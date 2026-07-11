@@ -23,6 +23,7 @@ from .base import SettingsFieldReport, inspect_setting
 
 LogLevel = Literal["DEBUG", "INFO", "WARN", "WARNING", "ERROR"]
 RuntimeEnv = Literal["dev", "test", "prod"]
+TaskRuntimeMode = Literal["legacy", "shadow"]
 
 
 class CoreSettings(BaseSettings):
@@ -50,6 +51,12 @@ class CoreSettings(BaseSettings):
     )
     canonical_planner_adapter_enabled: bool = Field(
         default=False, alias="HOST_CANONICAL_PLANNER_ADAPTER_ENABLED"
+    )
+    task_runtime_mode: TaskRuntimeMode = Field(
+        default="legacy", alias="HOST_TASK_RUNTIME_MODE"
+    )
+    task_runtime_shadow_owner: str = Field(
+        default="", alias="HOST_TASK_RUNTIME_SHADOW_OWNER"
     )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
@@ -95,6 +102,18 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_CANONICAL_PLANNER_ADAPTER_ENABLED",
                 default_value=False,
                 current_value=s.canonical_planner_adapter_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_mode",
+                env_key="HOST_TASK_RUNTIME_MODE",
+                default_value="legacy", current_value=s.task_runtime_mode,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_shadow_owner",
+                env_key="HOST_TASK_RUNTIME_SHADOW_OWNER",
+                default_value="", current_value=s.task_runtime_shadow_owner,
                 is_required=False,
             ),
             inspect_setting(

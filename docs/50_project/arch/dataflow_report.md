@@ -1,7 +1,7 @@
 受众：MASTER
 标题：当前数据流报告
 
-版本：v4.1
+版本：v4.2
 日期：2026-07-11
 定位：基于当前仓库代码，全面描述所有主流量路径。若历史方案文档与本文冲突，以本文与代码为准。
 
@@ -55,6 +55,9 @@ Chat / Surface 主链：
 - `host_brain/memory/canon_world_store.py`
 - `host_brain/governor/tokens.py`
 - `host_brain/audit/migrations/0053_canon_apply.sql`
+- `host_brain/agent_runtime/task_store.py`
+- `host_brain/agent_runtime/task_scheduler.py`
+- `host_brain/agent_runtime/planner_adapter.py`
 
 Input / Edge / 外显面：
 - `host_brain/app/input_routes.py`
@@ -305,6 +308,20 @@ host_brain/core/prompt_context.py:build_world_canon_slot(...)
 - WorldCanon 不应被写成 surface recall route，也不应和不存在的 StyleCanon 一起写入 StateArbiter 优先级。
 
 当前源码没有 `canon_style_store.py`，也没有 `host_brain/canon/style/`。StyleCanon 不是当前 recall route。
+
+### 6.1 Canonical Task Runtime shadow
+
+Planner Adapter 生成同一 `graph_id/revision` 的 TaskGraph 与 dependency artifact refs，DurableTaskStore 保存 graph/node/attempt/lease。`CanonicalShadowScheduler.evaluate_durable()` 在一个 SQLite 读事务内取得 snapshot，再以纯函数计算 READY、BLOCKED、RETRY_WAIT、RECOVER、CANCEL、BUDGET_BLOCKED 与 HOLD。`HOST_TASK_RUNTIME_MODE=legacy` 时 executor adapter 不读取 shadow；`shadow` 模式还必须匹配 `HOST_TASK_RUNTIME_SHADOW_OWNER`。当前输出只用于 decision digest 与 legacy diff，不调用 Worker，也不改变 AgentJobRegistry 的 authority。
+
+```mermaid
+flowchart LR
+    P["Planner Adapter / same revision"] --> S["DurableTaskStore snapshot"]
+    S --> D["CanonicalShadowScheduler pure decision"]
+    A["Artifact refs + budget decision"] --> D
+    L["Legacy decisions"] --> X["Shadow diff"]
+    D --> X
+    X --> O["Read-only report / zero external effects"]
+```
 
 ## 7. SurfaceMainChain -> ReplyEnvelope -> 后效
 

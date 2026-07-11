@@ -9,7 +9,11 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservationStatus,
 )
 from host_brain.agent_runtime.contract_errors import ContractViolation
-from host_brain.agent_runtime.executor import AgentRuntimeExecutor, execute_agent_runtime_payload
+from host_brain.agent_runtime.executor import (
+    AgentRuntimeExecutor,
+    evaluate_task_runtime_shadow,
+    execute_agent_runtime_payload,
+)
 from host_brain.agent_runtime.planner_adapter import (
     PLANNER_NEEDS_INPUT,
     CanonicalPlannerOutput,
@@ -54,6 +58,14 @@ from host_brain.agent_runtime.task_store import (
     build_reconciliation_attestation_binding,
     build_operation_fingerprint,
 )
+from host_brain.agent_runtime.task_scheduler import (
+    CanonicalShadowScheduler,
+    SchedulerAction,
+    SchedulerDecision,
+    SchedulerShadowReport,
+    ShadowSchedulerError,
+    evaluate_configured_shadow,
+)
 from host_brain.agent_runtime.verification_policy import VerificationResult, VerificationStatus
 from host_brain.agent_runtime.work_order import AgentWorkOrder, WorkOrder, WorkOrderV3
 
@@ -69,6 +81,7 @@ __all__ = [
     "BudgetReservation",
     "BudgetReservationStatus",
     "CanonicalPlannerOutput",
+    "CanonicalShadowScheduler",
     "ContractViolation",
     "DurableTaskStore",
     "Ed25519ReconciliationProofVerifier",
@@ -81,6 +94,10 @@ __all__ = [
     "ReviewResumePhase",
     "ReviewStatus",
     "ReviewType",
+    "SchedulerAction",
+    "SchedulerDecision",
+    "SchedulerShadowReport",
+    "ShadowSchedulerError",
     "SubAgentRequestAdapter",
     "SubAgentRequestContract",
     "SubAgentSpec",
@@ -105,6 +122,8 @@ __all__ = [
     "build_planner_shadow_comparison",
     "execute_agent_production_payload",
     "execute_agent_runtime_payload",
+    "evaluate_configured_shadow",
+    "evaluate_task_runtime_shadow",
     "validate_same_graph_revision",
     "validate_planner_target_binding",
 ]

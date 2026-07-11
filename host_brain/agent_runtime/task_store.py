@@ -694,6 +694,47 @@ class DurableTaskStore:
         finally:
             conn.close()
 
+    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
+        """Return one consistent read-only view for shadow scheduling."""
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            graph_row = self._require_graph(conn, graph_id, revision)
+            node_rows = conn.execute(
+                "SELECT * FROM task_runtime_node WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id",
+                (str(graph_id), int(revision)),
+            ).fetchall()
+            attempt_rows = conn.execute(
+                "SELECT * FROM task_runtime_attempt WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id, attempt_no, attempt_id",
+                (str(graph_id), int(revision)),
+            ).fetchall()
+            lease_rows = conn.execute(
+                """SELECT lease.* FROM task_runtime_lease AS lease
+                   JOIN task_runtime_attempt AS attempt ON attempt.attempt_id = lease.attempt_id
+                   WHERE attempt.graph_id = ? AND attempt.graph_revision = ? AND lease.status = 'ACTIVE'
+                   ORDER BY lease.attempt_id, lease.fencing_token""",
+                (str(graph_id), int(revision)),
+            ).fetchall()
+            budget_rows = conn.execute(
+                """SELECT * FROM task_runtime_budget_reservation
+                   WHERE graph_id = ? AND graph_revision = ?
+                   ORDER BY node_id, budget_id""",
+                (str(graph_id), int(revision)),
+            ).fetchall()
+            snapshot = {
+                "graph_record": _graph_record(graph_row, node_rows),
+                "attempts": [dict(row) for row in attempt_rows],
+                "active_leases": [dict(row) for row in lease_rows],
+                "budgets": [self._budget_record(row) for row in budget_rows],
+            }
+            conn.commit()
+            return snapshot
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def transition_graph(
         self,
         graph_id: str,

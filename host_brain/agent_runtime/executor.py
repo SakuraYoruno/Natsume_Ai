@@ -29,6 +29,41 @@ logger = logging.getLogger(__name__)
 MAX_CODEX_OUTPUT_CHARS = 24_000
 
 
+def evaluate_task_runtime_shadow(
+    store: Any,
+    graph_id: str,
+    graph_revision: int,
+    *,
+    confirmed_owner: str,
+    now_ts_ms: int,
+    artifact_refs: dict[str, str] | None = None,
+    budget_allowed: dict[str, bool] | None = None,
+    legacy_decisions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Read-only TASK-0469 adapter; it never enters the execution path."""
+    from host_brain.agent_runtime.task_scheduler import (  # noqa: PLC0415
+        CanonicalShadowScheduler,
+        evaluate_configured_shadow,
+    )
+    from host_brain.app.settings.core import get_core_settings  # noqa: PLC0415
+
+    settings = get_core_settings()
+    report = evaluate_configured_shadow(
+        CanonicalShadowScheduler(),
+        store,
+        graph_id,
+        graph_revision,
+        runtime_mode=settings.task_runtime_mode,
+        configured_owner=settings.task_runtime_shadow_owner,
+        confirmed_owner=confirmed_owner,
+        now_ts_ms=now_ts_ms,
+        artifact_refs=artifact_refs,
+        budget_allowed=budget_allowed,
+        legacy_decisions=legacy_decisions,
+    )
+    return None if report is None else report.to_dict()
+
+
 def _collect_git_summary(workspace: Path) -> dict[str, Any]:
     if not (workspace / ".git").exists():
         return {"changed_files": [], "git_diff_stat": None, "git_status": None, "status_map": {}}

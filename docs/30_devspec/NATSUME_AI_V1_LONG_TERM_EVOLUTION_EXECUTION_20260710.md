@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0468 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0469 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -415,7 +415,7 @@ Pop-Location
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | DONE |
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | DONE |
-| TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | PLANNED |
+| TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | DONE |
 | TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | PLANNED |
 | TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | PLANNED |
 | TASK-0472 | WP-32 / PR-012 | Review / Resume | WP-21/23 | 3–5 日 | 高 | PLANNED |

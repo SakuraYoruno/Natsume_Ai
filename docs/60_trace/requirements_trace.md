@@ -9,10 +9,10 @@
 ## 维护记录（2026-07-10）
 
 - 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。
-- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～TASK-0468 已于 2026-07-10 完成，其余 TASK-0469～0486 为 PLANNED，其中 TASK-0469 已通过前置 Gate 解锁；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
+- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～TASK-0469 已完成，其余 TASK-0470～0486 为 PLANNED，其中 TASK-0470、0472 已通过前置 Gate 解锁；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
 - 本次同步范围：M48 长期演化安全收敛的 PRD、DevSpec、DevTasks 与 T-NLE 正式闭环。
 - 新增映射：FR-NLE-001～005 → DevSpec §15 → TASK-0461～0486 → T-NLE-01～24。
-- 代码状态：正式执行文档已冻结；M48-A 的 TASK-0461～0468 为 DONE，其余任务按依赖 Gate 保持 PLANNED；Planner Adapter 只完成 shadow-only 合同与消费视图，不把文档或 shadow 完成误报为 Worker 主链已切换。
+- 代码状态：正式执行文档已冻结；M48-A 的 TASK-0461～0469 为 DONE，其余任务按依赖 Gate 保持 PLANNED；Scheduler 只完成 owner-confirmed read-only shadow，不把文档或 shadow 完成误报为 Worker 主链已切换。
 
 ## 维护记录（2026-06-04）
 - 本次同步范围：PRD v1.6、DevSpec v1.9、ModelPlane v1.5、DevTasks v2.0 的当前代码口径校准；不新增 PRD 需求编号。
@@ -1295,7 +1295,7 @@
 - DevSpec 落点：DevSpec §15.2～15.3。
 - DevTasks（TASK）：TASK-0466～TASK-0473。
 - 验收测试（T-xx）：T-NLE-04～11；T-Orch-01；T-Gov-01。
-- 当前进展（2026-07-10）：canonical contracts、Durable TaskStore 与 same-revision planner adapters、dependency refs、Child WorkOrder request、shadow comparison 已实施并通过 T-NLE-04～06；legacy JobRegistry 仍为 read authority，shadow scheduler、Verification/Judge/Review 与 Worker 主链切流仍待后续任务。
+- 当前进展（2026-07-11）：canonical contracts、Durable TaskStore、same-revision planner adapters 与 Canonical Scheduler shadow 已实施并通过 T-NLE-04～07；legacy JobRegistry 仍为 authority，Verification/Judge/Review 与 Worker 主链切流仍待后续任务。
 - 覆盖状态：READY_FOR_EXECUTION
 
 ## R-180（M48 Runtime Event 与 Context 治理）
