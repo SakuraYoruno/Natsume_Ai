@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.5
+版本：v1.6
 维护日期：2026-07-10
 标签：当前执行证据 + 历史归档
 
@@ -23,6 +23,7 @@
 - `NLE_WP10_TASK0463_VALIDATION_20260710.md`：Pentest Domain Store、中央 migration 与 shadow-only 验收证据。
 - `NLE_WP11_TASK0464_MIGRATION_MANIFEST_20260710.json`：87 份 Canon JSON 闭集扫描、83 份 Pentest eligible 的只读稳定迁移、receipt、hash/计数/检索对账证据。
 - `NLE_WP11_TASK0464_VALIDATION_20260710.md`：Pentest receipt-gated domain-only、promotion candidate、回滚与静态门禁验收证据。
+- `NLE_WP12_TASK0465_VALIDATION_20260710.md`：signed Canon Apply、durable token/journal、fence/lease/recovery 与 raw writer 静态闭集验收证据。
 - `NLE_WP20_TASK0466_VALIDATION_20260710.md`：Canonical contracts、schema snapshot 与兼容验收证据。
 - `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
 - `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`

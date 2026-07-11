@@ -81,27 +81,34 @@ class TestApproveTransaction:
             "status": "pending",
             "proposer_node_id": "test",
             "summary": "test",
-            "proposed_hash": None,
+            "proposed_hash": "a" * 64,
             "base_version": 1,
             "proposed_version": 2,
             "ts_ms": int(time.time() * 1000),
         }
         ledger = _make_ledger_mock(proposal_row)
 
-        mock_store = MagicMock()
-        mock_doc = MagicMock()
-        mock_doc.doc_id = "doc-001"
-        mock_store.approve_proposal_with_content.return_value = mock_doc
+        mock_service = MagicMock()
+        mock_result = MagicMock()
+        mock_result.target_doc_id = "doc-001"
+        mock_service.apply.return_value = mock_result
 
         cr._canon_store = None
         cr._ledger_provider = lambda: ledger
 
-        with patch("host_brain.app.canon_routes._get_canon_store", return_value=mock_store):
+        with patch("host_brain.app.canon_routes._get_canon_apply_service", return_value=mock_service):
             from host_brain.app.canon_routes import CanonProposalApproveRequest
             req = CanonProposalApproveRequest(
-                proposed_title="Test",
-                proposed_tags=[],
-                proposed_body="test body",
+                apply_id="apply-tx-02",
+                subject_version=2,
+                subject_hash="a" * 64,
+                target_doc_id="doc-001",
+                base_version=1,
+                approval_token_ref="canon::test",
+                actor_id="owner",
+                session_id="session",
+                trace_id="trace",
+                evidence_refs=["audit://test/review"],
             )
             loop = asyncio.new_event_loop()
             try:
@@ -112,7 +119,7 @@ class TestApproveTransaction:
                 loop.close()
 
         # approve_proposal_with_content 内部自管事务，验证它被调用
-        mock_store.approve_proposal_with_content.assert_called_once()
+        mock_service.apply.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -132,24 +139,31 @@ class TestApproveTransactionRollback:
             "status": "pending",
             "proposer_node_id": "test",
             "summary": "test",
-            "proposed_hash": None,
+            "proposed_hash": "b" * 64,
             "base_version": 1,
             "proposed_version": 2,
             "ts_ms": int(time.time() * 1000),
         }
         ledger = _make_ledger_mock(proposal_row)
 
-        mock_store = MagicMock()
-        mock_store.approve_proposal_with_content.side_effect = RuntimeError("DB error")
+        mock_service = MagicMock()
+        mock_service.apply.side_effect = RuntimeError("DB error")
 
         cr._ledger_provider = lambda: ledger
 
-        with patch("host_brain.app.canon_routes._get_canon_store", return_value=mock_store):
+        with patch("host_brain.app.canon_routes._get_canon_apply_service", return_value=mock_service):
             from host_brain.app.canon_routes import CanonProposalApproveRequest
             req = CanonProposalApproveRequest(
-                proposed_title="Test",
-                proposed_tags=[],
-                proposed_body="test body",
+                apply_id="apply-tx-03",
+                subject_version=2,
+                subject_hash="b" * 64,
+                target_doc_id="doc-001",
+                base_version=1,
+                approval_token_ref="canon::test",
+                actor_id="owner",
+                session_id="session",
+                trace_id="trace",
+                evidence_refs=["audit://test/review"],
             )
             with pytest.raises(HTTPException) as exc_info:
                 loop = asyncio.new_event_loop()

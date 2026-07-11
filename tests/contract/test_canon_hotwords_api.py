@@ -7,6 +7,7 @@ T-Canon-HW-API-02：max_words 参数生效 — max_words=2 时返回不超过 2 
 from __future__ import annotations
 
 import os
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -26,7 +27,7 @@ def client(tmp_path, monkeypatch):
     cr._ledger_provider = None
 
     from host_brain.audit.sqlite_ledger import SQLiteLedger
-    from host_brain.memory.canon_world_store import WorldCanonStore
+    from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
 
     ledger = SQLiteLedger(db_path=":memory:")
     store = WorldCanonStore(world_root=str(tmp_path / "world"), ledger=ledger)
@@ -36,20 +37,19 @@ def client(tmp_path, monkeypatch):
         ("hw-doc-001", "夏目贵志", ["主角", "人类"]),
         ("hw-doc-002", "猫咪老师", ["妖怪", "斑"]),
     ]:
-        store.submit_proposal(
-            proposal_id=f"p-{doc_id}",
-            target_doc_id=doc_id,
-            proposed_title=title,
-            proposed_tags=tags,
-            proposed_body=f"{title} 的详细描述，用于 API 测试。",
-            ts_ms=1000,
-        )
-        store.approve_proposal_with_content(
-            f"p-{doc_id}",
-            proposed_title=title,
-            proposed_tags=tags,
-            proposed_body=f"{title} 的详细描述，用于 API 测试。",
-            ts_ms=2000,
+        payload = {
+            "doc_id": doc_id,
+            "version": 1,
+            "status": "active",
+            "title": title,
+            "tags": tags,
+            "body": f"{title} 的详细描述，用于 API 测试。",
+            "updated_by": "test-fixture",
+            "ts_ms": 1000,
+        }
+        payload["hash"] = compute_world_canon_hash(payload)
+        store._doc_path(doc_id).write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
 
     # 注入 store 和 ledger 到 canon_routes

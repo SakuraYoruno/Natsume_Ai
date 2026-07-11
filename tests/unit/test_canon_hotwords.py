@@ -7,10 +7,11 @@ T-Canon-HW-03：空 SSOT 目录 — 无文档时返回空列表。
 
 from __future__ import annotations
 
+import json
 import pytest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.canon_world_store import WorldCanonStore
+from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
 
 
 # ---------------------------------------------------------------------------
@@ -28,22 +29,20 @@ def store(tmp_path, ledger):
 
 
 def _make_doc(store: WorldCanonStore, ledger: SQLiteLedger, doc_id: str, title: str, tags: list[str]) -> None:
-    """辅助函数：提交并审核通过一个文档，使其进入 active 状态。"""
-    proposal_id = f"p-hw-{doc_id}"
-    store.submit_proposal(
-        proposal_id=proposal_id,
-        target_doc_id=doc_id,
-        proposed_title=title,
-        proposed_tags=tags,
-        proposed_body=f"{title} 的详细描述内容，用于测试热词提取功能。",
-        ts_ms=1000,
-    )
-    store.approve_proposal_with_content(
-        proposal_id,
-        proposed_title=title,
-        proposed_tags=tags,
-        proposed_body=f"{title} 的详细描述内容，用于测试热词提取功能。",
-        ts_ms=2000,
+    """辅助函数：在临时测试根写入只读 fixture。"""
+    payload = {
+        "doc_id": doc_id,
+        "version": 1,
+        "status": "active",
+        "title": title,
+        "tags": tags,
+        "body": f"{title} 的详细描述内容，用于测试热词提取功能。",
+        "updated_by": "test-fixture",
+        "ts_ms": 1000,
+    }
+    payload["hash"] = compute_world_canon_hash(payload)
+    store._doc_path(doc_id).write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
     )
 
 

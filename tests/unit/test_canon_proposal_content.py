@@ -1,11 +1,47 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from pathlib import Path
 import sqlite3
+from unittest.mock import patch
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import WorldCanonStore
 from host_brain.memory.long_term_distiller import LongTermMemoryDistiller
+
+
+def _install_canon_apply_schema(db_path: Path) -> None:
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "audit"
+        / "migrations"
+        / "0053_canon_apply.sql"
+    )
+    sql = migration.read_text(encoding="utf-8-sig")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_ts_ms INTEGER NOT NULL
+            )
+            """
+        )
+        conn.executescript(sql)
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES (53, 'canon_apply', ?, 1000)",
+            (hashlib.sha256(sql.encode("utf-8")).hexdigest(),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_sqlite_ledger_migrates_canon_proposal_content_columns(tmp_path) -> None:
@@ -69,7 +105,7 @@ def test_canon_approve_route_uses_stored_proposal_content(tmp_path, monkeypatch)
 
     ledger = SQLiteLedger(db_path=str(tmp_path / "audit.sqlite3"), check_same_thread=False)
     store = WorldCanonStore(world_root=str(tmp_path / "world"), ledger=ledger)
-    store.submit_proposal(
+    proposal = store.submit_proposal(
         proposal_id="prop-approve-stored",
         target_doc_id="wc-stored-approve",
         proposed_title="待审核长期记忆",
@@ -80,15 +116,58 @@ def test_canon_approve_route_uses_stored_proposal_content(tmp_path, monkeypatch)
         ts_ms=1000,
     )
 
+    from host_brain.governor.tokens import CanonApprovalTokenIssuer
+    from host_brain.memory.canon_apply_service import CanonApplyService
+
+    key = Ed25519PrivateKey.generate()
+    _install_canon_apply_schema((tmp_path / "audit.sqlite3").resolve())
+    issuer = CanonApprovalTokenIssuer(
+        (tmp_path / "audit.sqlite3").resolve(),
+        authority_key_id="unit-key",
+        private_key=key,
+        reviewer_id="unit-owner",
+    )
+    binding = {
+        "operation": "APPLY",
+        "subject_type": "CANON_PROPOSAL",
+        "subject_id": proposal["proposal_id"],
+        "subject_version": proposal["proposed_version"],
+        "subject_hash": proposal["proposed_hash"],
+        "target_doc_id": proposal["target_id"],
+        "base_version": proposal["base_version"],
+        "actor_id": "unit-owner",
+        "session_id": "unit-session",
+        "trace_id": "unit-trace",
+        "evidence_refs": ("audit://unit/review",),
+    }
+    token = issuer.issue_approved_token(**binding)
+    service = CanonApplyService(
+        world_root=(tmp_path / "world").resolve(),
+        ledger=ledger,
+        trusted_approval_keys={"unit-key": key.public_key()},
+    )
+
     cr._canon_store = store
     cr._ledger_provider = lambda: ledger
     try:
-        response = asyncio.run(
-            cr.approve_proposal(
-                "prop-approve-stored",
-                cr.CanonProposalApproveRequest(approver_node_id="unit-test-approver"),
+        with patch("host_brain.app.canon_routes._get_canon_apply_service", return_value=service):
+            response = asyncio.run(
+                cr.approve_proposal(
+                    "prop-approve-stored",
+                    cr.CanonProposalApproveRequest(
+                        apply_id="unit-apply",
+                        subject_version=binding["subject_version"],
+                        subject_hash=binding["subject_hash"],
+                        target_doc_id=binding["target_doc_id"],
+                        base_version=binding["base_version"],
+                        approval_token_ref=token,
+                        actor_id=binding["actor_id"],
+                        session_id=binding["session_id"],
+                        trace_id=binding["trace_id"],
+                        evidence_refs=list(binding["evidence_refs"]),
+                    ),
+                )
             )
-        )
     finally:
         cr._canon_store = None
         cr._ledger_provider = None

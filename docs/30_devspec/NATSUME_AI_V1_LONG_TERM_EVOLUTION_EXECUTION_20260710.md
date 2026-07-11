@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0464、TASK-0466 已 `DONE`；其余任务按依赖保持 `PLANNED`）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0466 已 `DONE`；其余任务按依赖保持 `PLANNED`）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -409,7 +409,7 @@ Pop-Location
 | TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | DONE |
 | TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | DONE |
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | DONE |
-| TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | PLANNED |
+| TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | DONE |
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | PLANNED |
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | PLANNED |
@@ -504,18 +504,19 @@ Pop-Location
 
 ### TASK-0465 / LTE-WP-12：CanonApplyService 唯一写入口
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；Ed25519 审批证明、durable once-only token/journal、per-target fence/lease/recovery、raw writer fail-closed 与 T-NLE-03 验收通过）
 - 目标：让 WorldCanon 写入必须经过受治理 Apply Service；禁止调用者自行构造 `proposal_id` 伪装审批。
 - 代码事实：当前 `WorldCanonStore.upsert_document()` 先写文件再记录 `APPLIED`，`proposal_id` 本身不提供授权证明。
 - 前置任务：TASK-0464。
-- In Scope：Apply command、subject/version/token 绑定、一次性消费、audit event、direct-import scan。
+- In Scope：content-free Apply command、subject/version/hash/target/base/actor-session/trace-evidence 精确绑定、Ed25519 MASTER/GOVERNOR approval attestation、一次性 durable token burn、audit journal、direct-import/file-write scan。
 - Out of Scope：重写 Canon 检索和 Persona Canon。
 - 主要路径：`host_brain/memory/canon_apply_service.py`（新）、`host_brain/memory/canon_world_store.py`、`host_brain/governor/tokens.py`、`tools/static_scan/`。
-- 输出：唯一 apply API、拒绝码、迁移/测试专用受控入口。
-- 验收：T-NLE-03；无 token、过期、串用、版本漂移均拒绝；除 service/迁移外 direct upsert 为 0。
+- 输出：唯一 apply API；中央 `0053_canon_apply.sql` 与纯只读 exact-readiness（runtime/issuer inline DDL 为 0）；`PREPARED/APPLIED/FAILED/RECOVERY_REQUIRED` journal；同目标 active fence、owner lease、全 payload/command/token/attestation 不变量重验与 crash recovery；稳定拒绝码；离线私钥 issuer/runtime 公钥 verifier；仅临时根测试入口。
+- 验收：T-NLE-03；无 token、伪造/未知 authority、精确到期、串用、subject/session/version/payload/base 漂移、replay 均拒绝；并发同 token/同 target 只有一个赢家；replace/delete 崩溃可恢复；除 service 两个精确 permit primitive 外 direct Store/Canon file writer 为 0，Chroma `.upsert()` 不误报。
+- 安全边界：当前闭集由生产源码 static scan 与同解释器 identity permit 共同约束，不等同进程级隔离；Host 进程内任意代码执行不在该 capability 的隔离承诺内，独立 Canon writer 进程、OS ACL 与 IPC capability 下沉由后续架构任务实施。
 - 关联需求/测试：FR-NLE-001；T-NLE-03。
 - 停止条件：任何生产写路径无法携带可验证 subject/version/token。
-- 回滚：关闭新 promotion apply，但保持 direct-write scan；不得恢复 Pentest 直写。
+- 回滚：关闭 promotion/approve apply 与离线 issuer，但保留 0053 append-only journal、raw writer fail-closed 和 static scan；不得恢复 Pentest/Store 直写。
 - 审批：高风险 Canon Apply 保持逐项 MASTER Review。
 
 ### TASK-0466 / LTE-WP-20：冻结 Canonical Contracts
@@ -862,7 +863,7 @@ Pop-Location
 |---|---|
 | T-NLE-01 | 基线可复现；禁止依赖可静态检测；现有用户改动不被纳入 M48 |
 | T-NLE-02 | Pentest 回填、hash、检索样本对账；domain mode 无 WorldCanon 读写 |
-| T-NLE-03 | Canon Apply token/subject/version/expiry/once 绑定；direct write 为 0 |
+| T-NLE-03 | Canon Apply signed authority + token/subject/version/hash/target/base/session/evidence/expiry/once 绑定；per-target fence/lease/crash recovery；direct Store/Canon file write 为 0 |
 | T-NLE-04 | WorkOrder v2/v3 兼容；TaskGraph/Review/Verification schema 与非法迁移拒绝 |
 | T-NLE-05 | 只规划一次；同一 graph revision；依赖有效；Child WorkOrder lineage；cycle fail closed |
 | T-NLE-06 | TaskStore CAS/attempt/lease/heartbeat/recovery/idempotency/budget/outbox 原子性 |
@@ -921,4 +922,4 @@ Pop-Location
 
 ## 13. 首个执行动作
 
-初始开工入口只有 `TASK-0461 / LTE-WP-00`；其 baseline manifest Gate 已于 2026-07-10 满足。当前 TASK-0461～TASK-0464、TASK-0466 已完成，TASK-0465、TASK-0467、TASK-0468 已按依赖解锁；其余任务仍须等待各自前置 Gate。
+初始开工入口只有 `TASK-0461 / LTE-WP-00`；其 baseline manifest Gate 已于 2026-07-10 满足。当前 TASK-0461～TASK-0466 已完成，TASK-0467、TASK-0468 已按依赖解锁；其余任务仍须等待各自前置 Gate。

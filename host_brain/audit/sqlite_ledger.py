@@ -183,6 +183,11 @@ class SQLiteLedger(
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
+        database_row = self._conn.execute("PRAGMA database_list").fetchone()
+        database_file = str(database_row[2] or "") if database_row is not None else ""
+        self._canonical_db_path = (
+            str(Path(database_file).resolve()) if database_file else ":memory:"
+        )
         # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
         self._column_cache_lock = threading.Lock()
@@ -190,6 +195,12 @@ class SQLiteLedger(
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._ensure_schema()
+
+    @property
+    def canonical_db_path(self) -> str:
+        """Frozen path of the SQLite main DB as opened, independent of later CWD changes."""
+
+        return self._canonical_db_path
 
     # -------------------------------------------------------------------
     # Properties（快捷访问各日志表）

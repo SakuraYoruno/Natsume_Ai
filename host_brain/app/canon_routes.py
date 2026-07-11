@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
@@ -34,6 +34,15 @@ from host_brain.core.errors import (
     WCANON_PROPOSAL_STATUS_INVALID,
 )
 from host_brain.core.ids import new_request_id
+from host_brain.memory.canon_apply_service import (
+    CANON_OPERATION_APPLY,
+    CANON_OPERATION_ROLLBACK,
+    CANON_SUBJECT_PROPOSAL,
+    CanonApplyCommand,
+    CanonApplyError,
+    CanonApplyService,
+    resolve_world_canon_root,
+)
 from host_brain.memory.canon_world_store import WorldCanonStore
 
 _logger = logging.getLogger("Natsume.canon_routes")
@@ -47,6 +56,8 @@ router = APIRouter(prefix="/canon", tags=["canon"])
 # 依赖注入（外部注入 ledger provider，消除循环导入风险 P1-R118-2）
 # ---------------------------------------------------------------------------
 _canon_store: Optional[WorldCanonStore] = None
+_canon_apply_service: Optional[CanonApplyService] = None
+_canon_apply_service_key: tuple[str, str] | None = None
 _canon_store_lock = threading.Lock()  # F-28 修复：防止多线程竞态
 _ledger_provider: Optional[Any] = None  # Callable[[], SQLiteLedger]，由 router registry 注册时注入
 
@@ -57,8 +68,13 @@ def set_ledger_provider(provider: Any) -> None:
     Args:
         provider: 无参可调用对象，返回 SQLiteLedger 实例。
     """
-    global _ledger_provider
+    global _ledger_provider, _canon_store, _canon_apply_service, _canon_apply_service_key
     _ledger_provider = provider
+    # Test/app factories may replace the provider in-process.  Never retain a
+    # mutation service that points at an earlier database or Canon root.
+    _canon_store = None
+    _canon_apply_service = None
+    _canon_apply_service_key = None
 
 
 def _get_canon_store(ledger: SQLiteLedger) -> WorldCanonStore:
@@ -67,9 +83,21 @@ def _get_canon_store(ledger: SQLiteLedger) -> WorldCanonStore:
     if _canon_store is None:
         with _canon_store_lock:
             if _canon_store is None:  # double-checked locking
-                world_root = os.environ.get("Natsume_WORLD_CANON_ROOT", "host_brain/canon/world")
+                world_root = resolve_world_canon_root(os.environ.get("Natsume_WORLD_CANON_ROOT"))
                 _canon_store = WorldCanonStore(world_root=world_root, ledger=ledger)
     return _canon_store
+
+
+def _get_canon_apply_service(ledger: SQLiteLedger) -> CanonApplyService:
+    global _canon_apply_service, _canon_apply_service_key
+    world_root = resolve_world_canon_root(os.environ.get("Natsume_WORLD_CANON_ROOT"))
+    key = (str(world_root), str(ledger.canonical_db_path))
+    if _canon_apply_service is None or _canon_apply_service_key != key:
+        with _canon_store_lock:
+            if _canon_apply_service is None or _canon_apply_service_key != key:
+                _canon_apply_service = CanonApplyService(world_root=world_root, ledger=ledger)
+                _canon_apply_service_key = key
+    return _canon_apply_service
 
 
 # ---------------------------------------------------------------------------
@@ -87,11 +115,18 @@ class CanonProposalSubmitRequest(BaseModel):
 
 
 class CanonProposalApproveRequest(BaseModel):
-    proposed_title: Optional[str] = Field(None, description="提案标题（省略时使用提案记录中保存的内容）")
-    proposed_tags: Optional[List[str]] = Field(None, description="提案标签（省略时使用提案记录中保存的内容）")
-    proposed_body: Optional[str] = Field(None, description="提案正文（省略时使用提案记录中保存的内容）")
-    approver_node_id: Optional[str] = Field(None, description="审核节点 ID（可选）")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
+    apply_id: str
+    subject_version: int = Field(..., ge=0)
+    subject_hash: str = Field(..., min_length=64, max_length=64)
+    target_doc_id: str
+    base_version: int = Field(..., ge=0)
+    approval_token_ref: SecretStr
+    actor_id: str = Field(..., min_length=1)
+    session_id: str = Field(..., min_length=1)
+    trace_id: str = Field(..., min_length=1)
+    evidence_refs: List[str] = Field(..., min_length=1)
 
 class CanonProposalRejectRequest(BaseModel):
     reason: Optional[str] = Field(None, description="拒绝原因（不超过 200 字）")
@@ -99,9 +134,18 @@ class CanonProposalRejectRequest(BaseModel):
 
 
 class CanonProposalRollbackRequest(BaseModel):
-    rollback_reason: Optional[str] = Field(None, description="回滚原因（不超过 200 字）")
-    operator_node_id: Optional[str] = Field(None, description="操作节点 ID（可选）")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
+    apply_id: str
+    subject_version: int = Field(..., ge=0)
+    subject_hash: str = Field(..., min_length=64, max_length=64)
+    target_doc_id: str
+    base_version: int = Field(..., ge=0)
+    approval_token_ref: SecretStr
+    actor_id: str = Field(..., min_length=1)
+    session_id: str = Field(..., min_length=1)
+    trace_id: str = Field(..., min_length=1)
+    evidence_refs: List[str] = Field(..., min_length=1)
 
 class CanonProposalRollbackResponse(BaseModel):
     proposal_id: str
@@ -200,23 +244,6 @@ def _coerce_proposed_tags(raw: Any) -> list[str]:
         if isinstance(parsed, list):
             return [str(tag).strip() for tag in parsed if str(tag).strip()]
     return []
-
-
-def _resolve_approval_content(
-    *,
-    proposal: Dict[str, Any],
-    body: CanonProposalApproveRequest,
-) -> tuple[str, list[str], str]:
-    proposed_title = str(body.proposed_title or proposal.get("proposed_title") or "").strip()
-    proposed_tags = (
-        list(body.proposed_tags)
-        if body.proposed_tags is not None
-        else _coerce_proposed_tags(proposal.get("proposed_tags"))
-    )
-    proposed_body = str(body.proposed_body or proposal.get("proposed_body") or "").strip()
-    if not proposed_title or not proposed_body:
-        raise ValueError("proposal content missing: proposed_title/proposed_body required")
-    return proposed_title, proposed_tags, proposed_body
 
 
 def _get_ledger_from_app() -> SQLiteLedger:
@@ -374,7 +401,7 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
 
     try:
         ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
+        apply_service = _get_canon_apply_service(ledger)
 
         # 检查提案是否存在
         existing = ledger.get_proposal(proposal_id)
@@ -385,31 +412,37 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
                 headers={"X-Reason-Code": WCANON_PROPOSAL_NOT_FOUND},
             )
 
-        approver_node_id = body.approver_node_id or f"api.canon_proposals.approve::{request_id}"
-        proposed_title, proposed_tags, proposed_body = _resolve_approval_content(
-            proposal=existing,
-            body=body,
-        )
-        # approve_proposal_with_content handles its own write ordering internally;
-        # wrapping in ledger.transaction() causes nested lock/transaction conflicts.
-        doc = store.approve_proposal_with_content(
-            proposal_id=proposal_id,
-            proposed_title=proposed_title,
-            proposed_tags=proposed_tags,
-            proposed_body=proposed_body,
-            approver_node_id=approver_node_id,
-            ts_ms=ts_ms,
+        result = apply_service.apply(
+            CanonApplyCommand(
+                apply_id=body.apply_id,
+                operation=CANON_OPERATION_APPLY,
+                subject_type=CANON_SUBJECT_PROPOSAL,
+                subject_id=proposal_id,
+                subject_version=body.subject_version,
+                subject_hash=body.subject_hash,
+                target_doc_id=body.target_doc_id,
+                base_version=body.base_version,
+                approval_token_ref=body.approval_token_ref.get_secret_value(),
+                actor_id=body.actor_id,
+                session_id=body.session_id,
+                trace_id=body.trace_id,
+                evidence_refs=tuple(body.evidence_refs),
+            )
         )
 
         # 读取更新后的提案记录
-        response_row = dict(existing)
-        response_row["target_id"] = doc.doc_id
-        response_row["status"] = "APPLIED"
-        response_row["ts_ms"] = ts_ms
+        response_row = ledger.get_proposal(proposal_id) or dict(existing)
+        response_row["target_id"] = result.target_doc_id
         return _proposal_row_to_response(response_row, request_id)
 
     except HTTPException:
         raise
+    except CanonApplyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Reason-Code": exc.reason_code},
+        )
     except PermissionError as exc:
         raise HTTPException(
             status_code=422,
@@ -509,14 +542,24 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
 
     try:
         ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
+        apply_service = _get_canon_apply_service(ledger)
 
-        operator_node_id = body.operator_node_id or f"api.canon_proposals.rollback::{request_id}"
-        result = store.rollback_proposal(
-            proposal_id=proposal_id,
-            rollback_reason=body.rollback_reason or "",
-            operator_node_id=operator_node_id,
-            ts_ms=ts_ms,
+        result = apply_service.apply(
+            CanonApplyCommand(
+                apply_id=body.apply_id,
+                operation=CANON_OPERATION_ROLLBACK,
+                subject_type=CANON_SUBJECT_PROPOSAL,
+                subject_id=proposal_id,
+                subject_version=body.subject_version,
+                subject_hash=body.subject_hash,
+                target_doc_id=body.target_doc_id,
+                base_version=body.base_version,
+                approval_token_ref=body.approval_token_ref.get_secret_value(),
+                actor_id=body.actor_id,
+                session_id=body.session_id,
+                trace_id=body.trace_id,
+                evidence_refs=tuple(body.evidence_refs),
+            )
         )
 
         # 写 system_event_log（审计串联）
@@ -524,26 +567,32 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
             ledger.log_system_event({
                 "request_id": request_id,
                 "event_type": "WCANON_PROPOSAL_ROLLED_BACK",
-                "source": operator_node_id,
-                "detail": f"proposal_id={proposal_id} rolled_back_to_version={result['rolled_back_to_version']}",
+                "source": body.actor_id,
+                "detail": f"proposal_id={proposal_id} rolled_back_to_version={result.after_version}",
                 "ts_ms": ts_ms,
             })
         except Exception as audit_exc:
             _logger.warning("rollback 审计写入 system_event_log 失败（非致命）: %s", audit_exc)
 
         return CanonProposalRollbackResponse(
-            proposal_id=result["proposal_id"],
-            doc_id=result["doc_id"],
-            rolled_back_to_version=result["rolled_back_to_version"],
-            rollback_reason=result.get("rollback_reason"),
-            operator_node_id=result.get("operator_node_id"),
-            ts_ms=result["ts_ms"],
+            proposal_id=result.subject_id,
+            doc_id=result.target_doc_id,
+            rolled_back_to_version=result.after_version,
+            rollback_reason=None,
+            operator_node_id=body.actor_id,
+            ts_ms=ts_ms,
             request_id=request_id,
             timestamp=ts_ms,
         )
 
     except HTTPException:
         raise
+    except CanonApplyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Reason-Code": exc.reason_code},
+        )
     except PermissionError as exc:
         raise HTTPException(
             status_code=422,

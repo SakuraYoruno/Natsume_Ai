@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461 / LTE-WP-00`、`TASK-0462 / LTE-WP-01`、`TASK-0463 / LTE-WP-10`、`TASK-0464 / LTE-WP-11` 与 `TASK-0466 / LTE-WP-20` 于 2026-07-10 完成；Trace 已禁止 raw thought 新写入，Pentest 迁移/domain-only 机制通过 87 scanned / 83 eligible 临时证据演练，实际部署目标须先取得匹配 receipt，canonical contracts 尚未切换生产 authority。
-- 当前已解锁任务：`TASK-0465 / LTE-WP-12`、`TASK-0467 / LTE-WP-21`、`TASK-0468 / LTE-WP-22`；按文件所有权与依赖 Gate 并行推进。
+- 最近完成任务：`TASK-0461～TASK-0466` 于 2026-07-10 完成；Trace 已禁止 raw thought 新写入，Pentest 已完成 domain-only 机制，WorldCanon 仅允许 signed approval + durable token 的 `CanonApplyService` 写入，canonical contracts 尚未切换生产 authority。
+- 当前已解锁任务：`TASK-0467 / LTE-WP-21`、`TASK-0468 / LTE-WP-22`；按文件所有权与依赖 Gate 并行推进。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

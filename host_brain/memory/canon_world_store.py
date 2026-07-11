@@ -1,29 +1,25 @@
-"""World Canon SSOT store with versioned updates and auditable references."""
+"""Read/proposal WorldCanon store; all file mutation is permit-gated."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
-import time
+import re
 from typing import Any
+import uuid
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
-from host_brain.memory.canon_vector_auto_sync import trigger_canon_vector_auto_sync
-from host_brain.memory.canon_schemas import (
-    WorldCanonDocument,
-    WorldCanonScanIssue,
-)
+from host_brain.memory.canon_schemas import WorldCanonDocument, WorldCanonScanIssue
 
 
-# F-34：跨进程文件锁（R111-1）
-# filelock 为可选依赖；单进程部署时降级为 threading.Lock（已有 _write_lock）
 try:
     from filelock import FileLock as _FileLock  # type: ignore[import-untyped]
+
     _FILELOCK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - production dependency guard
     _FileLock = None  # type: ignore[assignment,misc]
     _FILELOCK_AVAILABLE = False
 
@@ -39,13 +35,35 @@ WORLD_EXECUTION_FACT_TOKENS = (
     "executed",
     "execution complete",
 )
+_CANON_DIRECT_WRITE_FORBIDDEN = "CANON_DIRECT_WRITE_FORBIDDEN"
+_CANON_APPLY_PAYLOAD_KEYS = frozenset(
+    {
+        "doc_id",
+        "version",
+        "status",
+        "title",
+        "tags",
+        "body",
+        "updated_by",
+        "ts_ms",
+        "hash",
+    }
+)
+_CANON_APPLY_STRING_KEYS = (
+    "doc_id",
+    "status",
+    "title",
+    "body",
+    "updated_by",
+    "hash",
+)
 
-_ROLLBACK_DELETE_RETRY_ATTEMPTS = 4
-_ROLLBACK_DELETE_RETRY_DELAY_S = 0.05
+# The sole capability object.  There is no env/test switch that can mint one.
+_CANON_APPLY_PERMIT = object()
 
 
 class WorldCanonStore:
-    """Single-writer world canon store."""
+    """Read Canon and submit/reject proposals without mutating Canon files."""
 
     def __init__(
         self,
@@ -56,26 +74,23 @@ class WorldCanonStore:
         self.world_root = Path(world_root)
         self.world_root.mkdir(parents=True, exist_ok=True)
         self.ledger = ledger or SQLiteLedger()
-        # F-34：跨进程文件锁目录（R111-1）
         self._lock_dir = self.world_root / ".locks"
         self._lock_dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, doc_id: str) -> WorldCanonDocument | None:
         path = self._doc_path(doc_id)
-        if not path.exists():
-            return None
-        return self._load_from_path(path)
+        return self._load_from_path(path) if path.exists() else None
 
     def list_documents(self) -> list[WorldCanonDocument]:
-        docs, _issues = self.scan_documents()
-        return docs
+        documents, _issues = self.scan_documents()
+        return documents
 
     def scan_documents(self) -> tuple[list[WorldCanonDocument], list[WorldCanonScanIssue]]:
-        docs: list[WorldCanonDocument] = []
+        documents: list[WorldCanonDocument] = []
         issues: list[WorldCanonScanIssue] = []
         for path in sorted(self.world_root.glob("*.json")):
             try:
-                docs.append(self._load_from_path(path))
+                documents.append(self._load_from_path(path))
             except json.JSONDecodeError as exc:
                 issues.append(
                     WorldCanonScanIssue(
@@ -92,8 +107,9 @@ class WorldCanonStore:
                         detail=str(exc),
                     )
                 )
-        return docs, issues
+        return documents, issues
 
+    # Raw mutation APIs remain as explicit fail-closed compatibility surfaces.
     def upsert_document(
         self,
         *,
@@ -107,102 +123,7 @@ class WorldCanonStore:
         ts_ms: int | None = None,
         allow_write: bool = True,
     ) -> WorldCanonDocument:
-        if not allow_write:
-            raise PermissionError("world canon write is blocked by policy")
-        if not proposal_id:
-            raise ValueError("proposal_id is required")
-
-        doc_id = _normalize_doc_id(doc_id)
-        title = str(title).strip()
-        body = str(body).strip()
-        status = str(status).strip() or "active"
-        if not title:
-            raise ValueError("world canon title cannot be empty")
-        if not body:
-            raise ValueError("world canon body cannot be empty")
-        if _contains_execution_claim(body):
-            raise ValueError("world canon body must not assert execution facts")
-
-        current = self.get(doc_id)
-        base_version = current.version if current is not None else 0
-        before_hash = current.hash if current is not None else None
-        next_version = base_version + 1
-        update_ts = int(ts_ms if ts_ms is not None else now_ms())
-
-        payload = {
-            "doc_id": doc_id,
-            "version": next_version,
-            "status": status,
-            "title": title,
-            "tags": _normalize_tags(tags),
-            "body": body,
-            "updated_by": proposal_id,
-            "ts_ms": update_ts,
-        }
-        payload["hash"] = compute_world_canon_hash(payload)
-
-        path = self._doc_path(doc_id)
-        # F-34：多进程部署时使用跨进程文件锁保护 SSOT 文件写入（R111-1）
-        lock_path = self._lock_dir / f"{_normalize_doc_id(doc_id)}.lock"
-        if _FILELOCK_AVAILABLE and _FileLock is not None:
-            with _FileLock(str(lock_path), timeout=10):
-                path.write_text(
-                    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
-                )
-        else:
-            # 单进程降级：直接写入（_write_lock 已在 SQLiteLedger 层保护 DB 写入）
-            path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-
-        self.ledger.log_canon_proposal(
-            {
-                "proposal_id": proposal_id,
-                "canon_kind": "world",
-                "target_id": doc_id,
-                "base_version": base_version,
-                "proposed_version": next_version,
-                "proposed_hash": payload["hash"],
-                "proposer_node_id": proposer_node_id,
-                "summary": "world canon upsert",
-                "status": "APPLIED",
-                "ts_ms": update_ts,
-            }
-        )
-        self.ledger.log_canon_change(
-            {
-                "change_id": f"canon_change::world::{doc_id}::v{next_version}",
-                "proposal_id": proposal_id,
-                "canon_kind": "world",
-                "target_id": doc_id,
-                "before_version": base_version if base_version > 0 else None,
-                "after_version": next_version,
-                "before_hash": before_hash,
-                "after_hash": payload["hash"],
-                "before_body": current.body if current is not None else None,
-                "after_body": body,
-                "source_path": str(path),
-                "ts_ms": update_ts,
-            }
-        )
-        self.ledger.upsert_world_canon_doc(
-            {
-                "doc_id": doc_id,
-                "version": next_version,
-                "hash": payload["hash"],
-                "status": status,
-                "source_path": str(path),
-                "updated_ts": update_ts,
-            }
-        )
-        trigger_canon_vector_auto_sync(
-            include_world=True,
-            world_root=self.world_root,
-            reason=f"world_upsert:{doc_id}@v{next_version}",
-        )
-        return self.get(doc_id)  # type: ignore[return-value]
+        raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
 
     def upsert(
         self,
@@ -217,40 +138,57 @@ class WorldCanonStore:
         ts_ms: int | None = None,
         allow_write: bool = True,
     ) -> WorldCanonDocument:
-        return self.upsert_document(
-            doc_id=doc_id,
-            title=title,
-            tags=tags,
-            body=body,
-            proposal_id=proposal_id,
-            proposer_node_id=proposer_node_id,
-            status=status,
-            ts_ms=ts_ms,
-            allow_write=allow_write,
-        )
+        raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
+
+    def approve_proposal(
+        self,
+        proposal_id: str,
+        *,
+        approver_node_id: str = "memory.canon_world_store",
+        ts_ms: int | None = None,
+    ) -> WorldCanonDocument:
+        raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
+
+    def approve_proposal_with_content(
+        self,
+        proposal_id: str,
+        *,
+        proposed_title: str,
+        proposed_tags: list[str] | None,
+        proposed_body: str,
+        approver_node_id: str = "memory.canon_world_store",
+        ts_ms: int | None = None,
+    ) -> WorldCanonDocument:
+        raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
+
+    def rollback_proposal(
+        self,
+        proposal_id: str,
+        *,
+        rollback_reason: str = "",
+        operator_node_id: str = "api.canon_proposals.rollback",
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        raise PermissionError(_CANON_DIRECT_WRITE_FORBIDDEN)
 
     def build_authoritative_entry(self, doc_id: str) -> dict[str, Any]:
-        doc = self.get(doc_id)
-        if doc is None:
+        document = self.get(doc_id)
+        if document is None:
             raise KeyError(f"unknown world canon document: {doc_id}")
         return {
             "slot": "authoritative",
             "kind": "world_canon",
-            "doc_id": doc.doc_id,
-            "version": doc.version,
-            "hash": doc.hash,
-            "status": doc.status,
-            "title": doc.title,
-            "tags": list(doc.tags),
-            "content": doc.body,
+            "doc_id": document.doc_id,
+            "version": document.version,
+            "hash": document.hash,
+            "status": document.status,
+            "title": document.title,
+            "tags": list(document.tags),
+            "content": document.body,
             "unsafe_as_fact": True,
             "reference_mode": "citation_only",
-            "citation": f"world_canon:{doc.doc_id}@v{doc.version}:{doc.hash[:12]}",
+            "citation": f"world_canon:{document.doc_id}@v{document.version}:{document.hash[:12]}",
         }
-
-    # ---------------------------------------------------------------------------
-    # 提案写入与审核流程（TASK-0114 / FR-WCANON-002）
-    # ---------------------------------------------------------------------------
 
     def submit_proposal(
         self,
@@ -265,66 +203,40 @@ class WorldCanonStore:
         summary: str = "",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """将 World Canon Evolution 提案写入 canon_proposal_log（status=pending）。
-
-        不修改 SSOT 文件，只记录提案。审核通过后由 approve_proposal() 触发实际写入。
-
-        Args:
-            proposal_id: 提案唯一 ID（调用方保证唯一性）。
-            target_doc_id: 目标 World Canon 文档 ID。
-            proposed_title: 提案标题。
-            proposed_tags: 提案标签列表。
-            proposed_body: 提案正文（不得含完成性表述）。
-            proposer_node_id: 提案来源节点 ID。
-            summary: 提案摘要。
-            ts_ms: 可选时间戳（毫秒），默认 now_ms()。
-
-        Returns:
-            写入的提案记录 dict。
-
-        Raises:
-            ValueError: proposal_id / target_doc_id 为空，或 proposed_body 含完成性表述。
-        """
-        if not proposal_id:
+        if not str(proposal_id or "").strip():
             raise ValueError("proposal_id is required")
-        if not target_doc_id:
-            raise ValueError("target_doc_id is required")
-        proposed_body = str(proposed_body).strip()
-        if not proposed_body:
-            raise ValueError("proposed_body cannot be empty")
-        if _contains_execution_claim(proposed_body):
+        title = str(proposed_title or "").strip()
+        body = str(proposed_body or "").strip()
+        if not title or not body:
+            raise ValueError("proposed_title and proposed_body are required")
+        if _contains_execution_claim(body):
             raise ValueError("proposed_body must not assert execution facts")
-
         doc_id = _normalize_doc_id(target_doc_id)
         current = self.get(doc_id)
         base_version = current.version if current is not None else 0
         proposed_version = base_version + 1
-        submit_ts = int(ts_ms if ts_ms is not None else now_ms())
-
-        # 计算提案 hash（基于提案内容，不含 proposal_id）
-        proposed_hash = compute_world_canon_hash(
-            {
-                "doc_id": doc_id,
-                "version": proposed_version,
-                "status": "active",
-                "title": str(proposed_title).strip(),
-                "tags": _normalize_tags(proposed_tags),
-                "body": proposed_body,
-                "updated_by": proposal_id,
-                "ts_ms": submit_ts,
-            }
-        )
-
+        submit_ts = int(now_ms() if ts_ms is None else ts_ms)
+        payload: dict[str, Any] = {
+            "doc_id": doc_id,
+            "version": proposed_version,
+            "status": "active",
+            "title": title,
+            "tags": _normalize_tags(proposed_tags),
+            "body": body,
+            "updated_by": str(proposal_id),
+            "ts_ms": submit_ts,
+        }
+        proposed_hash = compute_world_canon_hash(payload)
         row = {
-            "proposal_id": proposal_id,
+            "proposal_id": str(proposal_id),
             "canon_kind": "world",
             "target_id": doc_id,
             "base_version": base_version,
             "proposed_version": proposed_version,
             "proposed_hash": proposed_hash,
-            "proposed_title": str(proposed_title).strip(),
-            "proposed_tags": _normalize_tags(proposed_tags),
-            "proposed_body": proposed_body,
+            "proposed_title": title,
+            "proposed_tags": payload["tags"],
+            "proposed_body": body,
             "source_intent_id": source_intent_id,
             "proposer_node_id": proposer_node_id,
             "summary": summary or f"world canon proposal: {doc_id}",
@@ -334,121 +246,6 @@ class WorldCanonStore:
         self.ledger.log_canon_proposal(row)
         return row
 
-    def approve_proposal(
-        self,
-        proposal_id: str,
-        *,
-        approver_node_id: str = "memory.canon_world_store",
-        ts_ms: int | None = None,
-    ) -> "WorldCanonDocument":
-        """审核通过提案：status 改为 approved，触发 SSOT 文件写入，写 canon_change_log。
-
-        只允许对 status=pending 的提案执行审核。审核通过后调用 upsert_document() 完成
-        实际文件写入，并将提案 status 更新为 APPLIED。
-
-        Args:
-            proposal_id: 要审核的提案 ID。
-            approver_node_id: 审核节点 ID。
-            ts_ms: 可选时间戳（毫秒）。
-
-        Returns:
-            更新后的 WorldCanonDocument。
-
-        Raises:
-            KeyError: 提案不存在。
-            PermissionError: 提案 status 不是 pending（非白名单流程）。
-        """
-        approve_ts = int(ts_ms if ts_ms is not None else now_ms())
-
-        proposal = self.ledger.get_proposal(proposal_id)
-        if proposal is None:
-            raise KeyError(f"proposal not found: {proposal_id}")
-
-        current_status = str(proposal.get("status", ""))
-        if current_status != "pending":
-            raise PermissionError(
-                f"proposal {proposal_id!r} cannot be approved: "
-                f"current status is {current_status!r}, expected 'pending'"
-            )
-
-        # 更新提案 status → approved
-        # 从提案中提取目标文档信息（需要重新查询提案以获取 proposed_body 等）
-        # 注意：canon_proposal_log 只存了 hash，不存 body/title/tags
-        # 因此 approve_proposal 需要调用方在 submit_proposal 时同时传入完整内容
-        # 这里通过 proposal 的 summary 字段约定格式，或要求调用方传入 body 参数
-        # 设计决策：approve_proposal 接受可选的 body/title/tags 覆盖参数
-        # 若不传则从 SSOT 文件读取当前版本（仅用于 hash 验证）
-        raise NotImplementedError(
-            "approve_proposal requires proposed_body/title/tags; "
-            "use approve_proposal_with_content() instead"
-        )
-
-    def approve_proposal_with_content(
-        self,
-        proposal_id: str,
-        *,
-        proposed_title: str,
-        proposed_tags: list[str] | None,
-        proposed_body: str,
-        approver_node_id: str = "memory.canon_world_store",
-        ts_ms: int | None = None,
-    ) -> "WorldCanonDocument":
-        """审核通过提案并写入 SSOT 文件（完整内容版本）。
-
-        Args:
-            proposal_id: 要审核的提案 ID。
-            proposed_title: 提案标题（与 submit_proposal 时一致）。
-            proposed_tags: 提案标签。
-            proposed_body: 提案正文（与 submit_proposal 时一致）。
-            approver_node_id: 审核节点 ID。
-            ts_ms: 可选时间戳（毫秒）。
-
-        Returns:
-            更新后的 WorldCanonDocument。
-
-        Raises:
-            KeyError: 提案不存在。
-            PermissionError: 提案 status 不是 pending（非白名单流程）。
-            ValueError: proposed_body 含完成性表述，或 hash 与提案记录不匹配。
-        """
-        approve_ts = int(ts_ms if ts_ms is not None else now_ms())
-
-        proposal = self.ledger.get_proposal(proposal_id)
-        if proposal is None:
-            raise KeyError(f"proposal not found: {proposal_id}")
-
-        current_status = str(proposal.get("status", ""))
-        if current_status != "pending":
-            raise PermissionError(
-                f"proposal {proposal_id!r} cannot be approved: "
-                f"current status is {current_status!r}, expected 'pending'"
-            )
-
-        doc_id = str(proposal.get("target_id", ""))
-        if not doc_id:
-            raise ValueError(f"proposal {proposal_id!r} has no target_id")
-
-        # 更新提案 status → approved
-        # 触发 SSOT 文件写入（upsert_document 内部会写 canon_change_log）
-        doc = self.upsert_document(
-            doc_id=doc_id,
-            title=proposed_title,
-            tags=proposed_tags,
-            body=proposed_body,
-            proposal_id=proposal_id,
-            proposer_node_id=approver_node_id,
-            ts_ms=approve_ts,
-        )
-
-        # 更新提案 status → APPLIED
-        self.ledger.update_proposal_status(
-            proposal_id,
-            new_status="APPLIED",
-            ts_ms=approve_ts,
-        )
-
-        return doc
-
     def reject_proposal(
         self,
         proposal_id: str,
@@ -457,42 +254,18 @@ class WorldCanonStore:
         rejector_node_id: str = "api.canon_proposals.reject",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """拒绝提案：status 改为 rejected，不修改 SSOT 文件。
-
-        只允许对 status=pending 的提案执行拒绝。
-
-        Args:
-            proposal_id: 要拒绝的提案 ID。
-            reason: 拒绝原因（不超过 200 字）。
-            rejector_node_id: 拒绝节点 ID。
-            ts_ms: 可选时间戳（毫秒）。
-
-        Returns:
-            更新后的提案记录 dict（含 status=rejected + reject_reason）。
-
-        Raises:
-            KeyError: 提案不存在。
-            PermissionError: 提案 status 不是 pending（非白名单流程）。
-        """
-        reject_ts = int(ts_ms if ts_ms is not None else now_ms())
-
+        reject_ts = int(now_ms() if ts_ms is None else ts_ms)
         proposal = self.ledger.get_proposal(proposal_id)
         if proposal is None:
             raise KeyError(f"proposal not found: {proposal_id}")
-
-        current_status = str(proposal.get("status", ""))
-        if current_status != "pending":
+        if str(proposal.get("status")) != "pending":
             raise PermissionError(
-                f"proposal {proposal_id!r} cannot be rejected: "
-                f"current status is {current_status!r}, expected 'pending'"
+                f"proposal {proposal_id!r} cannot be rejected from {proposal.get('status')!r}"
             )
-
-        self.ledger.update_proposal_status(
-            proposal_id,
-            new_status="rejected",
-            ts_ms=reject_ts,
-        )
-
+        if not self.ledger.update_proposal_status(
+            proposal_id, new_status="rejected", ts_ms=reject_ts
+        ):
+            raise RuntimeError("proposal status update failed")
         return {
             **proposal,
             "status": "rejected",
@@ -501,222 +274,145 @@ class WorldCanonStore:
             "rejector_node_id": rejector_node_id,
         }
 
-    def rollback_proposal(
-        self,
-        proposal_id: str,
-        *,
-        rollback_reason: str = "",
-        operator_node_id: str = "api.canon_proposals.rollback",
-        ts_ms: int | None = None,
-    ) -> dict[str, Any]:
-        """回滚已 APPLIED 的提案：将 SSOT 文件恢复到 base_version，写 canon_change_log。
-
-        只允许对 status=APPLIED 的提案执行回滚。回滚后提案 status 更新为 ROLLED_BACK，
-        SSOT 文件版本回退到 base_version（若 base_version=0 则删除文件）。
-
-        Args:
-            proposal_id: 要回滚的提案 ID。
-            rollback_reason: 回滚原因（不超过 200 字）。
-            operator_node_id: 操作节点 ID。
-            ts_ms: 可选时间戳（毫秒）。
-
-        Returns:
-            回滚结果 dict（含 proposal_id / doc_id / rolled_back_to_version / ts_ms）。
-
-        Raises:
-            KeyError: 提案不存在。
-            PermissionError: 提案 status 不是 APPLIED（非白名单流程）。
-            FileNotFoundError: SSOT 文件不存在（无法回滚）。
-        """
-        rollback_ts = int(ts_ms if ts_ms is not None else now_ms())
-
-        proposal = self.ledger.get_proposal(proposal_id)
-        if proposal is None:
-            raise KeyError(f"proposal not found: {proposal_id}")
-
-        current_status = str(proposal.get("status", ""))
-        if current_status != "APPLIED":
-            raise PermissionError(
-                f"proposal {proposal_id!r} cannot be rolled back: "
-                f"current status is {current_status!r}, expected 'APPLIED'"
-            )
-
-        doc_id = str(proposal.get("target_id", ""))
-        if not doc_id:
-            raise ValueError(f"proposal {proposal_id!r} has no target_id")
-
-        base_version = int(proposal.get("base_version") or 0)
-        current_doc = self.get(doc_id)
-        if current_doc is None:
-            raise FileNotFoundError(f"SSOT file not found for doc_id: {doc_id}")
-
-        after_hash: str
-        if base_version == 0:
-            # 回滚到初始状态：删除 SSOT 文件
-            path = self._doc_path(doc_id)
-            lock_path = self._lock_dir / f"{_normalize_doc_id(doc_id)}.lock"
-            if _FILELOCK_AVAILABLE and _FileLock is not None:
-                with _FileLock(str(lock_path), timeout=10):
-                    _unlink_path_with_retry(path)
-            else:
-                _unlink_path_with_retry(path)
-            after_hash = ""
-            rolled_back_to_version = 0
-        else:
-            # 回滚到 base_version：从 canon_change_log 中查找 before_body
-            path = self._doc_path(doc_id)
-
-            # 从 change_log 中取出该提案写入时保存的 before_body 快照
-            before_body: str | None = None
-            change_row = self.ledger.get_canon_change_by_proposal(proposal_id)
-            if change_row is not None:
-                before_body = change_row.get("before_body")
-
-            if not before_body and base_version == 0:
-                # base_version=0 且无快照：走删除分支（已在上方处理，此处不会到达）
-                before_body = None
-
-            if before_body:
-                restored_body = before_body
-                restored_status = "active"
-            else:
-                # 降级：无历史快照时写入明确的回滚标记，避免静默损坏
-                _logger.warning(
-                    "rollback_proposal: proposal %r 无 before_body 快照，写入回滚标记",
-                    proposal_id,
-                )
-                restored_body = (
-                    f"[ROLLED_BACK from v{current_doc.version} to v{base_version} "
-                    f"by {operator_node_id}] {rollback_reason}"
-                )
-                restored_status = "rolled_back"
-
-            rollback_payload = {
-                "doc_id": doc_id,
-                "version": base_version,
-                "status": restored_status,
-                "title": current_doc.title,
-                "tags": list(current_doc.tags),
-                "body": restored_body,
-                "updated_by": proposal_id,
-                "ts_ms": rollback_ts,
-            }
-            rollback_payload["hash"] = compute_world_canon_hash(rollback_payload)
-            path.write_text(
-                json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-            after_hash = rollback_payload["hash"]
-            rolled_back_to_version = base_version
-
-        # 写 canon_change_log（回滚记录）
-        self.ledger.log_canon_change(
-            {
-                "change_id": f"canon_rollback::world::{doc_id}::v{rolled_back_to_version}::{rollback_ts}",
-                "proposal_id": proposal_id,
-                "canon_kind": "world",
-                "target_id": doc_id,
-                "before_version": current_doc.version,
-                "after_version": rolled_back_to_version,
-                "before_hash": current_doc.hash,
-                "after_hash": after_hash,
-                "source_path": str(self._doc_path(doc_id)),
-                "ts_ms": rollback_ts,
-            }
-        )
-
-        # 更新提案 status → ROLLED_BACK
-        self.ledger.update_proposal_status(
-            proposal_id,
-            new_status="ROLLED_BACK",
-            ts_ms=rollback_ts,
-        )
-
-        return {
-            "proposal_id": proposal_id,
-            "doc_id": doc_id,
-            "rolled_back_to_version": rolled_back_to_version,
-            "rollback_reason": str(rollback_reason)[:200],
-            "operator_node_id": operator_node_id,
-            "ts_ms": rollback_ts,
-        }
-
     def extract_hotwords(self, max_words: int = 200) -> list[str]:
-        """从 SSOT 文档中提取 ASR 热词（人名/地名/专有名词）。
-
-        从所有 status=active 的文档的 title 和 tags 中提取热词，去重后按字母序排序。
-        用于 Edge ASR 热词注入（M10-B FR-WCANON-001）。
-
-        Args:
-            max_words: 最大热词数量（默认 200，超出部分截断）。
-
-        Returns:
-            去重排序后的热词列表（list[str]），长度不超过 max_words。
-        """
-        docs = self.list_documents()
-        seen: set[str] = set()
-        hotwords: list[str] = []
-
-        for doc in docs:
-            if doc.status != "active":
+        words: set[str] = set()
+        for document in self.list_documents():
+            if document.status != "active":
                 continue
-            # 从 title 中提取（整体作为一个热词）
-            title = doc.title.strip()
-            if title and title not in seen:
-                seen.add(title)
-                hotwords.append(title)
-            # 从 tags 中提取（每个 tag 作为一个热词）
-            for tag in doc.tags:
-                tag = tag.strip()
-                if tag and tag not in seen:
-                    seen.add(tag)
-                    hotwords.append(tag)
-
-        hotwords.sort()
-        return hotwords[:max_words]
+            if document.title.strip():
+                words.add(document.title.strip())
+            words.update(tag.strip() for tag in document.tags if tag.strip())
+        return sorted(words)[:max_words]
 
     def _doc_path(self, doc_id: str) -> Path:
         return self.world_root / f"{_normalize_doc_id(doc_id)}.json"
 
     def _load_from_path(self, path: Path) -> WorldCanonDocument:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        doc_id = _normalize_doc_id(str(payload["doc_id"]))
-        version = int(payload["version"])
-        status = str(payload.get("status", "active"))
-        title = str(payload["title"])
-        tags = [str(tag) for tag in payload.get("tags", [])]
-        body = str(payload["body"])
-        updated_by = str(payload.get("updated_by", "unknown"))
-        ts_value = int(payload.get("ts_ms", 0))
-
-        expected_hash = compute_world_canon_hash(
-            {
-                "doc_id": doc_id,
-                "version": version,
-                "status": status,
-                "title": title,
-                "tags": tags,
-                "body": body,
-                "updated_by": updated_by,
-                "ts_ms": ts_value,
-            }
-        )
-        hash_value = str(payload.get("hash", expected_hash))
-        if hash_value != expected_hash:
-            hash_value = expected_hash
-
+        identity = {
+            "doc_id": _normalize_doc_id(str(payload["doc_id"])),
+            "version": int(payload["version"]),
+            "status": str(payload.get("status", "active")),
+            "title": str(payload["title"]),
+            "tags": [str(tag) for tag in payload.get("tags", [])],
+            "body": str(payload["body"]),
+            "updated_by": str(payload.get("updated_by", "unknown")),
+            "ts_ms": int(payload.get("ts_ms", 0)),
+        }
+        expected_hash = compute_world_canon_hash(identity)
+        if str(payload.get("hash", expected_hash)) != expected_hash:
+            raise ValueError(f"WORLD_CANON_HASH_MISMATCH:{identity['doc_id']}")
         return WorldCanonDocument(
-            doc_id=doc_id,
-            version=version,
-            hash=hash_value,
-            status=status,
-            title=title,
-            tags=tags,
-            body=body,
-            updated_by=updated_by,
-            ts_ms=ts_value,
+            **identity,
+            hash=expected_hash,
             source_path=str(path),
         )
+
+    def _load_apply_snapshot(self, doc_id: str) -> dict[str, Any] | None:
+        """Read an on-disk apply/recovery snapshot without compatibility coercion."""
+
+        requested_doc_id = _normalize_doc_id(doc_id)
+        path = self._doc_path(requested_doc_id)
+        try:
+            raw = path.read_text(encoding="utf-8-sig")
+        except FileNotFoundError:
+            return None
+        try:
+            payload = json.loads(
+                raw,
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_JSON_INVALID") from exc
+        if not isinstance(payload, dict) or set(payload) != _CANON_APPLY_PAYLOAD_KEYS:
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_SCHEMA_INVALID")
+        if any(type(payload[key]) is not str for key in _CANON_APPLY_STRING_KEYS):
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_TYPE_INVALID")
+        if type(payload["version"]) is not int or type(payload["ts_ms"]) is not int:
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_TYPE_INVALID")
+        tags = payload["tags"]
+        if type(tags) is not list or any(type(tag) is not str for tag in tags):
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_TYPE_INVALID")
+        if (
+            _normalize_doc_id(payload["doc_id"]) != payload["doc_id"]
+            or payload["doc_id"] != requested_doc_id
+            or payload["version"] <= 0
+            or payload["ts_ms"] < 0
+        ):
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_VALUE_INVALID")
+        identity = {key: payload[key] for key in _CANON_APPLY_PAYLOAD_KEYS if key != "hash"}
+        expected_hash = compute_world_canon_hash(identity)
+        if payload["hash"] != expected_hash:
+            raise ValueError(f"WORLD_CANON_HASH_MISMATCH:{payload['doc_id']}")
+        return dict(payload)
+
+    def _replace_authorized_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_version: int,
+        expected_hash: str | None,
+        apply_id: str,
+        permit: object,
+    ) -> Path:
+        if permit is not _CANON_APPLY_PERMIT:
+            raise PermissionError("CANON_APPLY_PERMIT_INVALID")
+        normalized = _validated_authorized_payload(payload)
+        doc_id = normalized["doc_id"]
+        path = self._doc_path(doc_id)
+        lock_path = self._lock_dir / f"{doc_id}.lock"
+        if not _FILELOCK_AVAILABLE or _FileLock is None:
+            raise RuntimeError("CANON_APPLY_FILE_LOCK_UNAVAILABLE")
+        with _FileLock(str(lock_path), timeout=30):
+            _assert_expected_snapshot(
+                self._load_apply_snapshot(doc_id),
+                expected_version=int(expected_version),
+                expected_hash=expected_hash,
+            )
+            temp_path = path.with_name(
+                f".{path.name}.{_safe_file_token(apply_id)}.{uuid.uuid4().hex}.tmp"
+            )
+            try:
+                encoded = (
+                    json.dumps(normalized, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                with temp_path.open("xb") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, path)
+                _fsync_directory(path.parent)
+            finally:
+                temp_path.unlink(missing_ok=True)
+        return path
+
+    def _delete_authorized_document(
+        self,
+        doc_id: str,
+        *,
+        expected_version: int,
+        expected_hash: str | None,
+        apply_id: str,
+        permit: object,
+    ) -> Path:
+        if permit is not _CANON_APPLY_PERMIT:
+            raise PermissionError("CANON_APPLY_PERMIT_INVALID")
+        del apply_id
+        normalized_id = _normalize_doc_id(doc_id)
+        path = self._doc_path(normalized_id)
+        lock_path = self._lock_dir / f"{normalized_id}.lock"
+        if not _FILELOCK_AVAILABLE or _FileLock is None:
+            raise RuntimeError("CANON_APPLY_FILE_LOCK_UNAVAILABLE")
+        with _FileLock(str(lock_path), timeout=30):
+            _assert_expected_snapshot(
+                self._load_apply_snapshot(normalized_id),
+                expected_version=int(expected_version),
+                expected_hash=expected_hash,
+            )
+            path.unlink()
+            _fsync_directory(path.parent)
+        return path
 
 
 def compute_world_canon_hash(payload: dict[str, Any]) -> str:
@@ -724,23 +420,37 @@ def compute_world_canon_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError("WORLD_CANON_APPLY_PAYLOAD_DUPLICATE_KEY")
+        payload[key] = value
+    return payload
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"WORLD_CANON_APPLY_PAYLOAD_CONSTANT_INVALID:{value}")
+
+
 def _normalize_doc_id(doc_id: str) -> str:
     value = str(doc_id).strip()
-    if not value:
-        raise ValueError("doc_id is required")
-    if "/" in value or "\\" in value:
-        raise ValueError(f"invalid doc_id path segment: {doc_id}")
-    allowed = value.replace("-", "").replace("_", "")
-    if not allowed.isalnum():
+    if (
+        not value
+        or len(value) > 160
+        or "/" in value
+        or "\\" in value
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("doc_id is invalid")
+    if not value.replace("-", "").replace("_", "").isalnum():
         raise ValueError(f"doc_id contains unsupported characters: {doc_id}")
     return value
 
 
-def _normalize_tags(tags: list[str] | None) -> list[str]:
-    if not tags:
-        return []
+def _normalize_tags(tags: Any) -> list[str]:
     normalized: list[str] = []
-    for tag in tags:
+    for tag in tags or []:
         cleaned = str(tag).strip()
         if cleaned and cleaned not in normalized:
             normalized.append(cleaned)
@@ -748,16 +458,73 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
 
 
 def _contains_execution_claim(text: str) -> bool:
-    lowered = text.lower()
+    lowered = str(text or "").lower()
     return any(token in lowered for token in WORLD_EXECUTION_FACT_TOKENS)
 
 
-def _unlink_path_with_retry(path: Path) -> None:
-    for attempt in range(1, _ROLLBACK_DELETE_RETRY_ATTEMPTS + 1):
-        try:
-            path.unlink(missing_ok=True)
+def _safe_file_token(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_-]", "_", str(value or "").strip())
+    if not normalized:
+        raise ValueError("apply_id is required")
+    return normalized[:120]
+
+
+def _validated_authorized_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {
+        "doc_id": _normalize_doc_id(payload.get("doc_id", "")),
+        "version": int(payload.get("version") or 0),
+        "status": str(payload.get("status") or "active").strip(),
+        "title": str(payload.get("title") or "").strip(),
+        "tags": _normalize_tags(payload.get("tags")),
+        "body": str(payload.get("body") or "").strip(),
+        "updated_by": str(payload.get("updated_by") or "").strip(),
+        "ts_ms": int(payload.get("ts_ms") or 0),
+    }
+    if (
+        normalized["version"] <= 0
+        or normalized["ts_ms"] < 0
+        or not normalized["title"]
+        or not normalized["body"]
+        or not normalized["updated_by"]
+    ):
+        raise ValueError("CANON_APPLY_PAYLOAD_INVALID")
+    if _contains_execution_claim(normalized["body"]):
+        raise ValueError("world canon body must not assert execution facts")
+    expected_hash = compute_world_canon_hash(normalized)
+    supplied_hash = str(payload.get("hash") or "").strip().lower()
+    if supplied_hash and supplied_hash != expected_hash:
+        raise ValueError("CANON_APPLY_PAYLOAD_HASH_MISMATCH")
+    normalized["hash"] = expected_hash
+    return normalized
+
+
+def _assert_expected_snapshot(
+    current: dict[str, Any] | None,
+    *,
+    expected_version: int,
+    expected_hash: str | None,
+) -> None:
+    current_version = int(current["version"]) if current is not None else 0
+    current_hash = str(current["hash"]) if current is not None else None
+    if current_version != expected_version or current_hash != expected_hash:
+        raise RuntimeError(
+            "CANON_APPLY_BASE_DRIFT:"
+            f"expected={expected_version}:{expected_hash or ''}:"
+            f"actual={current_version}:{current_hash or ''}"
+        )
+
+
+def _fsync_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(
+            str(path),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+    except OSError:
+        if os.name == "nt":
             return
-        except PermissionError:
-            if attempt >= _ROLLBACK_DELETE_RETRY_ATTEMPTS:
-                raise
-            time.sleep(_ROLLBACK_DELETE_RETRY_DELAY_S)
+        raise
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

@@ -105,7 +105,7 @@ def test_set_ledger_provider_injection(ledger):
 # ---------------------------------------------------------------------------
 
 def test_rollback_proposal_success(store, ledger):
-    """APPLIED 提案可回滚，SSOT 版本降回 base_version，提案 status 变为 ROLLED_BACK。"""
+    """旧 approve/rollback 写入口均 fail-closed。"""
     # 1. 提交提案
     store.submit_proposal(
         proposal_id="p-rollback-001",
@@ -116,31 +116,20 @@ def test_rollback_proposal_success(store, ledger):
         ts_ms=1000,
     )
 
-    # 2. 审核通过（触发 SSOT 写入）
-    doc = store.approve_proposal_with_content(
-        "p-rollback-001",
-        proposed_title="回滚测试文档",
-        proposed_tags=["test"],
-        proposed_body="这是一个用于测试回滚的文档内容",
-        ts_ms=2000,
-    )
-    assert doc.version == 1
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
+        store.approve_proposal_with_content(
+            "p-rollback-001",
+            proposed_title="回滚测试文档",
+            proposed_tags=["test"],
+            proposed_body="这是一个用于测试回滚的文档内容",
+            ts_ms=2000,
+        )
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
+        store.rollback_proposal("p-rollback-001", rollback_reason="测试回滚")
 
-    # 3. 回滚
-    result = store.rollback_proposal(
-        "p-rollback-001",
-        rollback_reason="测试回滚",
-        ts_ms=3000,
-    )
-    assert result["proposal_id"] == "p-rollback-001"
-    assert result["rolled_back_to_version"] == 0  # base_version=0，文件应被删除
-
-    # 4. 验证提案 status 已更新为 ROLLED_BACK
     proposal = ledger.get_proposal("p-rollback-001")
     assert proposal is not None
-    assert proposal["status"] == "ROLLED_BACK"
-
-    # 5. 验证 SSOT 文件已删除（base_version=0）
+    assert proposal["status"] == "pending"
     assert store.get("doc-rollback") is None
 
 
@@ -159,7 +148,7 @@ def test_rollback_proposal_non_applied_raises(store, ledger):
         proposed_body="待审核的文档内容，尚未通过审核",
         ts_ms=1000,
     )
-    with pytest.raises(PermissionError, match="cannot be rolled back"):
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
         store.rollback_proposal("p-rollback-pending")
 
     # rejected 状态
@@ -172,5 +161,5 @@ def test_rollback_proposal_non_applied_raises(store, ledger):
         ts_ms=1000,
     )
     store.reject_proposal("p-rollback-rejected", reason="测试拒绝")
-    with pytest.raises(PermissionError, match="cannot be rolled back"):
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
         store.rollback_proposal("p-rollback-rejected")

@@ -24,7 +24,7 @@ def test_t_nle_01_production_boundary_baseline_is_exact_and_current() -> None:
     scanner = _load_scanner()
     report = scanner.scan_report(ROOT, policy_path=POLICY)
 
-    assert report["policy_id"] == "TASK-0464_NLE_BOUNDARY_DOMAIN_CUTOVER"
+    assert report["policy_id"] == "TASK-0465_NLE_BOUNDARY_CANON_APPLY"
     assert report["violations"] == []
     counts = Counter(row["rule_id"] for row in report["existing_debt"])
     assert counts == {

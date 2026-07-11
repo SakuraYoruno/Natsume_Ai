@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_id": "TASK-0464_NLE_BOUNDARY_DOMAIN_CUTOVER",
+  "policy_id": "TASK-0465_NLE_BOUNDARY_CANON_APPLY",
   "rules": [
     {
       "rule_id": "NLE-BND-EDGE-HOST-IMPL",
@@ -34,6 +34,69 @@
       "kind": "call_name",
       "source_roots": ["host_brain/pentest"],
       "names": ["CanonVectorQuery"]
+    },
+    {
+      "rule_id": "NLE-BND-WORLDCANON-RAW-MUTATION",
+      "kind": "world_canon_mutation",
+      "source_roots": ["edge_client", "host_brain", "scripts", "skills", "tools"],
+      "store_modules": ["host_brain.memory.canon_world_store"],
+      "mutator_names": [
+        "upsert",
+        "upsert_document",
+        "approve_proposal",
+        "approve_proposal_with_content",
+        "rollback_proposal",
+        "_replace_authorized_payload",
+        "_delete_authorized_document"
+      ],
+      "issuer_names": ["CanonApprovalTokenIssuer", "issue_approved_token"],
+      "trusted_call_sites": [
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 45
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._delete_authorized_document",
+          "line": 1315
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 1320
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._replace_authorized_payload",
+          "line": 1323
+        },
+        {
+          "path": "host_brain/memory/canon_apply_service.py",
+          "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
+          "line": 1328
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.open",
+          "line": 380
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.replace",
+          "line": 384
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.unlink",
+          "line": 387
+        },
+        {
+          "path": "host_brain/memory/canon_world_store.py",
+          "symbol": "CanonFile.unlink",
+          "line": 413
+        }
+      ]
     },
     {
       "rule_id": "NLE-BND-NO-PARALLEL-LIFE-ROOT",
