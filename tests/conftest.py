@@ -212,8 +212,22 @@ def _reset_host_brain_singletons():
 
     env_snapshot = dict(os.environ)
     _reset_host_brain_runtime_state()
-    yield
-    _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
+    from host_brain.observability.degradation_state import (
+        DegradationStateMachine,
+        set_global_degradation_state_machine,
+    )
+
+    # Production correctly restores the durable latch from audit.sqlite3. A
+    # test process must not inherit whichever ignored developer DB happens to
+    # exist in its worktree, so the default test boundary is an explicit
+    # healthy in-memory machine. Degradation contracts install their own
+    # machine and still exercise every fail-closed path.
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
+        _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
 
 
 def pytest_configure(config: pytest.Config) -> None:
