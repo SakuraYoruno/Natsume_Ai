@@ -13,6 +13,7 @@ from host_brain.core.metabolism import (
     normalize_hard_state,
 )
 from host_brain.governor.policy_cache import GovernorPolicyCache
+from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.rules import evaluate_governor_gates
 from host_brain.governor.route_token import CommittedRouteDecision, RouteToken, compile_route_decision
 from host_brain.governor.schemas import (
@@ -269,6 +270,13 @@ class IntentDecisionEngine:
                 seq=envelope.seq,
                 now_ts_ms=now,
             )
+        approved_action_binding = build_governed_action_binding(
+            intent_envelope=envelope,
+            approval_token_ref=approval_token_ref,
+            risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+            issued_at_ms=now,
+            expires_at_ms=now + _approval_binding_ttl_ms(self),
+        )
 
         row = {
             "request_id": req_id,
@@ -279,6 +287,7 @@ class IntentDecisionEngine:
             "reason_code": None,
             "rule_trace": gate_eval["rule_trace"],
             "tokens": {"approval_token_ref": approval_token_ref},
+            "approved_action_binding": approved_action_binding,
             "snapshot_refs": snapshot_refs,
             "stage": "S_INTENT_OK",
             "ts_ms": now,
@@ -329,6 +338,18 @@ class IntentDecisionEngine:
 
                 # AIRLOCK 通道：强制返回 GOV_AIRLOCK_REVIEW
                 elif tier_enum == ApprovalTier.AIRLOCK:
+                    # Never expose an executable approval token while review is
+                    # pending.  The returned reference is deliberately absent
+                    # from TokenService, so legacy brokers also fail closed.
+                    airlock_token_ref = f"airlock-review::{envelope.id}"
+                    row["tokens"] = {"approval_token_ref": airlock_token_ref}
+                    row["approved_action_binding"] = build_governed_action_binding(
+                        intent_envelope=envelope,
+                        approval_token_ref=airlock_token_ref,
+                        risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+                        issued_at_ms=now,
+                        expires_at_ms=now + _approval_binding_ttl_ms(self),
+                    )
                     committed = compile_route_decision(
                         approved=True,
                         reason_code="AIRLOCK_REQUIRED",
@@ -453,6 +474,13 @@ class IntentDecisionEngine:
                 seq=envelope.seq,
                 now_ts_ms=now,
             )
+        approved_action_binding = build_governed_action_binding(
+            intent_envelope=envelope,
+            approval_token_ref=approval_token_ref,
+            risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+            issued_at_ms=now,
+            expires_at_ms=now + _approval_binding_ttl_ms(self),
+        )
         self.ledger.mark_intent_seen(
             intent_id=envelope.id,
             session_id=envelope.session_id,
@@ -475,6 +503,7 @@ class IntentDecisionEngine:
             "reason_code": None,
             "rule_trace": [{"gate_id": "POLICY_CACHE_HIT", "hit": False, "reason_hint": "APPROVE_CACHED"}],
             "tokens": {"approval_token_ref": approval_token_ref},
+            "approved_action_binding": approved_action_binding,
             "snapshot_refs": snapshot_refs,
             "stage": "S_INTENT_OK",
             "ts_ms": now,
@@ -515,6 +544,26 @@ class IntentDecisionEngine:
             }
         self.ledger.log_governor(row)
         return row
+
+
+def _resolve_intent_risk_level(registry: Any, action: str) -> int:
+    """Read static risk from the authoritative registry; unknown stays highest risk."""
+    if registry is None:
+        return 5
+    try:
+        meta = registry.get(str(action or "").strip())
+        return max(1, min(5, int(getattr(meta, "risk_level", 5)))) if meta is not None else 5
+    except (AttributeError, TypeError, ValueError):
+        return 5
+
+
+def _approval_binding_ttl_ms(engine: IntentDecisionEngine) -> int:
+    if engine.token_service is not None:
+        try:
+            return max(1, int(engine.token_service.approval_ttl_ms))
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return max(1, min(int(engine.expiry_window_ms), 120_000))
 
 
 def _is_expired(*, ts_ms: int, now_ms_value: int, ttl_ms: int) -> bool:

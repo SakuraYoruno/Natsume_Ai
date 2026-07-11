@@ -98,6 +98,21 @@ def _copy_scene_awareness(raw: Mapping[str, Any] | None) -> dict[str, Any]:
         cleaned["companion_suitable"] = bool(raw.get("companion_suitable"))
     if isinstance(raw.get("has_screenshot"), bool):
         cleaned["has_screenshot"] = bool(raw.get("has_screenshot"))
+    for key in (
+        "observed_at_ms",
+        "expires_at_ms",
+        "source_observed_at_ms",
+        "source_expires_at_ms",
+        "confidence",
+        "epistemic_type",
+        "conflict_state",
+        "source_ref",
+    ):
+        if raw.get(key) is not None:
+            cleaned[key] = raw.get(key)
+    source_refs = raw.get("source_refs")
+    if isinstance(source_refs, (list, tuple)):
+        cleaned["source_refs"] = [str(item).strip() for item in source_refs if str(item).strip()]
     return cleaned
 
 

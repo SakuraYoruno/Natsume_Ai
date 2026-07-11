@@ -17,7 +17,8 @@
 - 本次增量：TASK-0476 / T-NLE-14 完成，Digital Life state 写入升级为 expected-version CAS，新增 0057 OCC migration、`LifeStateCommandService`、冲突/显式 fallback audit 与 20 并发无 silent overwrite 验证；生产副本未迁移。
 - 本次增量：TASK-0477 / T-NLE-15 完成，只读 WorldProjection 提供 `Natsume.world_projection.v1` snapshot、GET read API、source/confidence/observed/expires/epistemic/conflict facts、StateArbiter 冲突可见、过期 fact 可见，且空库查询不初始化 Life state。
 - 本次增量：TASK-0478 / T-NLE-16 完成，新增 `Natsume.appraisal.record.v1` 确定性 emotional event adapter 与 `Natsume.bond.projection.v1` 只读 projection；Bond API/真实闭环验证器统一经 `BondDynamicsWriter.apply_update()`，T-SSOT-01 同时阻止 stage direct call 与 score/stage/rift 直接改写，boundary 不改变关系权限。
-- 状态口径：M48-A 的 TASK-0461～TASK-0478 已完成，TASK-0479～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
+- 本次增量：TASK-0479 / T-NLE-17 完成，新增 source-preserving SceneDecision、ProactiveVoice/Surface adapter、Governor intent/action/scope/risk/token binding、fail-closed route/AIRLOCK gate、shared TokenService handler 前门、Governor-monotonic ActionArbiter 与 dry-run Runtime Event；显式用户目标优先，scene/affect/relationship 只能收紧主动性和表达。
+- 状态口径：M48-A 的 TASK-0461～TASK-0479 已完成，TASK-0480～0486 按 DAG 保持 PLANNED/并行实施；M48-B Entry Gate 尚缺 MASTER 批准，TASK-0487～0622 仍为 PROGRAMMED。
 - 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。新增 `ReviewStore` 与 0055 migration；Review resume token 绑定 review/subject/version/phase/checkpoint，过期、串用、重复 resume 均 fail-closed；声明 durable review 的写 WorkOrder 不能仅靠 `confirmed=true` 通过。新增 `CanonicalRuntimeRouter`；`CoreSettings` 支持 `legacy|shadow|canonical`、canary、kill switch 和 canonical owner，默认仍为 legacy/0% canary。新增 `RuntimeEventStore` 与 0056 migration；runtime replay 受 `HOST_RUNTIME_EVENT_REPLAY_ENABLED` 默认关闭保护，EventBus 继续只是通知投影。新增 ContextEnvelope v2；私有/raw refs 与污染上下文 fail-closed，公共输出仅保留 refs/计数/预算摘要。新增 Digital Life OCC：`digital_life_state` 支持 expected-version CAS、冲突结果和 OCC audit，旧 fallback 为显式 single-writer 兼容路径。新增 WorldProjection：只读 `WorldProjectionReadModel` 与 GET snapshot API，不写 Life/Canon/Memory。新增 Appraisal/Bond convergence：纯事件适配器不替代 VAD/inner weather，BondProjection 只读并将 score/stage 标为兼容投影，所有生产写调用收敛到有 evidence 的 BondDynamics command。
 
 ## 维护记录（2026-07-10）
@@ -1331,8 +1332,8 @@
 - DevSpec 落点：DevSpec §15.5。
 - DevTasks（TASK）：TASK-0476～TASK-0479。
 - 验收测试（T-xx）：T-NLE-14～17；T-50～T-54；T-BOND-RIFT-01～02。
-- 当前进展（2026-07-11）：TASK-0476 / T-NLE-14 已完成，`digital_life_state` 写入具备 expected-version CAS、migration catalog 扩展、冲突事件、显式 single-writer fallback 与 20 并发无 silent overwrite 验证。TASK-0477 / T-NLE-15 已完成，只读 WorldProjection snapshot 具备 source/confidence/observed/expires/epistemic/conflict fields，过期与冲突可见，且无 write route/facade。TASK-0478 / T-NLE-16 已完成，AppraisalRecord 从既有 episode/aftereffect 确定性回放到 appraisal、affect/drive、expression/bond signal；BondProjection 保留 texture/rift/repair/boundary/SocialBrain vector，score/stage 仅为兼容字段，所有生产写调用经 BondDynamics command，关系权限未改变。Scene/ActionArbiter 仍待 TASK-0479。
-- 覆盖状态：PARTIAL_DONE
+- 当前进展（2026-07-11）：TASK-0476～TASK-0479 / T-NLE-14～17 已完成。Life state 使用 OCC；WorldProjection 只读且显示来源/TTL/冲突；Appraisal/Bond 可回放并保持单写/边界语义；SceneDecision 继承来源 TTL 并实际影响 ProactiveVoice/Surface，ActionArbiter 只消费已绑定且 route-committed 的 Governor authority，handler 前 token 一次性消费，保持用户显式目标且 preview 无外部副作用。
+- 覆盖状态：DONE
 
 ## R-182（M48 安全升级、Operator 观测与发布封板）
 

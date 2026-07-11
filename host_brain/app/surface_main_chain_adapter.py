@@ -249,6 +249,48 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
     return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
 
 
+def _surface_scene_guardrails(
+    *,
+    scene_awareness: Mapping[str, Any] | None,
+    task_control: Mapping[str, Any] | None,
+    user_goal_ref: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Project SceneDecision into expression-only Surface constraints."""
+    from host_brain.persona.scene_policy import build_scene_decision  # noqa: PLC0415
+
+    control = dict(task_control or {}) if isinstance(task_control, Mapping) else {}
+    enabled = str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    decision = build_scene_decision(
+        scene_awareness=scene_awareness,
+        task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+        user_goal_ref=user_goal_ref,
+        now_ms=int(now_ms),
+        enabled=enabled,
+    )
+    payload = decision.as_dict(now_ms=int(now_ms))
+    if bool(payload.get("expired")) or not enabled:
+        return payload, ()
+    policy = str(payload.get("proactive_policy") or "ALLOW").upper()
+    expression_mode = str(payload.get("expression_mode") or "natural")
+    if policy == "BLOCK":
+        return payload, (
+            f"SceneDecision({expression_mode})：保持简短、安静、任务优先；不得主动扩展话题或追加追问。",
+            "SceneDecision 只能收紧表达，绝不能改写、取消或替换用户已经明确的任务目标。",
+        )
+    if policy == "CONTEXTUAL":
+        return payload, (
+            f"SceneDecision({expression_mode})：表达必须贴合当前任务/场景，最多一次必要追问，不发通用主动寒暄。",
+            "场景、情绪和关系信号不得扩大权限、改变任务范围或覆盖显式用户目标。",
+        )
+    return payload, ()
+
+
 def build_surface_main_chain_input_from_surface_reply_input(
     agent_input: Any,
     *,
@@ -289,6 +331,27 @@ def build_surface_main_chain_input_from_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
         reply_plan=task_control,
     )
+    surface_intent_id = str(
+        _safe_mapping(getattr(agent_input, "intent_draft", None)).get("id") or ""
+    ).strip()
+    scene_payload, scene_guardrails = _surface_scene_guardrails(
+        scene_awareness=_safe_mapping(getattr(agent_input, "scene_awareness", None)),
+        task_control=task_control,
+        user_goal_ref=f"intent://{surface_intent_id}" if surface_intent_id else "",
+        now_ms=int(getattr(agent_input, "ts_ms", 0) or time.time() * 1000),
+    )
+    if isinstance(trace_stage_meta, dict):
+        trace_stage_meta["scene_decision"] = {
+            "schema_version": scene_payload.get("schema_version"),
+            "decision_id": scene_payload.get("decision_id"),
+            "scene_type": scene_payload.get("scene_type"),
+            "proactive_policy": scene_payload.get("proactive_policy"),
+            "expression_mode": scene_payload.get("expression_mode"),
+            "expires_at_ms": scene_payload.get("expires_at_ms"),
+            "expired": scene_payload.get("expired"),
+            "source_refs": list(scene_payload.get("source_refs") or []),
+            "user_goal_preserved": scene_payload.get("user_goal_preserved"),
+        }
     affect_packet = _affect_packet(
         agent_input,
         task_control=task_control,
@@ -337,6 +400,14 @@ def build_surface_main_chain_input_from_surface_reply_input(
     except Exception:
         pass
 
+    surface_must_not_do = tuple(
+        _surface_boundary_must_not_do(
+            agent_input=agent_input,
+            task_control=task_control,
+            trace_stage_meta=trace_stage_meta,
+        )
+    ) + scene_guardrails
+
     return SurfaceMainChainInput(
         soul_md=_surface_soul_chat_anchor(soul),
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
@@ -354,11 +425,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
             runtime_payload=runtime_payload,
         ),
         necessary_facts=_necessary_facts(agent_input, task_control=task_control, trace_stage_meta=trace_stage_meta),
-        must_not_do=_surface_boundary_must_not_do(
-            agent_input=agent_input,
-            task_control=task_control,
-            trace_stage_meta=trace_stage_meta,
-        ),
+        must_not_do=surface_must_not_do,
         style_anchor=(
             "像熟人私聊：先接住当前话，再轻轻顶嘴或顺手打趣；不要写成客服回执、流程确认或任务记录。",
             "寒暄也要像真的在聊天：不要把寒暄抽象成“问候/招呼”这类标签词；直接回对方这句话，比如顺手回一句下午好或轻轻吐槽。",

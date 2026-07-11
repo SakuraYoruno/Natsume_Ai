@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0478 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0479 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -425,7 +425,7 @@ Pop-Location
 | TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | DONE |
 | TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | DONE |
 | TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | DONE |
-| TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | PLANNED |
+| TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | DONE |
 | TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | PLANNED |
 | TASK-0481 | WP-61 / PR-021 | Degradation State | WP-53 | 2–3 日 | 中 | PLANNED |
 | TASK-0482 | WP-62 / PR-022 | Identity Snapshot | WP-53 | 2–3 日 | 高 | PLANNED |
@@ -734,7 +734,7 @@ Pop-Location
 
 ### TASK-0479 / LTE-WP-53：ScenePolicy 与 ActionArbiter
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：抽取现有场景判断为可过期 SceneDecision，并新增只会收紧动作/主动性的 ActionArbiter。
 - 代码事实：`proactive_voice.py`、Surface task mode 和 scene awareness 已有真实场景；Governor 保持最终否决权。
 - 前置任务：TASK-0477、TASK-0478。
@@ -747,6 +747,7 @@ Pop-Location
 - 停止条件：Arbiter 可放宽 token/scope/risk，或推断情绪覆盖用户任务。
 - 回滚：关闭 projection/arbiter；Governor 原门禁继续生效。
 - 审批：主动行为策略变化需 owner review。
+- 完成证据（2026-07-11）：新增 `Natsume.scene.decision.v1`、`Natsume.governed_action.binding.v1`、`Natsume.action_arbiter.decision.v1`、`Natsume.action.preview.v1` 与 T-NLE-17。SceneDecision 继承 source/confidence/observed/expires/conflict/TTL，不在读取时续期，并实际接入 ProactiveVoice 与 Surface expression guardrails。Governor 输出绑定 intent/action/scope/static risk/token digest；route ref/detail 必须一致且只有 OK token 可执行，AIRLOCK 固定暂停且不暴露可执行 approval token。Governor/ToolBroker 共享 TokenService，canonical skill handler 前完成 binding/registry/token/Arbiter 校验并一次性消费 token；重复 execution helper 已收敛为代理。显式用户 action 只收紧 expression/follow-up，不改变目标；preview 固定 `DRY_RUN`、AIRLOCK `would_execute=false`，可选写入脱敏 Runtime Event。`HOST_ACTION_ARBITER_ENABLED=false` 为默认执行切流回滚，`HOST_LIFE_PROJECTION_ENABLED=false` 关闭 scene 软策略；两者均不放宽非法 route/AIRLOCK/Governor REJECT。
 
 ### TASK-0480 / LTE-WP-60：Federated Capability Maturity
 

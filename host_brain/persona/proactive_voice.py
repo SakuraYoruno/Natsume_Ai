@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -993,20 +994,38 @@ class PersonaProactiveVoice:
             "scene_tags": scene_tags,
             "current_activity": str(raw.get("current_activity") or "").strip() or None,
             "companion_suitable": raw.get("companion_suitable") if isinstance(raw.get("companion_suitable"), bool) else None,
+            "source_refs": raw.get("source_refs") or raw.get("source_ref"),
+            "observed_at_ms": raw.get("observed_at_ms", raw.get("source_observed_at_ms")),
+            "expires_at_ms": raw.get("expires_at_ms", raw.get("source_expires_at_ms")),
+            "confidence": raw.get("confidence"),
+            "epistemic_type": raw.get("epistemic_type"),
+            "conflict_state": raw.get("conflict_state"),
         }
 
     def _scene_allows_scene(self, scene_type: str, ctx: dict[str, Any]) -> tuple[bool, str]:
         scene = self._coerce_scene_awareness(ctx)
-        scene_tags = set(scene.get("scene_tags") or [])
-        if scene.get("companion_suitable") is False:
-            return False, "scene companion_suitable=false"
-        if scene_tags & {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}:
-            return False, f"scene={','.join(sorted(scene_tags))} suppresses proactive"
-        if scene_tags & {"gaming", "gameplay", "battle", "lobby"}:
-            if scene_type in {SCENE_LATE_NIGHT, SCENE_MORNING_GREET, SCENE_HOLIDAY_GREET}:
-                return False, "scene=gaming prefers companion follow-up over generic greeting"
-            return True, "scene=gaming"
-        return True, ""
+        sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
+        from host_brain.persona.scene_policy import (  # noqa: PLC0415
+            build_scene_decision,
+            evaluate_proactive_scene,
+        )
+        decision_now_ms = ctx.get("now_ms", ctx.get("current_ts_ms"))
+
+        decision = build_scene_decision(
+            scene_awareness=scene,
+            task_mode=str(ctx.get("task_mode") or ctx.get("surface_task_mode") or ""),
+            sys_mode=sys_mode,
+            activity_monitor=activity_monitor,
+            user_goal_ref=str(ctx.get("user_goal_ref") or ""),
+            now_ms=decision_now_ms,
+            enabled=str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower()
+            not in {"0", "false", "no", "off"},
+        )
+        return evaluate_proactive_scene(
+            decision,
+            proactive_scene_type=scene_type,
+            now_ms=decision_now_ms,
+        )
 
     def _apply_mode_to_style(self, style: str, ctx: dict[str, Any]) -> str:
         sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)

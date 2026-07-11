@@ -92,6 +92,7 @@ class SurfaceReplyInput:
     llm_runtime: Optional[Dict[str, Any]] = None
     render_policy: Dict[str, Any] = field(default_factory=dict)
     surface_task_control: Dict[str, Any] = field(default_factory=dict)
+    scene_awareness: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
     attachment_summary: str = ""

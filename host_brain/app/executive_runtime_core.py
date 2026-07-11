@@ -885,6 +885,7 @@ def _execute_skill(
     registry = get_skill_registry()
     skill_meta = registry.require(skill_id)
     approval_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("approval_token_ref"))
+    confirm_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("confirm_token_ref"))
     execution_intent_id = _normalize_text(intent_id) or f"intent::{request_id}::{skill_id}"
 
     if _normalize_text(dict(governor_result or {}).get("decision"), lower=True) not in {"", "approve"}:
@@ -911,6 +912,111 @@ def _execute_skill(
             payload={"approval_token_ref": approval_token_ref or None},
         )
 
+    action_arbiter_decision: dict[str, Any] | None = None
+    token_service = None
+    if _action_arbiter_execution_enabled():
+        envelope = dict(intent_draft or {})
+        bound_intent_id = _normalize_text(envelope.get("id") or envelope.get("intent_id"))
+        bound_session_id = _normalize_text(envelope.get("session_id"))
+        try:
+            bound_seq = int(envelope.get("seq"))
+        except (TypeError, ValueError):
+            bound_seq = -1
+        authority_error = ""
+        if not bound_intent_id or bound_intent_id != execution_intent_id:
+            authority_error = "ARBITER_INTENT_ID_MISMATCH"
+        elif not bound_session_id or bound_session_id != session_id:
+            authority_error = "ARBITER_SESSION_ID_MISMATCH"
+        elif bound_seq < 0:
+            authority_error = "ARBITER_INTENT_SEQ_INVALID"
+
+        if not authority_error:
+            from host_brain.app.dependencies import get_token_service  # noqa: PLC0415
+            from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL  # noqa: PLC0415
+
+            token_service = get_token_service()
+            token_check = token_service.validate_bound_token(
+                approval_token_ref or None,
+                expected_type=TOKEN_TYPE_APPROVAL,
+                intent_id=bound_intent_id,
+                skill_name=skill_id,
+                session_id=bound_session_id,
+                seq=bound_seq,
+                now_ts_ms=int(time.time() * 1000),
+                consume=False,
+            )
+            if not token_check.valid:
+                authority_error = str(token_check.reason_code or "TOKEN_INVALID")
+
+        if not authority_error:
+            from host_brain.governor.action_arbiter import arbitrate_action  # noqa: PLC0415
+            from host_brain.persona.scene_policy import build_scene_decision  # noqa: PLC0415
+
+            surface_control = dict(getattr(request_body, "surface_task_control", {}) or {})
+            scene_awareness = envelope.get("scene_awareness")
+            if not isinstance(scene_awareness, dict):
+                envelope_args = envelope.get("args")
+                scene_awareness = (
+                    dict(envelope_args.get("scene_awareness") or {})
+                    if isinstance(envelope_args, dict)
+                    else {}
+                )
+            scene_decision = build_scene_decision(
+                scene_awareness=scene_awareness,
+                task_mode=str(surface_control.get("task_mode") or envelope.get("action") or ""),
+                user_goal_ref=f"intent://{bound_intent_id}",
+                now_ms=int(time.time() * 1000),
+            )
+            action_arbiter_decision = arbitrate_action(
+                governor_decision=governor_result,
+                proposed_action={
+                    "action_kind": skill_id,
+                    "scope": str(skill_meta.scope or ""),
+                    "risk_level": int(skill_meta.risk_level),
+                    "requires_token": True,
+                    "is_proactive": False,
+                },
+                intent_envelope=envelope,
+                scene_decision=scene_decision,
+                user_intent={
+                    "explicit": True,
+                    "intent_id": bound_intent_id,
+                    "action_kind": str(envelope.get("action") or ""),
+                    "goal_ref": f"intent://{bound_intent_id}",
+                },
+                now_ms=int(time.time() * 1000),
+            )
+            if action_arbiter_decision.get("decision") == "BLOCK":
+                authority_error = str(
+                    (action_arbiter_decision.get("reason_codes") or ["ACTION_ARBITER_BLOCKED"])[0]
+                )
+
+        if authority_error:
+            latency_ms = int((time.time() - started) * 1000)
+            _log_skill_exec_row(
+                request_id=request_id,
+                intent_id=execution_intent_id,
+                skill_name=skill_id,
+                result_status="REJECTED",
+                result_code=authority_error,
+                result_digest=authority_error,
+                approval_token_ref=approval_token_ref or None,
+                ts_ms=int(time.time() * 1000),
+            )
+            return _ExecutionOutcome(
+                route_type="skill",
+                target_id=skill_id,
+                skill_family=str(skill_meta.family or "general"),
+                success=False,
+                result_text="",
+                error_text=authority_error,
+                latency_ms=latency_ms,
+                payload={
+                    "approval_token_ref": approval_token_ref or None,
+                    "action_arbiter_decision": action_arbiter_decision,
+                },
+            )
+
     args = _extract_skill_args(intent_draft, request_body, task_text)
     if is_agent_runtime_skill(skill_id):
         args.setdefault("approval_confirmed", True)
@@ -929,6 +1035,8 @@ def _execute_skill(
         "emotion_context": dict(emotion_context or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
+    if action_arbiter_decision is not None:
+        exec_context["action_arbiter_decision"] = action_arbiter_decision
     if skill_id.startswith("memory_"):
         exec_context.update(
             _build_memory_exec_context(
@@ -940,6 +1048,19 @@ def _execute_skill(
         )
 
     try:
+        if token_service is not None:
+            token_result = token_service.validate_execution_tokens(
+                intent_id=bound_intent_id,
+                skill_name=skill_id,
+                session_id=bound_session_id,
+                seq=bound_seq,
+                approval_token_ref=approval_token_ref or None,
+                confirm_token_ref=confirm_token_ref or None,
+                require_confirm=bool(skill_meta.require_confirm),
+                now_ts_ms=int(time.time() * 1000),
+            )
+            if not token_result.valid:
+                raise PermissionError(str(token_result.reason_code or "TOKEN_INVALID"))
         handler_payload = skill_meta.handler(args, exec_context)
         if isinstance(handler_payload, dict):
             payload = dict(handler_payload)
@@ -1176,6 +1297,11 @@ def _build_chat_input(
     chat_trace_stage_meta.setdefault("input_source", str(getattr(request_body, "input_source", "") or "").strip())
     chat_trace_stage_meta.setdefault("reply_channel", str(getattr(request_body, "reply_channel", "") or "").strip())
 
+    intent_args = intent_draft.get("args") if isinstance(intent_draft, dict) else None
+    scene_awareness = intent_draft.get("scene_awareness") if isinstance(intent_draft, dict) else None
+    if not isinstance(scene_awareness, dict) and isinstance(intent_args, dict):
+        scene_awareness = intent_args.get("scene_awareness")
+
     return SurfaceReplyInput(
         request_id=request_id,
         session_id=session_id,
@@ -1199,6 +1325,7 @@ def _build_chat_input(
         llm_runtime=resolved_llm_runtime,
         render_policy=dict(getattr(request_body, "render_policy", {}) or {}),
         surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
+        scene_awareness=dict(scene_awareness or {}) if isinstance(scene_awareness, dict) else {},
         attachments=list(getattr(request_body, "attachments", []) or []),
         multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
         attachment_summary=str(getattr(request_body, "attachment_summary", "") or "").strip(),
@@ -2101,6 +2228,12 @@ async def stream_chat_route(
 
 def _legacy_direct_text_routes_enabled() -> bool:
     raw = str(os.environ.get("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _action_arbiter_execution_enabled() -> bool:
+    """Canary switch; release cutover enables this after focused validation."""
+    raw = str(os.environ.get("HOST_ACTION_ARBITER_ENABLED") or "false").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 

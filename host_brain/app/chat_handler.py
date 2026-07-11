@@ -36,6 +36,10 @@ from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
 )
+from host_brain.governor.route_token import (
+    RouteTokenDisposition,
+    validate_governor_route_token,
+)
 from host_brain.tribe.thalamus_agent import (
     THALAMUS_SCENE_TYPE_SOURCE,
     get_thalamus_agent,
@@ -59,6 +63,12 @@ def _resolve_governor_executor_workers() -> int:
     except ValueError:
         value = 4
     return max(2, min(value, 12))
+
+
+def _action_arbiter_enabled() -> bool:
+    """Dedicated cutover flag for the post-Governor execution precondition."""
+    raw = str(os.environ.get("HOST_ACTION_ARBITER_ENABLED") or "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 _GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
@@ -702,6 +712,50 @@ async def _unified_chat_sse_generator(
                 "request_id": request_id,
             })
             return
+
+        # Route commitment is checked before publishing GOV_APPROVED and before
+        # Cortex can observe the request.  During cutover, a completely absent
+        # legacy token pair is tolerated only while the dedicated feature flag
+        # is disabled.  Any supplied-but-invalid pair remains fail closed, and
+        # AIRLOCK is always a paused review state rather than an approval.
+        route_validation = validate_governor_route_token(governor_result)
+        route_gate_enabled = _action_arbiter_enabled()
+        route_metadata_present = bool(
+            route_validation.token_ref or route_validation.detail_token
+        )
+        if route_validation.disposition == RouteTokenDisposition.PAUSE:
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "PAUSE",
+                "execution_state": "PAUSED_REVIEW",
+                "reason_code": "GOV_AIRLOCK_REVIEW",
+                "route_validation_reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token,
+                "request_id": request_id,
+            })
+            return
+        if (
+            route_validation.disposition == RouteTokenDisposition.BLOCK
+            and (route_gate_enabled or route_metadata_present)
+        ):
+            metrics.inc_rejection(route_validation.reason_code)
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "execution_state": "BLOCKED",
+                "reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token or None,
+                "request_id": request_id,
+            })
+            return
+        if route_validation.disposition == RouteTokenDisposition.BLOCK:
+            _logger.warning(
+                "[%s] legacy Governor output has no route-token pair; "
+                "compatibility cutover remains active",
+                request_id,
+            )
 
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
         _send_mateengine_state_cue(

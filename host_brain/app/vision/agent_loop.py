@@ -128,6 +128,8 @@ def _build_scene_awareness_signal(screenshot_data: Dict[str, Any] | None) -> Dic
     confidence: float | None = None
     source = "screenshot_only"
     scene_tags: list[str] = []
+    observed_at_ms = int(time.time() * 1000)
+    expires_at_ms = observed_at_ms + 120_000
 
     if isinstance(raw_scene, dict):
         scene_tags.extend(_normalize_scene_tags(raw_scene.get("scene_tags")))
@@ -141,6 +143,19 @@ def _build_scene_awareness_signal(screenshot_data: Dict[str, Any] | None) -> Dic
         except (TypeError, ValueError):
             confidence = None
         source = str(raw_scene.get("source") or "scene_awareness").strip() or "scene_awareness"
+        try:
+            observed_at_ms = int(
+                raw_scene.get("observed_at_ms")
+                or payload.get("captured_at_ms")
+                or payload.get("ts_ms")
+                or observed_at_ms
+            )
+        except (TypeError, ValueError):
+            observed_at_ms = int(time.time() * 1000)
+        try:
+            expires_at_ms = int(raw_scene.get("expires_at_ms") or observed_at_ms + 120_000)
+        except (TypeError, ValueError):
+            expires_at_ms = observed_at_ms + 120_000
     elif raw_scene is not None:
         scene_tags.extend(_normalize_scene_tags(raw_scene))
         source = "scene_awareness"
@@ -196,6 +211,8 @@ def _build_scene_awareness_signal(screenshot_data: Dict[str, Any] | None) -> Dic
         "companion_suitable": companion_suitable,
         "source": source,
         "confidence": confidence,
+        "observed_at_ms": observed_at_ms,
+        "expires_at_ms": expires_at_ms,
         "has_screenshot": bool(str(payload.get("image_base64") or "").strip()),
     }
 

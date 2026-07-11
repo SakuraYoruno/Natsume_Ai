@@ -93,6 +93,7 @@ _EDGE_RPC_COMPONENT_BY_SERVICE_ID = {
 
 # 全局单例
 _ledger: Optional[SQLiteLedger] = None
+_token_service: Optional[TokenService] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
 _skill_registry: Optional[SkillRegistry] = None
 _policy_cache: Optional[GovernorPolicyCache] = None
@@ -433,13 +434,26 @@ def get_tool_catalog() -> ToolCatalog:
     return _tool_catalog
 
 
+def get_token_service() -> TokenService:
+    """Return the process-wide execution token authority.
+
+    Governor issues approval tokens and ToolBroker consumes them.  Keeping the
+    two components on different in-memory registries makes every real token
+    fail validation at the execution boundary, so both dependencies must share
+    this singleton.
+    """
+    global _token_service
+    if _token_service is None:
+        _token_service = TokenService()
+    return _token_service
+
+
 def get_tool_broker() -> ToolBroker:
     global _tool_broker
     if _tool_broker is None:
-        token_service = TokenService()
         _tool_broker = ToolBroker(
             catalog=get_tool_catalog(),
-            token_service=token_service,
+            token_service=get_token_service(),
             ledger=get_ledger(),
         )
     return _tool_broker
@@ -716,6 +730,7 @@ def get_intent_engine() -> IntentDecisionEngine:
     if _intent_engine is None:
         _intent_engine = IntentDecisionEngine(
             ledger=get_ledger(),
+            token_service=get_token_service(),
             registry=get_skill_registry(),
             policy_cache=get_policy_cache(),
         )
