@@ -1,5 +1,19 @@
 """Release package exports."""
 
+from .identity_snapshot import (
+    IDENTITY_SNAPSHOT_FEATURE_FLAG,
+    IDENTITY_SNAPSHOT_SCHEMA_VERSION,
+    IdentityReleaseGate,
+    IdentityReviewCandidate,
+    IdentityRollbackPlan,
+    IdentitySnapshot,
+    IdentitySnapshotDiff,
+    IdentitySourceRef,
+    build_identity_rollback_plan,
+    build_identity_snapshot,
+    diff_identity_snapshots,
+    evaluate_identity_release_gate,
+)
 from .release_manifest import (
     M8_MIGRATION_DIRS,
     S_RELEASE_CHECKLIST,
@@ -13,14 +27,25 @@ from .release_manifest import (
 )
 
 __all__ = [
+    "IDENTITY_SNAPSHOT_FEATURE_FLAG",
+    "IDENTITY_SNAPSHOT_SCHEMA_VERSION",
+    "IdentityReleaseGate",
+    "IdentityReviewCandidate",
+    "IdentityRollbackPlan",
+    "IdentitySnapshot",
+    "IdentitySnapshotDiff",
+    "IdentitySourceRef",
     "M8_MIGRATION_DIRS",
     "S_RELEASE_CHECKLIST",
     "STATUS_FAILED",
     "STATUS_READY",
     "_MIGRATION_EXTS",
     "_load_model_plane_meta",
+    "build_identity_rollback_plan",
+    "build_identity_snapshot",
     "build_release_checklist",
+    "diff_identity_snapshots",
+    "evaluate_identity_release_gate",
     "generate_m8_manifest",
     "validate_release_bundle",
 ]
-
