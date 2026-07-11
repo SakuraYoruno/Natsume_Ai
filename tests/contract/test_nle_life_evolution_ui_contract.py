@@ -13,6 +13,10 @@ from host_brain.app.dependencies import get_token_service
 from host_brain.app.settings.core import get_core_settings
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.action_arbiter import build_governed_action_binding
+from host_brain.observability.degradation_state import (
+    DegradationStateMachine,
+    set_global_degradation_state_machine,
+)
 from host_brain.persona.life_evolution_view import (
     LIFE_EVOLUTION_VIEW_SCHEMA_VERSION,
     build_life_evolution_view,
@@ -20,6 +24,23 @@ from host_brain.persona.life_evolution_view import (
 
 
 NOW = 1_800_200_000_000
+
+
+@pytest.fixture(autouse=True)
+def _isolated_degradation_machine(monkeypatch: pytest.MonkeyPatch):
+    """Keep T-NLE-22 independent from a developer/runtime audit database.
+
+    Action preview must consume the real degradation gate, but this contract
+    verifies Life projection semantics rather than migration state.  A
+    process-global durable machine would otherwise make the result depend on
+    whichever ignored audit.sqlite3 happens to exist in the worktree.
+    """
+    monkeypatch.setenv("HOST_DEGRADATION_STATE_ENABLED", "true")
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
 
 
 def _world() -> dict:
