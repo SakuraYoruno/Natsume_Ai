@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.16
+版本：v1.17
 维护日期：2026-07-11
 标签：当前执行证据 + 历史归档
 
@@ -35,6 +35,7 @@
 - `NLE_WP51_TASK0477_VALIDATION_20260711.md`：只读 WorldProjection、source/confidence/TTL/conflict/epistemic facts 与无反写验收证据。
 - `NLE_WP52_TASK0478_VALIDATION_20260711.md`：确定性 Appraisal replay、只读 BondProjection、BondDynamics 单写收敛与 rift/repair/boundary 验收证据。
 - `NLE_WP53_TASK0479_VALIDATION_20260711.md`：expiring SceneDecision、ProactiveVoice 接线、只收紧 Governor 的 ActionArbiter 与 dry-run/Runtime Event 验收证据。
+- `NLE_WP70_TASK0483_VALIDATION_20260711.md`：Execution/Review versioned read model、Operator UI、token-bound resume、cursor replay、Monitor E2E 与 deterministic build 验收证据。
 - `NLE_WP30_TASK0470_VALIDATION_20260711.md`：fail-closed Verification runner、required gate、TaskStore 状态门与 T-NLE-08 验收证据。
 - `NLE_WP31_TASK0471_VALIDATION_20260711.md`：AcceptanceJudgement、criterion verdict、Executor acceptance 字段、TaskStore ACCEPTED 状态门与 T-NLE-09 验收证据。
 - `NLE_WP32_TASK0472_VALIDATION_20260711.md`：Durable ReviewStore、绑定 resume token、一次性 PRE/POST resume 与 T-NLE-10 验收证据。

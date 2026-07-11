@@ -45,7 +45,7 @@ AIRLOCK 返回的 approval ref 故意不登记到 TokenService，因此即使绕
 - 合计本轮聚焦/相关回归：`207 passed`；14 个变更 Python 模块 `py_compile` 通过；`git diff --check` 通过。
 - 独立只读阻塞项复审：`PASS`；AIRLOCK、authority binding、handler 前门、Surface goal/TTL 四项均关闭，未发现新增 P0/P1。
 - 文档 audience/delivery scoped gates：通过；freshness scoped gate：`3 checked / 3 skipped / 0 failures`。
-- 全量 NLE 合同按提速后的依赖波次策略，在独立 TASK-0483 合入后统一执行。
+- 与独立 TASK-0483 合入后的全量 NLE 合同：`206 passed / 17 warnings`；warnings 均为既有 invalid-escape deprecation。
 
 ## 4. 停止条件与回滚
 

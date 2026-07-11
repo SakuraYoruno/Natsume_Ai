@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint src/features/execution/taskRuntimeModel.js src/features/execution/taskRuntimeApi.js src/features/execution/taskRuntimeQueries.js src/features/execution/components/TaskRuntimeConsole.jsx src/pages/TaskRuntime.jsx",
+    "typecheck": "tsc --noEmit --allowJs --checkJs --skipLibCheck --moduleResolution bundler --module esnext --target es2022 src/features/execution/taskRuntimeModel.js",
+    "test:read-model": "node --test src/features/execution/taskRuntimeModel.test.js",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:routes": "npm run build && playwright test e2e/monitor-route-smoke.spec.js",
     "test:e2e:interactions": "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js"
@@ -25,12 +28,18 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "@eslint/js": "^9.39.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^16.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
+    "typescript": "^5.9.3",
     "vite": "^8.0.3"
   }
 }

@@ -171,6 +171,11 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     mateSay: { service: 'host', path: '/v1/mateengine/say', risk: 'medium' },
   },
   execution: {
+    taskRuntimeExecutions: { service: 'obs', path: '/obs/task-runtime/executions', risk: 'low' },
+    taskRuntimeExecution: { service: 'obs', path: '/obs/task-runtime/executions/:graphId', risk: 'low' },
+    taskReviewApprove: { service: 'host', path: '/internal/codex/reviews/:reviewId/approve', risk: 'medium' },
+    taskReviewReject: { service: 'host', path: '/internal/codex/reviews/:reviewId/reject', risk: 'medium' },
+    taskReviewResume: { service: 'host', path: '/internal/codex/reviews/:reviewId/resume', risk: 'high' },
     agentInfo: { service: 'host', path: '/v1/agent/info', risk: 'low' },
     agentRun: { service: 'host', path: '/v1/agent/run', risk: 'medium' },
     chatDebug: { service: 'host', path: '/v1/chat', risk: 'medium' },

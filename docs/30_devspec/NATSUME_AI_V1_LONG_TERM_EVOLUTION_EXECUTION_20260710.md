@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0479 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0479、TASK-0483 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -429,7 +429,7 @@ Pop-Location
 | TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | PLANNED |
 | TASK-0481 | WP-61 / PR-021 | Degradation State | WP-53 | 2–3 日 | 中 | PLANNED |
 | TASK-0482 | WP-62 / PR-022 | Identity Snapshot | WP-53 | 2–3 日 | 高 | PLANNED |
-| TASK-0483 | WP-70 / PR-023 | Execution / Review UI | WP-24/40 | 2–4 日 | 中 | PLANNED |
+| TASK-0483 | WP-70 / PR-023 | Execution / Review UI | WP-24/40 | 2–4 日 | 中 | DONE |
 | TASK-0484 | WP-71 / PR-024 | Life UI | WP-51/52/53 | 2–4 日 | 中 | PLANNED |
 | TASK-0485 | WP-72 / PR-025 | Capability / Health / Identity UI | WP-60/61/62 | 2–4 日 | 中 | PLANNED |
 | TASK-0486 | WP-80 / PR-026 | Release Seal 与回滚演练 | 全部 | 2–3 日 | 高 | PLANNED |
@@ -799,7 +799,7 @@ Pop-Location
 
 ### TASK-0483 / LTE-WP-70：Execution、Trace 与 Review UI
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：在现有 Monitor UI 扩展 TaskGraph、attempt、budget、verification、review、resume 和 cursor timeline。
 - 代码事实：Monitor UI 已有 Execution/Agent Loop、Trace、Operations 等页面，不需要重写 Operator Console。
 - 前置任务：TASK-0473、TASK-0474。
@@ -812,6 +812,7 @@ Pop-Location
 - 停止条件：UI 需要消费未版本化内部表，或能绕过 token 直接恢复。
 - 回滚：关闭 `HOST_NLE_OPERATOR_VIEWS_ENABLED`；保留后端 read model。
 - 审批：生成静态资产进入提交范围前确认 diff 仅来自预期 build。
+- 完成证据（2026-07-11）：新增 versioned execution index/detail read model、TaskStore/ReviewStore/RuntimeEventStore 只读 facade 与 `/obs/task-runtime` routes；Monitor UI 可显示 DAG、attempt、budget、verification、Review approve/reject/expired、绑定 token/subject/version/phase/checkpoint 的 resume 和 cursor replay。`HOST_NLE_OPERATOR_VIEWS_ENABLED=false` 在 dependency 构造前返回 404；UI 不读取内部表/SQLite、不显示 raw thought、不提供 `confirmed` 旁路。T-NLE-21 `7 passed`，Node read-model `4 passed`，相关 Store/Route `88 passed`，Monitor E2E `96/96 passed`，lint/typecheck/build 通过且两次静态资产 SHA256 一致；与 TASK-0479 合入后的全量 NLE `206 passed`。
 
 ### TASK-0484 / LTE-WP-71：Life World、Appraisal、Bond 与 Scene UI
 

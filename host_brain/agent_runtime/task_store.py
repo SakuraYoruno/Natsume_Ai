@@ -686,6 +686,40 @@ class DurableTaskStore:
         finally:
             conn.close()
 
+    def list_graphs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent validated graph records for versioned read adapters."""
+
+        size = max(1, min(int(limit), 500))
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            graph_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph
+                ORDER BY updated_ts_ms DESC, graph_id, revision DESC
+                LIMIT ?
+                """,
+                (size,),
+            ).fetchall()
+            records: list[dict[str, Any]] = []
+            for graph_row in graph_rows:
+                node_rows = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node
+                    WHERE graph_id = ? AND graph_revision = ?
+                    ORDER BY node_id
+                    """,
+                    (str(graph_row["graph_id"]), int(graph_row["revision"])),
+                ).fetchall()
+                records.append(_graph_record(graph_row, node_rows))
+            conn.commit()
+            return records
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> dict[str, Any]:
         conn = self._connect()
         try:

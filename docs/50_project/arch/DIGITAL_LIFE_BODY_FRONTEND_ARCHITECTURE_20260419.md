@@ -1,8 +1,8 @@
 受众：MASTER
 标题：数字生命主体化前端架构方案（2026-04-19）
 
-版本：v1.2
-日期：2026-06-03
+版本：v1.3
+日期：2026-07-11
 
 # 数字生命主体化前端架构方案（2026-04-19）
 
@@ -14,6 +14,7 @@
 > - 下文第 3 节保留的是本轮重构立项时的问题基线；当前实际落地状态请结合第 12.4 节与第 14 节各阶段完成情况一起阅读。
 > - 2026-06-03 代码校准：`host_brain/app/monitor_ui/src/api/obs.js`、`src/api/runtime.js`、`src/queries/runtimeQueries.js`、`src/queries/queryKeys.js` 继续承载观测与运行态数据接线；`DigitalLifeOverview.jsx` 是数字生命体首页聚合面，`BackgroundRuntimeCard.jsx` 和 `AvatarStateCard.jsx` 分别承载后台生命节律与桌面身体状态；`DigitalLifeNav.jsx` 仍作为数字生命体局部导航/快捷入口，而非全站主导航唯一事实源。
 > - 2026-06-03 导航边界：Automation、Gateway、Tools、SkillsHub 等页面仍归入“运营 / 外周执行”视角；主体化首页只汇聚高信号状态，不把所有控制面板重新铺平到驾驶舱。
+> - 2026-07-11 Operator 增量：`/execution/task-runtime` 已加入 `Execution` 导航组，作为执行审查页展示 TaskGraph DAG、attempt、budget、verification、Review、token-bound resume 与 Runtime Event cursor replay。它消费 `/obs/task-runtime` versioned read model，不读取内部表，也不改变数字生命驾驶舱的信息架构；`HOST_NLE_OPERATOR_VIEWS_ENABLED=false` 可整体隐藏该增量。
 >
 > 本文档不是“把监控页换个皮肤”，而是要把当前前端从“监控页面集合”推进为“数字生命主体驾驶舱”。核心目标是让用户看到的不是分散的图表，而是一个有主体、有器官系统、有生命体征、有病灶、有因果链和有行为后果的数字生命体。
 
@@ -805,6 +806,17 @@ flowchart TD
 - 病灶相关查询在 sidecar 启动期抖动时现在会做受控自动重试；如果刷新失败但旧聚合仍可用，页面会保留旧病灶并明确提示这是刷新异常
 - 首页主病灶卡和病灶面板现在也能直接进入病灶详情与病灶事件链，用户不必先绕回器官网页才能开始诊断
 - 后续仍可继续补更专门的病灶历史接口，让“病灶时间演化”不再只依赖前端聚合时间轴
+
+### Phase E：执行与审查 Operator 增量（2026-07-11）
+
+- [x] E1. 在既有 `Execution` 导航组新增 `/execution/task-runtime`，没有重写主导航壳或数字生命首页。
+- [x] E2. 新增 versioned execution index/detail read model，只读聚合 TaskStore、ReviewStore 与 RuntimeEventStore。
+- [x] E3. 页面展示 DAG/node 状态、attempt/lease、budget、verification、Review approve/reject/expired 和 cursor timeline。
+- [x] E4. resume 操作缺 token 时禁用，提交必须绑定 subject/version/phase/checkpoint/token；不存在 `confirmed` 旁路。
+- [x] E5. `/obs/task-runtime` 在 `HOST_NLE_OPERATOR_VIEWS_ENABLED=false` 时于依赖构造前返回 404；UI 不直读 SQLite/内部表，不显示 raw thought。
+- [x] E6. Monitor E2E 96/96、read-model unit、lint/typecheck/build 通过；连续两次静态构建的 140 个文件 SHA256 一致。
+
+边界说明：执行审查页属于 Operator 控制面，负责解释“任务为什么处于当前状态、等待哪类审查、从哪个 cursor 回放”；它不是新的任务状态真源，也不把执行控制卡片铺回数字生命驾驶舱。Task/Review 状态仍由后端状态机和 token contract 决定。
 
 ## 15. 验收标准
 

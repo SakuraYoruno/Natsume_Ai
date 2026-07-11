@@ -15,6 +15,13 @@ export const OBS_QUERY_KEYS = Object.freeze({
   insightsSummary: (windowMinutes) => ['insights-summary', windowMinutes],
   systemConfig: (windowMinutes) => ['system-config', windowMinutes],
   agentLoopConsole: () => ['agent-loop-console'],
+  taskRuntimeIndex: () => ['task-runtime-index'],
+  taskRuntimeExecution: (graphId, revision, afterCursor) => [
+    'task-runtime-execution',
+    graphId || 'none',
+    revision || 0,
+    afterCursor || 0,
+  ],
   bondOverview: () => ['bond-overview'],
   bondUserDetail: (userId) => ['bond-user-detail', userId || 'none'],
   toolsCatalog: (query) => ['tools-catalog', query || 'all'],

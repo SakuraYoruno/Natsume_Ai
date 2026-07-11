@@ -306,6 +306,40 @@ class ReviewStore:
         finally:
             conn.close()
 
+    def list_reviews(
+        self,
+        *,
+        task_graph_id: str | None = None,
+        work_order_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return validated reviews without mutating expiry or token state."""
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if _text(task_graph_id):
+            clauses.append("task_graph_id = ?")
+            params.append(_text(task_graph_id))
+        if _text(work_order_id):
+            clauses.append("work_order_id = ?")
+            params.append(_text(work_order_id))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit), 500)))
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM agent_runtime_review
+                {where}
+                ORDER BY created_ts_ms, review_id
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._record_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
     def approve_review(
         self,
         review_id: str,

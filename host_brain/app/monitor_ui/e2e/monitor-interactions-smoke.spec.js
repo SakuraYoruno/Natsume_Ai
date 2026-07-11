@@ -1222,6 +1222,171 @@ async function stubBodyIntegrationDegradedApis(page) {
   }))
 }
 
+function taskRuntimeReview(reviewId, status, { expired = false } = {}) {
+  return {
+    review_id: reviewId,
+    review_type: 'PRE_EXECUTION_APPROVAL',
+    subject_ref: `task-node://graph-smoke/${reviewId}`,
+    subject_version: 4,
+    requester: 'runtime',
+    reason: `Governed review ${reviewId}`,
+    risk_level: 4,
+    status,
+    persisted_status: status,
+    status_version: 1,
+    expires_at: expired ? 1 : 4_102_444_800_000,
+    expired,
+    resume_phase: 'PRE_EXECUTION',
+    checkpoint_id: `checkpoint://graph-smoke/${reviewId}/4`,
+    evidence_refs: [`evidence://graph-smoke/${reviewId}`],
+    actions: {
+      approve: status === 'PENDING' && !expired,
+      reject: status === 'PENDING' && !expired,
+      resume: status === 'APPROVED' && !expired,
+      resume_requires_token: true,
+      resume_binding_fields: [
+        'resume_token_ref',
+        'subject_ref',
+        'subject_version',
+        'resume_phase',
+        'checkpoint_id',
+      ],
+    },
+  }
+}
+
+async function stubTaskRuntimeApis(page) {
+  await stubCommonReadApis(page)
+  const state = {
+    statuses: {
+      'review-pending': 'PENDING',
+      'review-reject': 'PENDING',
+      'review-approved': 'APPROVED',
+      'review-expired': 'EXPIRED',
+    },
+    approveCalls: [],
+    rejectCalls: [],
+    resumeCalls: [],
+  }
+  await page.route('**/obs/task-runtime/executions**', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/obs/task-runtime/executions') {
+      return fulfillJson(route, {
+        schema_version: 'Natsume.operator.execution_index.v1',
+        generated_at_ms: 1_782_260_000_000,
+        read_only: true,
+        executions: [{
+          graph_id: 'graph-smoke',
+          revision: 7,
+          root_work_order_id: 'work-smoke',
+          status: 'COMPLETED',
+          terminal: true,
+          node_count: 3,
+          updated_ts_ms: 1_782_260_000_000,
+        }],
+      })
+    }
+    const reviews = Object.entries(state.statuses).map(([reviewId, status]) => (
+      taskRuntimeReview(reviewId, status, { expired: reviewId === 'review-expired' })
+    ))
+    return fulfillJson(route, {
+      schema_version: 'Natsume.operator.execution_review.v1',
+      generated_at_ms: 1_782_260_000_000,
+      read_only: true,
+      mutation_contract: {
+        direct_database_write: false,
+        review_commands: ['approve', 'reject', 'resume'],
+        resume_requires_bound_token: true,
+        automatic_resume: false,
+      },
+      execution: {
+        graph_id: 'graph-smoke',
+        revision: 7,
+        root_work_order_id: 'work-smoke',
+        planner_ref: 'planner://smoke/7',
+        status: 'COMPLETED',
+        terminal: true,
+      },
+      dag: {
+        nodes: [
+          {
+            node_id: 'plan',
+            dependencies: [],
+            route: 'worker.plan',
+            risk_level: 1,
+            status: 'ACCEPTED',
+            attempts: [{ attempt_id: 'attempt-plan', attempt_no: 1, status: 'SUCCEEDED' }],
+            verification: { status: 'PASS', evidence_refs: ['evidence://plan/verify'] },
+          },
+          {
+            node_id: 'execute',
+            dependencies: ['plan'],
+            route: 'worker.execute',
+            risk_level: 4,
+            status: 'ACCEPTED',
+            attempts: [{ attempt_id: 'attempt-execute', attempt_no: 2, status: 'SUCCEEDED' }],
+            verification: { status: 'PASS', evidence_refs: ['evidence://execute/verify'] },
+          },
+          {
+            node_id: 'publish',
+            dependencies: ['execute'],
+            route: 'worker.publish',
+            risk_level: 2,
+            status: 'ACCEPTED',
+            attempts: [{ attempt_id: 'attempt-publish', attempt_no: 1, status: 'SUCCEEDED' }],
+            verification: { status: 'PASS', evidence_refs: ['evidence://publish/verify'] },
+          },
+        ],
+        edges: [{ from: 'plan', to: 'execute' }, { from: 'execute', to: 'publish' }],
+      },
+      attempts: [
+        { attempt_id: 'attempt-plan', node_id: 'plan', attempt_no: 1, status: 'SUCCEEDED' },
+        { attempt_id: 'attempt-execute', node_id: 'execute', attempt_no: 2, status: 'SUCCEEDED' },
+        { attempt_id: 'attempt-publish', node_id: 'publish', attempt_no: 1, status: 'SUCCEEDED' },
+      ],
+      budgets: [{
+        budget_id: 'budget-smoke',
+        scope: 'graph-smoke',
+        node_id: 'execute',
+        status: 'CONSUMED',
+        consumed: { token_count: 420, tool_call_count: 3, time_ms: 900 },
+        limits: { token_count: 1000, tool_call_count: 10, time_ms: 5000 },
+        exceeded_dimensions: [],
+      }],
+      verification: [
+        { node_id: 'plan', status: 'PASS', source: 'runtime_event', evidence_refs: ['evidence://plan/verify'] },
+        { node_id: 'execute', status: 'PASS', source: 'runtime_event', evidence_refs: ['evidence://execute/verify'] },
+        { node_id: 'publish', status: 'PASS', source: 'runtime_event', evidence_refs: ['evidence://publish/verify'] },
+      ],
+      reviews,
+      timeline: [
+        { cursor: 1, event_id: 'event-plan', event_type: 'TASK_GRAPH_CREATED', summary: 'Plan created', payload_ref: 'taskstore://event/1', evidence_refs: [], dedupe_key: 'd1', ts_ms: 1_782_260_000_001 },
+        { cursor: 7, event_id: 'event-complete', event_type: 'TASK_GRAPH_COMPLETED', summary: 'Execution terminal', payload_ref: 'taskstore://event/7', evidence_refs: ['evidence://complete'], dedupe_key: 'd7', ts_ms: 1_782_260_000_007 },
+      ],
+      cursor_page: { after: 0, next_cursor: 7, event_count: 2, has_more: false, dedupe_field: 'dedupe_key' },
+    })
+  })
+  await page.route('**/internal/codex/reviews/*/approve', async (route) => {
+    const reviewId = new URL(route.request().url()).pathname.split('/').at(-2)
+    state.approveCalls.push(await route.request().postDataJSON())
+    state.statuses[reviewId] = 'APPROVED'
+    return fulfillJson(route, { accepted: true, resume_token_ref: `review-resume.v1.${reviewId}` })
+  })
+  await page.route('**/internal/codex/reviews/*/reject', async (route) => {
+    const reviewId = new URL(route.request().url()).pathname.split('/').at(-2)
+    state.rejectCalls.push(await route.request().postDataJSON())
+    state.statuses[reviewId] = 'REJECTED'
+    return fulfillJson(route, { accepted: true })
+  })
+  await page.route('**/internal/codex/reviews/*/resume', async (route) => {
+    const reviewId = new URL(route.request().url()).pathname.split('/').at(-2)
+    state.resumeCalls.push(await route.request().postDataJSON())
+    state.statuses[reviewId] = 'CONSUMED'
+    return fulfillJson(route, { accepted: true })
+  })
+  return state
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Desktop navigation scopes secondary links to the active section', async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
@@ -2076,5 +2241,70 @@ test.describe('Monitor interaction smoke', () => {
     await expect(handoff.getByText('degraded')).toBeVisible()
     await expect(handoff.getByText('locked', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: '发送 state' })).toBeDisabled()
+  })
+
+  test('Task Runtime replays a complex graph from plan to terminal cursor', async ({ page, baseURL }) => {
+    await stubTaskRuntimeApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/task-runtime'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '执行审查' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'graph-smoke@7 · COMPLETED' })).toBeVisible()
+    const dag = page.getByRole('region', { name: 'TaskGraph DAG' })
+    await expect(dag).toBeVisible()
+    await expect(dag.getByText('plan', { exact: true })).toBeVisible()
+    await expect(dag.getByText('execute', { exact: true })).toBeVisible()
+    await expect(dag.getByText('publish', { exact: true })).toBeVisible()
+    await expect(dag.getByText('Attempt #2 · attempt-execute')).toBeVisible()
+
+    const budgets = page.getByRole('region', { name: 'Task budget reservations' })
+    await expect(budgets.getByText('budget-smoke')).toBeVisible()
+    await expect(budgets.getByText(/Consumed · 420 tokens · 3 tools · 900ms/)).toBeVisible()
+
+    const timeline = page.getByRole('region', { name: 'Runtime cursor timeline' })
+    await expect(timeline.getByText('TASK_GRAPH_CREATED')).toBeVisible()
+    await expect(timeline.getByText('TASK_GRAPH_COMPLETED')).toBeVisible()
+    await expect(timeline.getByText('after 0 → next 7')).toBeVisible()
+
+    const reviews = page.getByRole('region', { name: 'Review command rail' })
+    await expect(reviews.getByText('review-expired', { exact: true })).toBeVisible()
+    await expect(reviews.getByText('已过期，approve / reject / resume 操作入口关闭。')).toBeVisible()
+    await expect(reviews.getByRole('button', { name: '批准 review-expired' })).toHaveCount(0)
+    await expect(reviews.getByRole('button', { name: '恢复 review-expired' })).toHaveCount(0)
+  })
+
+  test('Task Review approve reject and token-bound resume stay distinct', async ({ page, baseURL }) => {
+    const state = await stubTaskRuntimeApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/task-runtime'), { waitUntil: 'domcontentloaded' })
+    const reviews = page.getByRole('region', { name: 'Review command rail' })
+
+    await reviews.getByRole('button', { name: '批准 review-pending' }).click()
+    await expect.poll(() => state.approveCalls.length).toBe(1)
+    expect(state.resumeCalls).toHaveLength(0)
+    expect(state.approveCalls[0]).toMatchObject({
+      actor_id: 'monitor-operator',
+      subject_version: 4,
+      resume_phase: 'PRE_EXECUTION',
+    })
+
+    await reviews.getByRole('button', { name: '拒绝 review-reject' }).click()
+    await expect.poll(() => state.rejectCalls.length).toBe(1)
+    expect(state.rejectCalls[0]).toEqual({ actor_id: 'monitor-operator' })
+
+    const approvedToken = reviews.getByLabel('Resume token review-approved')
+    const approvedResume = reviews.getByRole('button', { name: '恢复 review-approved' })
+    await expect(approvedResume).toBeDisabled()
+    expect(state.resumeCalls).toHaveLength(0)
+    await approvedToken.fill('review-resume.v1.explicit-token')
+    await expect(approvedResume).toBeEnabled()
+    await approvedResume.click()
+    await expect.poll(() => state.resumeCalls.length).toBe(1)
+    expect(state.resumeCalls[0]).toEqual({
+      resume_token_ref: 'review-resume.v1.explicit-token',
+      subject_ref: 'task-node://graph-smoke/review-approved',
+      subject_version: 4,
+      resume_phase: 'PRE_EXECUTION',
+      checkpoint_id: 'checkpoint://graph-smoke/review-approved/4',
+    })
+    expect('confirmed' in state.resumeCalls[0]).toBe(false)
   })
 })

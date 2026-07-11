@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0479` 已完成；SceneDecision 已实际接入 ProactiveVoice，ActionArbiter 只能维持或收紧 Governor，显式用户目标优先且 preview 不执行外部副作用。
-- 当前并行波次：`TASK-0480～TASK-0482` 与 `TASK-0484` 已因 TASK-0479 完成而解锁；`TASK-0483` 已在独立工作树实施。各任务仍保持独立提交，主动行为策略变化需 owner review，成熟度升级需 MASTER 批准。
+- 最近完成任务：`TASK-0461～TASK-0479`、`TASK-0483` 已完成；Execution/Review Operator UI 已提供版本化只读 DAG、attempt、budget、verification、review、token-bound resume 与 cursor replay，并通过 96 项 Monitor E2E 和集成后 206 项全量 NLE。
+- 当前并行波次：`TASK-0480～TASK-0482` 与 `TASK-0484` 已解锁；TASK-0485 等待 0480～0482，TASK-0486 等待 M48-A 全部任务。各任务保持独立提交，主动行为策略变化需 owner review，成熟度升级需 MASTER 批准。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

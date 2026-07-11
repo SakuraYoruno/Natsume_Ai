@@ -29,6 +29,7 @@ import {
   Sparkles,
   Wand2,
   Wrench,
+  Workflow,
   Zap,
 } from 'lucide-react'
 import {
@@ -66,6 +67,7 @@ import {
   Sessions,
   SkillsHub,
   SystemConfig,
+  TaskRuntime,
   Tools,
   Trace,
   TribeConsole,
@@ -410,6 +412,17 @@ export const routeManifest = Object.freeze([
     icon: Clock,
     element: <Automation />,
     serviceDeps: ['host'],
+    riskLevel: 'medium',
+    smokeTest: true,
+  },
+  {
+    path: '/execution/task-runtime',
+    legacyPaths: [],
+    navGroup: 'Execution',
+    label: '执行审查',
+    icon: Workflow,
+    element: <TaskRuntime />,
+    serviceDeps: ['obs', 'host'],
     riskLevel: 'medium',
     smokeTest: true,
   },

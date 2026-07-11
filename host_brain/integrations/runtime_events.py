@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from host_brain.core.ids import now_ms
 
@@ -605,6 +605,68 @@ class RuntimeEventStore:
                 tuple(params),
             ).fetchall()
             return [_runtime_event_record(row) for row in rows]
+        finally:
+            conn.close()
+
+    def list_events_for_aggregates(
+        self,
+        *,
+        aggregate_refs: Sequence[tuple[str, str]],
+        after_cursor: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Replay events for an explicit aggregate allowlist.
+
+        Operator views use this method instead of scanning or exposing the
+        unversioned timeline table.  Exact type/id pairs also avoid unrelated
+        runtime activity consuming a task's cursor page.
+        """
+
+        normalized = list(
+            dict.fromkeys(
+                (
+                    _require_text(kind, field_name="aggregate_type"),
+                    _require_text(identifier, field_name="aggregate_id"),
+                )
+                for kind, identifier in aggregate_refs
+            )
+        )
+        if not normalized:
+            return []
+        if len(normalized) > 2_000:
+            raise RuntimeEventError(
+                RUNTIME_EVENT_INVALID,
+                "aggregate replay allowlist exceeds 2000 identities",
+            )
+        after = max(0, int(after_cursor))
+        size = min(1000, max(1, int(limit)))
+        conn = self._connect()
+        try:
+            records: list[dict[str, Any]] = []
+            # Keep each statement below SQLite's conservative 999-variable
+            # limit while supporting large DAGs.  Taking ``size`` rows from
+            # every chunk is sufficient before the final global top-N merge.
+            for offset in range(0, len(normalized), 400):
+                chunk = normalized[offset : offset + 400]
+                identity_sql = " OR ".join(
+                    "(aggregate_type = ? AND aggregate_id = ?)" for _ in chunk
+                )
+                params: list[Any] = [after]
+                for kind, identifier in chunk:
+                    params.extend((kind, identifier))
+                params.append(size)
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM runtime_event_timeline
+                    WHERE cursor > ? AND ({identity_sql})
+                    ORDER BY cursor ASC
+                    LIMIT ?
+                    """,
+                    tuple(params),
+                ).fetchall()
+                records.extend(_runtime_event_record(row) for row in rows)
+            records.sort(key=lambda item: (int(item["cursor"]), str(item["event_id"])))
+            return records[:size]
         finally:
             conn.close()
 

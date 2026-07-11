@@ -70,6 +70,9 @@ class CoreSettings(BaseSettings):
     runtime_event_replay_enabled: bool = Field(
         default=False, alias="HOST_RUNTIME_EVENT_REPLAY_ENABLED"
     )
+    nle_operator_views_enabled: bool = Field(
+        default=False, alias="HOST_NLE_OPERATOR_VIEWS_ENABLED"
+    )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
     @classmethod
@@ -154,6 +157,13 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_RUNTIME_EVENT_REPLAY_ENABLED",
                 default_value=False,
                 current_value=s.runtime_event_replay_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="nle_operator_views_enabled",
+                env_key="HOST_NLE_OPERATOR_VIEWS_ENABLED",
+                default_value=False,
+                current_value=s.nle_operator_views_enabled,
                 is_required=False,
             ),
             inspect_setting(
