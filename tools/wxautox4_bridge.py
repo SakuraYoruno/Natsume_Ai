@@ -42,17 +42,24 @@ Phase 3 additions (2026-03-27):
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import os
+import re
+import secrets
+import sqlite3
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 logger = logging.getLogger("Natsume.wxautox4_bridge")
 
@@ -71,6 +78,80 @@ PHASE3_MSG_CACHE_TTL_S = float(         # Phase 3: message object cache TTL (def
     os.environ.get("EDGE_WECHAT_WXAUTOX4_MSG_CACHE_TTL_S") or 300
 )
 
+BRIDGE_EXPOSURE_MODE_ENV = "NATSUME_BRIDGE_EXPOSURE_MODE"
+BRIDGE_HMAC_SECRET_ENV = "NATSUME_WECHAT_BRIDGE_HMAC_SECRET"
+BRIDGE_HMAC_KEY_ID_ENV = "NATSUME_WECHAT_BRIDGE_HMAC_KEY_ID"
+BRIDGE_PRINCIPAL_ENV = "NATSUME_WECHAT_BRIDGE_PRINCIPAL_ID"
+BRIDGE_ALLOWED_SCOPES_ENV = "NATSUME_WECHAT_BRIDGE_ALLOWED_SCOPES"
+BRIDGE_ALLOWED_SOURCES_ENV = "NATSUME_WECHAT_BRIDGE_REMOTE_ALLOWED_SOURCES"
+BRIDGE_ALLOWED_ACTIONS_ENV = "NATSUME_WECHAT_BRIDGE_REMOTE_ALLOWED_ACTIONS"
+BRIDGE_REMOTE_APPROVAL_REF_ENV = "NATSUME_WECHAT_BRIDGE_REMOTE_APPROVAL_REF"
+BRIDGE_RATE_PER_MINUTE_ENV = "NATSUME_BRIDGE_RATE_PER_MINUTE"
+BRIDGE_RATE_BURST_ENV = "NATSUME_BRIDGE_RATE_BURST"
+BRIDGE_COMMAND_TTL_MS_ENV = "NATSUME_BRIDGE_COMMAND_TTL_MS"
+BRIDGE_LEDGER_PATH_ENV = "NATSUME_WECHAT_BRIDGE_SECURITY_LEDGER_PATH"
+BRIDGE_AUDIT_PATH_ENV = "NATSUME_WECHAT_BRIDGE_SECURITY_AUDIT_PATH"
+BRIDGE_CALLBACK_HMAC_SECRET_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
+LEGACY_BRIDGE_ENABLED_ENV = "EDGE_WECHAT_BRIDGE_ENABLED"
+
+BRIDGE_MODE_DISABLED = "DISABLED"
+BRIDGE_MODE_LOOPBACK = "LOOPBACK"
+BRIDGE_MODE_REMOTE_APPROVED = "REMOTE_APPROVED"
+BRIDGE_COMMAND_VERSION = "natsume.bridge-auth.v1"
+BRIDGE_COMMAND_TRANSPORT = "jsonl"
+BRIDGE_COMMAND_METHOD = "COMMAND"
+BRIDGE_COMMAND_PATH = "wxautox4"
+BRIDGE_REQUIRED_SCOPE = "bridge:write"
+BRIDGE_CALLBACK_PLATFORM = "wechat"
+BRIDGE_CALLBACK_METHOD = "POST"
+BRIDGE_MAX_COMMAND_ROW_BYTES = 256 * 1024
+BRIDGE_MAX_COMMAND_BODY_BYTES = 128 * 1024
+BRIDGE_MAX_COMMAND_ROWS_PER_CYCLE = 256
+BRIDGE_MAX_COMMAND_BATCH_BYTES = 4 * 1024 * 1024
+BRIDGE_MAX_AUDIT_ROW_BYTES = 64 * 1024
+BRIDGE_MAX_CALLBACK_RESPONSE_BYTES = 64 * 1024
+BRIDGE_MAX_FUTURE_SKEW_MS = 30_000
+BRIDGE_DEFAULT_COMMAND_TTL_MS = 300_000
+BRIDGE_DEFAULT_RATE_PER_MINUTE = 120
+BRIDGE_DEFAULT_RATE_BURST = 20
+
+BRIDGE_REASON_ALLOWED = "BRIDGE_COMMAND_ALLOWED"
+BRIDGE_REASON_DISABLED = "BRIDGE_EXPOSURE_DISABLED"
+BRIDGE_REASON_MODE_INVALID = "BRIDGE_EXPOSURE_MODE_INVALID"
+BRIDGE_REASON_LEGACY_DISABLED = "BRIDGE_LEGACY_KILL_SWITCH_DISABLED"
+BRIDGE_REASON_CONFIG_INVALID = "BRIDGE_EXPOSURE_CONFIG_INVALID"
+BRIDGE_REASON_REMOTE_NOT_APPROVED = "BRIDGE_REMOTE_APPROVAL_REQUIRED"
+BRIDGE_REASON_EDGE_URL_NOT_LOOPBACK = "BRIDGE_EDGE_URL_NOT_LOOPBACK"
+BRIDGE_REASON_SCHEMA_INVALID = "BRIDGE_COMMAND_SCHEMA_INVALID"
+BRIDGE_REASON_BODY_TOO_LARGE = "BRIDGE_COMMAND_BODY_TOO_LARGE"
+BRIDGE_REASON_BODY_DIGEST_INVALID = "BRIDGE_COMMAND_BODY_DIGEST_INVALID"
+BRIDGE_REASON_PRINCIPAL_DENIED = "BRIDGE_COMMAND_PRINCIPAL_DENIED"
+BRIDGE_REASON_SCOPE_DENIED = "BRIDGE_COMMAND_SCOPE_DENIED"
+BRIDGE_REASON_SOURCE_DENIED = "BRIDGE_COMMAND_SOURCE_DENIED"
+BRIDGE_REASON_APPROVAL_DENIED = "BRIDGE_COMMAND_APPROVAL_DENIED"
+BRIDGE_REASON_EXPIRED = "BRIDGE_COMMAND_EXPIRED"
+BRIDGE_REASON_SIGNATURE_INVALID = "BRIDGE_COMMAND_SIGNATURE_INVALID"
+BRIDGE_REASON_RATE_LIMITED = "BRIDGE_COMMAND_RATE_LIMITED"
+BRIDGE_REASON_REPLAYED = "BRIDGE_COMMAND_REPLAYED"
+BRIDGE_REASON_AUDIT_UNAVAILABLE = "BRIDGE_COMMAND_AUDIT_UNAVAILABLE"
+BRIDGE_REASON_AUTHORITY_UNAVAILABLE = "BRIDGE_COMMAND_AUTHORITY_UNAVAILABLE"
+
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,254}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SECURITY_FIELDS = frozenset({
+    "version",
+    "key_id",
+    "transport",
+    "method",
+    "path",
+    "principal",
+    "scope",
+    "timestamp_ms",
+    "nonce",
+    "body_sha256",
+    "hmac_sha256",
+})
+
 # Media type codes matching the Gateway bridge convention
 MEDIA_TYPE_CODE_MAP: dict[str, int] = {
     "text": 1,
@@ -82,6 +163,1044 @@ MEDIA_TYPE_CODE_MAP: dict[str, int] = {
     "file": 49,      # wxautox4 may report files as link/49
     "system": 10000,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeExposureConfig:
+    """Fail-closed process configuration captured before wxautox4 import."""
+
+    mode: str
+    enabled: bool
+    reason_code: str
+    edge_url: str
+    key_id: str = ""
+    principal_id: str = ""
+    allowed_scopes: tuple[str, ...] = ()
+    allowed_sources: tuple[str, ...] = ()
+    allowed_actions: tuple[str, ...] = ()
+    approval_ref: str = ""
+    rate_per_minute: int = 0
+    rate_burst: int = 0
+    command_ttl_ms: int = 0
+    queue_path: str = ""
+    result_path: str = ""
+    ledger_path: str = ""
+    audit_path: str = ""
+    hmac_secret: bytes = field(default=b"", repr=False, compare=False)
+    callback_hmac_secret: bytes = field(default=b"", repr=False, compare=False)
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeAuthorizationDecision:
+    allowed: bool
+    reason_code: str
+    command_id_digest: str
+    nonce_digest: str
+    body_sha256: str
+
+
+def _env_switch(raw: Any, *, default: bool) -> tuple[bool, bool]:
+    if raw is None:
+        return default, True
+    value = str(raw or "").strip().lower()
+    if value in {"1", "true", "yes", "on", "enabled"}:
+        return True, True
+    if value in {"0", "false", "no", "off", "disabled", ""}:
+        return False, True
+    return False, False
+
+
+def _positive_int(raw: Any, default: int) -> int:
+    try:
+        value = int(str(raw if raw is not None else default).strip())
+    except (TypeError, ValueError):
+        return -1
+    return value
+
+
+def _csv_tokens(raw: Any) -> tuple[str, ...]:
+    values = {
+        str(item).strip()
+        for item in str(raw or "").split(",")
+        if str(item).strip()
+    }
+    return tuple(sorted(values))
+
+
+def _edge_url_state(edge_url: str) -> tuple[bool, bool]:
+    try:
+        parsed = urllib.parse.urlsplit(str(edge_url or "").strip())
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            return False, False
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return False, False
+    host = str(parsed.hostname).strip().lower()
+    if host == "localhost":
+        return True, True
+    try:
+        return True, ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True, False
+
+
+def _bridge_storage_paths_are_distinct(
+    *,
+    queue_path: str,
+    result_path: str,
+    ledger_path: str,
+    audit_path: str,
+) -> bool:
+    paths = [
+        Path(item).resolve()
+        for item in (queue_path, result_path, ledger_path, audit_path)
+        if str(item or "").strip()
+    ]
+    if ledger_path:
+        paths.extend(
+            Path(f"{ledger_path}{suffix}").resolve()
+            for suffix in ("-wal", "-shm", "-journal")
+        )
+    if audit_path:
+        paths.extend(
+            Path(f"{audit_path}.{index}").resolve()
+            for index in range(1, 9)
+        )
+    identities = [
+        os.path.normcase(os.path.normpath(str(path)))
+        for path in paths
+    ]
+    if len(set(identities)) != len(identities):
+        return False
+    existing = [path for path in paths if path.exists()]
+    for index, left in enumerate(existing):
+        for right in existing[index + 1 :]:
+            try:
+                if os.path.samefile(left, right):
+                    return False
+            except OSError:
+                return False
+    return True
+
+
+def load_bridge_exposure_config(
+    *,
+    edge_url: str = DEFAULT_EDGE_URL,
+    command_queue_file: str = "",
+    command_result_file: str = "",
+    environ: Mapping[str, str] | None = None,
+) -> BridgeExposureConfig:
+    """Parse the complete bridge authority without importing Edge or wx code."""
+
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    configured_mode = str(source.get(BRIDGE_EXPOSURE_MODE_ENV, "") or "").strip().upper()
+    if not configured_mode:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_DISABLED,
+            edge_url=str(edge_url or "").strip(),
+        )
+    if configured_mode not in {
+        BRIDGE_MODE_DISABLED,
+        BRIDGE_MODE_LOOPBACK,
+        BRIDGE_MODE_REMOTE_APPROVED,
+    }:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_MODE_INVALID,
+            edge_url=str(edge_url or "").strip(),
+        )
+    if configured_mode == BRIDGE_MODE_DISABLED:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_DISABLED,
+            edge_url=str(edge_url or "").strip(),
+        )
+
+    legacy_enabled, legacy_valid = _env_switch(
+        source.get(LEGACY_BRIDGE_ENABLED_ENV),
+        default=False,
+    )
+    if not legacy_valid or not legacy_enabled:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_LEGACY_DISABLED,
+            edge_url=str(edge_url or "").strip(),
+        )
+
+    normalized_url = str(edge_url or "").strip().rstrip("/")
+    url_valid, url_loopback = _edge_url_state(normalized_url)
+    if not url_valid:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_CONFIG_INVALID,
+            edge_url=normalized_url,
+        )
+    if configured_mode == BRIDGE_MODE_LOOPBACK and not url_loopback:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=BRIDGE_REASON_EDGE_URL_NOT_LOOPBACK,
+            edge_url=normalized_url,
+        )
+
+    secret_text = str(source.get(BRIDGE_HMAC_SECRET_ENV, "") or "")
+    callback_secret_text = str(source.get(BRIDGE_CALLBACK_HMAC_SECRET_ENV, "") or "")
+    key_id = str(
+        source.get(BRIDGE_HMAC_KEY_ID_ENV, "bridge.wxautox4.hmac.v1") or ""
+    ).strip()
+    principal_id = str(
+        source.get(BRIDGE_PRINCIPAL_ENV, "edge.gateway.wechat.bridge") or ""
+    ).strip()
+    explicit_scopes = _csv_tokens(source.get(BRIDGE_ALLOWED_SCOPES_ENV))
+    allowed_scopes = explicit_scopes or (
+        (BRIDGE_REQUIRED_SCOPE,) if configured_mode == BRIDGE_MODE_LOOPBACK else ()
+    )
+    allowed_sources = _csv_tokens(source.get(BRIDGE_ALLOWED_SOURCES_ENV))
+    allowed_actions = _csv_tokens(source.get(BRIDGE_ALLOWED_ACTIONS_ENV))
+    approval_ref = str(source.get(BRIDGE_REMOTE_APPROVAL_REF_ENV, "") or "").strip()
+    rate_per_minute = _positive_int(
+        source.get(BRIDGE_RATE_PER_MINUTE_ENV), BRIDGE_DEFAULT_RATE_PER_MINUTE
+    )
+    rate_burst = _positive_int(
+        source.get(BRIDGE_RATE_BURST_ENV), BRIDGE_DEFAULT_RATE_BURST
+    )
+    ttl_ms = _positive_int(
+        source.get(BRIDGE_COMMAND_TTL_MS_ENV), BRIDGE_DEFAULT_COMMAND_TTL_MS
+    )
+    queue_path = _normalize_optional_path(command_queue_file)
+    result_path = _normalize_optional_path(command_result_file)
+    default_ledger = f"{queue_path}.security.sqlite3" if queue_path else ""
+    default_audit = f"{queue_path}.security-audit.jsonl" if queue_path else ""
+    ledger_path = _normalize_optional_path(
+        source.get(BRIDGE_LEDGER_PATH_ENV) or default_ledger
+    )
+    audit_path = _normalize_optional_path(
+        source.get(BRIDGE_AUDIT_PATH_ENV) or default_audit
+    )
+
+    remote_fields_missing = bool(
+        configured_mode == BRIDGE_MODE_REMOTE_APPROVED
+        and (
+            not str(source.get(BRIDGE_HMAC_SECRET_ENV, "") or "")
+            or not str(source.get(BRIDGE_CALLBACK_HMAC_SECRET_ENV, "") or "")
+            or not str(source.get(BRIDGE_PRINCIPAL_ENV, "") or "").strip()
+            or not explicit_scopes
+            or not allowed_sources
+            or not allowed_actions
+            or not approval_ref
+            or not str(source.get(BRIDGE_HMAC_KEY_ID_ENV, "") or "").strip()
+            or not str(source.get(BRIDGE_RATE_PER_MINUTE_ENV, "") or "").strip()
+            or not str(source.get(BRIDGE_RATE_BURST_ENV, "") or "").strip()
+            or not str(source.get(BRIDGE_LEDGER_PATH_ENV, "") or "").strip()
+            or not str(source.get(BRIDGE_AUDIT_PATH_ENV, "") or "").strip()
+        )
+    )
+    resolved_queue = os.path.normcase(str(Path(queue_path).resolve())) if queue_path else ""
+    resolved_result = os.path.normcase(str(Path(result_path).resolve())) if result_path else ""
+    resolved_ledger = os.path.normcase(str(Path(ledger_path).resolve())) if ledger_path else ""
+    resolved_audit = os.path.normcase(str(Path(audit_path).resolve())) if audit_path else ""
+    base_invalid = bool(
+        len(secret_text.encode("utf-8")) < 32
+        or len(callback_secret_text.encode("utf-8")) < 32
+        or hmac.compare_digest(
+            secret_text.encode("utf-8"),
+            callback_secret_text.encode("utf-8"),
+        )
+        or _SAFE_ID_RE.fullmatch(key_id) is None
+        or _SAFE_ID_RE.fullmatch(principal_id) is None
+        or BRIDGE_REQUIRED_SCOPE not in allowed_scopes
+        or any(_SAFE_ID_RE.fullmatch(item) is None for item in allowed_scopes)
+        or any(_SAFE_ID_RE.fullmatch(item) is None for item in allowed_sources)
+        or any(_SAFE_ID_RE.fullmatch(item) is None for item in allowed_actions)
+        or (
+            configured_mode == BRIDGE_MODE_REMOTE_APPROVED
+            and _SAFE_ID_RE.fullmatch(approval_ref) is None
+        )
+        or rate_per_minute <= 0
+        or rate_burst <= 0
+        or not (1_000 <= ttl_ms <= 3_600_000)
+        or not queue_path
+        or not result_path
+        or not ledger_path
+        or not audit_path
+        or not _bridge_storage_paths_are_distinct(
+            queue_path=resolved_queue,
+            result_path=resolved_result,
+            ledger_path=resolved_ledger,
+            audit_path=resolved_audit,
+        )
+    )
+    if remote_fields_missing or base_invalid:
+        return BridgeExposureConfig(
+            mode=BRIDGE_MODE_DISABLED,
+            enabled=False,
+            reason_code=(
+                BRIDGE_REASON_REMOTE_NOT_APPROVED
+                if remote_fields_missing
+                else BRIDGE_REASON_CONFIG_INVALID
+            ),
+            edge_url=normalized_url,
+        )
+
+    return BridgeExposureConfig(
+        mode=configured_mode,
+        enabled=True,
+        reason_code=BRIDGE_REASON_ALLOWED,
+        edge_url=normalized_url,
+        key_id=key_id,
+        principal_id=principal_id,
+        allowed_scopes=allowed_scopes,
+        allowed_sources=(allowed_sources if configured_mode == BRIDGE_MODE_REMOTE_APPROVED else ("loopback",)),
+        allowed_actions=(allowed_actions if configured_mode == BRIDGE_MODE_REMOTE_APPROVED else ("*",)),
+        approval_ref=approval_ref,
+        rate_per_minute=rate_per_minute,
+        rate_burst=rate_burst,
+        command_ttl_ms=ttl_ms,
+        queue_path=queue_path,
+        result_path=result_path,
+        ledger_path=ledger_path,
+        audit_path=audit_path,
+        hmac_secret=secret_text.encode("utf-8"),
+        callback_hmac_secret=callback_secret_text.encode("utf-8"),
+    )
+
+
+def _active_config_is_valid(config: BridgeExposureConfig) -> bool:
+    if type(config) is not BridgeExposureConfig or not config.enabled:
+        return False
+    url_valid, url_loopback = _edge_url_state(config.edge_url)
+    if not url_valid or (config.mode == BRIDGE_MODE_LOOPBACK and not url_loopback):
+        return False
+    if (
+        config.mode not in {BRIDGE_MODE_LOOPBACK, BRIDGE_MODE_REMOTE_APPROVED}
+        or config.reason_code != BRIDGE_REASON_ALLOWED
+        or type(config.hmac_secret) is not bytes
+        or type(config.callback_hmac_secret) is not bytes
+        or not isinstance(config.allowed_scopes, tuple)
+        or not isinstance(config.allowed_sources, tuple)
+        or not isinstance(config.allowed_actions, tuple)
+        or type(config.rate_per_minute) is not int
+        or type(config.rate_burst) is not int
+        or type(config.command_ttl_ms) is not int
+        or not isinstance(config.key_id, str)
+        or not isinstance(config.principal_id, str)
+        or not isinstance(config.approval_ref, str)
+        or not isinstance(config.queue_path, str)
+        or not isinstance(config.result_path, str)
+        or not isinstance(config.ledger_path, str)
+        or not isinstance(config.audit_path, str)
+        or _SAFE_ID_RE.fullmatch(config.key_id) is None
+        or _SAFE_ID_RE.fullmatch(config.principal_id) is None
+        or len(config.hmac_secret) < 32
+        or len(config.callback_hmac_secret) < 32
+        or hmac.compare_digest(config.hmac_secret, config.callback_hmac_secret)
+        or BRIDGE_REQUIRED_SCOPE not in config.allowed_scopes
+        or any(
+            not isinstance(item, str) or _SAFE_ID_RE.fullmatch(item) is None
+            for item in config.allowed_scopes
+        )
+        or config.rate_per_minute <= 0
+        or config.rate_burst <= 0
+        or not (1_000 <= config.command_ttl_ms <= 3_600_000)
+        or not config.queue_path
+        or not config.result_path
+        or not config.ledger_path
+        or not config.audit_path
+    ):
+        return False
+    if not _bridge_storage_paths_are_distinct(
+        queue_path=config.queue_path,
+        result_path=config.result_path,
+        ledger_path=config.ledger_path,
+        audit_path=config.audit_path,
+    ):
+        return False
+    if config.mode == BRIDGE_MODE_LOOPBACK:
+        return config.allowed_sources == ("loopback",) and not config.approval_ref
+    return bool(
+        config.allowed_sources
+        and config.allowed_actions
+        and config.approval_ref
+        and all(
+            isinstance(item, str) and _SAFE_ID_RE.fullmatch(item)
+            for item in config.allowed_sources
+        )
+        and all(
+            isinstance(item, str) and _SAFE_ID_RE.fullmatch(item)
+            for item in config.allowed_actions
+        )
+        and _SAFE_ID_RE.fullmatch(config.approval_ref)
+    )
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _command_body(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in row.items() if str(key) not in _SECURITY_FIELDS}
+
+
+def _bridge_command_hmac(
+    *,
+    secret: bytes,
+    version: str,
+    key_id: str,
+    transport: str,
+    method: str,
+    path: str,
+    principal: str,
+    scope: str,
+    timestamp_ms: int,
+    nonce: str,
+    body_sha256: str,
+) -> str:
+    canonical = "\n".join((
+        version,
+        key_id,
+        transport,
+        method,
+        path,
+        str(timestamp_ms),
+        nonce,
+        principal,
+        scope,
+        body_sha256,
+    )).encode("utf-8")
+    return hmac.new(secret, canonical, hashlib.sha256).hexdigest()
+
+
+def sign_bridge_command_row(
+    body: Mapping[str, Any],
+    *,
+    secret: str | bytes,
+    key_id: str = "bridge.wxautox4.hmac.v1",
+    principal: str = "edge.gateway.wechat.bridge",
+    scope: str = BRIDGE_REQUIRED_SCOPE,
+    timestamp_ms: int | None = None,
+    nonce: str | None = None,
+    source: str = "loopback",
+    approval_ref: str = "",
+) -> dict[str, Any]:
+    """Build one content-bound row for trusted queue producers and tests."""
+
+    row = {str(key): value for key, value in dict(body).items()}
+    if any(key in row for key in _SECURITY_FIELDS):
+        raise ValueError("business body contains reserved bridge security fields")
+    row["source"] = str(source).strip()
+    row["approval_ref"] = str(approval_ref).strip()
+    body_bytes = _canonical_json_bytes(row)
+    if len(body_bytes) > BRIDGE_MAX_COMMAND_BODY_BYTES:
+        raise ValueError(BRIDGE_REASON_BODY_TOO_LARGE)
+    key = secret.encode("utf-8") if isinstance(secret, str) else bytes(secret)
+    if len(key) < 32:
+        raise ValueError("bridge HMAC secret must contain at least 32 bytes")
+    issued_at = int(time.time() * 1000) if timestamp_ms is None else int(timestamp_ms)
+    nonce_value = str(nonce or secrets.token_urlsafe(24)).strip()
+    digest = hashlib.sha256(body_bytes).hexdigest()
+    row.update({
+        "version": BRIDGE_COMMAND_VERSION,
+        "key_id": str(key_id).strip(),
+        "transport": BRIDGE_COMMAND_TRANSPORT,
+        "method": BRIDGE_COMMAND_METHOD,
+        "path": BRIDGE_COMMAND_PATH,
+        "principal": str(principal).strip(),
+        "scope": str(scope).strip(),
+        "timestamp_ms": issued_at,
+        "nonce": nonce_value,
+        "body_sha256": digest,
+    })
+    row["hmac_sha256"] = _bridge_command_hmac(
+        secret=key,
+        version=BRIDGE_COMMAND_VERSION,
+        key_id=row["key_id"],
+        transport=BRIDGE_COMMAND_TRANSPORT,
+        method=BRIDGE_COMMAND_METHOD,
+        path=BRIDGE_COMMAND_PATH,
+        principal=row["principal"],
+        scope=row["scope"],
+        timestamp_ms=issued_at,
+        nonce=nonce_value,
+        body_sha256=digest,
+    )
+    if len(_canonical_json_bytes(row)) > BRIDGE_MAX_COMMAND_ROW_BYTES:
+        raise ValueError(BRIDGE_REASON_BODY_TOO_LARGE)
+    return row
+
+
+class _BridgeSecurityLedger:
+    """Durable rate and one-shot claims; no command payload is persisted."""
+
+    def __init__(self, path: str) -> None:
+        self._path = str(Path(path).resolve())
+        _ensure_parent_dir(self._path)
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS bridge_command_claim (
+                    nonce_digest TEXT PRIMARY KEY,
+                    command_id_digest TEXT NOT NULL UNIQUE,
+                    body_sha256 TEXT NOT NULL,
+                    principal_digest TEXT NOT NULL,
+                    claimed_at_ms INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS bridge_rate_window (
+                    authority_digest TEXT NOT NULL,
+                    window_start_ms INTEGER NOT NULL,
+                    request_count INTEGER NOT NULL,
+                    PRIMARY KEY (authority_digest, window_start_ms)
+                );
+                CREATE TABLE IF NOT EXISTS bridge_rate_bucket (
+                    authority_digest TEXT PRIMARY KEY,
+                    tokens REAL NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                );
+                """
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=FULL")
+        return conn
+
+    def claim_with_rate(
+        self,
+        *,
+        authority_digest: str,
+        nonce_digest: str,
+        command_id_digest: str,
+        body_sha256: str,
+        principal_digest: str,
+        now_ms: int,
+        rate_per_minute: int,
+        burst: int,
+    ) -> str:
+        """Atomically check replay, consume one global token and claim once."""
+        current_ms = int(now_ms)
+        capacity = float(max(1, int(burst)))
+        refill_per_ms = float(rate_per_minute) / 60_000.0
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                replay = conn.execute(
+                    """
+                    SELECT 1 FROM bridge_command_claim
+                    WHERE nonce_digest=? OR command_id_digest=?
+                    LIMIT 1
+                    """,
+                    (nonce_digest, command_id_digest),
+                ).fetchone()
+                if replay is not None:
+                    conn.commit()
+                    return BRIDGE_REASON_REPLAYED
+
+                rate_row = conn.execute(
+                    """
+                    SELECT tokens, updated_at_ms FROM bridge_rate_bucket
+                    WHERE authority_digest=?
+                    """,
+                    (authority_digest,),
+                ).fetchone()
+                if rate_row is None:
+                    tokens = capacity
+                    updated_at_ms = current_ms
+                else:
+                    previous_tokens = max(0.0, float(rate_row[0]))
+                    previous_updated = int(rate_row[1])
+                    updated_at_ms = max(current_ms, previous_updated)
+                    tokens = min(
+                        capacity,
+                        previous_tokens
+                        + (updated_at_ms - previous_updated) * refill_per_ms,
+                    )
+                if tokens < 1.0:
+                    conn.execute(
+                        """
+                        INSERT INTO bridge_rate_bucket(
+                            authority_digest, tokens, updated_at_ms
+                        ) VALUES (?, ?, ?)
+                        ON CONFLICT(authority_digest)
+                        DO UPDATE SET
+                            tokens=excluded.tokens,
+                            updated_at_ms=excluded.updated_at_ms
+                        """,
+                        (authority_digest, tokens, updated_at_ms),
+                    )
+                    conn.commit()
+                    return BRIDGE_REASON_RATE_LIMITED
+
+                conn.execute(
+                    """
+                    INSERT INTO bridge_command_claim(
+                        nonce_digest, command_id_digest, body_sha256,
+                        principal_digest, claimed_at_ms, status, updated_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, 'CLAIMED', ?)
+                    """,
+                    (
+                        nonce_digest,
+                        command_id_digest,
+                        body_sha256,
+                        principal_digest,
+                        int(now_ms),
+                        int(now_ms),
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO bridge_rate_bucket(
+                        authority_digest, tokens, updated_at_ms
+                    ) VALUES (?, ?, ?)
+                    ON CONFLICT(authority_digest)
+                    DO UPDATE SET
+                        tokens=excluded.tokens,
+                        updated_at_ms=excluded.updated_at_ms
+                    """,
+                    (authority_digest, tokens - 1.0, updated_at_ms),
+                )
+                conn.commit()
+                return BRIDGE_REASON_ALLOWED
+        except sqlite3.IntegrityError:
+            return BRIDGE_REASON_REPLAYED
+
+    def mark_terminal(
+        self,
+        *,
+        nonce_digest: str,
+        succeeded: bool,
+        now_ms: int,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE bridge_command_claim SET status=?, updated_at_ms=? WHERE nonce_digest=?",
+                ("EXECUTED" if succeeded else "FAILED", int(now_ms), nonce_digest),
+            )
+            conn.commit()
+
+    def cleanup(self, *, now_ms: int, retention_ms: int) -> None:
+        claim_cutoff = int(now_ms) - max(60_000, int(retention_ms))
+        rate_cutoff = int(now_ms) - 24 * 60 * 60 * 1000
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM bridge_command_claim WHERE claimed_at_ms < ?",
+                (claim_cutoff,),
+            )
+            conn.execute(
+                "DELETE FROM bridge_rate_bucket WHERE updated_at_ms < ?",
+                (rate_cutoff,),
+            )
+            conn.execute(
+                "DELETE FROM bridge_rate_window WHERE window_start_ms < ?",
+                (rate_cutoff,),
+            )
+            conn.commit()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+class _BridgeJsonlAudit:
+    """Fsync audit containing identifiers/digests only, never raw commands."""
+
+    def __init__(self, path: str) -> None:
+        self._path = str(Path(path).resolve())
+        self._lock = threading.Lock()
+        self._poisoned = False
+        _ensure_parent_dir(self._path)
+        if os.path.islink(self._path):
+            raise OSError("bridge audit path must not be a symlink")
+        self._validate_existing()
+        with open(self._path, "ab", buffering=0) as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def append(self, row: Mapping[str, Any]) -> None:
+        safe = {
+            "schema_version": "natsume.bridge-security-audit.v1",
+            "ts_ms": int(row.get("ts_ms") or 0),
+            "decision": str(row.get("decision") or "DENY"),
+            "reason_code": str(row.get("reason_code") or BRIDGE_REASON_AUTHORITY_UNAVAILABLE),
+            "principal_digest": str(row.get("principal_digest") or ""),
+            "scope_digest": str(row.get("scope_digest") or ""),
+            "source_digest": str(row.get("source_digest") or ""),
+            "command_id_digest": str(row.get("command_id_digest") or ""),
+            "nonce_digest": str(row.get("nonce_digest") or ""),
+            "body_sha256": str(row.get("body_sha256") or ""),
+        }
+        encoded = _canonical_json_bytes(safe) + b"\n"
+        with self._lock:
+            if self._poisoned:
+                raise OSError("bridge audit writer is poisoned")
+            try:
+                self._rotate_if_needed(len(encoded))
+                with open(self._path, "ab", buffering=0) as handle:
+                    written = handle.write(encoded)
+                    if written != len(encoded):
+                        raise OSError("bridge audit short write")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError:
+                self._poisoned = True
+                raise
+
+    def _validate_existing(self) -> None:
+        for candidate in (
+            self._path,
+            *(f"{self._path}.{index}" for index in range(1, 9)),
+        ):
+            if not os.path.exists(candidate):
+                continue
+            with open(candidate, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() > 0:
+                    handle.seek(-1, os.SEEK_END)
+                    if handle.read(1) != b"\n":
+                        raise ValueError("bridge audit contains a torn terminal row")
+                handle.seek(0)
+                while True:
+                    raw = handle.readline(BRIDGE_MAX_AUDIT_ROW_BYTES + 2)
+                    if not raw:
+                        break
+                    if len(raw) > BRIDGE_MAX_AUDIT_ROW_BYTES:
+                        raise ValueError("bridge audit row exceeds its limit")
+                    try:
+                        row = json.loads(
+                            raw.decode("utf-8"),
+                            object_pairs_hook=_strict_json_object,
+                            parse_constant=_reject_nonfinite_json,
+                        )
+                    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+                        raise ValueError("bridge audit contains malformed JSON") from exc
+                    if (
+                        not isinstance(row, dict)
+                        or row.get("schema_version") != "natsume.bridge-security-audit.v1"
+                        or not isinstance(row.get("ts_ms"), int)
+                        or row.get("decision") not in {"ALLOW", "DENY"}
+                        or not str(row.get("reason_code") or "")
+                    ):
+                        raise ValueError("bridge audit contains an invalid row")
+
+    def _rotate_if_needed(self, incoming_bytes: int) -> None:
+        maximum = 64 * 1024 * 1024
+        current = os.path.getsize(self._path) if os.path.exists(self._path) else 0
+        if current + int(incoming_bytes) <= maximum:
+            return
+        archives = 8
+        oldest = f"{self._path}.{archives}"
+        if os.path.exists(oldest):
+            os.unlink(oldest)
+        for index in range(archives - 1, 0, -1):
+            source = f"{self._path}.{index}"
+            if os.path.exists(source):
+                os.replace(source, f"{self._path}.{index + 1}")
+        if os.path.exists(self._path):
+            os.replace(self._path, f"{self._path}.1")
+
+
+def _digest_text(value: Any) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+class BridgeCommandAuthority:
+    """Verify, rate-limit, audit and durably claim before any wx API call."""
+
+    def __init__(
+        self,
+        config: BridgeExposureConfig,
+        *,
+        clock_ms: Any | None = None,
+    ) -> None:
+        if not _active_config_is_valid(config):
+            raise ValueError(BRIDGE_REASON_CONFIG_INVALID)
+        if clock_ms is not None and not callable(clock_ms):
+            raise TypeError("clock_ms must be callable")
+        self._config = config
+        self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        self._ledger = _BridgeSecurityLedger(config.ledger_path)
+        self._audit = _BridgeJsonlAudit(config.audit_path)
+        self._ledger.cleanup(
+            now_ms=int(self._clock_ms()),
+            retention_ms=config.command_ttl_ms + BRIDGE_MAX_FUTURE_SKEW_MS,
+        )
+        self._last_cleanup_ms = int(self._clock_ms())
+
+    @property
+    def config(self) -> BridgeExposureConfig:
+        return self._config
+
+    def authorize(self, row: Mapping[str, Any]) -> BridgeAuthorizationDecision:
+        now_ms = int(self._clock_ms())
+        if now_ms - self._last_cleanup_ms >= 60 * 60 * 1000:
+            self._ledger.cleanup(
+                now_ms=now_ms,
+                retention_ms=self._config.command_ttl_ms + BRIDGE_MAX_FUTURE_SKEW_MS,
+            )
+            self._last_cleanup_ms = now_ms
+        decision = self._verify(row, now_ms=now_ms)
+        if not decision.allowed:
+            try:
+                self._audit_decision(row, decision, now_ms=now_ms)
+                return decision
+            except Exception:
+                return BridgeAuthorizationDecision(
+                    False,
+                    BRIDGE_REASON_AUDIT_UNAVAILABLE,
+                    decision.command_id_digest,
+                    decision.nonce_digest,
+                    decision.body_sha256,
+                )
+        principal = str(row.get("principal") or "")
+        authority_digest = _digest_text(f"{self._config.key_id}|{principal}")
+        try:
+            authority_reason = self._ledger.claim_with_rate(
+                authority_digest=authority_digest,
+                nonce_digest=decision.nonce_digest,
+                command_id_digest=decision.command_id_digest,
+                body_sha256=decision.body_sha256,
+                principal_digest=_digest_text(principal),
+                now_ms=now_ms,
+                rate_per_minute=self._config.rate_per_minute,
+                burst=self._config.rate_burst,
+            )
+        except Exception:
+            unavailable = BridgeAuthorizationDecision(
+                False,
+                BRIDGE_REASON_AUTHORITY_UNAVAILABLE,
+                decision.command_id_digest,
+                decision.nonce_digest,
+                decision.body_sha256,
+            )
+            try:
+                self._audit_decision(row, unavailable, now_ms=now_ms)
+                return unavailable
+            except Exception:
+                return BridgeAuthorizationDecision(
+                    False,
+                    BRIDGE_REASON_AUDIT_UNAVAILABLE,
+                    decision.command_id_digest,
+                    decision.nonce_digest,
+                    decision.body_sha256,
+                )
+        if authority_reason != BRIDGE_REASON_ALLOWED:
+            decision = BridgeAuthorizationDecision(
+                False,
+                authority_reason,
+                decision.command_id_digest,
+                decision.nonce_digest,
+                decision.body_sha256,
+            )
+            try:
+                self._audit_decision(row, decision, now_ms=now_ms)
+                return decision
+            except Exception:
+                return BridgeAuthorizationDecision(
+                    False, BRIDGE_REASON_AUDIT_UNAVAILABLE,
+                    decision.command_id_digest, decision.nonce_digest,
+                    decision.body_sha256,
+                )
+        try:
+            self._audit_decision(row, decision, now_ms=now_ms)
+        except Exception:
+            return BridgeAuthorizationDecision(
+                False,
+                BRIDGE_REASON_AUDIT_UNAVAILABLE,
+                decision.command_id_digest,
+                decision.nonce_digest,
+                decision.body_sha256,
+            )
+        return decision
+
+    def mark_terminal(self, decision: BridgeAuthorizationDecision, *, succeeded: bool) -> None:
+        try:
+            self._ledger.mark_terminal(
+                nonce_digest=decision.nonce_digest,
+                succeeded=succeeded,
+                now_ms=int(self._clock_ms()),
+            )
+        except Exception:
+            # The durable one-shot claim already exists.  Never make a failed
+            # status write a reason to repeat a potentially completed effect.
+            return
+
+    def _verify(
+        self,
+        row: Mapping[str, Any],
+        *,
+        now_ms: int,
+    ) -> BridgeAuthorizationDecision:
+        command_id = str(row.get("command_id") or "").strip()
+        nonce = str(row.get("nonce") or "").strip()
+        body_sha256 = str(row.get("body_sha256") or "").strip().lower()
+        base = BridgeAuthorizationDecision(
+            False,
+            BRIDGE_REASON_SCHEMA_INVALID,
+            _digest_text(command_id),
+            _digest_text(nonce),
+            body_sha256 if _SHA256_RE.fullmatch(body_sha256) else "",
+        )
+        parser_rejection = str(row.get("__bridge_rejection_reason") or "")
+        if parser_rejection in {BRIDGE_REASON_BODY_TOO_LARGE, BRIDGE_REASON_SCHEMA_INVALID}:
+            return BridgeAuthorizationDecision(
+                False,
+                parser_rejection,
+                base.command_id_digest,
+                base.nonce_digest,
+                base.body_sha256,
+            )
+        try:
+            row_bytes = _canonical_json_bytes(dict(row))
+            body = _command_body(row)
+            body_bytes = _canonical_json_bytes(body)
+        except (TypeError, ValueError):
+            return base
+        if len(row_bytes) > BRIDGE_MAX_COMMAND_ROW_BYTES or len(body_bytes) > BRIDGE_MAX_COMMAND_BODY_BYTES:
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_BODY_TOO_LARGE,
+                base.command_id_digest, base.nonce_digest, base.body_sha256,
+            )
+        version = str(row.get("version") or "").strip()
+        key_id = str(row.get("key_id") or "").strip()
+        transport = str(row.get("transport") or "").strip()
+        method = str(row.get("method") or "").strip()
+        path = str(row.get("path") or "").strip()
+        principal = str(row.get("principal") or "").strip()
+        scope = str(row.get("scope") or "").strip()
+        source = str(row.get("source") or "").strip()
+        approval_ref = str(row.get("approval_ref") or "").strip()
+        signature = str(row.get("hmac_sha256") or "").strip().lower()
+        timestamp = row.get("timestamp_ms")
+        if (
+            version != BRIDGE_COMMAND_VERSION
+            or key_id != self._config.key_id
+            or transport != BRIDGE_COMMAND_TRANSPORT
+            or method != BRIDGE_COMMAND_METHOD
+            or path != BRIDGE_COMMAND_PATH
+            or _SAFE_ID_RE.fullmatch(command_id) is None
+            or _SAFE_ID_RE.fullmatch(principal) is None
+            or _SAFE_ID_RE.fullmatch(scope) is None
+            or _SAFE_ID_RE.fullmatch(nonce) is None
+            or type(timestamp) is not int
+            or _SHA256_RE.fullmatch(body_sha256) is None
+            or _SHA256_RE.fullmatch(signature) is None
+        ):
+            return base
+        expected_body = hashlib.sha256(body_bytes).hexdigest()
+        if not hmac.compare_digest(expected_body, body_sha256):
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_BODY_DIGEST_INVALID,
+                base.command_id_digest, base.nonce_digest, expected_body,
+            )
+        if principal != self._config.principal_id:
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_PRINCIPAL_DENIED,
+                base.command_id_digest, base.nonce_digest, expected_body,
+            )
+        if scope != BRIDGE_REQUIRED_SCOPE or scope not in self._config.allowed_scopes:
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_SCOPE_DENIED,
+                base.command_id_digest, base.nonce_digest, expected_body,
+            )
+        action = str(row.get("action") or "").strip().lower()
+        if (
+            self._config.mode == BRIDGE_MODE_REMOTE_APPROVED
+            and action not in self._config.allowed_actions
+        ):
+            return BridgeAuthorizationDecision(
+                False,
+                BRIDGE_REASON_SCOPE_DENIED,
+                base.command_id_digest,
+                base.nonce_digest,
+                expected_body,
+            )
+        if not (now_ms - self._config.command_ttl_ms <= timestamp <= now_ms + BRIDGE_MAX_FUTURE_SKEW_MS):
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_EXPIRED,
+                base.command_id_digest, base.nonce_digest, expected_body,
+            )
+        if self._config.mode == BRIDGE_MODE_LOOPBACK:
+            if source != "loopback" or approval_ref:
+                return BridgeAuthorizationDecision(
+                    False, BRIDGE_REASON_SOURCE_DENIED,
+                    base.command_id_digest, base.nonce_digest, expected_body,
+                )
+        else:
+            if source not in self._config.allowed_sources:
+                return BridgeAuthorizationDecision(
+                    False, BRIDGE_REASON_SOURCE_DENIED,
+                    base.command_id_digest, base.nonce_digest, expected_body,
+                )
+            if approval_ref != self._config.approval_ref:
+                return BridgeAuthorizationDecision(
+                    False, BRIDGE_REASON_APPROVAL_DENIED,
+                    base.command_id_digest, base.nonce_digest, expected_body,
+                )
+        expected_signature = _bridge_command_hmac(
+            secret=self._config.hmac_secret,
+            version=version,
+            key_id=key_id,
+            transport=transport,
+            method=method,
+            path=path,
+            principal=principal,
+            scope=scope,
+            timestamp_ms=timestamp,
+            nonce=nonce,
+            body_sha256=body_sha256,
+        )
+        if not hmac.compare_digest(expected_signature, signature):
+            return BridgeAuthorizationDecision(
+                False, BRIDGE_REASON_SIGNATURE_INVALID,
+                base.command_id_digest, base.nonce_digest, expected_body,
+            )
+        return BridgeAuthorizationDecision(
+            True,
+            BRIDGE_REASON_ALLOWED,
+            base.command_id_digest,
+            base.nonce_digest,
+            expected_body,
+        )
+
+    def _audit_decision(
+        self,
+        row: Mapping[str, Any],
+        decision: BridgeAuthorizationDecision,
+        *,
+        now_ms: int,
+    ) -> None:
+        self._audit.append({
+            "ts_ms": now_ms,
+            "decision": "ALLOW" if decision.allowed else "DENY",
+            "reason_code": decision.reason_code,
+            "principal_digest": _digest_text(row.get("principal")),
+            "scope_digest": _digest_text(row.get("scope")),
+            "source_digest": _digest_text(row.get("source")),
+            "command_id_digest": decision.command_id_digest,
+            "nonce_digest": decision.nonce_digest,
+            "body_sha256": decision.body_sha256,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -105,26 +1224,86 @@ def _build_msg_id(*, sender: str, content: str, ts_ms: int) -> str:
     return f"wxautox4-{ts_ms}-{digest}"
 
 
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        text = str(key)
+        if text in result:
+            raise ValueError("duplicate JSON key")
+        result[text] = value
+    return result
+
+
+def _reject_nonfinite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant: {value}")
+
+
 def _read_jsonl_rows_from_offset(
-    path_value: str, offset: int,
-) -> tuple[list[dict[str, Any]], int]:
+    path_value: str,
+    offset: int,
+    discarding_oversized_row: bool = False,
+) -> tuple[list[dict[str, Any]], int, bool]:
     path_text = _normalize_optional_path(path_value)
     if not path_text or not os.path.exists(path_text):
-        return [], 0
-    with open(path_text, "r", encoding="utf-8") as handle:
+        return [], 0, False
+    with open(path_text, "rb") as handle:
         handle.seek(max(0, int(offset)))
         rows: list[dict[str, Any]] = []
-        for raw in handle:
-            line = str(raw).strip()
+        batch_bytes = 0
+        discarding = bool(discarding_oversized_row)
+        while discarding and batch_bytes < BRIDGE_MAX_COMMAND_BATCH_BYTES:
+            remaining = BRIDGE_MAX_COMMAND_BATCH_BYTES - batch_bytes
+            raw = handle.readline(min(BRIDGE_MAX_COMMAND_ROW_BYTES + 2, remaining))
+            if not raw:
+                return rows, int(handle.tell()), True
+            batch_bytes += len(raw)
+            if raw.endswith(b"\n"):
+                discarding = False
+        if discarding:
+            return rows, int(handle.tell()), True
+        while (
+            len(rows) < BRIDGE_MAX_COMMAND_ROWS_PER_CYCLE
+            and batch_bytes < BRIDGE_MAX_COMMAND_BATCH_BYTES
+        ):
+            raw = handle.readline(BRIDGE_MAX_COMMAND_ROW_BYTES + 2)
+            if not raw:
+                break
+            batch_bytes += len(raw)
+            if len(raw) > BRIDGE_MAX_COMMAND_ROW_BYTES:
+                rows.append({"__bridge_rejection_reason": BRIDGE_REASON_BODY_TOO_LARGE})
+                discarding = not raw.endswith(b"\n")
+                while discarding and batch_bytes < BRIDGE_MAX_COMMAND_BATCH_BYTES:
+                    remaining = BRIDGE_MAX_COMMAND_BATCH_BYTES - batch_bytes
+                    raw = handle.readline(
+                        min(BRIDGE_MAX_COMMAND_ROW_BYTES + 2, remaining)
+                    )
+                    if not raw:
+                        break
+                    batch_bytes += len(raw)
+                    if raw.endswith(b"\n"):
+                        discarding = False
+                break
+            try:
+                line = raw.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                rows.append({"__bridge_rejection_reason": BRIDGE_REASON_SCHEMA_INVALID})
+                continue
             if not line:
                 continue
             try:
-                payload = json.loads(line)
+                payload = json.loads(
+                    line,
+                    object_pairs_hook=_strict_json_object,
+                    parse_constant=_reject_nonfinite_json,
+                )
             except Exception:
+                rows.append({"__bridge_rejection_reason": BRIDGE_REASON_SCHEMA_INVALID})
                 continue
             if isinstance(payload, dict):
                 rows.append(payload)
-        return rows, int(handle.tell())
+            else:
+                rows.append({"__bridge_rejection_reason": BRIDGE_REASON_SCHEMA_INVALID})
+        return rows, int(handle.tell()), discarding
 
 
 def _append_jsonl_row(path_value: str, row: dict[str, Any]) -> None:
@@ -138,25 +1317,67 @@ def _append_jsonl_row(path_value: str, row: dict[str, Any]) -> None:
 
 
 def _post_to_edge_callback(
-    edge_url: str, body: dict[str, Any], *, timeout_s: float,
+    edge_url: str,
+    body: dict[str, Any],
+    *,
+    timeout_s: float,
+    security: BridgeExposureConfig | None = None,
+    now_ms: int | None = None,
+    nonce: str | None = None,
 ) -> bool:
     """POST inbound message to Gateway webhook. Returns True on success."""
+    if security is None or not _active_config_is_valid(security):
+        return False
     base = str(edge_url or DEFAULT_EDGE_URL).strip().rstrip("/")
+    if base != security.edge_url:
+        return False
     url = f"{base}{CALLBACK_PATH}"
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    data = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    issued_at_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    timestamp = str(issued_at_ms // 1000)
+    nonce_value = str(nonce or secrets.token_urlsafe(24)).strip()
+    canonical = (
+        "natsume-webhook-v1\n"
+        f"{BRIDGE_CALLBACK_PLATFORM}\n{BRIDGE_CALLBACK_METHOD}\n{CALLBACK_PATH}\n"
+        f"{timestamp}\n{nonce_value}\n"
+    ).encode("utf-8") + data
+    signature = hmac.new(
+        security.callback_hmac_secret,
+        canonical,
+        hashlib.sha256,
+    ).hexdigest()
+    headers.update({
+        "X-Natsume-Webhook-Timestamp": timestamp,
+        "X-Natsume-Webhook-Nonce": nonce_value,
+        "X-Natsume-Webhook-Signature": signature,
+    })
     request = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers=headers,
         method="POST",
     )
     try:
         with urllib.request.urlopen(
             request, timeout=max(0.2, float(timeout_s)),
         ) as response:
-            payload = response.read()
+            payload = response.read(BRIDGE_MAX_CALLBACK_RESPONSE_BYTES + 1)
+            if len(payload) > BRIDGE_MAX_CALLBACK_RESPONSE_BYTES:
+                return False
     except urllib.error.HTTPError as exc:
-        logger.warning("edge callback rejected code=%s body=%s", exc.code, exc.read())
+        error_body = exc.read(BRIDGE_MAX_CALLBACK_RESPONSE_BYTES + 1)
+        logger.warning(
+            "edge callback rejected code=%s body=%s",
+            exc.code,
+            error_body[:BRIDGE_MAX_CALLBACK_RESPONSE_BYTES],
+        )
         return False
     except Exception as exc:
         logger.warning("edge callback failed: %s", exc)
@@ -271,6 +1492,7 @@ class InboundProcessor:
         listen_targets: list[str] | None = None,
         media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
         msg_cache: dict[str, Any] | None = None,              # Phase 3: shared msg object cache
+        security: BridgeExposureConfig | None = None,
     ) -> None:
         self._wx = wx
         self._edge_url = edge_url
@@ -280,6 +1502,13 @@ class InboundProcessor:
         self._listen_targets = list(listen_targets or [])
         self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._msg_cache: dict[str, Any] = msg_cache if msg_cache is not None else {}
+        if security is None or not _active_config_is_valid(security):
+            raise ValueError(BRIDGE_REASON_CONFIG_INVALID)
+        normalized_edge_url = str(edge_url or DEFAULT_EDGE_URL).strip().rstrip("/")
+        if normalized_edge_url != security.edge_url:
+            raise ValueError(BRIDGE_REASON_CONFIG_INVALID)
+        self._edge_url = normalized_edge_url
+        self._security = security
         self._msg_cache_ts: dict[str, float] = {}   # Phase 3: msg_id -> insert monotonic time
         self._shutdown = threading.Event()
         self._recent_signatures: dict[str, float] = {}  # signature -> mono timestamp
@@ -441,7 +1670,11 @@ class InboundProcessor:
         if link_url:  # Phase 2: link message URL
             body["link_url"] = link_url
 
-        if _post_to_edge_callback(self._edge_url, body, timeout_s=self._callback_timeout_s):
+        callback_kwargs: dict[str, Any] = {
+            "timeout_s": self._callback_timeout_s,
+            "security": self._security,
+        }
+        if _post_to_edge_callback(self._edge_url, body, **callback_kwargs):
             self._stats["forwarded"] += 1
             logger.info("forwarded inbound: sender=%s content=%.80s", sender, content)
             # Phase 3: cache the raw message object for advanced ops (delete/capture/etc.)
@@ -550,16 +1783,35 @@ class OutboundProcessor:
         poll_interval_s: float = DEFAULT_COMMAND_POLL_INTERVAL_S,
         media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,  # Phase 1
         msg_cache: dict[str, Any] | None = None,              # Phase 3: shared msg object cache
+        authority: BridgeCommandAuthority | None = None,
     ) -> None:
+        if authority is not None and type(authority) is not BridgeCommandAuthority:
+            raise TypeError("authority must be BridgeCommandAuthority")
+        if authority is not None:
+            configured_queue = os.path.normcase(
+                str(Path(authority.config.queue_path).resolve())
+            )
+            configured_result = os.path.normcase(
+                str(Path(authority.config.result_path).resolve())
+            )
+            actual_queue = os.path.normcase(str(Path(command_queue_file).resolve()))
+            actual_result = os.path.normcase(str(Path(command_result_file).resolve()))
+            if (
+                configured_queue != actual_queue
+                or configured_result != actual_result
+            ):
+                raise ValueError(BRIDGE_REASON_CONFIG_INVALID)
         self._wx = wx
         self._queue_file = command_queue_file
         self._result_file = command_result_file
         self._poll_interval_s = max(0.1, poll_interval_s)
         self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._msg_cache: dict[str, Any] = msg_cache if msg_cache is not None else {}
+        self._authority = authority
         self._shutdown = threading.Event()
         self._read_offset: int = 0
-        self._processed_ids: set[str] = set()
+        self._discarding_oversized_row = False
+        self.__dispatch_token = object()
         self._stats = {"executed": 0, "failed": 0, "unsupported": 0}
 
     def run(self) -> None:
@@ -577,17 +1829,68 @@ class OutboundProcessor:
         self._shutdown.set()
 
     def _process_cycle(self) -> None:
-        rows, new_offset = _read_jsonl_rows_from_offset(self._queue_file, self._read_offset)
+        rows, new_offset, discarding = _read_jsonl_rows_from_offset(
+            self._queue_file,
+            self._read_offset,
+            self._discarding_oversized_row,
+        )
         if new_offset > self._read_offset:
             self._read_offset = new_offset
+        self._discarding_oversized_row = discarding
         for cmd in rows:
-            cmd_id = str(cmd.get("command_id") or "").strip()
-            if not cmd_id or cmd_id in self._processed_ids:
-                continue
-            self._processed_ids.add(cmd_id)
             self._execute_command(cmd)
 
     def _execute_command(self, command: dict[str, Any]) -> None:
+        now_ms = int(time.time() * 1000)
+        if self._authority is None:
+            decision = BridgeAuthorizationDecision(
+                False,
+                BRIDGE_REASON_DISABLED,
+                _digest_text(command.get("command_id")),
+                _digest_text(command.get("nonce")),
+                "",
+            )
+        else:
+            try:
+                decision = self._authority.authorize(command)
+            except Exception:
+                decision = BridgeAuthorizationDecision(
+                    False,
+                    BRIDGE_REASON_AUTHORITY_UNAVAILABLE,
+                    _digest_text(command.get("command_id")),
+                    _digest_text(command.get("nonce")),
+                    "",
+                )
+        if not decision.allowed:
+            self._stats["failed"] += 1
+            _append_jsonl_row(
+                self._result_file,
+                {
+                    "command_id_digest": decision.command_id_digest,
+                    "nonce_digest": decision.nonce_digest,
+                    "body_sha256": decision.body_sha256,
+                    "ts_ms": now_ms,
+                    "success": False,
+                    "status": "rejected",
+                    "reason_code": decision.reason_code,
+                    "detail": "bridge command rejected before device dispatch",
+                },
+            )
+            return
+        try:
+            self.__execute_authorized_command(command, dispatch_token=self.__dispatch_token)
+        finally:
+            assert self._authority is not None
+            self._authority.mark_terminal(decision, succeeded=True)
+
+    def __execute_authorized_command(
+        self,
+        command: dict[str, Any],
+        *,
+        dispatch_token: object,
+    ) -> None:
+        if dispatch_token is not self.__dispatch_token:
+            raise PermissionError(BRIDGE_REASON_AUTHORITY_UNAVAILABLE)
         now_ms = int(time.time() * 1000)
         command_id = str(command.get("command_id") or "").strip() or f"wxautox4-{now_ms}"
         request_id = str(command.get("request_id") or "").strip()
@@ -1118,6 +2421,7 @@ class WxAutoX4Bridge:
         listen_targets: list[str] | None = None,
         health_check_interval_s: float = DEFAULT_HEALTH_CHECK_INTERVAL_S,  # Phase 1
         media_download_dir: str = DEFAULT_MEDIA_DOWNLOAD_DIR,              # Phase 1
+        exposure_config: BridgeExposureConfig | None = None,
     ) -> None:
         self._edge_url = edge_url
         self._queue_file = command_queue_file
@@ -1130,12 +2434,40 @@ class WxAutoX4Bridge:
         self._health_check_interval_s = health_check_interval_s
         self._media_download_dir = _normalize_optional_path(media_download_dir)
         self._shutdown = threading.Event()
+        self._exposure = exposure_config or load_bridge_exposure_config(
+            edge_url=edge_url,
+            command_queue_file=command_queue_file,
+            command_result_file=command_result_file,
+        )
 
     def start(self) -> int:
         """Initialize wxautox4 and run the bridge. Blocks until interrupted.
 
         Returns exit code (0 = clean, 1 = error).
         """
+        if not self._exposure.enabled:
+            logger.error("wxautox4 bridge blocked: %s", self._exposure.reason_code)
+            return 1
+        if self._exposure.edge_url != str(self._edge_url or "").strip().rstrip("/"):
+            logger.error("wxautox4 bridge blocked: %s", BRIDGE_REASON_CONFIG_INVALID)
+            return 1
+        if (
+            os.path.normcase(str(Path(self._exposure.queue_path).resolve()))
+            != os.path.normcase(str(Path(self._queue_file).resolve()))
+            or os.path.normcase(str(Path(self._exposure.result_path).resolve()))
+            != os.path.normcase(str(Path(self._result_file).resolve()))
+        ):
+            logger.error("wxautox4 bridge blocked: %s", BRIDGE_REASON_CONFIG_INVALID)
+            return 1
+        try:
+            authority = BridgeCommandAuthority(self._exposure)
+        except Exception as exc:
+            logger.error(
+                "wxautox4 bridge authority unavailable before device binding: %s",
+                type(exc).__name__,
+            )
+            return 1
+
         logger.info("=" * 60)
         logger.info("wxautox4 Bridge for Natsume_Ai  [Phase 1]")
         logger.info("=" * 60)
@@ -1193,6 +2525,7 @@ class WxAutoX4Bridge:
             listen_targets=self._listen_targets,
             media_download_dir=self._media_download_dir,
             msg_cache=shared_msg_cache,
+            security=self._exposure,
         )
         inbound.setup_listeners()
 
@@ -1211,6 +2544,7 @@ class WxAutoX4Bridge:
             poll_interval_s=self._command_poll_interval_s,
             media_download_dir=self._media_download_dir,
             msg_cache=shared_msg_cache,
+            authority=authority,
         )
 
         outbound_thread = threading.Thread(
