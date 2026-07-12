@@ -1,6 +1,6 @@
 # M48-B Evidence
 
-当前包含已批准的 Entry Gate 资产与 TASK-0487～0492 交付证据；TASK-0487、TASK-0488 已 `DONE`，TASK-0489～TASK-0492 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，TASK-0493～0496 尚未实施。
+当前包含已批准的 Entry Gate 资产与 TASK-0487～0493 交付证据；TASK-0487、TASK-0488、TASK-0493 已 `DONE`，TASK-0489～TASK-0492 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，TASK-0494～0496 尚未实施。
 
 - `M48B_ENTRY_GATE_PACKET.json`：所有权、migration、cutover、隔离 fixture 与 P0 控制的机器可读 SSOT。
 - `M48B_ENTRY_GATE_PACKET.md`：人工评审视图。
@@ -12,6 +12,7 @@
 - `task0490/`：Skill/Provider 严格签名验证、content-addressed physical quarantine、0060 durable state、STAGED-only intake、legacy import/install 封口与 protected production handoff 证据。
 - `task0491/`：真实 0058 principal/evidence、Governor token intersection、Lab-only choke points、0061 strict RunStore、legacy Pentest 封口与 protected route/composition handoff 证据。
 - `task0492/`：17-endpoint typed Service Catalog、18770 双 owner/public bind fail-closed、candidate-only startup gate、one-shot reservation composition 与 protected startup handoff 证据。
+- `task0493/`：Edge contracts-only AST guard、122 条内容寻址 finding、54 个 TASK-0581 迁移组、动态 loader/callable flow 封口与不可降级 Delivery Gate 证据。
 
 执行：
 
