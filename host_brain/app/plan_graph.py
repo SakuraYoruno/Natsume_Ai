@@ -535,87 +535,62 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
     # ── 尝试 LLM 语义整合 ──
     user_message = str(state.get("user_message") or "").strip()
     llm_used = False
+    model_attempt_trace: dict[str, Any] = {}
     final_answer = fallback_answer
 
     if parts and user_message:
         try:
-            from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-                resolve_executive_router_llm_runtime,
-                resolve_host_llm_runtime_async,
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import PLAN_SYNTHESIZE_PROMPT_ID  # noqa: PLC0415
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
+
+            sub_results_text = "\n".join(parts)
+            system_prompt, user_prompt = _build_synthesize_prompts(
+                user_message=user_message,
+                sub_results_text=sub_results_text,
             )
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
-            # synthesize_node 是同步函数（运行在 asyncio.to_thread 的线程池中），
-            # 用 asyncio.run() 在独立事件循环中获取 LLM 运行时配置
-            llm_runtime = asyncio.run(
-                resolve_host_llm_runtime_async(
-                    rollout_key=str(state.get("session_id") or ""),
-                    scene_type="EXEC_INTENT",
-                )
-            )
-            router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
+            if system_prompt and user_prompt:
+                try:
+                    from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
 
-            if bool(router_runtime.get("available")):
-                provider_name = str(router_runtime.get("provider_name") or "").strip()
-                model_id = str(router_runtime.get("model_id") or "").strip()
-                api_key = str(router_runtime.get("llm_api_key") or "").strip()
+                    history_window = get_conversation_history().fetch_window_for_messages(
+                        session_id=str(state.get("session_id") or "").strip(),
+                        max_turns=conversation_max_turns(),
+                        exclude_request_id=request_id,
+                        render_target_lang="zh",
+                    )
+                except Exception:
+                    history_window = None
 
-                if provider_name and model_id and api_key:
-                    timeout_ms = max(3000, int(router_runtime.get("timeout_ms") or 8000))
-                    base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
-                    gen_params = {"temperature": 0.4, "top_p": 0.9}
-
-                    sub_results_text = "\n".join(parts)
-                    system_prompt, user_prompt = _build_synthesize_prompts(
-                        user_message=user_message,
-                        sub_results_text=sub_results_text,
+                synth_system_prompt = system_prompt
+                if history_window and str(history_window.older_summary or "").strip():
+                    synth_system_prompt = (
+                        f"{system_prompt}\n\n【更早对话摘要】\n{str(history_window.older_summary).strip()}"
                     )
 
-                    if system_prompt and user_prompt:
-                        try:
-                            from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
-
-                            history_window = get_conversation_history().fetch_window_for_messages(
-                                session_id=str(state.get("session_id") or "").strip(),
-                                max_turns=conversation_max_turns(),
-                                exclude_request_id=request_id,
-                                render_target_lang="zh",
-                            )
-                        except Exception:
-                            history_window = None
-
-                        synth_system_prompt = system_prompt
-                        if history_window and str(history_window.older_summary or "").strip():
-                            synth_system_prompt = (
-                                f"{system_prompt}\n\n【更早对话摘要】\n{str(history_window.older_summary).strip()}"
-                            )
-
-                        messages = build_chat_messages(
-                            system_prompt=synth_system_prompt,
-                            history_turns=list(getattr(history_window, "recent_turns", []) or []),
-                            user_message=user_prompt,
-                        )
-                        pool_result = complete_llm_with_pool_sync(
-                            request_id=request_id,
-                            scene_type="PLAN_SYNTHESIZE",
-                            cognitive_tier="B",
-                            provider_name=provider_name,
-                            model_id=model_id,
-                            api_key=api_key,
-                            timeout_ms=timeout_ms,
-                            messages=messages,
-                            gen_params=gen_params,
-                            base_url_override=base_url_override,
-                        )
-
-                        llm_text = str(pool_result.content or "").strip() if not pool_result.pool_exhausted else ""
-                        if llm_text:
-                            final_answer = llm_text
-                            llm_used = True
-                            _logger.info(
-                                "[%s] synthesize_node: LLM 语义整合成功，输出 %d 字符",
-                                request_id, len(final_answer),
-                            )
+                messages = build_chat_messages(
+                    system_prompt=synth_system_prompt,
+                    history_turns=list(getattr(history_window, "recent_turns", []) or []),
+                    user_message=user_prompt,
+                )
+                result = complete_compiled_prompt_sync(
+                    prompt_id=PLAN_SYNTHESIZE_PROMPT_ID,
+                    request_id=request_id,
+                    scene_type="PLAN_SYNTHESIZE",
+                    cognitive_tier="B",
+                    deadline_ms=8_000,
+                    messages=messages,
+                )
+                model_attempt_trace = model_attempt_result_trace(result)
+                llm_text = str(result.content or "").strip() if result.success else ""
+                if llm_text:
+                    final_answer = llm_text
+                    llm_used = True
+                    _logger.info(
+                        "[%s] synthesize_node: LLM 语义整合成功，输出 %d 字符",
+                        request_id, len(final_answer),
+                    )
 
         except Exception as llm_exc:
             _logger.warning(
@@ -640,6 +615,7 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
             "success_count": len(success_tasks),
             "failed_count": len(failed_tasks),
             "llm_used": llm_used,
+            "model_attempt": model_attempt_trace,
             "latency_ms": latency_ms,
         }],
     }

@@ -32,12 +32,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.model_attempt_port import complete_compiled_model_sync
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime import EMOTIONAL_SILENCE_PROMPT_ID
 
 from host_brain.persona.offline_continuity import (
     absence_recovery_factor_for_absence_band,
@@ -191,22 +192,8 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
     text = str(template_text or "")
     if not kwargs:
         return text
-
-
-def _pool_credentials_available() -> bool:
-    for key in (
-        "HOST_GEMINI_API_KEY",
-        "GEMINI_API_KEY",
-        "HOST_MINIMAX_API_KEY",
-        "MINIMAX_API_KEY",
-        "OPENAI_API_KEY",
-        "HOST_OPENAI_API_KEY",
-    ):
-        if str(os.environ.get(key) or "").strip():
-            return True
-    return False
     try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+        return text.format_map({str(k): "" if v is None else v for k, v in kwargs.items()})
     except Exception:
         return text
 
@@ -250,6 +237,7 @@ class EmotionalSilenceEngine:
         self._current_mood_state: str = "steady"
         self._current_valence: float = 0.0
         self._current_arousal: float = 0.3
+        self._last_model_attempt_trace: dict[str, Any] = {}
 
     # ── 情绪更新 ──────────────────────────────────────────────────────────
 
@@ -571,14 +559,8 @@ class EmotionalSilenceEngine:
         topic_resistance_hint: str,
         trigger_reason: str,
     ) -> dict[str, Any]:
-        if not _pool_credentials_available():
-            return {}
         templates = _load_llm_hint_templates()
         if not templates:
-            return {}
-        try:
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
-        except Exception:
             return {}
 
         system_prompt = str(templates.get("system_prompt") or "").strip() or (
@@ -598,11 +580,9 @@ class EmotionalSilenceEngine:
             "请输出 JSON：{{\"silence_hint\":\"...\",\"topic_resistance_hint\":\"...\"}}"
         )
         try:
-            result = complete_llm_with_pool_sync(
-                request_id=f"silence_hint::{int(time.time() * 1000)}",
-                scene_type="SILENCE_STATE",
-                cognitive_tier="C",
-                messages=[
+            completion = complete_compiled_model_sync(
+                prompt_id=EMOTIONAL_SILENCE_PROMPT_ID,
+                messages=(
                     {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
@@ -619,22 +599,27 @@ class EmotionalSilenceEngine:
                             topic_resistance_hint=str(topic_resistance_hint or "").strip() or "无",
                         ),
                     },
-                ],
-                timeout_ms=1800,
-                gen_params={"temperature": 0.35},
-                response_format="json_object",
+                ),
+                request_id=f"silence_hint::{int(time.time() * 1000)}",
+                scene_type="SILENCE_STATE",
+                cognitive_tier="C",
+                deadline_ms=1_800,
+                foreground=True,
+                metadata={"caller": "emotional_silence_hints"},
             )
         except Exception:
             return {}
-        if result.pool_exhausted:
+        self._last_model_attempt_trace = dict(completion.trace)
+        if not completion.success:
             return {}
         try:
-            parsed = json.loads(result.content)
+            parsed = json.loads(completion.content)
         except Exception:
             return {}
         return {
             "silence_hint": str(parsed.get("silence_hint") or "").strip(),
             "topic_resistance_hint": str(parsed.get("topic_resistance_hint") or "").strip(),
+            "model_attempt": dict(completion.trace),
         }
 
     # ── 查询 ──────────────────────────────────────────────────────────────
@@ -643,6 +628,10 @@ class EmotionalSilenceEngine:
     def response_willingness(self) -> float:
         """当前回复意愿值。"""
         return self._response_willingness
+
+    @property
+    def last_model_attempt_trace(self) -> dict[str, Any]:
+        return dict(self._last_model_attempt_trace)
 
     @property
     def topic_resistance_map(self) -> dict[str, float]:

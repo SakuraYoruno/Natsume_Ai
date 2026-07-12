@@ -9,6 +9,7 @@ import pytest
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.contract_errors import ContractViolation
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.verification_policy import (
     VERIFICATION_COMMAND_FORBIDDEN,
     VERIFICATION_REQUIRED_NOT_PASSED,
@@ -147,25 +148,21 @@ def test_t_nle_08_verification_result_rejects_bool_and_float_timestamps() -> Non
 
 
 def test_t_nle_08_executor_blocks_required_verification_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    class FakePopen:
-        pid = 12345
-        returncode = 0
-
-        def __init__(self, command, *_args, **_kwargs) -> None:
-            self.command = list(command)
-
-        def communicate(self, *args, **kwargs):
-            output_path = Path(self.command[self.command.index("-o") + 1])
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text("done", encoding="utf-8")
-            return '{"type":"thread.started","thread_id":"thread-ok"}\n', ""
+    class FakeAgentExecutor:
+        def execute(self, order, *, workspace: Path) -> AgentResult:
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=order.work_order_id,
+                summary="done",
+                result_text="done",
+                review_required=False,
+            )
 
     class FakeVerificationPolicy:
         def run(self, *_args, **kwargs) -> dict[str, Any]:
             return _result(status=VerificationStatus.FAIL, work_order_id=str(kwargs["work_order_id"]))
 
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
 
     result = AgentRuntimeExecutor(
         artifact_store=AgentArtifactStore(tmp_path / "runs"),

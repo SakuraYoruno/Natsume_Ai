@@ -15,7 +15,15 @@ import json
 import logging
 from typing import Any, Dict, List, Mapping, Optional
 
+from host_brain.app.dependencies import get_model_attempt_service, get_prompt_registry
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime import (
+    ModelAttemptRequest,
+    OutputContract,
+    PromptRef,
+    VISION_ACTION_PLANNER_PROMPT_ID,
+    model_attempt_result_trace,
+)
 
 from .clawdbot_protocol import (
     Action,
@@ -24,7 +32,6 @@ from .clawdbot_protocol import (
 )
 
 _logger = logging.getLogger("Natsume.action_planner")
-_MULTIMODAL_PROVIDERS = frozenset({"gemini", "openai"})
 
 _DEFAULT_SYSTEM_PROMPT = """你是一个谨慎的桌面视觉自动化规划器。
 只输出一个 JSON 对象，不要输出 Markdown 或额外解释。
@@ -104,20 +111,8 @@ async def generate_action_plan(
     Returns:
         ActionPlan 实例（即使 LLM 失败也会返回降级计划）
     """
-    import asyncio as _asyncio
-
-    provider_name = str(llm_runtime.get("cloud_provider_name") or llm_runtime.get("provider_name") or "").strip().lower()
-    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash-lite")
-    api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 20000)
-    base_url_override = str(llm_runtime.get("cloud_base_url_override") or llm_runtime.get("base_url_override") or "").strip() or None
-    available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))
     templates = _load_template_mapping("vision.action_planner.prompt_templates")
-
-    # LLM 不可用时返回降级计划
-    if not available or not provider_name:
-        _logger.warning("action_planner: LLM 不可用，返回降级计划", extra={"request_id": request_id})
-        return _make_fallback_plan(request_id, session_id, goal, reason="LLM_UNAVAILABLE")
 
     # 构建 Prompt
     from host_brain.app.chat_handler_vision import _build_vision_context_section, _has_image_input
@@ -135,14 +130,6 @@ async def generate_action_plan(
     image_base64 = str((vision_context or {}).get("image_base64") or "").strip() if has_image else ""
     image_url = str((vision_context or {}).get("image_url") or "").strip() if has_image else ""
     image_mime = str((vision_context or {}).get("image_mime") or "image/png").strip()
-    if has_image and provider_name not in _MULTIMODAL_PROVIDERS:
-        gemini_key = _resolve_gemini_api_key_from_host_config()
-        if gemini_key:
-            provider_name = "gemini"
-            model_id = _resolve_gemini_vision_model_id()
-            api_key = gemini_key
-            base_url_override = None
-
     messages: list[dict] = [
         {
             "role": "system",
@@ -173,30 +160,41 @@ async def generate_action_plan(
         messages.append({"role": "user", "content": user_prompt})
 
     try:
-        from host_brain.integrations.llm_helpers import invoke_llm_text
-
-        timeout_sec = max(5.0, float(timeout_ms) / 1000.0)
-        result = await _asyncio.wait_for(
-            _asyncio.to_thread(
-                invoke_llm_text,
-                provider_name=provider_name,
-                model_id=model_id,
-                api_key=api_key,
-                timeout_ms=timeout_ms,
-                messages=messages,
-                gen_params={
-                    "max_tokens": 1200,
-                    "temperature": 0.2,  # 指令生成需要低温度，保证稳定性
-                },
-                response_format={"type": "json_object"},
-                base_url_override=base_url_override,
-                feature_key="vision_action_planner",
-            ),
-            timeout=timeout_sec,
+        prompt_ref = PromptRef(
+            prompt_id=VISION_ACTION_PLANNER_PROMPT_ID,
+            version="v1.0.0",
+            variables={"messages": tuple(messages)},
+            output_contract=OutputContract(kind="json_object"),
         )
+        get_prompt_registry().render(prompt_ref)
+        result = await get_model_attempt_service().complete(
+            ModelAttemptRequest(
+                request_id=f"{request_id}:action-plan",
+                scene_type="VISION_ACTION_PLANNER",
+                cognitive_tier="B",
+                prompt=prompt_ref,
+                deadline_ms=max(5_000, timeout_ms),
+                foreground=True,
+                metadata={
+                    "caller": "vision_action_planner",
+                    "parent_request_id": request_id,
+                    "session_id": session_id,
+                    "has_image": bool(has_image),
+                },
+            )
+        )
+        attempt_trace = model_attempt_result_trace(result)
+        if not result.success:
+            return _make_fallback_plan(
+                request_id,
+                session_id,
+                goal,
+                reason=f"MODEL_ATTEMPT_ERROR:{result.error_code or 'FAILED'}",
+                model_attempt=attempt_trace,
+            )
 
         # 提取 LLM 返回的 JSON 文本
-        raw_text = str(result or "").strip()
+        raw_text = str(result.content or "").strip()
 
         return _parse_llm_response(
             raw_text=raw_text,
@@ -205,6 +203,7 @@ async def generate_action_plan(
             goal=goal,
             stop_on_error=stop_on_error,
             need_screenshot_feedback=need_screenshot_feedback,
+            model_attempt=attempt_trace,
         )
 
     except Exception as exc:
@@ -227,22 +226,41 @@ def _parse_llm_response(
     goal: str,
     stop_on_error: bool,
     need_screenshot_feedback: bool,
+    model_attempt: Mapping[str, Any] | None = None,
 ) -> ActionPlan:
     """将 LLM 返回的 JSON 文本解析为 ActionPlan。"""
     if not raw_text:
-        return _make_fallback_plan(request_id, session_id, goal, reason="EMPTY_RESPONSE")
+        return _make_fallback_plan(
+            request_id,
+            session_id,
+            goal,
+            reason="EMPTY_RESPONSE",
+            model_attempt=model_attempt,
+        )
 
     # 提取 JSON 块（LLM 有时会在 JSON 前后加说明文字）
     json_text = _extract_json_block(raw_text)
     if not json_text:
         _logger.warning("action_planner: 无法从 LLM 响应中提取 JSON", extra={"request_id": request_id, "raw": raw_text[:200]})
-        return _make_fallback_plan(request_id, session_id, goal, reason="JSON_PARSE_FAILED")
+        return _make_fallback_plan(
+            request_id,
+            session_id,
+            goal,
+            reason="JSON_PARSE_FAILED",
+            model_attempt=model_attempt,
+        )
 
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as exc:
         _logger.warning("action_planner: JSON 解析失败", extra={"request_id": request_id, "error": str(exc)})
-        return _make_fallback_plan(request_id, session_id, goal, reason="JSON_DECODE_ERROR")
+        return _make_fallback_plan(
+            request_id,
+            session_id,
+            goal,
+            reason="JSON_DECODE_ERROR",
+            model_attempt=model_attempt,
+        )
 
     # 解析 actions 列表
     raw_actions_value = data.get("actions") or []
@@ -282,7 +300,13 @@ def _parse_llm_response(
             continue
 
     if not actions:
-        return _make_fallback_plan(request_id, session_id, goal, reason="NO_VALID_ACTIONS")
+        return _make_fallback_plan(
+            request_id,
+            session_id,
+            goal,
+            reason="NO_VALID_ACTIONS",
+            model_attempt=model_attempt,
+        )
 
     return ActionPlan(
         request_id=request_id,
@@ -296,6 +320,7 @@ def _parse_llm_response(
             "visual_summary": str(data.get("visual_summary") or data.get("screen_summary") or data.get("scene_summary") or ""),
             "confidence": _safe_float(data.get("confidence"), default=0.0),
             "notes": str(data.get("notes") or ""),
+            "model_attempt": dict(model_attempt or {}),
         },
     )
 
@@ -305,29 +330,6 @@ def _safe_float(value: Any, *, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
-
-
-def _resolve_gemini_api_key_from_host_config() -> str | None:
-    try:
-        from host_brain.app.config import load_host_config
-
-        result = load_host_config()
-        if result.success and result.config is not None:
-            value = str(getattr(result.config, "gemini_api_key", "") or "").strip()
-            if value:
-                return value
-    except Exception:
-        pass
-    import os
-
-    value = str(os.environ.get("GEMINI_API_KEY") or "").strip()
-    return value or None
-
-
-def _resolve_gemini_vision_model_id() -> str:
-    import os
-
-    return str(os.environ.get("HOST_GEMINI_VISION_MODEL_ID") or os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
 
 
 def _extract_json_block(text: str) -> str:
@@ -357,6 +359,7 @@ def _make_fallback_plan(
     session_id: str,
     goal: str,
     reason: str = "UNKNOWN",
+    model_attempt: Mapping[str, Any] | None = None,
 ) -> ActionPlan:
     """生成降级 ActionPlan（仅包含一条 DONE 指令，标记失败）。"""
     return ActionPlan(
@@ -371,5 +374,9 @@ def _make_fallback_plan(
         ],
         stop_on_error=True,
         need_screenshot_feedback=False,
-        extra={"fallback": True, "reason": reason},
+        extra={
+            "fallback": True,
+            "reason": reason,
+            "model_attempt": dict(model_attempt or {}),
+        },
     )

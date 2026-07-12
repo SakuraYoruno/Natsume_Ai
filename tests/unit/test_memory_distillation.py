@@ -29,8 +29,10 @@ from tests.fakes.chroma_client import FakeChromaClient
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def ledger(tmp_path):
-    return SQLiteLedger(db_path=str(tmp_path / "test.sqlite3"))
+def ledger():
+    # Direct LifeMemoryStore writes are fixture-only after AW03; production
+    # durable writes must go through LifeMemoryService/Repository.
+    return SQLiteLedger(db_path=":memory:")
 
 
 @pytest.fixture()
@@ -678,4 +680,3 @@ def test_distill_top_k_concurrent_idempotent(tmp_path):
         assert all(sid == persisted_id for sid in results)
     finally:
         ledger.close()
-

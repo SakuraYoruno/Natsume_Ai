@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     RPC_EVENT_BATCH_PARTIAL_FAIL,
     RPC_EVENT_NETWORK_UNAVAILABLE,
     RPC_EVENT_SCHEMA_INVALID,

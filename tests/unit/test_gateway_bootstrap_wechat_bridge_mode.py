@@ -294,7 +294,7 @@ def _patch_durable_bootstrap(monkeypatch, *, app_factory=None) -> None:  # noqa:
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", _FakeBridge)
     monkeypatch.setattr(
-        "host_brain.persistence.gateway_transport_repository.SQLiteGatewayTransportStore",
+        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
         _FakeTransportStore,
     )
     monkeypatch.setattr(
@@ -359,7 +359,7 @@ def test_schema_preflight_fails_before_any_background_component(monkeypatch) -> 
 
     _patch_durable_bootstrap(monkeypatch)
     monkeypatch.setattr(
-        "host_brain.persistence.gateway_transport_repository.SQLiteGatewayTransportStore",
+        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
         _FailingStore,
     )
 

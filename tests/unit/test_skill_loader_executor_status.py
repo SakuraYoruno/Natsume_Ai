@@ -7,7 +7,7 @@ from host_brain.skills.registry import SkillMeta, SkillRegistry
 
 
 def _noop_handler(_args: dict, _context: dict | None) -> dict:
-    return {"status": "prepared"}
+    return {"status": "prepared", "tool": "demo"}
 
 
 def _make_loader() -> tuple[SkillLoader, TokenService]:
@@ -41,7 +41,7 @@ def test_loader_preserves_rejected_executor_result(monkeypatch) -> None:
     loader, tokens = _make_loader()
     intent = _make_intent()
     approval = tokens.issue_approval_token(intent_id=intent["id"], skill_name=intent["action"], session_id=intent["session_id"], seq=intent["seq"], now_ts_ms=1000)
-    monkeypatch.setattr("host_brain.skills.loader._dispatch_executor", lambda _payload: {"status": "REJECTED", "reason_code": "FILE_NOT_FOUND", "detail": "missing"})
+    monkeypatch.setattr("host_brain.skills.loader._dispatch_executor", lambda _payload, **_kwargs: {"status": "REJECTED", "reason_code": "FILE_NOT_FOUND", "detail": "missing"})
 
     result = loader.execute(intent=intent, governor_output={"decision": "APPROVE", "tokens": {"approval_token_ref": approval}}, now_ts_ms=1000)
 
@@ -53,7 +53,7 @@ def test_loader_preserves_degraded_executor_result(monkeypatch) -> None:
     loader, tokens = _make_loader()
     intent = _make_intent()
     approval = tokens.issue_approval_token(intent_id=intent["id"], skill_name=intent["action"], session_id=intent["session_id"], seq=intent["seq"], now_ts_ms=1000)
-    monkeypatch.setattr("host_brain.skills.loader._dispatch_executor", lambda _payload: {"status": "DEGRADED", "reason_code": "BROWSER_UNAVAILABLE", "detail": "playwright not installed"})
+    monkeypatch.setattr("host_brain.skills.loader._dispatch_executor", lambda _payload, **_kwargs: {"status": "DEGRADED", "reason_code": "BROWSER_UNAVAILABLE", "detail": "playwright not installed"})
 
     result = loader.execute(intent=intent, governor_output={"decision": "APPROVE", "tokens": {"approval_token_ref": approval}}, now_ts_ms=1000)
 

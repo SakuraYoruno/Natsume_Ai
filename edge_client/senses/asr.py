@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    ASR_LOW_CONFIDENCE,
     ASR_DEVICE_ERROR,
     ASR_DEVICE_RECOVERED,
     ASR_DEVICE_RECOVERY_EXHAUSTED,
@@ -25,8 +26,9 @@ from host_brain.core.errors import (
     ASR_MODEL_UNAVAILABLE,
     ASR_STREAM_INTERRUPTED,
     ASR_VAD_NO_SPEECH,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 
 logger = logging.getLogger("Natsume.edge.asr")
@@ -446,7 +448,7 @@ def build_asr_transcript_event(
     - alternates 最多 3 个（超出时截断）
     - 低置信度自动标注 low_confidence=True + reason_code=ASR_LOW_CONFIDENCE
     """
-    from host_brain.core.errors import ASR_LOW_CONFIDENCE as _ASR_LOW_CONFIDENCE
+    _ASR_LOW_CONFIDENCE = ASR_LOW_CONFIDENCE
     if not evidence_ref or not str(evidence_ref).strip():
         raise ValueError("ASRTranscriptEvent requires evidence_ref")
 

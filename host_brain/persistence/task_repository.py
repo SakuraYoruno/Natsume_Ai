@@ -1313,6 +1313,27 @@ class DurableTaskStore:
         finally:
             conn.close()
 
+    def get_active_lease(self, attempt_id: str) -> dict[str, Any] | None:
+        """Return the exact ACTIVE lease row for one attempt, if present.
+
+        This is intentionally a read-only identity lookup. Callers must still
+        compare ``expires_ts_ms`` with their trusted clock before authorizing
+        an operation; an expired row may remain ACTIVE until recovery marks it.
+        """
+
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_lease
+                WHERE attempt_id = ? AND status = 'ACTIVE'
+                """,
+                (str(attempt_id),),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
     def acquire_lease(
         self,
         attempt_id: str,

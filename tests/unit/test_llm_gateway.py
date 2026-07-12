@@ -90,6 +90,30 @@ class TestLLMGatewayAPIKeyAndHealth:
         assert "已执行" not in narrative
         assert "已保存" not in narrative
 
+    def test_canonical_model_attempt_port_owns_credentials(self):
+        calls: list[dict] = []
+
+        def canonical_provider(payload):
+            calls.append(dict(payload))
+            return '{"narrative":{"text":"ok"},"intent_draft":{},"meta":{"draft_only":true}}'
+
+        canonical_provider.natsume_provider_kind = "canonical_model_attempt"
+        gw = _make_gateway(
+            available=True,
+            api_key=None,
+            provider_name=PROVIDER_OPENAI,
+            provider=canonical_provider,
+        )
+
+        result = gw.generate(
+            request_id="req-canonical-port",
+            model_profile_id="server-owned",
+            prompt_payload={"messages": [{"role": "user", "content": "hello"}]},
+        )
+
+        assert result.success is True
+        assert len(calls) == 1
+
     def test_t_llm_gw_03_invalid_api_key_stable_output(self):
         """T-LLM-GW-03：available=False 时输出稳定，reason_code=SERVICE_UNAVAILABLE_DEPENDENCY。"""
         gw = _make_gateway(available=False, api_key="sk-invalid")

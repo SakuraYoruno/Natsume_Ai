@@ -271,7 +271,7 @@ class GlymphaticAgent:
         _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("glymphatic_agent.consolidation_summary") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -285,21 +285,11 @@ class GlymphaticAgent:
                 bond_stage=str(bond_stage or "friend"),
                 recovery_quality=round(float(recovery_quality), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.5-flash",
-                timeout_ms=8000,
-                agent_role="glymphatic_consolidator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="glymphatic_consolidation_summary",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=128,
-                temperature=0.3,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _summary = str(_parsed.get("consolidation_summary") or "").strip()[:100]
             if _summary:
                 _log.info("GlymphaticAgent.generate_consolidation_summary: %s", _summary[:50])

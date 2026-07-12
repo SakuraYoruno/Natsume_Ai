@@ -19,8 +19,12 @@ from edge_client.rpc.voice import (
     VoiceRpcResult,
 )
 from edge_client.rpc.resource_gate import TASK_PLAYBACK, TASK_TTS_SYNTH, VoiceResourceGate
-from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED, VOICE_SYNTH_FAILED
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import (
+    VOICE_INTERRUPTED,
+    VOICE_PLAYBACK_FAILED,
+    VOICE_SYNTH_FAILED,
+    now_ms,
+)
 
 
 EVENT_TTS_QUEUED = "TTS_QUEUED"

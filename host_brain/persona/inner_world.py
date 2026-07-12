@@ -93,10 +93,6 @@ _INNER_WORLD_LLM_TIMEOUT_MS = max(
     800,
     int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_TIMEOUT_S", "15")) * 1000),
 )
-_INNER_WORLD_LLM_CACHE_TTL_MS = max(
-    5_000,
-    int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_CACHE_TTL_S", "120")) * 1000),
-)
 _TOPIC_MOJIBAKE_RE = re.compile(r"[ÃÂÄÅÇÉÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]")
 _NOISE_TOPIC_VALUES = {
     "ok",
@@ -268,11 +264,6 @@ _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
     "stay_quiet, play_lightly, stabilize_tone, observe_more. "
     "thought_form is one of body_signal, scene_notice, memory_flash, interrupted_impulse, ambivalence, quiet_drift."
 )
-_INNER_WORLD_LLM_CACHE_LOCK = threading.Lock()
-_INNER_WORLD_LLM_CACHE: dict[str, Any] = {
-    "resolved_at_ms": 0,
-    "runtime": None,
-}
 _INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_MS = max(
     5_000,
     int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_S", "300")) * 1000),
@@ -1184,31 +1175,6 @@ def _generate_inner_stream_note_from_llm(
         )
         return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
 
-    runtime = _resolve_inner_world_llm_runtime(now_ms=now_ms)
-    if not isinstance(runtime, Mapping):
-        opened = _open_inner_world_llm_circuit(
-            reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_UNAVAILABLE",
-            now_ms=now_ms,
-        )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
-    if not bool(runtime.get("available")):
-        opened = _open_inner_world_llm_circuit(
-            reason=agent_reason_code or str(runtime.get("route_reason_code") or "INNER_WORLD_LLM_UNAVAILABLE"),
-            now_ms=now_ms,
-        )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
-
-    provider_name = str(runtime.get("provider_name") or "").strip()
-    model_id = str(runtime.get("model_id") or "").strip()
-    base_url_override = str(runtime.get("base_url_override") or "").strip() or None
-    timeout_ms = max(800, min(int(runtime.get("timeout_ms") or _INNER_WORLD_LLM_TIMEOUT_MS), _INNER_WORLD_LLM_TIMEOUT_MS))
-    if not provider_name or not model_id:
-        opened = _open_inner_world_llm_circuit(
-            reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_INVALID",
-            now_ms=now_ms,
-        )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
-
     topic = _pick_inner_stream_topic(state.anticipation_topics)
     topic_phrase = _topic_to_inner_phrase(topic)
     recent_events = [
@@ -1396,36 +1362,41 @@ def _generate_inner_stream_note_from_llm(
     prompt_text = prompt_text_template.format(payload_json=json.dumps(prompt_payload, ensure_ascii=False))
 
     try:
-        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+            INNER_WORLD_MONOLOGUE_PROMPT_ID,
+        )
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        result = complete_llm_with_pool_sync(
+        result = complete_compiled_prompt_sync(
+            prompt_id=INNER_WORLD_MONOLOGUE_PROMPT_ID,
             request_id=f"inner-world::{now_ms}",
             scene_type="INNER_WORLD",
             cognitive_tier="B",
-            provider_name=provider_name,
-            model_id=model_id,
-            timeout_ms=timeout_ms,
+            deadline_ms=_INNER_WORLD_LLM_TIMEOUT_MS,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text},
             ],
-            gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.76, "top_p": 0.92, "max_output_tokens": 320}),
-            response_format="json_object",
-            base_url_override=base_url_override,
+            foreground=False,
+            metadata={"chain": "inner_world_monologue"},
         )
-        if result.pool_exhausted:
+        attempt_trace = model_attempt_result_trace(result)
+        if not result.success:
             opened = _open_inner_world_llm_circuit(
-                reason=agent_reason_code or "INNER_WORLD_LLM_POOL_EXHAUSTED",
+                reason=agent_reason_code or result.error_code or "INNER_WORLD_MODEL_ATTEMPT_FAILED",
                 now_ms=now_ms,
             )
             return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
                 "inner_life_source": inner_life_source,
+                "model_attempt": attempt_trace,
             }
         raw_text = str(result.content or "").strip()
         if not raw_text:
             opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_EMPTY", now_ms=now_ms)
             return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
                 "inner_life_source": inner_life_source,
+                "model_attempt": attempt_trace,
             }
         parsed = _extract_llm_json_payload(raw_text)
         note = _finalize_inner_note_text(str(parsed.get("note") or ""))
@@ -1436,12 +1407,14 @@ def _generate_inner_stream_note_from_llm(
             opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_NOTE_EMPTY", now_ms=now_ms)
             return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
                 "inner_life_source": inner_life_source,
+                "model_attempt": attempt_trace,
             }
         quality = _score_inner_world_note(note=note, parsed=parsed, inner_life_source=inner_life_source)
         if _inner_note_quality_rejected(quality):
             return "", "", "INNER_WORLD_LLM_NOTE_LOW_LIVELINESS", {
                 "inner_life_source": inner_life_source,
                 "quality": quality,
+                "model_attempt": attempt_trace,
             }
         try:
             from host_brain.persona.inner_monologue import normalize_inner_life_trace  # noqa: PLC0415
@@ -1457,7 +1430,11 @@ def _generate_inner_stream_note_from_llm(
         except Exception:
             life_trace = {}
         _close_inner_world_llm_circuit(now_ms=now_ms)
-        return note, focus, "", {"life_trace": life_trace, "inner_life_source": inner_life_source}
+        return note, focus, "", {
+            "life_trace": life_trace,
+            "inner_life_source": inner_life_source,
+            "model_attempt": attempt_trace,
+        }
     except Exception as llm_exc:
         reason = (
             f"{agent_reason_code}|INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
@@ -1491,47 +1468,6 @@ def _extract_llm_json_payload(raw_text: str) -> dict[str, Any]:
             return {}
     return {}
 
-
-def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
-    cache_now = int(now_ms)
-    with _INNER_WORLD_LLM_CACHE_LOCK:
-        resolved_at = int(_INNER_WORLD_LLM_CACHE.get("resolved_at_ms") or 0)
-        cached_runtime = _INNER_WORLD_LLM_CACHE.get("runtime")
-        if cached_runtime and (cache_now - resolved_at) <= _INNER_WORLD_LLM_CACHE_TTL_MS:
-            return dict(cached_runtime) if isinstance(cached_runtime, Mapping) else None
-
-    runtime: dict[str, Any] | None = None
-    try:
-        from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-            resolve_surface_reply_llm_runtime,
-            resolve_host_llm_runtime,
-        )
-
-        base_runtime = resolve_host_llm_runtime(
-            rollout_key="inner_world_monologue_tick",
-            scene_type="CHAT",
-        )
-        runtime = resolve_surface_reply_llm_runtime(base_runtime=base_runtime)
-        model_override = str(
-            os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
-            or os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID")
-            or "gemini-2.5-flash"
-        ).strip()
-        runtime["model_id"] = model_override
-        runtime["chat_model_id"] = model_override
-        runtime["agent_gen_params"] = {
-            "temperature": 0.76,
-            "top_p": 0.92,
-            "max_output_tokens": 320,
-        }
-    except Exception as exc:
-        _logger.debug("InnerWorld LLM runtime resolve failed: %s", exc)
-        runtime = None
-
-    with _INNER_WORLD_LLM_CACHE_LOCK:
-        _INNER_WORLD_LLM_CACHE["resolved_at_ms"] = cache_now
-        _INNER_WORLD_LLM_CACHE["runtime"] = dict(runtime) if isinstance(runtime, Mapping) else None
-    return dict(runtime) if isinstance(runtime, Mapping) else None
 
 def _pick_inner_stream_topic(raw_topics: list[str] | None) -> str:
     topics = _sanitize_anticipation_topics(raw_topics)

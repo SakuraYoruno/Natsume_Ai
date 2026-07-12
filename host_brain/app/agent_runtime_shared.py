@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from collections.abc import Mapping
 from typing import Any, Callable, Sequence
 
@@ -1483,134 +1484,57 @@ class _SubAgentGatewayAdapter:
         timeout_ms: int,
         base_url_override: str | None,
     ) -> None:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: PLC0415
-        from langchain_openai import ChatOpenAI  # noqa: PLC0415
-        from host_brain.app.prompt_builder import extract_langchain_content_text  # noqa: PLC0415
-
-        self._chat_openai_cls = ChatOpenAI
-        self._human_message = HumanMessage
-        self._system_message = SystemMessage
-        self._ai_message = AIMessage
-        self._extract_text = extract_langchain_content_text
+        # Provider/model arguments remain accepted as a compatibility shape for
+        # the existing sub-agent composition call.  They are intentionally not
+        # model authority: ModelAttemptService resolves the server-owned route.
         self.provider_name = str(provider_name or "").strip().lower()
         self._model_id = str(model_id or "").strip() or "default"
-        self._api_key = str(api_key or "").strip()
-        self._base_url_override = str(base_url_override or "").strip() or None
-        self._timeout_sec = max(1.0, float(timeout_ms) / 1000.0)
-        self._temperature = 0.3
-        try:
-            from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available  # noqa: PLC0415
-
-            self._use_codex_cli = self.provider_name == "codex" and not self._api_key and codex_cli_lm_allowed_for_background()
-        except Exception:
-            self._use_codex_cli = False
-        self._fallback_model_ids = self._resolve_fallback_model_ids(
-            provider_name=self.provider_name,
-            primary_model_id=self._model_id,
-        )
-        self._llm = None if self._use_codex_cli else self._build_llm(model_id=self._model_id, api_key=self._api_key)
-
-    @staticmethod
-    def _resolve_fallback_model_ids(*, provider_name: str, primary_model_id: str) -> list[str]:
-        if str(provider_name or "").strip().lower() != "gemini":
-            return []
-        raw = (
-            get_orchestration_settings().subagent_fallback_model_ids.strip()
-            or "gemini-3.1-pro-preview,gemini-2.5-flash-lite"
-        )
-        primary = str(primary_model_id or "").strip()
-        rows: list[str] = []
-        for chunk in raw.split(","):
-            model_id = str(chunk or "").strip()
-            if not model_id:
-                continue
-            if primary and model_id == primary:
-                continue
-            if model_id in rows:
-                continue
-            rows.append(model_id)
-        return rows
-
-    def _build_llm(self, *, model_id: str, api_key: str) -> Any:
-        return self._chat_openai_cls(
-            model=str(model_id or "").strip() or "default",
-            api_key=str(api_key or "").strip() or None,
-            base_url=self._base_url_override,
-            timeout=self._timeout_sec,
-            max_retries=1,
-            temperature=self._temperature,
-        )
-
-    def _to_lc_messages(self, messages: list[dict[str, Any]]) -> list[Any]:
-        lc_messages: list[Any] = []
-        for row in list(messages or []):
-            if not isinstance(row, Mapping):
-                continue
-            role = str(row.get("role") or "user").strip().lower()
-            content = str(row.get("content") or "").strip()
-            if not content:
-                continue
-            if role == "system":
-                lc_messages.append(self._system_message(content=content))
-            elif role == "assistant":
-                lc_messages.append(self._ai_message(content=content))
-            else:
-                lc_messages.append(self._human_message(content=content))
-        return lc_messages
+        self._timeout_ms = max(1_000, int(timeout_ms or 30_000))
+        # Never retain secrets or provider endpoints on the compatibility port.
+        del api_key, base_url_override
 
     def complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        if self._use_codex_cli:
-            from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: PLC0415
+        from host_brain.agent_runtime.agent_prompt import (  # noqa: PLC0415
+            SUBAGENT_GATEWAY_PROMPT_ID,
+            build_agent_model_prompt_ref,
+        )
+        from host_brain.app.dependencies import (  # noqa: PLC0415
+            get_model_attempt_service,
+            get_prompt_registry,
+        )
+        from host_brain.model_runtime import (  # noqa: PLC0415
+            ModelAttemptRequest,
+            model_attempt_result_trace,
+        )
 
-            content = invoke_llm_text(
-                provider_name=self.provider_name,
-                model_id=self._model_id,
-                api_key="",
-                timeout_ms=int(self._timeout_sec * 1000),
-                messages=messages,
-                gen_params={"temperature": self._temperature},
-                feature_key="subagent_gateway",
+        registry = get_prompt_registry()
+        prompt_ref = build_agent_model_prompt_ref(
+            registry,
+            prompt_id=SUBAGENT_GATEWAY_PROMPT_ID,
+            messages=messages,
+        )
+        result = get_model_attempt_service().complete_sync(
+            ModelAttemptRequest(
+                request_id=f"subagent-{uuid.uuid4().hex}",
+                scene_type="SUBAGENT",
+                cognitive_tier="B",
+                prompt=prompt_ref,
+                deadline_ms=self._timeout_ms,
+                foreground=False,
+                metadata={"caller": "subagent_gateway"},
             )
-            return {"content": str(content or "").strip()}
-        lc_messages = self._to_lc_messages(messages)
-        try:
-            response = self._llm.invoke(lc_messages)
-            return {"content": self._extract_text(getattr(response, "content", ""))}
-        except Exception as primary_exc:
-            last_exc: Exception = primary_exc
-            _logger.warning(
-                "sub-agent gateway invoke failed provider=%s model=%s err=%s",
-                self.provider_name,
-                self._model_id,
-                primary_exc,
+        )
+        trace = model_attempt_result_trace(result)
+        if not result.success:
+            raise RuntimeError(
+                f"sub-agent model attempt failed: {result.error_code or 'MODEL_ATTEMPT_FAILED'}"
             )
-            for fallback_model_id in list(self._fallback_model_ids or []):
-                retry_api_key = self._api_key
-                if self.provider_name == "gemini":
-                    try:
-                        from host_brain.app.graph_config_builder import resolve_gemini_model_route  # noqa: PLC0415
-
-                        retry_route = resolve_gemini_model_route(
-                            role="subagent_fallback",
-                            preferred_api_key=None,
-                            route_key=f"{fallback_model_id}:{int(time.time() * 1000)}",
-                        )
-                        retry_api_key = str(retry_route.get("api_key") or retry_api_key or "").strip() or retry_api_key
-                    except Exception:
-                        pass
-                try:
-                    retry_llm = self._build_llm(model_id=fallback_model_id, api_key=retry_api_key)
-                    response = retry_llm.invoke(lc_messages)
-                    return {"content": self._extract_text(getattr(response, "content", ""))}
-                except Exception as fallback_exc:
-                    last_exc = fallback_exc
-                    _logger.warning(
-                        "sub-agent gateway fallback failed provider=%s model=%s err=%s",
-                        self.provider_name,
-                        fallback_model_id,
-                        fallback_exc,
-                    )
-            raise last_exc
+        return {
+            "content": str(result.content or "").strip(),
+            "model_attempt": trace,
+            "provider": trace["final_provider"],
+            "model": trace["final_model"],
+        }
 
 
 
@@ -1619,22 +1543,14 @@ def _build_subagent_gateway_from_runtime(
     adapter_class: type[Any] | None = None,
 ) -> Any | None:
     try:
-        if not bool(llm_runtime.get("available")):
-            return None
-        provider_name = str(llm_runtime.get("provider_name") or "").strip()
-        model_id = str(llm_runtime.get("model_id") or "").strip()
-        api_key = str(llm_runtime.get("llm_api_key") or "").strip()
         timeout_ms = int(llm_runtime.get("timeout_ms") or 30_000)
-        base_url_override = str(llm_runtime.get("base_url_override") or "").strip() or None
-        if not provider_name or not model_id:
-            return None
         _adapter_class = adapter_class or _SubAgentGatewayAdapter
         return _adapter_class(
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=api_key,
+            provider_name="model_attempt_service",
+            model_id="server_owned_route",
+            api_key="",
             timeout_ms=timeout_ms,
-            base_url_override=base_url_override,
+            base_url_override=None,
         )
     except Exception as exc:
         _logger.debug("sub-agent gateway adapter unavailable: %s", exc)
@@ -3911,7 +3827,7 @@ async def _async_post_process(
         orchestration_settings = get_orchestration_settings()
         skip_bulk_tts = orchestration_settings.tts_sentence_stream_enabled
         if orchestration_settings.stream_tts_enabled and narrative.strip() and not skip_bulk_tts:
-            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+            from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
             from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
 
             base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -3928,16 +3844,20 @@ async def _async_post_process(
                     intensity = max(0.0, min(1.0, float(intensity_raw)))
                 except (TypeError, ValueError):
                     pass
-            tts_result = await post_speak(
-                text=narrative,
+            tts_result = await submit_voice_command(
+                action="speak",
+                payload={
+                    "text": narrative,
+                    "session_id": session_id,
+                    "speed": float(tts_route.get("speed") or 1.0),
+                    "pitch": float(tts_route.get("pitch") or 0.0),
+                    "emotion_tag": etag,
+                    "emotion_intensity": intensity,
+                    "style_note": str(tts_route.get("style_note") or ""),
+                    "lang_hint": str(tts_route.get("lang_hint") or render_target_lang),
+                },
                 request_id=request_id,
-                session_id=session_id,
-                speed=float(tts_route.get("speed") or 1.0),
-                pitch=float(tts_route.get("pitch") or 0.0),
-                emotion_tag=etag,
-                emotion_intensity=intensity,
-                style_note=str(tts_route.get("style_note") or ""),
-                lang_hint=str(tts_route.get("lang_hint") or render_target_lang),
+                idempotency_key=f"{request_id}:bulk-tts",
             )
 
             try:

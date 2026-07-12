@@ -3063,7 +3063,8 @@ async def _send_gateway_voice_reply(
     import logging as _logging  # noqa: PLC0415
     _vlogger = _logging.getLogger("Natsume.gateway_voice")
     try:
-        from host_brain.channels.edge_rpc_client import post_gateway_reply, post_speak  # noqa: PLC0415
+        from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
         from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
         _tts_text_normalized = str(tts_text or "").strip()
         if not _tts_text_normalized:
@@ -3089,13 +3090,17 @@ async def _send_gateway_voice_reply(
             emotion_tag=emotion_tag,
         )
         effective_emotion_tag = _resolve_gateway_voice_emotion_tag(emotion_tag)
-        result = await post_speak(
-            text=_tts_text_normalized,
+        result = await submit_voice_command(
+            action="speak",
+            payload={
+                "text": _tts_text_normalized,
+                "emotion_tag": effective_emotion_tag,
+                "emotion_intensity": emotion_intensity,
+                "lang_hint": str(tts_params.lang_hint or "zh"),
+                "export_audio": bool(send_gateway_voice_message),
+            },
             request_id=request_id,
-            emotion_tag=effective_emotion_tag,
-            emotion_intensity=emotion_intensity,
-            lang_hint=str(tts_params.lang_hint or "zh"),
-            export_audio=bool(send_gateway_voice_message),
+            idempotency_key=f"{request_id}:gateway-voice",
         )
         voice_result = _extract_gateway_voice_result(result)
         audio_path = str(voice_result.get("voice_audio_path") or "").strip()

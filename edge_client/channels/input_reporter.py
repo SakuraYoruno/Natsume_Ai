@@ -649,8 +649,8 @@ class EdgeInputReporter:
         body: bytes,
         idempotency_key: str,
     ) -> dict[str, str]:
-        from host_brain.secure_ingress.credential import build_hmac_sha256_signature  # noqa: PLC0415
-        from host_brain.secure_ingress.surfaces import (  # noqa: PLC0415
+        from natsume_contracts.edge.v1 import (  # noqa: PLC0415
+            build_hmac_sha256_signature,
             IngressSurface,
             build_surface_request,
         )

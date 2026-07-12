@@ -33,6 +33,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
             principal_id="service.edge.gateway.test",
             idempotency_key="host-input-test",
             body_sha256="0" * 64,
+            request_id="request-host-input-test",
         ),
     )
     monkeypatch.setattr(
@@ -43,7 +44,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
 
 
 def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
@@ -64,7 +65,7 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -74,7 +75,7 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
 
 
 def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
@@ -94,7 +95,7 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -105,14 +106,9 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     assert kwargs["payload"]["platform"] == "qq"
 
 
-def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    fastpath_mock = AsyncMock(return_value=True)
+def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatch) -> None:
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
-    monkeypatch.setattr(
-        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
-        fastpath_mock,
-    )
 
     client = _build_client(monkeypatch)
     try:
@@ -133,13 +129,11 @@ def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatc
     payload = response.json()
     assert payload["success"] is True
     assert payload["status"] == "COMPLETED"
-    assert "progress fastpath" in payload["detail"]
-    assert fastpath_mock.await_count == 1
-    assert dispatch_mock.await_count == 0
+    assert dispatch_mock.await_count == 1
 
 
 def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
@@ -161,7 +155,7 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "ASR"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs

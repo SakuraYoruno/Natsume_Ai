@@ -12,6 +12,7 @@ from host_brain.agent_runtime.acceptance_judge import (
 )
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.agent_runtime.result_contract import AgentResult
 
 
 def _executed_result(*, returncode: int = 0) -> dict[str, Any]:
@@ -80,21 +81,18 @@ def test_t_nle_09_running_execution_never_accepts_matching_output() -> None:
 
 
 def test_t_nle_09_executor_attaches_acceptance_judgement(monkeypatch, tmp_path: Path) -> None:
-    class FakePopen:
-        pid = 12345
-        returncode = 0
+    class FakeAgentExecutor:
+        def execute(self, order, *, workspace: Path) -> AgentResult:
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=order.work_order_id,
+                summary="Agent WorkOrder executed.",
+                result_text="exit code is zero",
+                review_required=False,
+                metadata={"returncode": 0},
+            )
 
-        def __init__(self, command, *_args, **_kwargs) -> None:
-            self.command = list(command)
-
-        def communicate(self, *args, **kwargs):
-            output_path = Path(self.command[self.command.index("-o") + 1])
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text("exit code is zero", encoding="utf-8")
-            return '{"type":"thread.started","thread_id":"thread-ok"}\n', ""
-
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
 
     result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
         {

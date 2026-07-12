@@ -6,6 +6,7 @@ import pytest
 
 from host_brain.model_runtime import (
     OutputContract,
+    ModelAttemptRequest,
     ProductionProviderBinding,
     ProductionProviderConfigurationError,
     PromptRef,
@@ -16,6 +17,12 @@ from host_brain.model_runtime import (
     build_production_route_policy,
     route_decision_from_graph_runtime,
 )
+from host_brain.model_runtime.production_route_policy import (
+    _apply_cognitive_tier_route,
+    _cloud_runtime,
+    _default_runtime_resolver,
+)
+from host_brain.model_runtime.production_provider_adapters import _default_credential_resolver
 
 
 def _rendered_prompt():
@@ -56,6 +63,75 @@ def test_graph_runtime_maps_to_one_stable_secret_free_target() -> None:
         "generation_parameters": {"temperature": 0.2, "max_tokens": 64}
     }
     assert "never-copy-this-secret" not in repr(first)
+
+
+def test_route_boundary_normalizes_sdk_max_output_tokens_alias() -> None:
+    decision = route_decision_from_graph_runtime(
+        _runtime(agent_gen_params={"temperature": 0.3, "max_output_tokens": 320}),
+        scene_type="INNER_ACTIVITY",
+        cognitive_tier="B",
+    )
+
+    assert decision.targets[0].metadata["generation_parameters"] == {
+        "temperature": 0.3,
+        "max_tokens": 320,
+    }
+
+
+def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_A_MODEL_ID", raising=False)
+    monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_C_MODEL_ID", raising=False)
+    base = _runtime(model_id="generic-model")
+
+    tier_a = _apply_cognitive_tier_route(
+        base,
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="A",
+    )
+    tier_c = _apply_cognitive_tier_route(
+        base,
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="C",
+    )
+    cloud = _cloud_runtime(
+        {
+            **base,
+            "cloud_provider_name": "gemini",
+            "cloud_model_id": "gemini-vision",
+            "cloud_timeout_ms": 9000,
+            "cloud_available": True,
+        }
+    )
+
+    assert tier_a["model_id"] == "gemini-2.5-pro"
+    assert tier_c["model_id"] == "gemini-2.5-flash-lite"
+    assert tier_a["model_id"] != tier_c["model_id"]
+    assert cloud["model_id"] == "gemini-vision"
+    assert cloud["timeout_ms"] == 9000
+
+
+def test_default_runtime_resolver_uses_secret_free_subagent_catalog_lane(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "deepseek-subagent")
+    monkeypatch.setenv("HOST_SUBAGENT_TIMEOUT_MS", "6400")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-stay-in-adapter")
+    request = ModelAttemptRequest(
+        request_id="subagent-route",
+        scene_type="SUBAGENT",
+        cognitive_tier="B",
+        prompt=PromptRef("provider.test"),
+        deadline_ms=1000,
+    )
+
+    runtime = asyncio.run(_default_runtime_resolver(request, _rendered_prompt()))
+
+    assert runtime["provider_name"] == "deepseek"
+    assert runtime["model_id"] == "deepseek-subagent"
+    assert runtime["timeout_ms"] == 6400
+    assert runtime["route_target"] == "cloud"
+    assert runtime["route_lane"] == "subagent"
+    assert runtime["generation_parameters"]["max_tokens"] == 1200
+    assert "must-stay-in-adapter" not in repr(runtime)
 
 
 def test_production_route_policy_freezes_default_and_scene_routes() -> None:
@@ -139,6 +215,16 @@ def test_provider_registry_requires_explicit_credential_status_without_leaking_s
         )
     assert secret not in str(captured.value)
     assert "deepseek" in str(captured.value)
+
+
+def test_production_credential_resolver_does_not_cache_or_mutate_environment(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "adapter-only-secret")
+    before = dict(__import__("os").environ)
+
+    resolved = _default_credential_resolver("openai")
+
+    assert resolved == "adapter-only-secret"
+    assert dict(__import__("os").environ) == before
 
 
 @pytest.mark.parametrize("provider", ["openai", "openai_compatible", "gemini", "deepseek", "codex"])

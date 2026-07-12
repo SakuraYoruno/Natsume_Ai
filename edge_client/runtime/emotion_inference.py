@@ -10,8 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from host_brain.core.metabolism import EmotionVector
-from host_brain.core.emotion_constants import EMOTION_TAG_TO_VAD
+from natsume_contracts.edge.v1 import EmotionVector, EMOTION_TAG_TO_VAD
 
 
 # ASR keyword matching lists (edge-specific, multilingual)

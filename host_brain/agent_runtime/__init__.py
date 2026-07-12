@@ -68,7 +68,6 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "WorkOrderV3": ("host_brain.agent_runtime.work_order", "WorkOrderV3"),
     "adapt_planning_agent_plan": ("host_brain.agent_runtime.planner_adapter", "adapt_planning_agent_plan"),
     "adapt_skill_dag_plan": ("host_brain.agent_runtime.planner_adapter", "adapt_skill_dag_plan"),
-    "agent_enabled": ("host_brain.agent_runtime.agent_executor", "agent_enabled"),
     "build_reconciliation_attestation_binding": ("host_brain.persistence.task_repository", "build_reconciliation_attestation_binding"),
     "build_outbox_payload_ref": ("host_brain.persistence.task_repository", "build_outbox_payload_ref"),
     "build_operation_fingerprint": ("host_brain.persistence.task_repository", "build_operation_fingerprint"),

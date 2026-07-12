@@ -554,7 +554,7 @@ def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
     post_gateway_reply_mock = AsyncMock()
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=post_speak_mock,
     ), patch(
         "host_brain.channels.edge_rpc_client.post_gateway_reply",
@@ -570,8 +570,8 @@ def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
         )
 
     assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["lang_hint"] == "zh"
-    assert post_speak_mock.await_args.kwargs["export_audio"] is False
+    assert post_speak_mock.await_args.kwargs["payload"]["lang_hint"] == "zh"
+    assert post_speak_mock.await_args.kwargs["payload"]["export_audio"] is False
     assert post_gateway_reply_mock.await_count == 0
     assert result["voice_status"] == "ACCEPTED"
     assert result["voice_success"] is True
@@ -602,7 +602,7 @@ def test_send_gateway_voice_reply_can_opt_in_to_platform_voice_message() -> None
     )
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=post_speak_mock,
     ), patch(
         "host_brain.channels.edge_rpc_client.post_gateway_reply",
@@ -619,7 +619,7 @@ def test_send_gateway_voice_reply_can_opt_in_to_platform_voice_message() -> None
         )
 
     assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["export_audio"] is True
+    assert post_speak_mock.await_args.kwargs["payload"]["export_audio"] is True
     assert post_gateway_reply_mock.await_count == 1
     voice_call = post_gateway_reply_mock.await_args.kwargs
     assert voice_call["msg_type"] == "voice"

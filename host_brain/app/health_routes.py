@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, status
+from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.dependencies import collect_dependency_probes, get_ledger
@@ -34,7 +35,6 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
-from edge_client.rpc.health import build_edge_transport_probe_statuses
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()

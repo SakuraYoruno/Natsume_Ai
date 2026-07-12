@@ -357,55 +357,23 @@ def resolve_vts_expression(
         ts_ms=now_value,
     )
 
-    # Edge/VTS emotion resolution used to mirror into the local desktop pet.
-    # Keep that bridge opt-in now that the Host MateEngine model is driven by
-    # chat lifecycle poses; otherwise late VTS expression work can overwrite
-    # the visible "speak -> home" desktop-pet state.
-    if _mateengine_vts_emotion_mirror_enabled():
-        try:
-            from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
-
-            send_mateengine_action(
-                action="emote",
-                emotion_tag=normalized_tag,
-                request_id=req_id,
-                intensity=0.7,
-            )
-        except Exception as exc:
-            _logger.debug(
-                "MateEngine local desktop pet emotion bridge failed: %s (request_id=%s)",
-                exc,
-                req_id,
-            )
-
-    # ── 真正驱动 Edge VTS（fire-and-forget，不阻塞调用方）──────────────────
-    # 通过 EdgeRpcClient 发送 HTTP POST /v1/edge/vts，让 Edge 端执行表情切换。
-    # 本函数可能在 asyncio.to_thread 的 worker 线程中被调用，因此必须使用
-    # run_coroutine_threadsafe 而非 ensure_future，以确保协程被提交到正确的
-    # 事件循环（主线程循环）。若无运行中的事件循环则跳过，不影响审计结果。
+    # Physical application belongs exclusively to Edge.  Host retains only the
+    # deterministic policy/audit projection above and submits one versioned
+    # command carrying authority, grant, deadline and idempotency metadata.
     try:
-        from host_brain.channels.edge_rpc_client import post_desktop_pet as _post_desktop_pet  # noqa: PLC0415
-        from host_brain.channels.edge_rpc_client import post_vts as _post_vts  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
 
         async def _fire_edge_vts() -> None:
             try:
-                await _post_vts(
+                await submit_avatar_command(
                     action="set_expression",
-                    emotion_tag=normalized_tag,
+                    payload={"emotion_tag": normalized_tag},
                     request_id=req_id,
+                    idempotency_key=f"{req_id}:vts-expression:{normalized_tag}",
                 )
-                pet_touch_type = _resolve_desktop_pet_touch_type(normalized_tag)
-                if pet_touch_type and _desktop_pet_emotion_bridge_enabled():
-                    await _post_desktop_pet(
-                        action="touch",
-                        touch_type=pet_touch_type,
-                        expression=normalized_tag,
-                        emotion_tag=normalized_tag,
-                        request_id=req_id,
-                    )
             except Exception as exc:
                 _logger.debug(
-                    "Edge VTS HTTP 调用失败（降级）: %s (request_id=%s)",
+                    "Edge embodiment command failed（降级）: %s (request_id=%s)",
                     exc, req_id,
                 )
 

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.model_attempt_port import complete_compiled_model
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime import HIPPOCAMPUS_RECALL_PROMPT_ID
 from host_brain.persona.identity import is_reserved_persona_self_id
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -14,20 +15,6 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 def _load_recall_association_templates() -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged("hippocampus.recall_association.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _pool_credentials_available() -> bool:
-    for key in (
-        "HOST_GEMINI_API_KEY",
-        "GEMINI_API_KEY",
-        "HOST_MINIMAX_API_KEY",
-        "MINIMAX_API_KEY",
-        "OPENAI_API_KEY",
-        "HOST_OPENAI_API_KEY",
-    ):
-        if str(os.environ.get(key) or "").strip():
-            return True
-    return False
 
 
 def _resolve_template_text(value: Any, *, render_target_lang: str) -> str:
@@ -113,8 +100,6 @@ class HippocampusAgent:
         retrieval_summary: Mapping[str, Any],
         retrieval_evidence_items: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not _pool_credentials_available():
-            return {}
         if str(retrieval_summary.get("status") or "").strip().upper() not in {"OK", "APPLIED"}:
             return {}
 
@@ -128,11 +113,6 @@ class HippocampusAgent:
             store_id = str(item.get("store_id") or "").strip().lower()
             snippets.append(f"{index + 1}. [{store_id or 'memory'}] {snippet}")
         if not snippets:
-            return {}
-
-        try:
-            from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
-        except Exception:
             return {}
 
         templates = _load_recall_association_templates()
@@ -155,24 +135,25 @@ class HippocampusAgent:
             snippets="\n".join(snippets),
         )
         try:
-            result = await acomplete_llm_with_pool(
+            completion = await complete_compiled_model(
+                prompt_id=HIPPOCAMPUS_RECALL_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ),
                 request_id=request_id,
                 scene_type="HIPPOCAMPUS_RECALL",
                 cognitive_tier="B",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                timeout_ms=2400,
-                gen_params={"temperature": 0.35},
-                response_format="json_object",
+                deadline_ms=2_400,
+                foreground=True,
+                metadata={"caller": "hippocampus_recall_association"},
             )
         except Exception:
             return {}
-        if result.pool_exhausted:
+        if not completion.success:
             return {}
         try:
-            parsed = json.loads(result.content)
+            parsed = json.loads(completion.content)
         except Exception:
             return {}
         association_summary = _truncate_text(parsed.get("association_summary"), limit=240)
@@ -181,8 +162,9 @@ class HippocampusAgent:
             return {}
         payload = {
             "association_summary": association_summary,
-            "association_provider": result.final_provider,
-            "association_model_id": result.final_model,
+            "association_provider": str(completion.trace.get("final_provider") or ""),
+            "association_model_id": str(completion.trace.get("final_model") or ""),
+            "association_model_attempt": dict(completion.trace),
             "association_generated": True,
         }
         if recall_focus:

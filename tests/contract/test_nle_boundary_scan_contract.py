@@ -28,10 +28,9 @@ def test_t_nle_01_production_boundary_baseline_is_exact_and_current() -> None:
     assert report["violations"] == []
     counts = Counter(row["rule_id"] for row in report["existing_debt"])
     assert counts == {
-        "NLE-BND-EDGE-HOST-IMPL": 3,
         "NLE-BND-AGENTRUNTIME-APP": 1,
     }
-    assert len(report["existing_debt"]) == 4
+    assert len(report["existing_debt"]) == 1
     for row in report["existing_debt"]:
         assert row["path"].endswith(".py")
         assert row["symbol"]
@@ -39,6 +38,68 @@ def test_t_nle_01_production_boundary_baseline_is_exact_and_current() -> None:
         assert row["reason"]
         assert row["remove_task"]
         assert row["lines"]
+
+
+def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
+    scanner = _load_scanner()
+    policy = scanner.load_policy(POLICY)
+    rule = next(
+        row
+        for row in policy["rules"]
+        if row["rule_id"] == "NLE-BND-WORLDCANON-RAW-MUTATION"
+    )
+
+    trusted_sites = {
+        (row["path"], row["symbol"], row["line"])
+        for row in rule["trusted_call_sites"]
+    }
+    assert trusted_sites == {
+        (
+            "host_brain/memory/canon_apply_service.py",
+            "WorldCanonStore._CANON_APPLY_PERMIT",
+            43,
+        ),
+        (
+            "host_brain/memory/canon_apply_service.py",
+            "WorldCanonStore._delete_authorized_document",
+            1235,
+        ),
+        (
+            "host_brain/memory/canon_apply_service.py",
+            "WorldCanonStore._CANON_APPLY_PERMIT",
+            1240,
+        ),
+        (
+            "host_brain/memory/canon_apply_service.py",
+            "WorldCanonStore._replace_authorized_payload",
+            1243,
+        ),
+        (
+            "host_brain/memory/canon_apply_service.py",
+            "WorldCanonStore._CANON_APPLY_PERMIT",
+            1248,
+        ),
+        (
+            "host_brain/memory/canon_world_store.py",
+            "CanonFile.open",
+            390,
+        ),
+        (
+            "host_brain/memory/canon_world_store.py",
+            "CanonFile.replace",
+            394,
+        ),
+        (
+            "host_brain/memory/canon_world_store.py",
+            "CanonFile.unlink",
+            397,
+        ),
+        (
+            "host_brain/memory/canon_world_store.py",
+            "CanonFile.unlink",
+            423,
+        ),
+    }
 
 
 def test_t_nle_01_stale_allowlist_is_a_contract_failure() -> None:

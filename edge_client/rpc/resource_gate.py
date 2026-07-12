@@ -5,14 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    EdgeVoiceEventLedger,
+    RESOURCE_GATE_PREEMPTED,
     VOICE_GATE_PREEMPTED,
     VOICE_GATE_PRIORITY_BLOCKED,
     VOICE_GATE_RESOURCE_LIMITED,
     VOICE_GATE_TASK_INVALID,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 
 
 TASK_ASR_INGRESS = "ASR_INGRESS"
@@ -51,7 +53,7 @@ class ResourceGateDecision:
 # M15-E: ResourcePreemptionEvent（优先级抢占审计事件）
 # ---------------------------------------------------------------------------
 
-from host_brain.core.errors import RESOURCE_GATE_PREEMPTED as _RESOURCE_GATE_PREEMPTED  # noqa: E402
+_RESOURCE_GATE_PREEMPTED = RESOURCE_GATE_PREEMPTED
 
 
 @dataclass(frozen=True)
@@ -116,7 +118,7 @@ class VoiceResourceGate:
     def __init__(
         self,
         *,
-        ledger: SQLiteLedger | None = None,
+        ledger: EdgeVoiceEventLedger | None = None,
         vram_soft_limit_ratio: float = 0.90,
         max_fallback_queue_depth: int = 1,
     ) -> None:

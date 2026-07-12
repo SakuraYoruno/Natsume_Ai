@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-04 已完成，AW-05 正式实施
+当前代码基线：`codex/m48-integration`，AW-00～AW-06 已完成，AW-07 正式实施
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -237,7 +237,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-05：Model、Prompt、Governor、Capability 与 Domain Packs
 
-状态：`IN_PROGRESS`
+状态：`DONE`（模型调用、Prompt、Skill/MCP/Tool、Capability、Domain Pack 已统一到受治理的单一运行时；生产调用点、持久化授权与审计切流完成）
 
 目标：统一模型尝试、prompt 注册、授权、Tool/Capability Broker，并把领域流程从通用 executor 抽成受治理 Domain Pack。
 
@@ -249,9 +249,13 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：每个调用有 route decision、budget、attempt、grant、evidence；Pack 可独立启停/升级/回滚但不能取得平台 writer；通用 executor 不再包含领域流程。
 
+完成事实：建立唯一 `PromptRegistry → ModelAttemptService → RoutePolicy → ProviderAdapter` 调用链和 secret-free `ServerRouteCatalog`，Surface/Thalamus/Agent/SubAgent/Vision/Tribe/Pentest/Life/Reflection 等生产调用点不再私建 provider、自选模型或持有业务重试；`model_attempt_log` 持久化 route/attempt/prompt digest/adapter/timing/result digest。Skill/Tool/MCP 统一进入 durable `CapabilityBroker`，跨进程 claim/receipt/late-outcome、per-capability 隔离执行池和 receipt secret sanitizer 已落地；Skill authority 精确绑定 HostCommand、WorkOrder、graph/revision、node/attempt、lease/fence 与 Governor grant，MCP 写调用消费 canonical TokenService token。Pentest、Research/Browser、Media/Translation 已抽为声明式 Domain Pack，通用 executor 只编排 worker/postprocess/delivery/recovery；用户可见 delivery 自身也是具备稳定 request/delivery id 和 durable receipt 的 Domain capability。Plan 不再把顶层 `exec_intent` token 复用于子技能，每个节点签发并消费独立 durable child grant。
+
+验收事实：AW-05 unit/contract 汇合波 `226 passed`，最终 P1 sanitizer/authority/迁移定向回归分别 `55 passed`、`40 passed`；单次 integration wave 中此前通过的 MCP/Pentest/Internal-Agent 节点未重复执行，失败节点按四类共享根因修正后联合 `21 passed`。最终 `compileall`、生产 bypass 静态扫描、migration-only 新库、`git diff --check` 均通过。
+
 ### AW-06：Edge、Gateway 与 Device Authority
 
-状态：`WAITING_FOR_AW_01`
+状态：`DONE`（Edge contracts-only 独立包、Service Catalog、EmbodimentCommand 设备单 authority、durable lease/fence/receipt/reconnect 已完成 production cutover）
 
 目标：让 Edge 成为 contracts-only 的独立发布单元，并成为 Voice/Avatar/Desktop/Hardware 物理输出的唯一 authority。
 
@@ -263,9 +267,13 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：Edge 在无 Host 包环境可安装并跑合同测试；21 个 Host import 文件归零；断连/reconnect 不重复动作；每个设备命令有唯一 owner 和 receipt。
 
+完成事实：新增可独立安装的 `natsume_contracts.edge.v1` 与 `edge_client` 发布边界，原 21 个 Edge→Host 实现导入归零；Host→Edge 显式实现导入也归零，Host startup/health 只消费版本化 Service Catalog/Health Query，不再读取或回显 Edge 私有配置。Voice/VTS/Mate/Desktop/Clipboard 的生产副作用统一由 Host `EmbodimentCommand` port 提交，Edge 持有唯一 actuator/driver；Host 的 socket/urlopen、DesktopController/pyperclip/本地截图写盘及旧 device transport 已删除。Edge endpoint 使用 SQLite durable session lease、fencing、command claim、receipt/digest；Host 握手并续租后绑定 command，过期 lease、旧 fence、幂等冲突和崩溃遗留 `DISPATCHING` 均 fail-closed/`IN_DOUBT`，reconnect 不重放物理动作。Capability Broker 只在 durable Skill authority 验证后注入不可伪造的只读 command authority snapshot，caller 同名字段被剥离。
+
+验收事实：AW-06 A～E 定向 unit/contract/static 覆盖独立包、设备切流、transport、desktop authority、service catalog 与 architecture guard；关键汇合切片分别 `72 passed`、`39 passed`、`25 passed`、`24 passed`。单次 integration wave `20 passed / 1 failed`，唯一失败为已删除 Edge→SQLiteLedger 依赖后的陈旧 allowlist及 AW-03 Canon trusted-site 行号漂移；精确删除/更新 9 个清单项且全仓 boundary scan `violations=[]` 后，仅重跑该失败节点 `1 passed`。最终显式 Host→Edge=0、Edge→Host=0，剩余 7 项仅为动态加载风险基线；standalone package、`compileall`、`git diff --check` 均通过。
+
 ### AW-07：Query/Observability 与 Operator Plane
 
-状态：`WAITING_FOR_AW_02_TO_AW_06`
+状态：`IN_PROGRESS`
 
 目标：Obs 只读，统一 versioned read model、projection、trace、metrics、replay，并让 Operator Console 只使用生成 client 和受治理 command。
 
@@ -438,11 +446,11 @@ AW-08 只有在以下全部成立时才完成：
 | AW-02 | `DONE` | chat/host input/Internal Agent/Scheduler 共用 governed Task/Agent 主链，canonical assignment 决定真实 executor |
 | AW-03 | `DONE` | migration/UoW/journal/outbox、Memory/Canon 单写脊柱已切流；业务 SQLite authority 为 0；无 P0/P1 |
 | AW-04 | `DONE` | LifeCommand/Event/Reducer/Projection/Outbox/Receipt 单脊柱、SchedulerClock 单时钟与 execution-time grant/lease fencing 已切流；无 P0/P1 |
-| AW-05 | `IN_PROGRESS` | PromptRegistry/ModelAttemptService foundation 后，原子切换 Surface/Thalamus/Agent/Tool/Pack 真实调用链并删除旧 authority |
-| AW-06 | `WAITING` | AW-01 后可建 Edge foundation；AW-02/03/04 后完成 production cutover、设备单 authority |
-| AW-07 | `WAITING` | Query-only projection 与 typed Operator |
+| AW-05 | `DONE` | ModelAttempt/Prompt/Route、Capability Broker、durable Skill/MCP authority 与三类 Domain Pack 已完成 production cutover；无 P0/P1 |
+| AW-06 | `DONE` | Edge/Host 显式实现导入归零，设备单 authority、durable lease/fence/receipt 与 reconnect no-replay 已切流；无 P0/P1 |
+| AW-07 | `IN_PROGRESS` | 建立 versioned projection/query gateway，Obs GET 零副作用，UI mutation 统一回 Secure Ingress |
 | AW-08 | `WAITING` | 旧架构删除、`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`、一次最终实测与 Core Release |
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-05 的立即执行顺序：先冻结 `PromptRegistry → ModelAttemptService → RoutePolicy → ProviderAdapter` 唯一接口与 attempt audit；随后按同一接口并行切换 Surface/Thalamus、Agent/SubAgent/Vision/Emergent 与现有 provider/llm helper，禁止业务模块自选 provider、内部重试或跨请求缓存；再把 Tool/Skill/MCP 收口到 Capability Broker，并抽取 Pentest、Media/Translation、Research/Browser 三类 Domain Pack。三条生产切流汇合后删除旧模型路由/重试与通用 executor 内的领域流程，只运行一次 AW-05 integration wave，无需用户再次确认。
+AW-07 的立即执行顺序：并行建立可重建/对账的 versioned projection spine、带 principal/scope 与字段 allowlist 的 `OperatorQueryGateway`、统一回 Secure Ingress 的 `OperatorCommandGateway`，以及公共 `ReadModelEnvelope.v1`/OpenAPI generated client；先切 Task/Trace/Session/Health/Device 状态，再删除 Obs GET 探针/命令副作用、业务 store 直查、重复 router/DTO 和 UI 手写 mutation URL。四条生产切流汇合后只运行一次 AW-07 integration wave，无需用户再次确认。

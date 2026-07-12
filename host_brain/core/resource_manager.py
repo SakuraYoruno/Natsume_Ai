@@ -63,18 +63,19 @@ def _compact_process(row: Mapping[str, Any]) -> dict[str, Any]:
 def _compact_llm_attempt(row: Any) -> dict[str, Any]:
     if isinstance(row, Mapping):
         provider = row.get("provider")
-        model = row.get("model")
+        model = row.get("model_id") or row.get("model")
         status = row.get("status")
-        reason_code = row.get("reason_code")
-        detail = row.get("detail")
+        reason_code = row.get("error_code") or row.get("reason_code")
+        detail = row.get("error_message") or row.get("detail")
         latency_ms = row.get("latency_ms")
     else:
         provider = getattr(row, "provider", None)
-        model = getattr(row, "model", None)
+        model = getattr(row, "model_id", None) or getattr(row, "model", None)
         status = getattr(row, "status", None)
-        reason_code = getattr(row, "reason_code", None)
-        detail = getattr(row, "detail", None)
+        reason_code = getattr(row, "error_code", None) or getattr(row, "reason_code", None)
+        detail = getattr(row, "error_message", None) or getattr(row, "detail", None)
         latency_ms = getattr(row, "latency_ms", None)
+    status = getattr(status, "value", status)
     return {
         "provider": str(provider or "").strip(),
         "model": str(model or "").strip(),
@@ -101,20 +102,6 @@ def _summarize_llm_attempts(attempts: list[dict[str, Any]]) -> str:
         else:
             parts.append(f"{provider}/{model} {status}")
     return "; ".join(parts)
-
-
-def _provider_model_env_name(provider: str) -> str:
-    provider_token = str(provider or "").strip().upper()
-    if not provider_token:
-        return ""
-    return f"HOST_{provider_token}_MODEL_ID"
-
-
-def _provider_base_url_env_name(provider: str) -> str:
-    provider_token = str(provider or "").strip().upper()
-    if not provider_token:
-        return ""
-    return f"HOST_{provider_token}_BASE_URL"
 
 
 _RESOURCE_GATE_CRITICAL_TASK_IDS = {
@@ -905,26 +892,11 @@ class SystemResourceManager:
 
     def _analyze_with_llm(self, *, detail: Mapping[str, Any], pressure: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            from host_brain.app.config import load_host_config  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                RESOURCE_MANAGER_ANALYSIS_PROMPT_ID,
+            )
 
-            config_result = load_host_config()
-            config = config_result.config if config_result.success and config_result.config is not None else None
-            provider_name = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_PROVIDER") or "").strip().lower() or None
-            model_id = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_MODEL_ID") or "").strip() or None
-            api_key = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_API_KEY") or "").strip() or None
-            base_url_override = str(os.environ.get("HOST_RESOURCE_MANAGER_LLM_BASE_URL") or "").strip() or None
-            if not provider_name and config is not None:
-                provider_name = str(getattr(config, "llm_provider", "") or "").strip().lower() or None
-            if provider_name and config is not None and not api_key:
-                api_key = str(getattr(config, "llm_api_key", "") or "").strip() or None
-            if provider_name and not model_id:
-                model_env_name = _provider_model_env_name(provider_name)
-                model_id = str(os.environ.get(model_env_name) or "").strip() or None
-            if provider_name and not base_url_override:
-                base_url_env_name = _provider_base_url_env_name(provider_name)
-                base_url_override = str(os.environ.get(base_url_env_name) or "").strip() or None
-            explicit_single_model = bool(provider_name and model_id and api_key)
             timeout_ms = int(_parse_float_env(
                 "HOST_RESOURCE_MANAGER_LLM_TIMEOUT_MS",
                 default=30000,
@@ -961,26 +933,24 @@ class SystemResourceManager:
                 "\"auto_actions\":[{\"action\":str,\"why\":str,\"pids\":[int]}],\"confidence\":float}.\n"
                 + json.dumps(payload, ensure_ascii=False, sort_keys=True)[:9000]
             )
-            result = complete_llm_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                prompt_id=RESOURCE_MANAGER_ANALYSIS_PROMPT_ID,
                 request_id=f"resource-manager::{now_ms()}",
                 scene_type="RESOURCE_MANAGEMENT",
                 cognitive_tier="C",
-                provider_name=provider_name,
-                model_id=model_id,
-                api_key=api_key,
-                base_url_override=base_url_override,
-                timeout_ms=timeout_ms,
+                deadline_ms=timeout_ms,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                gen_params={"temperature": 0.1, "top_p": 0.8, "max_tokens": 900},
-                response_format="json_object",
             )
             attempts = [_compact_llm_attempt(item) for item in list(result.attempts or [])]
-            if result.pool_exhausted:
+            if not result.success:
                 with self._lock:
-                    self._last_llm_error = f"LLM_POOL_EXHAUSTED: {_summarize_llm_attempts(attempts)}"
+                    self._last_llm_error = (
+                        f"{result.error_code or 'MODEL_ATTEMPT_FAILED'}: "
+                        f"{_summarize_llm_attempts(attempts)}"
+                    )
                     self._last_llm_attempts = attempts
                 return {}
             parsed = json.loads(str(result.content or "{}"))
@@ -990,8 +960,8 @@ class SystemResourceManager:
                     self._last_llm_attempts = attempts
                 return {}
             parsed["source"] = "llm"
-            parsed["model"] = result.final_model
-            parsed["provider"] = result.final_provider
+            parsed["model"] = result.final_target.model_id if result.final_target is not None else ""
+            parsed["provider"] = result.final_target.provider if result.final_target is not None else ""
             parsed["cached"] = bool(result.cached)
             with self._lock:
                 self._last_llm_error = ""

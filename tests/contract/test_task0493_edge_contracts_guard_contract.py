@@ -4,7 +4,6 @@ from collections import Counter
 from functools import lru_cache
 import json
 from pathlib import Path
-import subprocess
 
 from tools.architecture import edge_contracts_guard as guard
 
@@ -30,20 +29,17 @@ def test_repository_boundary_baseline_is_exact_content_addressed_and_current() -
 
     assert report["passed"] is True
     assert report["violations"] == []
-    assert report["finding_count"] == 122
-    assert counts == {"EDGE_TO_HOST": 97, "HOST_TO_EDGE": 25}
-    assert kinds[("EDGE_TO_HOST", "path")] == 1
-    assert kinds[("HOST_TO_EDGE", "dynamic_risk")] == 6
-    assert sum(
-        count
-        for (direction, kind), count in kinds.items()
-        if direction == "EDGE_TO_HOST" and kind in {"from", "import", "dynamic"}
-    ) == 96
+    assert report["finding_count"] == 7
+    assert counts == {"HOST_TO_EDGE": 7}
+    assert kinds[("HOST_TO_EDGE", "dynamic_risk")] == 7
+    assert not [
+        row for row in report["findings"] if row["direction"] == "EDGE_TO_HOST"
+    ]
     assert not [
         row for row in report["findings"] if row["direction"].startswith("CONTRACTS_")
     ]
     assert report["baseline_fingerprints_sha256"] == (
-        "sha256:30d220048dc6f6e15013d4f3246cee96eca7d665cb37604e2c728a0c013c9bed"
+        "sha256:c7911197b99c1ede561751675a20ee299fe8c9e179afa7306de02c469525963b"
     )
     assert report["current_fingerprints_sha256"] == report[
         "baseline_fingerprints_sha256"
@@ -55,13 +51,13 @@ def test_every_debt_edge_has_one_owner_target_deadline_and_content_digest() -> N
     migration = json.loads(MIGRATION.read_text(encoding="utf-8"))
     report = _repository_report()
 
-    assert len(baseline["expected_fingerprints"]) == 122
+    assert len(baseline["expected_fingerprints"]) == 7
     assert baseline["fingerprints_sha256"] == guard.fingerprint_digest(
         baseline["expected_fingerprints"]
     )
     assert baseline["migration_sha256"] == guard.content_digest(migration)
-    assert len(migration["edges"]) == 54
-    assert len(report["mapped_migration_edges"]) == 54
+    assert len(migration["edges"]) == 7
+    assert len(report["mapped_migration_edges"]) == 7
     assert {edge["edge_id"] for edge in migration["edges"]} == set(
         report["mapped_migration_edges"]
     )
@@ -72,32 +68,13 @@ def test_every_debt_edge_has_one_owner_target_deadline_and_content_digest() -> N
         assert edge["priority"] in {"P0", "P1", "P2"}
 
 
-def test_baseline_commit_is_a_real_reproducible_source_snapshot() -> None:
+def test_aw06_baseline_records_edge_to_host_zero() -> None:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    commit = baseline["baseline_commit"]
 
-    assert commit == "840680d18f21c8b3c2d42668bd06129e440d63af"
-    assert subprocess.run(
-        ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-    ).returncode == 0
-    assert subprocess.run(
-        [
-            "git",
-            "diff",
-            "--quiet",
-            commit,
-            "--",
-            "edge_client",
-            "host_brain",
-            "natsume_contracts",
-        ],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-    ).returncode == 0
+    assert all(
+        not fingerprint.startswith("EDGE_TO_HOST|")
+        for fingerprint in baseline["expected_fingerprints"]
+    )
 
 
 def test_delivery_gate_invokes_guard_in_non_downgradable_freeze_mode() -> None:

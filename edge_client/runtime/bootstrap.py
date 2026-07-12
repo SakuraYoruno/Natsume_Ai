@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from natsume_contracts.edge.v1 import GatewayTransportStoreFactory
+
 from edge_client.actuators.speech import SpeechPlaybackQueue
 from edge_client.actuators.tts_engine import (
     AudioPlaybackDevice,
@@ -52,6 +54,7 @@ class EdgeRuntime:
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | VrmBridgeDriver | None
     tribe_bridge: Any | None
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None
     startup_threads: list[threading.Thread] = field(default_factory=list, repr=False)
 
     @property
@@ -135,7 +138,11 @@ class EdgeRuntime:
         return outcome
 
 
-def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
+def build_edge_runtime(
+    config: EdgeConfig,
+    *,
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None,
+) -> EdgeRuntime:
     """Build runtime components from validated edge configuration."""
 
     env_lookup = _normalize_env_lookup(os.environ)
@@ -582,13 +589,21 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
         tribe_bridge=getattr(voice_pipeline, "tribe_bridge", None),
+        gateway_transport_store_factory=gateway_transport_store_factory,
     )
 
 
-def bootstrap(config: EdgeConfig) -> EdgeRuntime:
+def bootstrap(
+    config: EdgeConfig,
+    *,
+    gateway_transport_store_factory: GatewayTransportStoreFactory | None = None,
+) -> EdgeRuntime:
     """M45 entrypoint alias for runtime assembly."""
 
-    runtime = build_edge_runtime(config)
+    runtime = build_edge_runtime(
+        config,
+        gateway_transport_store_factory=gateway_transport_store_factory,
+    )
 
     # 将 EdgeConfig 存入 runtime，供 fastapi_app.py 的 wx handler 读取
     runtime._edge_config = config  # type: ignore[attr-defined]
@@ -712,7 +727,10 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
                 line_channel_access_token=config.line_channel_access_token,
                 line_channel_secret=config.line_channel_secret,
             )
-            gw_instance = start_gateway(gw_config)
+            gw_instance = start_gateway(
+                gw_config,
+                transport_store_factory=runtime.gateway_transport_store_factory,
+            )
             runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]
             LOGGER.info("Unified Message Gateway 已启动，端口: %d", config.gateway_port)
         except Exception as exc:

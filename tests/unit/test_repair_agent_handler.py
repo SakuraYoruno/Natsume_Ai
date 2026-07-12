@@ -141,9 +141,7 @@ def test_execute_repair_plan_blocks_dangerous_command() -> None:
     assert result["actions"][0]["stderr"] == "BLOCKED_BY_SAFETY_GATE"
 
 
-def test_call_repair_planner_llm_uses_cache_on_second_call(monkeypatch) -> None:
-    mod._repair_plan_cache.clear()
-
+def test_repair_planner_does_not_reuse_cross_request_model_cache(monkeypatch) -> None:
     call_count = [0]
     fake_plan = {
         "repair_type": "pip_install",
@@ -168,44 +166,7 @@ def test_call_repair_planner_llm_uses_cache_on_second_call(monkeypatch) -> None:
     assert call_count[0] == 1
 
     mod._build_repair_result(task_text="任务B", previous_error="ModuleNotFoundError: foo")
-    assert call_count[0] == 1
-
-    mod._repair_plan_cache.clear()
-
-
-def test_build_repair_result_retries_llm_after_cache_expired(monkeypatch) -> None:
-    mod._repair_plan_cache.clear()
-
-    call_count = [0]
-    fake_plan = {
-        "repair_type": "pip_install",
-        "commands": [{"cmd": ["python", "-m", "pip", "install", "foo"], "timeout_s": 60}],
-        "summary": "安装 foo",
-        "can_retry": True,
-    }
-
-    def fake_llm_call(task_text, previous_error):
-        call_count[0] += 1
-        return fake_plan
-
-    current_ts = 2000.0
-    fingerprint = mod._get_error_fingerprint("ModuleNotFoundError: foo")
-    mod._repair_plan_cache[fingerprint] = (fake_plan, current_ts - mod._REPAIR_CACHE_TTL_S - 1)
-
-    monkeypatch.setattr(mod.time, "time", lambda: current_ts)
-    monkeypatch.setattr(mod, "_call_repair_planner_llm", fake_llm_call)
-    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, "true")
-    monkeypatch.setattr(
-        mod,
-        "_run_command",
-        lambda cmd, **_: {"command": cmd, "returncode": 0, "stdout": "", "stderr": "", "ok": True},
-    )
-
-    mod._build_repair_result(task_text="任务A", previous_error="ModuleNotFoundError: foo")
-
-    assert call_count[0] == 1
-
-    mod._repair_plan_cache.clear()
+    assert call_count[0] == 2
 
 
 def test_execute_repair_plan_partial_success_allows_retry(monkeypatch) -> None:

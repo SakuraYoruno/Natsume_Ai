@@ -54,6 +54,8 @@ def test_static_prompt_is_versioned_rendered_and_digest_checked() -> None:
 
     with pytest.raises(PromptDigestError):
         registry.validate_rendered(replace(rendered, digest="0" * 64))
+    with pytest.raises(UnknownPromptError):
+        registry.validate_rendered(replace(rendered, prompt_id="unregistered.prompt"))
 
 
 def test_registry_fails_closed_for_unknown_missing_variables_and_broader_cache() -> None:

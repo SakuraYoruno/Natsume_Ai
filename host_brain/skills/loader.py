@@ -14,7 +14,11 @@ from host_brain.observability.degradation_state import (
     evaluate_degradation_front_door,
     infer_degradation_capability,
 )
-from host_brain.skills.executor_registry import dispatch_executor_payload
+from host_brain.skills.executor_registry import (
+    BoundSkillExecutionAuthority,
+    bind_validated_skill_authority,
+    dispatch_executor_payload,
+)
 from host_brain.skills.registry import SkillRegistry
 
 
@@ -227,7 +231,32 @@ class SkillLoader:
             # 第一步：归一化层，handler 返回标准化 payload
             payload = meta.handler(args, exec_context)
             # 第二步：执行层，将 payload 路由到对应的 impl executor
-            handler_result = _dispatch_executor(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("skill handler must return an executor payload object")
+            if not str(payload.get("tool") or "").strip():
+                handler_result = payload
+            else:
+                dispatch_authority = bind_validated_skill_authority(
+                    payload=payload,
+                    request_id=request_id or intent_id,
+                    skill_id=skill_name,
+                    principal_id=str(
+                        exec_context.get("principal_id")
+                        or exec_context.get("person_id")
+                        or session_id
+                    ),
+                    target_id=skill_name,
+                    intent_id=intent_id,
+                    session_id=session_id,
+                    seq=seq,
+                    approval_token_ref=approval_token_ref,
+                    # Loader context is caller-controlled. Only its token,
+                    # already checked above by TokenService, may authorize.
+                    governed_execution_context=None,
+                    durable_ledger=self.ledger,
+                    validated_by="skill_loader.token_service",
+                )
+                handler_result = _dispatch_executor(payload, authority=dispatch_authority)
         except Exception as exc:  # pragma: no cover - defensive guard
             return self._log_and_return(
                 intent_id=intent_id,
@@ -386,12 +415,16 @@ class SkillLoader:
 
 
 # ---------------------------------------------------------------------------
-def _dispatch_executor(payload: Any) -> Any:
+def _dispatch_executor(
+    payload: Any,
+    *,
+    authority: BoundSkillExecutionAuthority | None = None,
+) -> Any:
     """将 handler 返回的归一化 payload 路由到对应的 impl executor。
 
     若 payload 不是 dict 或 tool 字段未注册，则原样透传（向后兼容）。
     """
-    return dispatch_executor_payload(payload)
+    return dispatch_executor_payload(payload, authority=authority)
 
 
 def _extract_audit_tier(governor_output: dict[str, Any] | None) -> AuditTier:

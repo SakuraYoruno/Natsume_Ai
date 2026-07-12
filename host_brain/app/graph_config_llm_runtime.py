@@ -28,7 +28,6 @@ from host_brain.integrations.llm_gateway import (
 )
 from host_brain.app.provider_factory import (
     _GEMINI_PRIMARY_RETRY_NODE_ID,
-    build_host_provider_fn,
     resolve_gemini_primary_fallback_model_id,
     resolve_host_llm_model_id,
 )
@@ -44,6 +43,31 @@ from host_brain.app.prompt_builder import (
 
 HOST_CHAT_ROUTE_HOST_14B = "host_14b"
 HOST_CHAT_ROUTE_CLOUD = "cloud"
+
+
+def _secret_free_route_metadata(value: Any) -> Any:
+    """Project route evidence without credentials or transport configuration."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _secret_free_route_metadata(item)
+            for key, item in value.items()
+            if str(key).strip().lower()
+            not in {
+                "api_key",
+                "llm_api_key",
+                "chat_llm_api_key",
+                "cloud_llm_api_key",
+                "credential",
+                "credentials",
+                "token",
+                "secret",
+                "base_url_override",
+            }
+        }
+    if isinstance(value, (list, tuple)):
+        return [_secret_free_route_metadata(item) for item in value]
+    return value
 HOST_CHAT_ROUTE_SKILLS = "skills"
 
 _HOST_CHAT_14B_DEFAULT_PROVIDER = PROVIDER_OPENAI
@@ -407,7 +431,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         candidate_provider = str(candidate.get("provider_name") or "").strip().lower()
         candidate_api_key = str(candidate.get("api_key") or "").strip() or None
         candidate_available = _is_provider_available(provider_name=candidate_provider, api_key=candidate_api_key, configured_available=True)
-        remote_chain_status.append({"chain_name": candidate.get("chain_name"), "provider_name": candidate_provider, "model_id": candidate.get("model_id"), "available": bool(candidate_available), "model_route": (dict(candidate.get("route_meta") or {}) if isinstance(candidate.get("route_meta"), dict) else {})})
+        remote_chain_status.append({"chain_name": candidate.get("chain_name"), "provider_name": candidate_provider, "model_id": candidate.get("model_id"), "available": bool(candidate_available), "model_route": _secret_free_route_metadata(dict(candidate.get("route_meta") or {}) if isinstance(candidate.get("route_meta"), dict) else {})})
         if candidate_available and selected_remote_candidate is None:
             selected_remote_candidate = dict(candidate)
 
@@ -420,7 +444,6 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         cloud_provider_name = str(selected_remote_candidate.get("provider_name") or PROVIDER_GEMINI).strip().lower() or PROVIDER_GEMINI
         cloud_model_id = str(selected_remote_candidate.get("model_id") or "").strip() or resolve_host_llm_model_id(cloud_provider_name)
         cloud_llm_api_key = str(selected_remote_candidate.get("api_key") or "").strip() or None
-        cloud_base_url_override = str(selected_remote_candidate.get("base_url_override") or "").strip() or None
         cloud_model_route = dict(selected_remote_candidate.get("route_meta") or {}) if isinstance(selected_remote_candidate.get("route_meta"), dict) else {}
         cloud_available = True
         route_reason_code = str(selected_remote_candidate.get("route_reason_code") or route_reason_code)
@@ -429,20 +452,15 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         cloud_provider_name = PROVIDER_GEMINI if normalized_preferred_provider != PROVIDER_MINIMAX else PROVIDER_MINIMAX
         cloud_model_id = gemini_cloud_model_id
         cloud_llm_api_key = gemini_cloud_api_key if cloud_provider_name == PROVIDER_GEMINI else minimax_api_key
-        cloud_base_url_override = _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()) if cloud_provider_name == PROVIDER_GEMINI else raw_minimax_base
         cloud_model_route = dict(gemini_cloud_route) if cloud_provider_name == PROVIDER_GEMINI else {}
         if cloud_provider_name == PROVIDER_MINIMAX:
             cloud_model_id = minimax_cloud_model_id
         cloud_available = False
 
-    cloud_provider_fn = build_host_provider_fn(provider_name=cloud_provider_name, model_id=cloud_model_id, api_key=cloud_llm_api_key, timeout_ms=cloud_timeout_ms, base_url_override=cloud_base_url_override)
     chat_provider_name = cloud_provider_name
     chat_model_id = cloud_model_id
     chat_timeout_ms = cloud_timeout_ms
-    chat_llm_api_key = cloud_llm_api_key
     chat_available = cloud_available
-    chat_provider_fn = cloud_provider_fn
-    chat_base_url_override = cloud_base_url_override
 
     host_14b_candidate_runtime: dict[str, Any] = {}
     host_14b_ready = False
@@ -478,8 +496,12 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
                 route_detail = f"{_provider_api_key_env_name(host_14b_provider) or 'api_key'} missing"
                 host_14b_unavailable_reason = "HOST_CHAT_LOCAL_LLM_KEY_MISSING"
         host_14b_available = _is_provider_available(provider_name=host_14b_provider, api_key=host_14b_api_key, configured_available=True)
-        host_14b_base_url_override = _resolve_host_14b_base_url(provider_name=host_14b_provider)
-        host_14b_candidate_runtime = {"provider_name": host_14b_provider, "model_id": host_14b_model_id, "timeout_ms": host_14b_timeout_ms, "llm_api_key": host_14b_api_key, "available": bool(host_14b_available), "base_url_override": host_14b_base_url_override, "provider_fn": (build_host_provider_fn(provider_name=host_14b_provider, model_id=host_14b_model_id, api_key=host_14b_api_key, timeout_ms=host_14b_timeout_ms, base_url_override=host_14b_base_url_override) if host_14b_available else None)}
+        host_14b_candidate_runtime = {
+            "provider_name": host_14b_provider,
+            "model_id": host_14b_model_id,
+            "timeout_ms": host_14b_timeout_ms,
+            "available": bool(host_14b_available),
+        }
         if host_14b_available:
             if health_probe_async:
                 healthy, health_detail = await _resolve_host_14b_health_status_async(provider_name=host_14b_provider, timeout_ms=min(host_14b_timeout_ms, 3_000))
@@ -491,10 +513,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
                 chat_provider_name = host_14b_provider
                 chat_model_id = host_14b_model_id
                 chat_timeout_ms = host_14b_timeout_ms
-                chat_llm_api_key = host_14b_api_key
                 chat_available = True
-                chat_base_url_override = host_14b_base_url_override
-                chat_provider_fn = host_14b_candidate_runtime.get("provider_fn") or build_host_provider_fn(provider_name=chat_provider_name, model_id=chat_model_id, api_key=chat_llm_api_key, timeout_ms=chat_timeout_ms, base_url_override=chat_base_url_override)
                 route_target = HOST_CHAT_ROUTE_HOST_14B
                 if selected_remote_candidate is not None and host_14b_chat_preferred:
                     route_reason_code = "HOST_CHAT_LOCAL_LLM_PRIMARY"
@@ -540,10 +559,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
                 chat_provider_name = cloud_provider_name
                 chat_model_id = cloud_model_id
                 chat_timeout_ms = cloud_timeout_ms
-                chat_llm_api_key = cloud_llm_api_key
                 chat_available = cloud_available
-                chat_provider_fn = cloud_provider_fn
-                chat_base_url_override = cloud_base_url_override
                 route_target = HOST_CHAT_ROUTE_CLOUD
                 route_reason_code = "ROUTING_MATRIX_SELECTED_CLOUD"
                 route_detail = f"routing_matrix selected cloud: task={_decision.task_type.value}, latency={_decision.latency_budget.value}"
@@ -555,10 +571,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
                 chat_provider_name = str(host_14b_candidate_runtime.get("provider_name") or chat_provider_name)
                 chat_model_id = str(host_14b_candidate_runtime.get("model_id") or chat_model_id)
                 chat_timeout_ms = int(host_14b_candidate_runtime.get("timeout_ms") or chat_timeout_ms)
-                chat_llm_api_key = host_14b_candidate_runtime.get("llm_api_key")
                 chat_available = bool(host_14b_candidate_runtime.get("available", True))
-                chat_provider_fn = host_14b_candidate_runtime.get("provider_fn") or chat_provider_fn
-                chat_base_url_override = str(host_14b_candidate_runtime.get("base_url_override") or chat_base_url_override or "").strip() or None
                 route_target = HOST_CHAT_ROUTE_HOST_14B
                 route_reason_code = "ROUTING_MATRIX_SELECTED_HOST_14B"
                 route_detail = f"routing_matrix selected host_14b: task={_decision.task_type.value}, latency={_decision.latency_budget.value}"
@@ -573,44 +586,36 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
 
     return {
         "provider_name": chat_provider_name, "model_id": chat_model_id, "timeout_ms": chat_timeout_ms,
-        "llm_api_key": chat_llm_api_key, "available": chat_available, "provider_fn": chat_provider_fn,
+        "available": chat_available,
         "route_target": route_target, "route_reason_code": route_reason_code, "route_detail": route_detail,
-        "base_url_override": chat_base_url_override, "sys_mode": sys_mode,
+        "sys_mode": sys_mode,
         "chat_provider_name": chat_provider_name, "chat_model_id": chat_model_id, "chat_timeout_ms": chat_timeout_ms,
-        "chat_llm_api_key": chat_llm_api_key, "chat_available": chat_available, "chat_provider_fn": chat_provider_fn,
-        "chat_base_url_override": chat_base_url_override,
+        "chat_available": chat_available,
         "cloud_provider_name": cloud_provider_name, "cloud_model_id": cloud_model_id, "cloud_timeout_ms": cloud_timeout_ms,
-        "cloud_llm_api_key": cloud_llm_api_key, "cloud_available": cloud_available, "cloud_provider_fn": cloud_provider_fn,
-        "cloud_base_url_override": cloud_base_url_override, "cloud_model_route": cloud_model_route,
+        "cloud_available": cloud_available,
+        "cloud_model_route": _secret_free_route_metadata(cloud_model_route),
         "remote_chain_status": remote_chain_status, "gray_rollout": dict(gray_rollout),
         "host_14b_ready": host_14b_ready,
         "host_14b_unavailable_reason": host_14b_unavailable_reason,
         "local_llm_ready": host_14b_ready,
         "local_llm_unavailable_reason": host_14b_unavailable_reason,
-        "host_14b_candidate_runtime": {
-            k: v for k, v in host_14b_candidate_runtime.items() if k != "provider_fn"
-        },
+        "host_14b_candidate_runtime": dict(host_14b_candidate_runtime),
         "routing_matrix_decision": routing_matrix_decision,
     }
 
 
 async def resolve_host_llm_runtime_async(*, rollout_key: str | None = None, scene_type: str | None = None) -> dict[str, Any]:
-    """异步版本的 LLM 运行时解析（不阻塞事件循环）。"""
-    return await _resolve_host_llm_runtime_core(rollout_key=rollout_key, scene_type=scene_type, health_probe_async=True)
+    """Compatibility delegate to the canonical secret-free RouteCatalog."""
+    from host_brain.app.route_catalog_runtime import resolve_host_llm_runtime_async as _resolve
+
+    return await _resolve(rollout_key=rollout_key, scene_type=scene_type)
 
 
 def resolve_host_llm_runtime(*, rollout_key: str | None = None, scene_type: str | None = None) -> dict[str, Any]:
-    """同步版本的 LLM 运行时解析（向后兼容，供测试和非异步上下文使用）。"""
-    import asyncio as _asyncio
-    coro = _resolve_host_llm_runtime_core(rollout_key=rollout_key, scene_type=scene_type, health_probe_async=False)
-    try:
-        _asyncio.get_running_loop()
-        import concurrent.futures as _cf
-        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
-            future = _pool.submit(_asyncio.run, coro)
-            return future.result()
-    except RuntimeError:
-        return _asyncio.run(coro)
+    """Compatibility delegate to the canonical secret-free RouteCatalog."""
+    from host_brain.app.route_catalog_runtime import resolve_host_llm_runtime as _resolve
+
+    return _resolve(rollout_key=rollout_key, scene_type=scene_type)
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +644,6 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     provider_name = str(base_runtime.get("provider_name") or PROVIDER_GEMINI).strip().lower() or PROVIDER_GEMINI
     timeout_value = _first_non_empty_env(timeout_env_name, *fallback_timeout_env_names)
     timeout_ms = max(800, _parse_int(timeout_value, default=timeout_default_ms, min_value=800, max_value=timeout_max_ms))
-    selected_api_key = str(base_runtime.get("llm_api_key") or base_runtime.get("chat_llm_api_key") or "").strip() or None
     explicit_model_override = _first_non_empty_env(model_env_name, *fallback_model_env_names)
     model_route: dict[str, Any] = {}
     if _surface_reply_codex_experiment_enabled(role):
@@ -660,10 +664,6 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
             "chat_model_id": model_id,
             "timeout_ms": codex_timeout_ms,
             "chat_timeout_ms": codex_timeout_ms,
-            "llm_api_key": None,
-            "chat_llm_api_key": None,
-            "base_url_override": None,
-            "chat_base_url_override": None,
             "available": True,
             "chat_available": True,
             "agent_gen_params": dict(gen_params),
@@ -681,10 +681,6 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
             "chat_model_id": model_id,
             "timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
             "chat_timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
-            "llm_api_key": None,
-            "chat_llm_api_key": None,
-            "base_url_override": None,
-            "chat_base_url_override": None,
             "available": True,
             "chat_available": True,
             "agent_gen_params": dict(gen_params),
@@ -694,29 +690,43 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
             "route_detail": f"agent role {role} routed to local Codex CLI",
         }
     if provider_name == PROVIDER_GEMINI:
-        model_route = resolve_gemini_model_route(role=role, preferred_api_key=selected_api_key, route_key=(str(base_runtime.get("route_reason_code") or "").strip() or str(base_runtime.get("route_target") or "").strip() or None))
+        model_route = resolve_gemini_model_route(role=role, preferred_api_key=None, route_key=(str(base_runtime.get("route_reason_code") or "").strip() or str(base_runtime.get("route_target") or "").strip() or None))
         if explicit_model_override and explicit_model_override.lower().startswith("gemini-"):
             model_id = explicit_model_override
         else:
             model_id = str(model_route.get("model_id") or base_runtime.get("model_id") or base_runtime.get("chat_model_id") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
-        selected_api_key = str(model_route.get("api_key") or selected_api_key or "").strip() or None
     else:
         model_id = _resolve_non_gemini_agent_model_id_v2(provider_name=provider_name, base_runtime=base_runtime, model_env_names=(model_env_name, *fallback_model_env_names))
-    return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
+    safe_model_route = {
+        key: value
+        for key, value in model_route.items()
+        if key not in {"api_key", "credential", "token", "base_url_override"}
+    }
+    return {
+        **base_runtime,
+        "model_id": model_id,
+        "chat_model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "chat_timeout_ms": timeout_ms,
+        "agent_gen_params": dict(gen_params),
+        "agent_role": role,
+        "agent_model_route": (safe_model_route or None),
+    }
 
 
 def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
-    """Surface reply 主链的 LLM 运行时配置。"""
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="surface_reply", model_env_name="HOST_SURFACE_REPLY_MODEL_ID", timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS", fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",), timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 700})
+    from host_brain.app.route_catalog_runtime import resolve_surface_reply_llm_runtime as _resolve
+
+    return _resolve(base_runtime=base_runtime)
 
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
-    """ExecutiveRouter 的 LLM 运行时配置。"""
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="executive_router", model_env_name="HOST_EXECUTIVE_ROUTER_MODEL_ID", timeout_env_name="HOST_EXECUTIVE_ROUTER_TIMEOUT_MS", timeout_default_ms=5_000, timeout_max_ms=30_000, gen_params={"temperature": 0.1, "top_p": 0.80}, fallback_model_env_names=("HOST_DISPATCH_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_DISPATCH_AGENT_TIMEOUT_MS",))
+    from host_brain.app.route_catalog_runtime import resolve_executive_router_llm_runtime as _resolve
+
+    return _resolve(base_runtime=base_runtime)
 
 
 def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
-    """SubAgent（code/translate/intent/vision）的 LLM 运行时配置。"""
-    runtime = _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="subagent", model_env_name="HOST_SUBAGENT_MODEL_ID", timeout_env_name="HOST_SUBAGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.3, "top_p": 0.85})
-    runtime["agent_role"] = "sub_agent"
-    return runtime
+    from host_brain.app.route_catalog_runtime import resolve_subagent_llm_runtime as _resolve
+
+    return _resolve(base_runtime=base_runtime)

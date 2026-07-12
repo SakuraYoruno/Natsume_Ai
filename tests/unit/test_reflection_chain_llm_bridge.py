@@ -2,21 +2,18 @@ from __future__ import annotations
 
 import json
 
-from host_brain.integrations.llm_gateway_schemas import ModelAttempt, PoolCompleteResult
+from host_brain.app import dependencies
+from host_brain.model_runtime import (
+    REFLECTION_EVALUATE_PROMPT_ID,
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
+)
 from host_brain.reasoning import reflection_chain as rc
-
-
-def _pool_result(content: str) -> PoolCompleteResult:
-    return PoolCompleteResult(
-        content=content,
-        final_model="test-model",
-        final_provider="test-provider",
-        attempts=[ModelAttempt(model="test-model", provider="test-provider", status="OK", latency_ms=12)],
-        pool_exhausted=False,
-        total_latency_ms=12,
-        cached=False,
-        cognitive_tier="B",
-    )
 
 
 def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) -> None:
@@ -37,13 +34,13 @@ def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) 
 
     calls: list[str] = []
 
-    def fake_complete(**kwargs):
-        scene_type = str(kwargs.get("scene_type") or "")
+    async def fake_complete(attempt):  # noqa: ANN001
+        scene_type = str(attempt.scene_type or "")
         calls.append(scene_type)
         if scene_type == "REFLECTION":
             if calls.count("REFLECTION") == 1:
-                return _pool_result(
-                    json.dumps(
+                return {
+                    "content": json.dumps(
                         {
                             "overall_score": 0.32,
                             "passed": False,
@@ -60,9 +57,9 @@ def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) 
                         },
                         ensure_ascii=False,
                     )
-                )
-            return _pool_result(
-                json.dumps(
+                }
+            return {
+                "content": json.dumps(
                     {
                         "overall_score": 0.91,
                         "passed": True,
@@ -79,25 +76,43 @@ def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) 
                     },
                     ensure_ascii=False,
                 )
-            )
+            }
         raise AssertionError(scene_type)
 
-    import host_brain.integrations.llm_helpers as helpers
-
-    monkeypatch.setattr(helpers, "complete_llm_with_pool_sync", fake_complete)
-
-    chain = rc.ReflectionChain(use_llm=True)
-    result = chain.revise(
-        user_message="我今天真的有点撑不住了",
-        ai_response="嗯。",
-        emotion_tag="sadness",
-        bond_stage="FRIEND",
+    route = RouteDecision(
+        decision_id="reflection-route",
+        targets=(
+            ProviderTarget("test.reflection", "mock", "reflection-model", timeout_ms=2_800),
+        ),
+        reason="TEST_REFLECTION_ROUTE",
+        max_attempts=2,
     )
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(route),
+        provider_adapters=[
+            CallableProviderAdapter("test.reflection", complete_fn=fake_complete)
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    try:
+        chain = rc.ReflectionChain(use_llm=True)
+        result = chain.revise(
+            user_message="我今天真的有点撑不住了",
+            ai_response="嗯。",
+            emotion_tag="sadness",
+            bond_stage="FRIEND",
+        )
+    finally:
+        dependencies.reset_model_runtime_composition()
 
     assert result.revised_text == ""
     assert "drop_too_short_reply" in result.operations
     assert result.reflection_before is not None
     assert result.reflection_before.should_revise is True
+    assert result.reflection_before.model_attempt_trace["route_decision_id"] == "reflection-route"
+    assert result.reflection_before.model_attempt_trace["attempts"][0]["prompt_id"] == REFLECTION_EVALUATE_PROMPT_ID
     assert result.reflection_after is not None
     assert calls.count("REFLECTION") >= 2
     assert set(calls) == {"REFLECTION"}

@@ -53,11 +53,6 @@ def test_inner_world_monologue_ignores_heavy_background_disable_when_core_ticks_
         "host_brain.persona.inner_activity_agent.generate_inner_activity_note",
         lambda **_kwargs: ("我先把没说完的事放在心里。", "topic", "", {}),
     )
-    monkeypatch.setattr(
-        "host_brain.persona.inner_world._resolve_inner_world_llm_runtime",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("runtime should not resolve")),
-    )
-
     note, focus, reason, meta = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
@@ -89,8 +84,8 @@ def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch)
         _unavailable_generate,
     )
     monkeypatch.setattr(
-        "host_brain.persona.inner_world._resolve_inner_world_llm_runtime",
-        lambda **_kwargs: {"available": False, "route_reason_code": "NO_MODEL"},
+        "host_brain.model_runtime.invocation.complete_compiled_prompt_sync",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("NO_MODEL")),
     )
 
     note, focus, reason, meta = _generate_inner_stream_note_from_llm(
@@ -103,7 +98,7 @@ def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch)
     assert note == ""
     assert focus == ""
     assert reason.startswith("INNER_WORLD_LLM_CIRCUIT_OPEN:")
-    assert meta == {}
+    assert "inner_life_source" in meta
     assert _inner_world_llm_circuit_snapshot(now_ms=123456)["open"] is True
     assert calls["count"] == 1
 
@@ -142,8 +137,8 @@ def test_inner_world_monologue_retries_after_circuit_cooldown(monkeypatch) -> No
         _generate,
     )
     monkeypatch.setattr(
-        "host_brain.persona.inner_world._resolve_inner_world_llm_runtime",
-        lambda **_kwargs: {"available": False, "route_reason_code": "NO_MODEL"},
+        "host_brain.model_runtime.invocation.complete_compiled_prompt_sync",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("NO_MODEL")),
     )
 
     _generate_inner_stream_note_from_llm(

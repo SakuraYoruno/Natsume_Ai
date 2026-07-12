@@ -7,7 +7,6 @@ format and HTTP header spelling cannot drift between producers and consumers.
 from __future__ import annotations
 
 import hashlib
-import hmac
 from typing import Any, Mapping
 
 
@@ -75,11 +74,13 @@ def build_hmac_digest(secret: bytes, **canonical_fields: Any) -> str:
     key = bytes(secret)
     if not key:
         raise ValueError("bridge HMAC secret is required")
-    return hmac.new(
-        key,
-        canonical_hmac_payload(**canonical_fields),
-        hashlib.sha256,
-    ).hexdigest()
+    payload = canonical_hmac_payload(**canonical_fields)
+    block_size = 64
+    normalized = hashlib.sha256(key).digest() if len(key) > block_size else key
+    normalized = normalized.ljust(block_size, b"\0")
+    outer = bytes(byte ^ 0x5C for byte in normalized)
+    inner = bytes(byte ^ 0x36 for byte in normalized)
+    return hashlib.sha256(outer + hashlib.sha256(inner + payload).digest()).hexdigest()
 
 
 def build_hmac_signature(secret: bytes, **canonical_fields: Any) -> str:

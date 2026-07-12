@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -77,48 +76,58 @@ class LifeDeliveryTransport:
             )
             return _validated_result(destination, result)
         if destination == "vts.emotion":
-            from host_brain.channels.vts import TRIGGER_HOST, resolve_vts_expression  # noqa: PLC0415
+            from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
 
             emotion_context = dict(payload.get("emotion_context") or {})
             target = dict(payload.get("target") or {})
-            result = await asyncio.to_thread(
-                resolve_vts_expression,
-                emotion_tag=str(
+            result = await submit_avatar_command(
+                action="set_expression",
+                payload={"emotion_tag": str(
                     emotion_context.get("emotion_tag")
                     or target.get("emotion_tag")
                     or "NEUTRAL"
-                ),
-                ledger=self._ledger,
+                )},
                 request_id=message.delivery_key,
-                trigger=TRIGGER_HOST,
-                ts_ms=int(payload.get("ts_ms") or 0) or None,
-                edge_available=True,
+                authority_ref=(
+                    f"authority://life/{message.authorization.authority_kind}/"
+                    f"{message.authorization.authority_principal_id}"
+                ),
+                grant_ref=message.authorization.governor_grant_ref,
+                idempotency_key=message.delivery_key,
             )
             return _validated_result(destination, result)
         if destination == "mateengine.state":
-            from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+            from host_brain.channels.embodiment import build_host_embodiment_command, submit_embodiment_command  # noqa: PLC0415
+            from natsume_contracts.edge.embodiment_v1 import EMBODIMENT_KIND_MATEENGINE  # noqa: PLC0415
 
             target = dict(payload.get("target") or {})
-            result = await asyncio.to_thread(
-                send_mateengine_action,
-                action=str(payload.get("action") or "state"),
-                state=str(
+            state = str(
                     payload.get("state")
                     or target.get("mateengine_state")
                     or "idle"
-                ),
-                emotion_tag=str(
+                )
+            emotion_tag = str(
                     payload.get("emotion_tag")
                     or target.get("emotion_tag")
                     or "NEUTRAL"
-                ),
-                expression=str(
-                    payload.get("expression")
-                    or target.get("expression")
-                    or ""
-                ),
-                request_id=message.delivery_key,
+                )
+            command_payload = (
+                {"command": {"type": "reset"}}
+                if state.strip().lower() == "idle"
+                else {"command": {"type": "expression", "preset": emotion_tag, "emotion_tag": emotion_tag}}
             )
+            result = await submit_embodiment_command(build_host_embodiment_command(
+                kind=EMBODIMENT_KIND_MATEENGINE,
+                action="command",
+                payload=command_payload,
+                request_id=message.delivery_key,
+                authority_ref=(
+                    f"authority://life/{message.authorization.authority_kind}/"
+                    f"{message.authorization.authority_principal_id}"
+                ),
+                grant_ref=message.authorization.governor_grant_ref,
+                idempotency_key=message.delivery_key,
+            ))
             return _validated_result(destination, result)
         raise AssertionError(f"unroutable Life delivery destination: {destination}")
 

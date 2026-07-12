@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-import subprocess
 
 from host_brain.agent_runtime import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.executor import _build_codex_command, _build_codex_subprocess_env
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.agent_runtime.result_contract import AgentResult
+
+
+def _inspect_order(tmp_path: Path, *, work_order_id: str) -> dict[str, object]:
+    return {
+        "work_order_id": work_order_id,
+        "domain": "code",
+        "run_mode": "inspect",
+        "objective": "inspect something",
+        "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path / "workspaces")},
+        "allowed_actions": ["read_files", "generate_report"],
+        "forbidden_actions": ["write_files", "modify_secret_files"],
+        "review_policy": {"review_required": False},
+    }
 
 
 def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> None:
@@ -18,35 +29,14 @@ def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> Non
     assert result["reason_code"] == "AGENT_WORKORDER_REQUIRED"
 
 
-def test_codex_runtime_executor_degrades_when_cli_missing(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: None)
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
-        {
-            "work_order_id": "wo-cli-missing",
-            "domain": "code",
-            "run_mode": "inspect",
-            "objective": "inspect something",
-            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
-            "allowed_actions": ["read_files", "generate_report"],
-            "forbidden_actions": ["write_files", "modify_secret_files"],
-            "review_policy": {"review_required": False},
-        }
-    )
-
-    assert result["status"] == "DEGRADED"
-    assert result["reason_code"] == "CODEX_CLI_UNAVAILABLE"
-    assert Path(result["artifacts_dir"]).joinpath("work_order.json").exists()
-    assert Path(result["artifacts_dir"]).joinpath("result.json").exists()
-
-
-def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path) -> None:
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
+def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path: Path) -> None:
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
         {
             "work_order_id": "wo-unconfirmed",
             "domain": "code",
             "run_mode": "worker",
             "objective": "edit something",
-            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
+            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path / "workspaces")},
             "allowed_actions": ["read_files", "write_files"],
             "forbidden_actions": ["modify_secret_files"],
             "approval_policy": {"require_confirm": True, "confirmed": False},
@@ -57,132 +47,91 @@ def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path) -> None:
     assert result["review_required"] is True
 
 
-def test_codex_runtime_command_honors_model_override(tmp_path) -> None:
-    order = AgentWorkOrder.from_mapping(
-        {
-            "work_order_id": "wo-model",
-            "domain": "code",
-            "run_mode": "inspect",
-            "objective": "inspect",
-            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
-            "metadata": {"codex_model": "gpt-5.4-mini", "codex_reasoning_effort": "low"},
-        }
+def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, Path]] = []
+
+    class FakeAgentExecutor:
+        def execute(self, order, *, workspace: Path) -> AgentResult:
+            calls.append((order.work_order_id, workspace))
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=order.work_order_id,
+                summary="done",
+                result_text="canonical result",
+                review_required=False,
+                metadata={"agent_trace": "preserved"},
+            )
+
+    git_states = iter(
+        [
+            {"changed_files": ["baseline.py"], "git_diff_stat": None, "git_status": " M baseline.py", "status_map": {"baseline.py": " M"}},
+            {
+                "changed_files": ["baseline.py", "created.py"],
+                "git_diff_stat": None,
+                "git_status": " M baseline.py\n?? created.py",
+                "status_map": {"baseline.py": " M", "created.py": "??"},
+            },
+        ]
+    )
+    monkeypatch.delenv("HOST_NATSUME_AGENT_ENABLED", raising=False)
+    monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
+    monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: next(git_states))
+
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
+        _inspect_order(tmp_path, work_order_id="wo-canonical")
     )
 
-    command = _build_codex_command(
-        codex_cmd="codex",
-        order=order,
-        workspace=tmp_path,
-        last_message_path=tmp_path / "last.txt",
-        sandbox_mode="read-only",
-    )
-
-    assert command[:4] == ["codex", "exec", "-m", "gpt-5.4-mini"]
-    assert 'model_reasoning_effort="low"' in command
-
-
-def test_codex_runtime_env_uses_run_local_temp_dir(monkeypatch, tmp_path) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    isolated_home = tmp_path / "codex-home"
-    monkeypatch.setenv("HOST_CODEX_CLI_HOME", str(isolated_home))
-    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
-
-    env = _build_codex_subprocess_env(run_dir=run_dir)
-
-    temp_dir = run_dir / ".codex_tmp"
-    assert temp_dir.exists()
-    assert env["TEMP"] == str(temp_dir.resolve())
-    assert env["TMP"] == str(temp_dir.resolve())
-    assert env["TMPDIR"] == str(temp_dir.resolve())
-    assert env["CODEX_HOME"] == str(isolated_home.resolve())
-    assert "OPENAI_API_KEY" not in env
-    assert env.get("HOME") or env.get("USERPROFILE")
-
-
-def test_codex_runtime_passes_absolute_last_message_path(monkeypatch, tmp_path) -> None:
-    monkeypatch.chdir(tmp_path)
-    captured: dict[str, list[str]] = {}
-
-    class FakePopen:
-        pid = 12345
-        returncode = 0
-
-        def __init__(self, command, *_args, **_kwargs) -> None:
-            captured["command"] = list(command)
-
-        def communicate(self, *args, **kwargs):
-            command = captured["command"]
-            output_path = Path(command[command.index("-o") + 1])
-            assert output_path.is_absolute()
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text("done", encoding="utf-8")
-            return '{"type":"thread.started","thread_id":"thread-ok"}\n', ""
-
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
-    monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
-    monkeypatch.setattr("host_brain.agent_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
-
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(Path("relative_runs"))).execute(
-        {
-            "work_order_id": "wo-absolute-output",
-            "domain": "code",
-            "run_mode": "inspect",
-            "objective": "inspect something",
-            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path / "workspaces")},
-            "allowed_actions": ["read_files", "generate_report"],
-            "forbidden_actions": ["write_files", "modify_secret_files"],
-        }
-    )
-
+    assert len(calls) == 1
+    assert calls[0][0] == "wo-canonical"
+    assert calls[0][1].is_absolute()
     assert result["status"] == "EXECUTED"
-    assert result["result_text"] == "done"
-    assert result["thread_id"] == "thread-ok"
+    assert result["result_text"] == "canonical result"
+    assert result["changed_files"] == ["created.py"]
+    assert result["metadata"]["execution_authority"] == "canonical_agent_executor"
+    assert result["metadata"]["agent_trace"] == "preserved"
+    run_dir = Path(result["artifacts_dir"])
+    for artifact in ("work_order.json", "prompt.txt", "changed_files.json", "verification.json", "metadata.json", "result.json"):
+        assert run_dir.joinpath(artifact).exists()
 
 
-def test_codex_runtime_timeout_persists_partial_logs(monkeypatch, tmp_path) -> None:
-    class FakePopen:
-        pid = 12345
-        returncode = None
+def test_runtime_converts_canonical_agent_crash_to_failed_result(monkeypatch, tmp_path: Path) -> None:
+    class CrashingAgentExecutor:
+        def execute(self, _order, *, workspace: Path) -> AgentResult:
+            raise RuntimeError(f"boom in {workspace.name}")
 
-        def __init__(self, *_args, **_kwargs) -> None:
-            self.calls = 0
-
-        def communicate(self, *args, **kwargs):
-            self.calls += 1
-            if self.calls == 1:
-                raise subprocess.TimeoutExpired(
-                    cmd="codex",
-                    timeout=15,
-                    output='{"type":"thread.started","thread_id":"thread-timeout"}\n',
-                    stderr="partial stderr",
-                )
-            self.returncode = -9
-            return "", "after kill stderr"
-
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
-    monkeypatch.setattr("host_brain.agent_runtime.executor._terminate_process_tree", lambda _proc: None)
-    monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
-    monkeypatch.setattr("host_brain.agent_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
-
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
-        {
-            "work_order_id": "wo-timeout",
-            "domain": "code",
-            "run_mode": "inspect",
-            "objective": "inspect something",
-            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
-            "allowed_actions": ["read_files", "generate_report"],
-            "forbidden_actions": ["write_files", "modify_secret_files"],
-            "metadata": {"timeout_seconds": 15, "codex_model": "gpt-5.4-mini"},
-        }
+    monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", CrashingAgentExecutor)
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.executor._collect_git_summary",
+        lambda _workspace: {"changed_files": [], "git_diff_stat": None, "git_status": None, "status_map": {}},
     )
 
-    run_dir = Path(result["artifacts_dir"])
-    assert result["status"] == "DEGRADED"
-    assert result["reason_code"] == "CODEX_EXEC_TIMEOUT"
-    assert result["thread_id"] == "thread-timeout"
-    assert "partial stderr" in run_dir.joinpath("stderr.log").read_text(encoding="utf-8")
-    assert run_dir.joinpath("events.jsonl").read_text(encoding="utf-8").strip().startswith('{"type":"thread.started"')
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
+        _inspect_order(tmp_path, work_order_id="wo-crash")
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["reason_code"] == "AGENT_ERROR"
+    assert "boom in" in result["detail"]
+    assert result["metadata"]["execution_authority"] == "canonical_agent_executor"
+    assert Path(result["artifacts_dir"]).joinpath("result.json").exists()
+
+
+def test_runtime_source_has_no_independent_codex_cli_authority() -> None:
+    import host_brain.agent_runtime.executor as executor_module
+
+    source = Path(executor_module.__file__).read_text(encoding="utf-8")
+    forbidden = (
+        "agent_enabled",
+        "HOST_NATSUME_AGENT_ENABLED",
+        "codex_cli_provider",
+        "codex_cli_command",
+        "build_codex_cli_env",
+        "subprocess.Popen",
+        "Popen(",
+        "_build_codex_command",
+        "_build_codex_subprocess_env",
+        "CODEX_EXEC",
+    )
+
+    assert "AgentExecutor().execute" in source
+    assert all(symbol not in source for symbol in forbidden)

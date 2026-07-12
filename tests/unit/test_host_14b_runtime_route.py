@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
+import host_brain.app.dependencies as app_dependencies
 import host_brain.app.graph_config_builder as graph_builder
 import host_brain.app.graph_config_llm_runtime as llm_runtime
 import host_brain.app.model_router as model_router
@@ -50,8 +52,19 @@ def _patch_runtime_dependencies(
     llm_provider: str = "gemini",
     codex_cli_available: bool = False,
 ) -> None:
+    class _CloudRoutingMatrix:
+        def select_with_fallback(self, *, task_type, latency_budget):  # noqa: ANN001
+            return SimpleNamespace(
+                task_type=task_type,
+                selected_model=SimpleNamespace(value=HOST_CHAT_ROUTE_CLOUD),
+                latency_budget=latency_budget,
+                is_fallback=False,
+                fallback_reason=None,
+            )
+
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setattr(llm_runtime, "codex_cli_lm_available", lambda: bool(codex_cli_available))
+    monkeypatch.setattr(app_dependencies, "get_routing_matrix", lambda: _CloudRoutingMatrix())
     monkeypatch.setattr(
         llm_runtime,
         "load_host_config",
@@ -66,15 +79,6 @@ def _patch_runtime_dependencies(
     )
     monkeypatch.setattr(
         llm_runtime,
-        "build_host_provider_fn",
-        lambda **kwargs: {
-            "provider_name": kwargs.get("provider_name"),
-            "model_id": kwargs.get("model_id"),
-            "base_url_override": kwargs.get("base_url_override"),
-        },
-    )
-    monkeypatch.setattr(
-        llm_runtime,
         "_resolve_host_14b_health_status",
         lambda **kwargs: (True, "ok"),
     )
@@ -85,6 +89,38 @@ def _patch_runtime_dependencies(
     )
 
 
+_FORBIDDEN_RUNTIME_KEYS = frozenset(
+    {
+        "api_key",
+        "llm_api_key",
+        "chat_llm_api_key",
+        "cloud_llm_api_key",
+        "token",
+        "credential",
+        "credentials",
+        "provider_fn",
+        "base_url_override",
+    }
+)
+
+
+def _assert_secret_free_runtime(value: Any, *, path: str = "runtime") -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            assert normalized_key not in _FORBIDDEN_RUNTIME_KEYS, (
+                f"{path}.{key} leaked secret/transport authority"
+            )
+            assert not callable(item), f"{path}.{key} leaked a callable"
+            _assert_secret_free_runtime(item, path=f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _assert_secret_free_runtime(item, path=f"{path}[{index}]")
+        return
+    assert not callable(value), f"{path} leaked a callable"
+
+
 def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch)
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
@@ -93,46 +129,40 @@ def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_PRIMARY_GEMINI"
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
     assert runtime["provider_name"] == "gemini"
-    assert runtime["model_id"] == "gemini-2.5-flash"
+    assert runtime["model_id"] == "gemini-2.5-flash-lite"
     assert runtime["available"] is True
-    assert runtime["remote_chain_status"][0]["chain_name"] == "gemini"
-    assert runtime["remote_chain_status"][0]["available"] is True
+    assert "remote_chain_status" not in runtime
 
 
-def test_resolve_host_llm_runtime_falls_back_to_codex(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_does_not_route_from_codex_credentials(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_CODEX_BASE_URL", "https://codex-relay.example.com")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_CODEX"
-    assert runtime["provider_name"] == "codex"
-    assert runtime["model_id"] == "gpt-4o-mini"
-    assert runtime["base_url_override"] == "https://codex-relay.example.com/v1"
-    assert runtime["remote_chain_status"][0]["available"] is False
-    assert runtime["remote_chain_status"][1]["chain_name"] == "codex"
-    assert runtime["remote_chain_status"][1]["provider_name"] == "codex"
-    assert runtime["remote_chain_status"][1]["available"] is True
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
+    assert runtime["provider_name"] == "gemini"
+    assert "remote_chain_status" not in runtime
 
 
-def test_resolve_host_llm_runtime_falls_back_to_deepseek(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_does_not_route_from_deepseek_credentials(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK"
-    assert runtime["provider_name"] == "deepseek"
-    assert runtime["model_id"] == "deepseek-v4-flash"
-    assert runtime["remote_chain_status"][0]["available"] is False
-    assert runtime["remote_chain_status"][1]["available"] is False
-    assert runtime["remote_chain_status"][2]["available"] is True
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
+    assert runtime["provider_name"] == "gemini"
+    assert "remote_chain_status" not in runtime
 
 
 def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> None:
@@ -145,17 +175,17 @@ def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> 
         llm_provider="minimax",
     )
     monkeypatch.setenv("HOST_MINIMAX_MODEL_ID", "M2-her")
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "minimax")
     monkeypatch.setenv("HOST_MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_PRIMARY_MINIMAX"
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
     assert runtime["provider_name"] == "minimax"
     assert runtime["model_id"] == "M2-her"
-    assert runtime["base_url_override"] == "https://api.minimaxi.com/v1"
-    assert runtime["remote_chain_status"][0]["chain_name"] == "minimax"
-    assert runtime["remote_chain_status"][0]["available"] is True
+    assert "remote_chain_status" not in runtime
 
 
 def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkeypatch) -> None:
@@ -170,15 +200,13 @@ def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkey
 
     runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_CHAT)
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
-    assert runtime["route_reason_code"] == "HOST_CHAT_LOCAL_LLM_PRIMARY"
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:LOCAL_CHAT"
     assert runtime["provider_name"] == "openai"
     assert runtime["model_id"] == "qwen3:14b-q4_k_m"
     assert runtime["cloud_available"] is True
-    routing_matrix_decision = dict(runtime.get("routing_matrix_decision") or {})
-    assert routing_matrix_decision.get("selected_model") == "cloud"
-    assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_HOST_14B
-    assert routing_matrix_decision.get("not_applied_reason") == "HOST_CHAT_LOCAL_LLM_PRIMARY"
+    assert "routing_matrix_decision" not in runtime
 
 
 def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> None:
@@ -193,49 +221,30 @@ def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> N
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_LOCAL"
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:LOCAL_CHAT"
     assert runtime["provider_name"] == "openai"
     assert runtime["model_id"] == "qwen3:14b-q4_k_m"
-    assert runtime["llm_api_key"] == "host-local-placeholder-key"
-    assert runtime["base_url_override"] == "http://127.0.0.1:11434/v1"
-    assert runtime["remote_chain_status"][0]["available"] is False
-    assert runtime["remote_chain_status"][1]["available"] is False
-    assert runtime["remote_chain_status"][2]["available"] is False
+    assert "remote_chain_status" not in runtime
 
 
 def test_resolve_host_llm_runtime_reasoning_scene_still_uses_remote_chain(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key="sk-codex", deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "codex")
 
     runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_EXEC_INTENT)
 
+    _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
-    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_CODEX"
-    routing_matrix_decision = dict(runtime.get("routing_matrix_decision") or {})
-    assert routing_matrix_decision.get("task_type") == "reasoning"
-    assert routing_matrix_decision.get("selected_model") == "cloud"
-    assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:EXECUTIVE_ROUTER"
+    assert runtime["provider_name"] == "codex"
+    assert runtime["model_id"] == "gpt-4o-mini"
+    assert "routing_matrix_decision" not in runtime
 
 
-def test_build_chat_graph_config_keeps_explicit_chat_runtime_binding(monkeypatch) -> None:
-    captured_calls: list[dict] = []
-
-    def _capture_provider_for_node(**kwargs):
-        captured_calls.append(dict(kwargs))
-        return {
-            "provider_name": kwargs.get("provider_name"),
-            "model_id": kwargs.get("model_id"),
-            "node_id": kwargs.get("node_id"),
-            "base_url_override": kwargs.get("base_url_override"),
-        }
-
-    monkeypatch.setattr(
-        graph_builder,
-        "build_host_provider_fn_for_node",
-        _capture_provider_for_node,
-    )
-
+def test_build_chat_graph_config_keeps_only_secret_free_model_route_metadata() -> None:
     cfg = build_chat_graph_config(
         provider_name="openai",
         model_id="qwen3:14b-q4_k_m",
@@ -253,13 +262,18 @@ def test_build_chat_graph_config_keeps_explicit_chat_runtime_binding(monkeypatch
         chat_base_url_override="http://127.0.0.1:11434/v1",
     )
 
+    _assert_secret_free_runtime(cfg, path="graph_config")
     overrides = cfg["model_node_overrides"]
     assert overrides[CHAT_DIRECT_NODE_ID]["provider"] == "openai"
     assert overrides[CHAT_DIRECT_NODE_ID]["model_id"] == "qwen3:14b-q4_k_m"
-    assert overrides[CHAT_DIRECT_NODE_ID]["provider_fn"]["base_url_override"] == "http://127.0.0.1:11434/v1"
     assert overrides["core_reasoner_primary"]["provider"] == "gemini"
-    assert overrides["core_reasoner_primary"]["provider_fn"]["base_url_override"] is None
-    assert any(
-        row.get("node_id") == CHAT_DIRECT_NODE_ID and row.get("base_url_override") == "http://127.0.0.1:11434/v1"
-        for row in captured_calls
-    )
+    allowed_route_keys = {
+        "provider",
+        "model_id",
+        "timeout_ms",
+        "available",
+        "max_output_tokens",
+    }
+    for node_id, route_metadata in overrides.items():
+        assert set(route_metadata) <= allowed_route_keys, node_id
+        assert not any(callable(value) for value in route_metadata.values())

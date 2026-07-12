@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
+import hashlib
 import json
 import logging
 import os
@@ -14,17 +15,29 @@ import shutil
 import subprocess
 from host_brain.core.subprocess_utils import run as _subprocess_run
 import threading
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import urljoin, urlparse
 
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.browser_researcher import execute_browser_research_work_order
-from host_brain.agent_runtime.executor import AgentRuntimeExecutor
-from host_brain.agent_runtime.lightnovel_epub_builder import execute_lightnovel_epub_work_order
-from host_brain.agent_runtime.production_studio import build_persona_boundary_contract
+from host_brain.agent_runtime.production_studio import (
+    AGENT_PRODUCTION_SKILL_IDS,
+    build_persona_boundary_contract,
+)
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.capability_plane.broker import (
+    CapabilityBroker,
+    CapabilityDescriptor,
+    CapabilityInvocationError,
+)
+from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
+from host_brain.capability_plane.policies import PredicateCapabilityPolicy
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.domain_packs.production_composition import (
+    ProductionDomainPackRuntime,
+    build_production_domain_pack_runtime,
+)
+from host_brain.domain_packs.registry import DomainPackResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -423,31 +436,20 @@ def _purchase_confirmation_missing(order: AgentWorkOrder) -> bool:
 
 
 def _queued_detail(*, order: AgentWorkOrder, blocked_until_confirmation: bool, start_background: bool) -> str:
-    skill_id = str(order.metadata.get("skill_id") or "").strip()
-    if skill_id == "agent_epub_builder" and blocked_until_confirmation:
-        return "Agent EPUB purchase plan queued; waiting for explicit purchase confirmation before starting worker."
+    if blocked_until_confirmation:
+        return "Agent production plan queued; waiting for explicit confirmation before starting worker."
     if start_background:
         return "Agent production worker queued."
     return "Agent production worker queued without background start."
 
 
 def _queued_result_text(*, order: AgentWorkOrder, blocked_until_confirmation: bool, start_background: bool) -> str:
-    skill_id = str(order.metadata.get("skill_id") or "").strip()
-    if skill_id == "agent_epub_builder":
-        if blocked_until_confirmation:
-            return (
-                "需要登录，但不要把账号、密码、验证码或 Cookie 发到聊天里。"
-                "已创建 EPUB 购买计划任务；在你通过本地浏览器完成登录会话交接，并明确确认书名、链接和最高积分前，"
-                "后台 worker 不会启动，也不会点击购买或消耗积分。"
-            )
+    if blocked_until_confirmation:
         return (
-            "已创建 EPUB 封装任务。它只会使用你的本地已登录浏览器会话或授权内容，"
-            "不会要求你把明文账号密码发到聊天里。"
+            "需要本地授权时，不要把账号、密码、验证码或 Cookie 发到聊天里。"
+            "已创建需要确认的生产任务；在完成本地会话交接并明确确认操作范围前，"
+            "后台 worker 不会启动，也不会点击购买或消耗积分。"
         )
-    if skill_id == "agent_lightnovel_recommender":
-        return "已创建轻小说推荐任务，只采集多个公开榜单/最新资源的标题、封面、简介和来源，不读取付费正文。"
-    if skill_id == "browser_research":
-        return "已创建网页资料研究任务，只读取公开网页或你提供的本地材料；完成后会生成来源明确的研究简报。"
     if start_background:
         return "已创建后台生产技能任务，结果会通过主链重新整理后再给用户。"
     return "已创建生产技能任务，当前仅排队落盘，未启动后台 worker。"
@@ -4197,25 +4199,430 @@ def _maybe_push_lightnovel_epub_to_gateway(
         )
         return failure
 
+_PRODUCTION_CAPABILITY_BROKER: CapabilityBroker | None = None
+_PRODUCTION_CAPABILITY_BROKER_LOCK = threading.Lock()
+_PRODUCTION_DOMAIN_PACK_RUNTIME: ProductionDomainPackRuntime | None = None
+# Tests may inject a repository-backed verifier. Production always performs
+# the durable command/attempt/grant lookup below.
+_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE: Callable[[Mapping[str, str], AgentWorkOrder], str | None] | None = None
+
+
+def _verify_durable_production_authority(
+    authority: Mapping[str, str],
+    order: AgentWorkOrder,
+) -> str | None:
+    """Re-resolve the Host command, running Task attempt and Governor grant."""
+
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+        from host_brain.persistence.host_command_repository import HostCommandRepository  # noqa: PLC0415
+        from host_brain.persistence.task_repository import DurableTaskStore  # noqa: PLC0415
+
+        ledger = get_ledger()
+        db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
+        if not db_path or db_path == ":memory:":
+            return "AGENT_PRODUCTION_DURABLE_AUTHORITY_UNAVAILABLE"
+        command = HostCommandRepository(db_path).get(str(authority.get("command_id") or ""))
+        if command is None:
+            return "AGENT_PRODUCTION_DURABLE_COMMAND_MISSING"
+        expected_request_id = str(order.metadata.get("request_id") or order.work_order_id).strip()
+        expected_target_id = str(order.metadata.get("skill_id") or "").strip()
+        if (
+            str(command.get("request_id") or "") != expected_request_id
+            or str(command.get("request_id") or "") != str(authority.get("request_id") or "")
+            or str(command.get("principal_id") or "") != str(authority.get("principal_id") or "")
+            or str(command.get("target_id") or "") != expected_target_id
+            or str(command.get("target_id") or "") != str(authority.get("target_id") or "")
+            or str(command.get("root_work_order_id") or "") != order.work_order_id
+            or str(command.get("root_work_order_id") or "")
+            != str(authority.get("work_order_id") or "")
+            or str(command.get("graph_id") or "") != str(authority.get("graph_id") or "")
+            or int(command.get("graph_revision") or 0)
+            != int(authority.get("graph_revision") or 0)
+            or str(command.get("route_type") or "").strip().lower() != "skill"
+        ):
+            return "AGENT_PRODUCTION_DURABLE_COMMAND_BINDING_MISMATCH"
+        task_store = DurableTaskStore(db_path)
+        attempt = task_store.get_attempt(str(authority.get("attempt_id") or ""))
+        if (
+            str(attempt.get("graph_id") or "") != str(authority.get("graph_id") or "")
+            or int(attempt.get("graph_revision") or 0)
+            != int(authority.get("graph_revision") or 0)
+            or str(attempt.get("node_id") or "") != str(authority.get("node_id") or "")
+            or str(attempt.get("status") or "").strip().upper() != "RUNNING"
+        ):
+            return "AGENT_PRODUCTION_DURABLE_ATTEMPT_BINDING_MISMATCH"
+        node = task_store.get_node(
+            str(authority.get("graph_id") or ""),
+            int(authority.get("graph_revision") or 0),
+            str(authority.get("node_id") or ""),
+        )
+        if (
+            str(node.get("graph_id") or "") != str(authority.get("graph_id") or "")
+            or int(node.get("graph_revision") or 0)
+            != int(authority.get("graph_revision") or 0)
+            or str(node.get("node_id") or "") != str(authority.get("node_id") or "")
+            or str(node.get("status") or "").strip().upper() != "RUNNING"
+        ):
+            return "AGENT_PRODUCTION_DURABLE_NODE_BINDING_MISMATCH"
+        lease = task_store.get_active_lease(str(authority.get("attempt_id") or ""))
+        if (
+            not isinstance(lease, Mapping)
+            or str(lease.get("lease_id") or "") != str(authority.get("lease_id") or "")
+            or str(lease.get("attempt_id") or "") != str(authority.get("attempt_id") or "")
+            or int(lease.get("fencing_token") or 0)
+            != int(authority.get("fencing_token") or 0)
+            or str(lease.get("status") or "").strip().upper() != "ACTIVE"
+            or int(lease.get("expires_ts_ms") or 0) <= now_ms()
+        ):
+            return "AGENT_PRODUCTION_DURABLE_LEASE_BINDING_MISMATCH"
+        DurableGovernorGrantResolver(ledger).require(
+            request_id=expected_request_id,
+            expected_ref=str(command.get("governor_grant_ref") or "").strip(),
+        )
+    except Exception:
+        return "AGENT_PRODUCTION_DURABLE_AUTHORITY_INVALID"
+    return None
+
+
+def _production_policy(request: CapabilityRequest, _descriptor: CapabilityDescriptor) -> tuple[bool, str, str]:
+    try:
+        order = AgentWorkOrder.from_mapping(dict(request.args.get("work_order") or {}))
+        order.validate()
+        _validate_production_boundary(order)
+    except Exception as exc:
+        return False, f"AGENT_PRODUCTION_POLICY_INVALID:{type(exc).__name__}", ""
+    skill_id = str(order.metadata.get("skill_id") or "").strip()
+    if skill_id != request.capability_id or skill_id not in AGENT_PRODUCTION_SKILL_IDS:
+        return False, "AGENT_PRODUCTION_CAPABILITY_UNKNOWN", ""
+    authority = dict(request.context.get("governed_execution") or {})
+    if not authority:
+        return False, "AGENT_PRODUCTION_GOVERNOR_GRANT_MISSING", ""
+    if (
+        str(authority.get("execution_mode") or "").strip() != GOVERNED_PRODUCTION_EXECUTION_MODE
+        or not str(authority.get("command_id") or "").strip()
+        or not str(authority.get("attempt_id") or "").strip()
+        or not str(authority.get("request_id") or "").strip()
+        or not str(authority.get("principal_id") or "").strip()
+        or not str(authority.get("target_id") or "").strip()
+        or not str(authority.get("work_order_id") or "").strip()
+        or not str(authority.get("graph_id") or "").strip()
+        or int(authority.get("graph_revision") or 0) < 1
+        or not str(authority.get("node_id") or "").strip()
+        or not str(authority.get("lease_id") or "").strip()
+        or int(authority.get("fencing_token") or 0) < 1
+    ):
+        return False, "AGENT_PRODUCTION_GRANT_BINDING_INVALID", ""
+    expected_request_id = str(order.metadata.get("request_id") or order.work_order_id).strip()
+    if (
+        str(authority.get("request_id") or "").strip() != expected_request_id
+        or str(authority.get("target_id") or "").strip() != skill_id
+    ):
+        return False, "AGENT_PRODUCTION_GRANT_IDENTITY_MISMATCH", ""
+    verifier = _PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE or _verify_durable_production_authority
+    durable_error = verifier(authority, order)
+    if durable_error is not None:
+        return False, durable_error, ""
+    # These IDs are created by the durable AW02 Task Runtime only after its
+    # Governor grant has been resolved. They bind this child capability grant
+    # to that exact command attempt; the broker cannot self-authorize it.
+    authority_ref = f"{authority['command_id']}#{authority['attempt_id']}"
+    if _purchase_confirmation_missing(order):
+        return False, "AGENT_PRODUCTION_CONFIRMATION_REQUIRED", ""
+    return True, "AGENT_PRODUCTION_CAPABILITY_APPROVED", authority_ref
+
+
+def _production_adapter(request: CapabilityRequest, grant: Any) -> dict[str, Any]:
+    try:
+        return _get_production_domain_pack_runtime().dispatch(
+            request=request,
+            grant=grant,
+        )
+    except DomainPackResolutionError as exc:
+        raise CapabilityInvocationError(exc.reason_code, str(exc)) from exc
+
+
+def _get_production_domain_pack_runtime() -> ProductionDomainPackRuntime:
+    global _PRODUCTION_DOMAIN_PACK_RUNTIME
+    if _PRODUCTION_DOMAIN_PACK_RUNTIME is not None:
+        return _PRODUCTION_DOMAIN_PACK_RUNTIME
+    with _PRODUCTION_CAPABILITY_BROKER_LOCK:
+        if _PRODUCTION_DOMAIN_PACK_RUNTIME is None:
+            if _PRODUCTION_CAPABILITY_BROKER is None:
+                raise RuntimeError("production CapabilityBroker is not composed")
+            _PRODUCTION_DOMAIN_PACK_RUNTIME = build_production_domain_pack_runtime(
+                capability_broker=_PRODUCTION_CAPABILITY_BROKER,
+                lightnovel_recommender_handler_provider=(
+                    lambda: execute_lightnovel_recommender_work_order
+                ),
+                lifecycle_task_handlers={
+                    "research.browser.gateway_delivery": _run_browser_research_delivery_stage,
+                    "media.lightnovel_recommender.postprocess": _run_lightnovel_postprocess_stage,
+                    "media.lightnovel_recommender.recover": _run_lightnovel_recovery_stage,
+                    "media.lightnovel_recommender.gateway_delivery": _run_lightnovel_delivery_stage,
+                    "media.epub_builder.gateway_delivery": _run_epub_delivery_stage,
+                },
+            )
+    return _PRODUCTION_DOMAIN_PACK_RUNTIME
+
+
+def _get_production_capability_broker() -> CapabilityBroker:
+    global _PRODUCTION_CAPABILITY_BROKER
+    if _PRODUCTION_CAPABILITY_BROKER is not None:
+        return _PRODUCTION_CAPABILITY_BROKER
+    with _PRODUCTION_CAPABILITY_BROKER_LOCK:
+        if _PRODUCTION_CAPABILITY_BROKER is None:
+            from host_brain.app.dependencies import get_capability_execution_journal  # noqa: PLC0415
+
+            broker = CapabilityBroker(
+                policy=PredicateCapabilityPolicy(_production_policy),
+                execution_journal=get_capability_execution_journal(),
+            )
+            for skill_id in sorted(AGENT_PRODUCTION_SKILL_IDS):
+                broker.register(CapabilityDescriptor(
+                    capability_id=skill_id,
+                    kind=CapabilityKind.DOMAIN,
+                    version="1",
+                    risk_level=5,
+                    adapter=_production_adapter,
+                ))
+            _PRODUCTION_CAPABILITY_BROKER = broker
+    return _PRODUCTION_CAPABILITY_BROKER
+
+
 def _execute_worker(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path) -> dict[str, Any]:
     skill_id = str(order.metadata.get("skill_id") or "").strip()
-    if skill_id == "browser_research":
-        return execute_browser_research_work_order(order, run_dir=run_dir)
-    if skill_id == "agent_lightnovel_recommender":
-        try:
-            return execute_lightnovel_recommender_work_order(order, run_dir=run_dir)
-        finally:
-            if _parse_bool_env("HOST_LIGHTNOVEL_RECOMMENDER_BROWSER_CLOSE_AFTER_RUN", default=False):
-                try:
-                    from host_brain.agent_runtime.browser_automation_service import get_browser_automation_service  # noqa: PLC0415
+    authority = dict(order.metadata.get("_capability_authority") or {})
+    request = CapabilityRequest(
+        request_id=str(order.metadata.get("request_id") or order.work_order_id),
+        attempt_id=str(authority.get("attempt_id") or f"production:{order.work_order_id}"),
+        # Replay is stable within one governed Task attempt, while a new
+        # command/attempt may deliberately retry a previously failed order.
+        idempotency_key=(
+            "agent-production::"
+            f"{str(authority.get('command_id') or 'missing-command')}::"
+            f"{str(authority.get('attempt_id') or 'missing-attempt')}::"
+            f"{order.work_order_id}::{skill_id}"
+        ),
+        capability_id=skill_id or "unknown",
+        kind=CapabilityKind.DOMAIN,
+        args={
+            "work_order": order.to_dict(),
+            "artifacts_root": str(store.runs_root),
+            "run_dir": str(run_dir),
+        },
+        context={"governed_execution": authority},
+        created_at_ms=now_ms(),
+    )
+    receipt = _get_production_capability_broker().execute(request)
+    if not receipt.success:
+        return {
+            "status": "FAILED",
+            "success": False,
+            "reason_code": receipt.reason_code or "AGENT_PRODUCTION_CAPABILITY_REJECTED",
+            "detail": receipt.detail,
+            "capability_receipt": receipt.to_dict(),
+        }
+    output = dict(receipt.output) if isinstance(receipt.output, Mapping) else {"status": "EXECUTED", "output": receipt.output}
+    output["capability_receipt"] = receipt.to_dict()
+    return output
 
-                    get_browser_automation_service(session_id="natsume_lightnovel").close(target="browser")
-                except Exception as exc:
-                    logger.debug("lightnovel recommender browser close skipped: %s", exc)
-    if skill_id == "agent_epub_builder":
-        return execute_lightnovel_epub_work_order(order, run_dir=run_dir)
-    result = AgentRuntimeExecutor(artifact_store=store).execute(order)
+
+def _decode_lifecycle_task(payload: Mapping[str, Any]) -> tuple[str, AgentWorkOrder, dict[str, Any], Path]:
+    order = AgentWorkOrder.from_mapping(dict(payload.get("work_order") or {}))
+    run_dir = Path(str(payload.get("run_dir") or "")).expanduser()
+    if not str(payload.get("run_dir") or "").strip():
+        raise ValueError("production lifecycle task requires run_dir")
+    result_ref = Path(str(payload.get("result_ref") or run_dir / "result.json")).expanduser()
+    result = _read_json_file(result_ref)
+    if not isinstance(result, Mapping):
+        raise ValueError("production lifecycle task requires a persisted result")
+    job_id = str(payload.get("job_id") or "").strip()
+    if not job_id:
+        raise ValueError("production lifecycle task requires job_id")
+    return job_id, order, dict(result), run_dir
+
+
+def _run_browser_research_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    job_id, order, result, run_dir = _decode_lifecycle_task(payload)
+    output = _maybe_push_browser_research_to_gateway(
+        job_id=job_id,
+        order=order,
+        result=result,
+        run_dir=run_dir,
+    )
+    return _require_delivery_stage_outcome(output)
+
+
+def _run_lightnovel_postprocess_stage(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _job_id, order, result, run_dir = _decode_lifecycle_task(payload)
     return _recover_lightnovel_recommender_result(order=order, result=result, run_dir=run_dir)
+
+
+def _run_lightnovel_recovery_stage(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return _run_lightnovel_postprocess_stage(payload)
+
+
+def _run_lightnovel_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    job_id, order, result, run_dir = _decode_lifecycle_task(payload)
+    output = _maybe_push_lightnovel_recommendations_to_gateway(
+        job_id=job_id,
+        order=order,
+        result=result,
+        run_dir=run_dir,
+    )
+    return _require_delivery_stage_outcome(output)
+
+
+def _run_epub_delivery_stage(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    job_id, order, result, run_dir = _decode_lifecycle_task(payload)
+    output = _maybe_push_lightnovel_epub_to_gateway(
+        job_id=job_id,
+        order=order,
+        result=result,
+        run_dir=run_dir,
+    )
+    return _require_delivery_stage_outcome(output)
+
+
+def _require_delivery_stage_outcome(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    if isinstance(output, Mapping) and output.get("success") is False:
+        raise CapabilityInvocationError(
+            str(output.get("reason_code") or "AGENT_PRODUCTION_DELIVERY_FAILED"),
+            str(output.get("detail") or "user-visible delivery failed"),
+        )
+    return output
+
+
+def _stable_lifecycle_identity(
+    *,
+    order: AgentWorkOrder,
+    stage_id: str,
+    phase: str,
+) -> tuple[str, str | None]:
+    root_request_id = str(order.metadata.get("request_id") or order.work_order_id).strip()
+    encoded = "\x1f".join(
+        (root_request_id, order.work_order_id, str(order.metadata.get("skill_id") or ""), phase, stage_id)
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    if phase == "delivery":
+        delivery_id = f"delivery://agent-production/{digest}"
+        return delivery_id, delivery_id
+    return f"production-stage://{digest}", None
+
+
+def _execute_lifecycle_stage(
+    *,
+    job_id: str,
+    order: AgentWorkOrder,
+    store: AgentArtifactStore,
+    run_dir: Path,
+    stage: Any,
+) -> tuple[Any, str | None]:
+    stage_id = str(stage.stage_id)
+    phase = str(stage.phase)
+    request_id, delivery_id = _stable_lifecycle_identity(
+        order=order,
+        stage_id=stage_id,
+        phase=phase,
+    )
+    authority = dict(order.metadata.get("_capability_authority") or {})
+    lifecycle_binding = {
+        "stage_id": stage_id,
+        "phase": phase,
+        "task_id": str(stage.task_id),
+        "delivery_id": delivery_id,
+    }
+    stable_run_dir = run_dir.resolve()
+    stable_artifacts_root = Path(store.runs_root).resolve()
+    request = CapabilityRequest(
+        request_id=request_id,
+        attempt_id=f"production-stage-attempt:{request_id.rsplit('/', 1)[-1]}",
+        idempotency_key=f"agent-production-stage::{request_id}",
+        capability_id=str(order.metadata.get("skill_id") or "unknown").strip(),
+        kind=CapabilityKind.DOMAIN,
+        args={
+            "work_order": order.to_dict(),
+            "artifacts_root": str(stable_artifacts_root),
+            "run_dir": str(stable_run_dir),
+            "result_ref": str(stable_run_dir / "result.json"),
+            "job_id": job_id,
+            "lifecycle_stage": lifecycle_binding,
+        },
+        context={
+            "governed_execution": authority,
+            "lifecycle_stage": lifecycle_binding,
+        },
+        created_at_ms=now_ms(),
+    )
+    return _get_production_capability_broker().execute(request), delivery_id
+
+
+def _run_declared_lifecycle_phase(
+    *,
+    phase: str,
+    job_id: str,
+    order: AgentWorkOrder,
+    store: AgentArtifactStore,
+    run_dir: Path,
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    current = dict(result)
+    skill_id = str(order.metadata.get("skill_id") or "").strip()
+    _get_production_capability_broker()
+    resolution = _get_production_domain_pack_runtime().registry.resolve(skill_id)
+    stages = tuple(stage for stage in resolution.lifecycle_stages if str(stage.phase) == phase)
+    for stage in stages:
+        store.write_json(run_dir / "result.json", current)
+        receipt, delivery_id = _execute_lifecycle_stage(
+            job_id=job_id,
+            order=order,
+            store=store,
+            run_dir=run_dir,
+            stage=stage,
+        )
+        receipts = dict(current.get("lifecycle_receipts") or {})
+        receipts[str(stage.stage_id)] = receipt.to_dict()
+        if not receipt.success:
+            risk_flags = list(dict.fromkeys([
+                *(str(flag) for flag in current.get("risk_flags", []) if str(flag).strip()),
+                f"lifecycle_stage_failed:{stage.stage_id}",
+            ]))
+            current["risk_flags"] = risk_flags
+            current["lifecycle_receipts"] = receipts
+            if bool(stage.required):
+                current.update({
+                    "status": "FAILED",
+                    "success": False,
+                    "reason_code": receipt.reason_code or "AGENT_PRODUCTION_STAGE_FAILED",
+                    "detail": receipt.detail,
+                })
+                break
+            continue
+
+        output = receipt.output
+        if phase in {"postprocess", "recovery"} and isinstance(output, Mapping):
+            current = dict(output)
+        current["lifecycle_receipts"] = receipts
+        if phase == "delivery":
+            delivery_record = (
+                dict(output)
+                if isinstance(output, Mapping)
+                else {"status": "SKIPPED", "success": False, "output": output}
+            )
+            delivery_record.update({
+                "delivery_id": delivery_id,
+                "request_id": receipt.request_id,
+                "capability_receipt": receipt.to_dict(),
+            })
+            deliveries = dict(current.get("deliveries") or {})
+            deliveries[str(stage.stage_id)] = delivery_record
+            current["deliveries"] = deliveries
+            if bool(stage.user_visible) and output is not None:
+                current["gateway_delivery"] = delivery_record
+        store.write_json(run_dir / "result.json", current)
+    return current
 
 
 def _run_background_job(
@@ -4235,9 +4642,29 @@ def _run_background_job(
     try:
         result = _execute_worker(order, store=store, run_dir=run_dir)
         store.write_json(run_dir / "result.json", result)
-        result = _recover_lightnovel_recommender_result(order=order, result=result, run_dir=run_dir)
+        result = _run_declared_lifecycle_phase(
+            phase="postprocess",
+            job_id=job_id,
+            order=order,
+            store=store,
+            run_dir=run_dir,
+            result=result,
+        )
         store.write_json(run_dir / "result.json", result)
         final_status = STATUS_COMPLETED if str(result.get("status") or "").upper() == "EXECUTED" else STATUS_FAILED
+        if final_status == STATUS_COMPLETED:
+            # Seal every user-visible delivery receipt before projecting the
+            # job as completed. A process crash leaves the durable job RUNNING,
+            # so generic recovery replays the receipt instead of re-sending.
+            result = _run_declared_lifecycle_phase(
+                phase="delivery",
+                job_id=job_id,
+                order=order,
+                store=store,
+                result=result,
+                run_dir=run_dir,
+            )
+            store.write_json(run_dir / "result.json", result)
         detail = str(result.get("summary") or "Agent production worker finished.")
         completed = _set_job(
             job_id,
@@ -4275,36 +4702,6 @@ def _run_background_job(
             ).to_dict(),
         )
         _persist_production_job_memory(job=completed, order=order, result=result)
-        gateway_delivery = _maybe_push_browser_research_to_gateway(
-            job_id=job_id,
-            order=order,
-            result=result,
-            run_dir=run_dir,
-        )
-        if gateway_delivery is None:
-            gateway_delivery = _maybe_push_lightnovel_recommendations_to_gateway(
-                job_id=job_id,
-                order=order,
-                result=result,
-                run_dir=run_dir,
-            )
-        if gateway_delivery is None:
-            gateway_delivery = _maybe_push_lightnovel_epub_to_gateway(
-                job_id=job_id,
-                order=order,
-                result=result,
-                run_dir=run_dir,
-            )
-        if gateway_delivery is not None:
-            updated_result = dict(result)
-            updated_result["gateway_delivery"] = gateway_delivery
-            delivered = _set_job(job_id, result=updated_result)
-            if delivered is None:
-                completed.result = updated_result
-                completed.updated_ts_ms = now_ms()
-                delivered = completed
-            _persist_job(store, run_dir, delivered)
-            store.write_json(run_dir / "result.json", updated_result)
     except Exception as exc:  # pragma: no cover - defensive background guard
         failed = _set_job(
             job_id,
@@ -4339,26 +4736,30 @@ def _start_background_job(
     thread.start()
 
 
-def recover_interrupted_lightnovel_recommendation_jobs(
+def recover_interrupted_production_jobs(
     *,
-    artifacts_root: str | Path | None = None,
+    artifacts_root: str | Path,
     limit: int = 3,
     max_age_hours: int = 72,
-    push_gateway: bool = True,
+    push_deliveries: bool = True,
+    skill_ids: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
-    root_value = str(
-        artifacts_root
-        or os.environ.get("HOST_LIGHTNOVEL_RECOMMENDER_ARTIFACTS_ROOT")
-        or "artifacts/codex_runs/lightnovel_recommender"
-    ).strip()
+    root_value = str(artifacts_root or "").strip()
     if not root_value:
-        return {"status": "SKIPPED", "reason_code": "LIGHTNOVEL_RECOVERY_ROOT_MISSING", "recovered": 0}
+        return {"status": "SKIPPED", "reason_code": "PRODUCTION_RECOVERY_ROOT_MISSING", "recovered": 0}
     root = Path(root_value).expanduser()
     if not root.is_absolute():
         root = Path.cwd() / root
     if not root.exists() or not root.is_dir():
-        return {"status": "SKIPPED", "reason_code": "LIGHTNOVEL_RECOVERY_ROOT_NOT_FOUND", "root": str(root), "recovered": 0}
+        return {
+            "status": "SKIPPED",
+            "reason_code": "PRODUCTION_RECOVERY_ROOT_NOT_FOUND",
+            "root": str(root),
+            "recovered": 0,
+        }
 
+    selected_skill_ids = frozenset(str(item or "").strip() for item in (skill_ids or ()) if str(item or "").strip())
+    store = AgentArtifactStore(root)
     now_value = now_ms()
     max_age_ms = max(1, int(max_age_hours)) * 60 * 60 * 1000
     job_paths = sorted(
@@ -4377,7 +4778,7 @@ def recover_interrupted_lightnovel_recommendation_jobs(
         if not isinstance(job_payload, Mapping):
             continue
         skill_id = str(job_payload.get("skill_id") or "").strip()
-        if skill_id != "agent_lightnovel_recommender":
+        if selected_skill_ids and skill_id not in selected_skill_ids:
             continue
         status = str(job_payload.get("status") or "").strip().upper()
         if status not in {STATUS_QUEUED, STATUS_RUNNING, "RECOVERING"}:
@@ -4389,31 +4790,37 @@ def recover_interrupted_lightnovel_recommendation_jobs(
         work_order_payload = _read_json_file(run_dir / "work_order.json")
         if not isinstance(result_payload, Mapping) or not isinstance(work_order_payload, Mapping):
             continue
-        if isinstance(result_payload.get("gateway_delivery"), Mapping) and bool(result_payload["gateway_delivery"].get("success")):
-            continue
 
         scanned_count += 1
         try:
             order = AgentWorkOrder.from_mapping(dict(work_order_payload))
-            recovered_result = _recover_lightnovel_recommender_result(
-                order=order,
-                result=result_payload,
-                run_dir=run_dir,
-            )
-            final_status = STATUS_COMPLETED if str(recovered_result.get("status") or "").upper() == "EXECUTED" else STATUS_FAILED
-            detail = str(recovered_result.get("summary") or "Recovered interrupted lightnovel recommendation job.")
             job_id = str(job_payload.get("job_id") or f"agent_job_recovered_{new_event_id()}").strip()
-            gateway_delivery = None
-            if push_gateway and final_status == STATUS_COMPLETED:
-                gateway_delivery = _maybe_push_lightnovel_recommendations_to_gateway(
+            recovered_result = _run_declared_lifecycle_phase(
+                phase="recovery",
+                job_id=job_id,
+                order=order,
+                store=store,
+                run_dir=run_dir,
+                result=result_payload,
+            )
+            final_status = (
+                STATUS_COMPLETED
+                if str(recovered_result.get("status") or "").upper() == "EXECUTED"
+                else STATUS_FAILED
+            )
+            if push_deliveries and final_status == STATUS_COMPLETED:
+                recovered_result = _run_declared_lifecycle_phase(
+                    phase="delivery",
                     job_id=job_id,
                     order=order,
-                    result=recovered_result,
+                    store=store,
                     run_dir=run_dir,
+                    result=recovered_result,
                 )
-                if gateway_delivery is not None:
-                    recovered_result = dict(recovered_result)
-                    recovered_result["gateway_delivery"] = gateway_delivery
+            detail = str(
+                recovered_result.get("summary")
+                or "Recovered interrupted Agent production job through declared Pack stages."
+            )
             recovered_job = AgentProductionJob(
                 job_id=job_id,
                 work_order_id=str(job_payload.get("work_order_id") or order.work_order_id),
@@ -4421,54 +4828,56 @@ def recover_interrupted_lightnovel_recommendation_jobs(
                 status=final_status,
                 artifacts_dir=str(run_dir),
                 result_contract_ref=str(run_dir / "result_contract.json"),
-                request_id=str(job_payload.get("request_id") or order.metadata.get("request_id") or "").strip() or None,
+                request_id=str(
+                    job_payload.get("request_id")
+                    or order.metadata.get("request_id")
+                    or ""
+                ).strip() or None,
                 detail=detail,
                 result=dict(recovered_result),
-                error=None if final_status == STATUS_COMPLETED else str(recovered_result.get("detail") or recovered_result.get("reason_code") or ""),
+                error=(
+                    None
+                    if final_status == STATUS_COMPLETED
+                    else str(recovered_result.get("detail") or recovered_result.get("reason_code") or "")
+                ),
                 created_ts_ms=int(job_payload.get("created_ts_ms") or now_value),
                 updated_ts_ms=now_ms(),
                 finished_ts_ms=now_ms(),
             )
             with _JOBS_LOCK:
                 _JOBS[job_id] = recovered_job
-            job_path.write_text(json.dumps(recovered_job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-            (run_dir / "result.json").write_text(json.dumps(recovered_result, ensure_ascii=False, indent=2), encoding="utf-8")
-            (run_dir / "result_contract.json").write_text(
-                json.dumps(
-                    _result_contract(
-                        status="EXECUTED" if final_status == STATUS_COMPLETED else "DEGRADED",
-                        order=order,
-                        run_dir=run_dir,
-                        detail=detail,
-                        error=recovered_job.error,
-                        result=recovered_result,
-                    ).to_dict(),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            _persist_job(store, run_dir, recovered_job)
+            store.write_json(run_dir / "result.json", recovered_result)
+            store.write_json(
+                run_dir / "result_contract.json",
+                _result_contract(
+                    status="EXECUTED" if final_status == STATUS_COMPLETED else "DEGRADED",
+                    order=order,
+                    run_dir=run_dir,
+                    detail=detail,
+                    error=recovered_job.error,
+                    result=recovered_result,
+                ).to_dict(),
             )
             _persist_production_job_memory(job=recovered_job, order=order, result=recovered_result)
             recovered_count += 1
-            results.append(
-                {
-                    "job_id": job_id,
-                    "work_order_id": order.work_order_id,
-                    "status": final_status,
-                    "gateway_delivery": gateway_delivery,
-                    "artifacts_dir": str(run_dir),
-                }
-            )
+            results.append({
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "skill_id": skill_id,
+                "status": final_status,
+                "deliveries": dict(recovered_result.get("deliveries") or {}),
+                "artifacts_dir": str(run_dir),
+            })
         except Exception as exc:
-            results.append(
-                {
-                    "job_id": str(job_payload.get("job_id") or ""),
-                    "status": "FAILED",
-                    "reason_code": "LIGHTNOVEL_INTERRUPTED_JOB_RECOVERY_FAILED",
-                    "detail": str(exc)[:240],
-                    "artifacts_dir": str(run_dir),
-                }
-            )
+            results.append({
+                "job_id": str(job_payload.get("job_id") or ""),
+                "skill_id": skill_id,
+                "status": "FAILED",
+                "reason_code": "PRODUCTION_INTERRUPTED_JOB_RECOVERY_FAILED",
+                "detail": str(exc)[:240],
+                "artifacts_dir": str(run_dir),
+            })
     return {
         "status": "OK",
         "root": str(root),
@@ -4476,6 +4885,34 @@ def recover_interrupted_lightnovel_recommendation_jobs(
         "recovered": recovered_count,
         "results": results,
     }
+
+
+def recover_interrupted_lightnovel_recommendation_jobs(
+    *,
+    artifacts_root: str | Path | None = None,
+    limit: int = 3,
+    max_age_hours: int = 72,
+    push_gateway: bool = True,
+) -> dict[str, Any]:
+    """Compatibility entry point; recovery authority is the generic Pack lifecycle."""
+
+    root_value = str(
+        artifacts_root
+        or os.environ.get("HOST_LIGHTNOVEL_RECOMMENDER_ARTIFACTS_ROOT")
+        or "artifacts/codex_runs/lightnovel_recommender"
+    ).strip()
+    result = recover_interrupted_production_jobs(
+        artifacts_root=root_value,
+        limit=limit,
+        max_age_hours=max_age_hours,
+        push_deliveries=push_gateway,
+        skill_ids={"agent_lightnovel_recommender"},
+    )
+    reason_code = str(result.get("reason_code") or "")
+    if reason_code.startswith("PRODUCTION_RECOVERY_ROOT_"):
+        result = dict(result)
+        result["reason_code"] = reason_code.replace("PRODUCTION_", "LIGHTNOVEL_", 1)
+    return result
 
 
 def execute_agent_production_payload(
@@ -4495,6 +4932,15 @@ def execute_agent_production_payload(
         != GOVERNED_PRODUCTION_EXECUTION_MODE
         or not str(governed_context.get("command_id") or "").strip()
         or not str(governed_context.get("attempt_id") or "").strip()
+        or not str(governed_context.get("request_id") or "").strip()
+        or not str(governed_context.get("principal_id") or "").strip()
+        or not str(governed_context.get("target_id") or "").strip()
+        or not str(governed_context.get("work_order_id") or "").strip()
+        or not str(governed_context.get("graph_id") or "").strip()
+        or int(governed_context.get("graph_revision") or 0) < 1
+        or not str(governed_context.get("node_id") or "").strip()
+        or not str(governed_context.get("lease_id") or "").strip()
+        or int(governed_context.get("fencing_token") or 0) < 1
     ):
         return {
             "status": "FAILED",
@@ -4508,6 +4954,23 @@ def execute_agent_production_payload(
             "reason_code": "AGENT_PRODUCTION_WORKORDER_REQUIRED",
             "detail": "payload.work_order is required",
         }
+    if governed_context is not None:
+        raw_metadata = dict(raw_order.get("metadata") or {})
+        expected_request_id = str(
+            raw_metadata.get("request_id") or raw_order.get("work_order_id") or ""
+        ).strip()
+        expected_target_id = str(raw_metadata.get("skill_id") or "").strip()
+        if (
+            str(governed_context.get("request_id") or "").strip() != expected_request_id
+            or str(governed_context.get("target_id") or "").strip() != expected_target_id
+            or str(governed_context.get("work_order_id") or "").strip()
+            != str(raw_order.get("work_order_id") or "").strip()
+        ):
+            return {
+                "status": "FAILED",
+                "reason_code": "AGENT_PRODUCTION_GOVERNED_CONTEXT_BINDING_INVALID",
+                "detail": "governed request/target identity does not match the WorkOrder",
+            }
 
     artifacts_root = str(
         data.get("artifacts_root")
@@ -4517,6 +4980,23 @@ def execute_agent_production_payload(
     ).strip()
     store = AgentArtifactStore(artifacts_root or None)
     order = AgentWorkOrder.from_mapping(raw_order)
+    if governed_context is not None:
+        # Bind the downstream broker request to the already-governed Task
+        # Runtime attempt without handing the adapter a reusable token.
+        order.metadata["_capability_authority"] = {
+            "execution_mode": str(governed_context.get("execution_mode") or ""),
+            "command_id": str(governed_context.get("command_id") or ""),
+            "attempt_id": str(governed_context.get("attempt_id") or ""),
+            "request_id": str(governed_context.get("request_id") or ""),
+            "principal_id": str(governed_context.get("principal_id") or ""),
+            "target_id": str(governed_context.get("target_id") or ""),
+            "work_order_id": str(governed_context.get("work_order_id") or ""),
+            "graph_id": str(governed_context.get("graph_id") or ""),
+            "graph_revision": int(governed_context.get("graph_revision") or 0),
+            "node_id": str(governed_context.get("node_id") or ""),
+            "lease_id": str(governed_context.get("lease_id") or ""),
+            "fencing_token": int(governed_context.get("fencing_token") or 0),
+        }
     run_dir = store.prepare_run_dir(order.work_order_id)
     try:
         order.validate()
@@ -4698,5 +5178,6 @@ __all__ = [
     "execute_agent_production_payload",
     "get_agent_production_job",
     "list_agent_production_jobs",
+    "recover_interrupted_production_jobs",
     "recover_interrupted_lightnovel_recommendation_jobs",
 ]

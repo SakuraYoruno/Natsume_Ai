@@ -70,6 +70,17 @@ class EdgeRpcCallResult:
         }
 
 
+def _from_embodiment_receipt(receipt: Any) -> EdgeRpcCallResult:
+    return EdgeRpcCallResult(
+        success=bool(getattr(receipt, "success", False)),
+        status=str(getattr(receipt, "status", "REJECTED")),
+        reason_code=getattr(receipt, "reason_code", None),
+        detail=str(getattr(receipt, "detail", "")),
+        event=dict(getattr(receipt, "event", None) or {}),
+        latency_ms=int(getattr(receipt, "latency_ms", 0) or 0),
+    )
+
+
 def _edge_degradation_rejection(
     *,
     capability_id: str,
@@ -921,11 +932,18 @@ async def post_vts(
         payload["emotion_intensity"] = float(emotion_intensity)
     if duration_s is not None:
         payload["duration_s"] = float(duration_s)
-    result = await _post_to_edge(
-        path="/v1/edge/vts",
-        payload=payload,
+    from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
+
+    receipt = await submit_avatar_command(
+        action=str(action).strip().lower(),
+        payload={key: value for key, value in payload.items() if key != "action"},
         request_id=req_id,
+        idempotency_key=(
+            f"{req_id}:legacy-vts:{str(action).strip().lower()}:"
+            f"{str(action_id or emotion_tag or '')}"
+        ),
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_vts action=%s action_id=%s emotion=%s → %s latency=%dms",
         action, action_id, emotion_tag, result.status, result.latency_ms,
@@ -974,11 +992,15 @@ async def post_avatar_behavior(
         payload["talk_state"] = str(talk_state).strip().lower()
     if source:
         payload["source"] = str(source).strip()
-    result = await _post_to_edge(
-        path="/v1/edge/vts",
-        payload=payload,
+    from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
+
+    receipt = await submit_avatar_command(
+        action="behavior",
+        payload={key: value for key, value in payload.items() if key != "action"},
         request_id=req_id,
+        idempotency_key=f"{req_id}:avatar-behavior:{payload['behavior_id']}",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_avatar_behavior behavior_id=%s -> %s latency=%dms",
         behavior_id, result.status, result.latency_ms,
@@ -1006,12 +1028,17 @@ async def post_asr_control(
         payload["audio_path"] = str(audio_path).strip()
     if label:
         payload["label"] = str(label).strip()
-    result = await _post_to_edge(
-        path="/v1/edge/asr",
+    from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_voice_command(
+        action="asr_control",
         payload=payload,
-        request_id=request_id,
-        request_timeout_ms=max(_resolve_timeout_ms(), 120_000),
+        request_id=req_id,
+        deadline_ms=now_ms() + max(_resolve_timeout_ms(), 120_000),
+        idempotency_key=f"{req_id}:asr-control:{payload['action']}",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_asr_control action=%s -> %s latency=%dms",
         action, result.status, result.latency_ms,
@@ -1041,12 +1068,17 @@ async def post_barge_in(
         payload["text"] = str(text).strip()
     if seq is not None:
         payload["seq"] = int(seq)
-    result = await _post_to_edge(
-        path="/v1/edge/barge_in",
+    from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_voice_command(
+        action="barge_in",
         payload=payload,
-        request_id=request_id,
-        request_timeout_ms=max(_resolve_timeout_ms(), 30_000),
+        request_id=req_id,
+        deadline_ms=now_ms() + max(_resolve_timeout_ms(), 30_000),
+        idempotency_key=f"{req_id}:barge-in:{payload['session_id']}",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_barge_in session=%s source=%s -> %s latency=%dms",
         session_id, source, result.status, result.latency_ms,
@@ -1108,17 +1140,19 @@ async def post_desktop_pet(
     if title_keywords:
         payload["title_keywords"] = [str(item).strip() for item in title_keywords if str(item).strip()]
 
-    if _env_bool("HOST_DESKTOP_PET_DIRECT_ENABLED", default=True):
-        result = await _post_to_desktop_pet_runtime(
-            payload=payload,
-            request_id=request_id,
-        )
-    else:
-        result = await _post_to_edge(
-            path="/v1/edge/desktop_pet",
-            payload=payload,
-            request_id=request_id,
-        )
+    from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_avatar_command(
+        action="desktop_pet",
+        payload={
+            "desktop_pet_action": payload.pop("action"),
+            **payload,
+        },
+        request_id=req_id,
+        idempotency_key=f"{req_id}:desktop-pet:{str(action).strip().lower()}",
+    )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_desktop_pet action=%s touch_type=%s preset=%s -> %s latency=%dms",
         action, touch_type, name, result.status, result.latency_ms,
@@ -1131,55 +1165,14 @@ async def _post_to_desktop_pet_runtime(
     payload: dict[str, Any],
     request_id: str | None = None,
 ) -> EdgeRpcCallResult:
-    import os
-    import time
-
-    try:
-        import httpx
-    except ImportError:
-        return EdgeRpcCallResult(
-            success=False,
-            status="DEGRADED",
-            reason_code="HTTPX_NOT_INSTALLED",
-            detail="httpx not installed",
-            event={},
-            latency_ms=0,
-        )
-
-    req_id = request_id or new_request_id()
-    base_url = _normalize_base_url(os.getenv("HOST_DESKTOP_PET_BASE_URL") or "http://127.0.0.1:18788")
-    action = str(payload.get("action") or "status").strip().lower()
-    t0 = int(time.time() * 1000)
-    try:
-        async with httpx.AsyncClient(timeout=2.5, trust_env=False) as client:
-            if action == "status":
-                resp = await client.get(f"{base_url}/health")
-            else:
-                resp = await client.post(f"{base_url}/action", json=payload)
-        latency_ms = max(0, int(time.time() * 1000) - t0)
-        try:
-            body = resp.json()
-        except Exception:
-            body = {"raw": resp.text}
-        success = resp.status_code == 200 and bool(body.get("success", False))
-        return EdgeRpcCallResult(
-            success=success,
-            status=("ACCEPTED" if success else "REJECTED"),
-            reason_code=None if success else str(body.get("reason_code") or f"HTTP_{resp.status_code}"),
-            detail=str(body.get("detail") or ("desktop pet runtime accepted" if success else "desktop pet runtime rejected")),
-            event={"request_id": req_id, "runtime": body},
-            latency_ms=latency_ms,
-        )
-    except Exception as exc:
-        latency_ms = max(0, int(time.time() * 1000) - t0)
-        return EdgeRpcCallResult(
-            success=False,
-            status="DEGRADED",
-            reason_code="DESKTOP_PET_RUNTIME_UNAVAILABLE",
-            detail=str(exc),
-            event={"request_id": req_id, "base_url": base_url},
-            latency_ms=latency_ms,
-        )
+    return EdgeRpcCallResult(
+        success=False,
+        status="REJECTED",
+        reason_code="HOST_DEVICE_EFFECT_RETIRED",
+        detail="direct Host desktop-pet transport retired; use EmbodimentCommand",
+        event={"request_id": request_id or "", "payload": dict(payload)},
+        latency_ms=0,
+    )
 
 
 async def post_speak(
@@ -1224,22 +1217,6 @@ async def post_speak(
         .replace("\u200b", "")
         .strip()
     )
-    mateengine_tts_sync_started = False
-    mateengine_tts_sync = str(os.environ.get("HOST_MATEENGINE_TTS_SYNC_ENABLED") or "true").strip().lower()
-    if normalized_text and mateengine_tts_sync in {"1", "true", "yes", "on"}:
-        try:
-            from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
-
-            signal_mateengine_speech_playback(
-                event="start",
-                text=normalized_text,
-                request_id=req_id,
-                utterance_id=resolved_utterance_id,
-            )
-            mateengine_tts_sync_started = True
-        except Exception as exc:
-            _logger.debug("MateEngine TTS mouth sync start failed: %s", exc)
-
     payload: dict[str, Any] = {
         "session_id": resolved_session_id,
         "utterance_id": resolved_utterance_id,
@@ -1262,62 +1239,20 @@ async def post_speak(
         payload["export_audio"] = True
     if wait_playback_start is not None:
         payload["wait_playback_start"] = bool(wait_playback_start)
-    rpc_timeout_ms = max(_resolve_timeout_ms(), 60_000)
-    result = await _post_to_edge(
-        path="/v1/edge/speak",
+    from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
+
+    receipt = await submit_voice_command(
+        action="speak",
         payload=payload,
         request_id=req_id,
-        request_timeout_ms=rpc_timeout_ms,
+        deadline_ms=now_ms() + max(_resolve_timeout_ms(), 60_000),
+        idempotency_key=f"{req_id}:legacy-speak:{resolved_utterance_id}",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_speak text_len=%d → %s latency=%dms",
         len(normalized_text), result.status, result.latency_ms,
     )
-    if mateengine_tts_sync_started and bool(result.success):
-        event = dict(result.event or {})
-        duration_s = (
-            event.get("duration_s")
-            or event.get("audio_duration_s")
-            or event.get("playback_duration_s")
-        )
-        energy_frames = (
-            event.get("energy_frames")
-            or event.get("rms_frames")
-            or event.get("mouth_frames")
-            or event.get("mouth_sync_frames")
-        )
-        if energy_frames is None and isinstance(event.get("vts_mouth_sync"), dict):
-            energy_frames = (
-                event["vts_mouth_sync"].get("energy_frames")
-                or event["vts_mouth_sync"].get("rms_frames")
-                or event["vts_mouth_sync"].get("mouth_frames")
-            )
-        if duration_s is not None or energy_frames is not None:
-            try:
-                from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
-
-                signal_mateengine_speech_playback(
-                    event="start",
-                    text=normalized_text,
-                    request_id=req_id,
-                    utterance_id=resolved_utterance_id,
-                    duration_s=duration_s,
-                    energy_frames=energy_frames,
-                )
-            except Exception as exc:
-                _logger.debug("MateEngine TTS RMS mouth sync failed: %s", exc)
-    if mateengine_tts_sync_started and not bool(result.success):
-        try:
-            from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
-
-            signal_mateengine_speech_playback(
-                event="failed",
-                text=normalized_text,
-                request_id=req_id,
-                utterance_id=resolved_utterance_id,
-            )
-        except Exception as exc:
-            _logger.debug("MateEngine TTS mouth sync stop failed: %s", exc)
     return result
 
 
@@ -1384,11 +1319,16 @@ async def post_screenshot(
     event 字段包含：image_b64 / image_mime / width / height / latency_ms
     """
     payload: dict[str, Any] = {"monitor_index": int(monitor_index)}
-    result = await _post_to_edge(
-        path="/v1/edge/screenshot",
+    from host_brain.channels.embodiment import submit_desktop_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_desktop_command(
+        action="screenshot",
         payload=payload,
-        request_id=request_id,
+        request_id=req_id,
+        idempotency_key=f"{req_id}:desktop:screenshot:{int(monitor_index)}",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_screenshot monitor=%d → %s latency=%dms",
         monitor_index, result.status, result.latency_ms,
@@ -1411,11 +1351,16 @@ async def post_automate(
         "actions": list(actions),
         "stop_on_error": bool(stop_on_error),
     }
-    result = await _post_to_edge(
-        path="/v1/edge/automate",
+    from host_brain.channels.embodiment import submit_desktop_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_desktop_command(
+        action="automate",
         payload=payload,
-        request_id=request_id,
+        request_id=req_id,
+        idempotency_key=f"{req_id}:desktop:automate",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_automate actions=%d → %s latency=%dms",
         len(actions), result.status, result.latency_ms,
@@ -1454,12 +1399,17 @@ async def post_visual_locate(
     }
     # VLM 推理耗时较长，默认超时设为 30s
     rpc_timeout_ms = timeout_ms if timeout_ms is not None else max(_resolve_timeout_ms(), 30_000)
-    result = await _post_to_edge(
-        path="/v1/edge/visual_locate",
+    from host_brain.channels.embodiment import submit_desktop_command  # noqa: PLC0415
+
+    req_id = request_id or new_request_id()
+    receipt = await submit_desktop_command(
+        action="visual_locate",
         payload=payload,
-        request_id=request_id,
-        request_timeout_ms=rpc_timeout_ms,
+        request_id=req_id,
+        deadline_ms=now_ms() + int(rpc_timeout_ms),
+        idempotency_key=f"{req_id}:desktop:visual-locate",
     )
+    result = _from_embodiment_receipt(receipt)
     _logger.debug(
         "post_visual_locate instruction=%r auto_click=%s → %s latency=%dms",
         instruction, auto_click, result.status, result.latency_ms,

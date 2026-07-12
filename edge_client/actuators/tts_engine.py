@@ -26,14 +26,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     TTS_GPU_OOM,
     TTS_MODEL_UNAVAILABLE,
     TTS_SYNTH_TIMEOUT,
     VOICE_SCHEMA_INVALID,
     VOICE_SYNTH_FAILED,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import new_request_id, now_ms
 
 logger = logging.getLogger("Natsume.edge.tts")
 

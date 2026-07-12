@@ -166,21 +166,21 @@ def test_build_chat_graph_config_auto_meta_preserved() -> None:
     assert cfg["graph_meta"]["scene_type"] == SCENE_TYPE_AUTO
 
 
-def test_chat_graph_can_route_direct_node_to_codex_spark(monkeypatch) -> None:
+def test_chat_graph_projects_catalog_selected_codex_spark(monkeypatch) -> None:
     monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED", "true")
     monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_available",
-        lambda: True,
+        lambda: (_ for _ in ()).throw(AssertionError("builder must not probe Codex")),
     )
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
-        lambda: True,
+        lambda: (_ for _ in ()).throw(AssertionError("builder must not route Codex")),
     )
 
     cfg = build_chat_graph_config(
-        provider_name="gemini",
-        model_id="gemini-2.5-pro",
+        provider_name="codex",
+        model_id="gpt-5.3-codex-spark",
         timeout_ms=5000,
         available=True,
         api_key="test-key",
@@ -194,20 +194,20 @@ def test_chat_graph_can_route_direct_node_to_codex_spark(monkeypatch) -> None:
     assert cfg["graph_meta"]["chat_model_id"] == "gpt-5.3-codex-spark"
     assert direct_node["provider"] == "codex"
     assert direct_node["model_id"] == "gpt-5.3-codex-spark"
-    assert direct_node["api_key"] is None
-    assert direct_node["timeout_ms"] == 45000
+    assert "api_key" not in direct_node
+    assert direct_node["timeout_ms"] == 10000
 
 
-def test_non_chat_graph_model_nodes_can_migrate_to_codex(monkeypatch) -> None:
+def test_non_chat_graph_projects_catalog_selected_codex(monkeypatch) -> None:
     monkeypatch.setenv("HOST_GRAPH_CODEX_MIGRATION_ENABLED", "true")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_available",
-        lambda: True,
+        lambda: (_ for _ in ()).throw(AssertionError("builder must not probe Codex")),
     )
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
-        lambda: True,
+        lambda: (_ for _ in ()).throw(AssertionError("builder must not route Codex")),
     )
 
     cfg = build_chat_graph_config(
@@ -219,8 +219,8 @@ def test_non_chat_graph_model_nodes_can_migrate_to_codex(monkeypatch) -> None:
         provider_fn=lambda _: {"status": "OK"},
         scene_type=SCENE_WORK_CODE,
         scene_type_source="explicit",
-        cloud_provider_name="gemini",
-        cloud_model_id="gemini-2.5-pro",
+        cloud_provider_name="codex",
+        cloud_model_id="gpt-5.4-mini",
         cloud_api_key="test-key",
         cloud_available=True,
     )
@@ -228,5 +228,5 @@ def test_non_chat_graph_model_nodes_can_migrate_to_codex(monkeypatch) -> None:
     nodes = cfg["model_node_overrides"]
     assert nodes["core_reasoner_primary"]["provider"] == "codex"
     assert nodes["core_reasoner_primary"]["model_id"] == "gpt-5.4-mini"
-    assert nodes["core_reasoner_primary"]["api_key"] is None
+    assert "api_key" not in nodes["core_reasoner_primary"]
     assert nodes[CHAT_DIRECT_NODE_ID]["provider"] == "gemini"

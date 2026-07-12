@@ -589,86 +589,50 @@ def warmup_surface_quote_runtime() -> str:
 
 
 def warmup_codex_exec_intent_pool() -> str:
-    """预热 EXEC_INTENT 的 Codex app-server worker，避免首条聊天替后台分类付冷启动成本。"""
+    """预热当前 server-owned EXEC_INTENT 模型路由。"""
     from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
 
     settings = get_startup_settings()
-    app_server_prewarm_enabled = bool(settings.codex_app_server_prewarm_enabled)
     exec_intent_model_warmup_enabled = bool(
         settings.codex_exec_intent_warmup_enabled
     )
     if not exec_intent_model_warmup_enabled:
         return "SKIPPED (disabled)"
     try:
-        from host_brain.integrations.codex_cli_provider import (  # noqa: PLC0415
-            invoke_codex_cli_text,
-            prewarm_codex_app_server,
-            resolve_codex_cli_model,
-        )
-        from host_brain.integrations.llm_helpers import _codex_pool_migration_enabled  # noqa: PLC0415
+        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import STARTUP_MODEL_WARMUP_PROMPT_ID  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        model_id = resolve_codex_cli_model(
-            settings.llm_pool_codex_model_id or settings.codex_model_id
-        )
         timeout_ms = int(settings.codex_exec_intent_warmup_timeout_ms)
-        prewarm_detail = "prewarm=skipped"
-        if app_server_prewarm_enabled:
-            raw_feature_keys = str(settings.codex_app_server_prewarm_feature_keys)
-            feature_keys = [item.strip() for item in raw_feature_keys.split(",") if item.strip()]
-            prewarm_timeout_ms = min(
-                timeout_ms,
-                int(settings.codex_app_server_prewarm_timeout_ms),
-            )
-            model_prewarm_enabled = bool(
-                settings.codex_app_server_model_prewarm_enabled
-            )
-            prewarm_result = prewarm_codex_app_server(
-                model_id=model_id,
-                feature_keys=feature_keys,
-                timeout_ms=prewarm_timeout_ms,
-                run_model_probe=model_prewarm_enabled,
-            )
-            prewarm_detail = (
-                f"prewarm_status={prewarm_result.get('status')}, "
-                f"prewarm_latency_ms={prewarm_result.get('latency_ms')}, "
-                f"prewarm_features={prewarm_result.get('feature_count')}, "
-                f"prewarm_threads={prewarm_result.get('thread_count')}, "
-                f"prewarm_model_probes={prewarm_result.get('model_probe_count')}, "
-                f"prewarm_workers={prewarm_result.get('worker_count')}, "
-                f"prewarm_profiles={prewarm_result.get('profiles')}, "
-                f"prewarm_pid={prewarm_result.get('pid')}"
-            )
-        if not exec_intent_model_warmup_enabled:
-            detail = f"model={model_id}, exec_intent_model_warmup=disabled, {prewarm_detail}"
-            _logger.info("Codex app-server 启动预热完成: %s", detail)
-            return f"OK ({detail})"
-        if not _codex_pool_migration_enabled("EXEC_INTENT"):
-            detail = f"model={model_id}, exec_intent_model_warmup=skipped_migration_disabled, {prewarm_detail}"
-            _logger.info("Codex app-server 启动预热完成: %s", detail)
-            return f"OK ({detail})"
         started_at = time.perf_counter()
-        raw_text = invoke_codex_cli_text(
-            model_id=model_id,
-            timeout_ms=timeout_ms,
-            response_format={"type": "json_object"},
-            feature_key="pool:EXEC_INTENT:C",
+        result = complete_compiled_prompt_sync(
+            prompt_id=STARTUP_MODEL_WARMUP_PROMPT_ID,
+            request_id=f"startup-model-warmup::{int(time.time() * 1000)}",
+            scene_type="STARTUP_MODEL_WARMUP",
+            cognitive_tier="C",
+            deadline_ms=timeout_ms,
+            foreground=False,
             messages=[
                 {
                     "role": "system",
-                    "content": 'Return exactly this JSON object and no extra text: {"route":"chat"}',
+                    "content": "Return exactly the word ready and no extra text.",
                 },
                 {"role": "user", "content": "startup warmup"},
             ],
         )
-        parsed = json.loads(str(raw_text or "").strip())
-        if not isinstance(parsed, Mapping):
-            raise RuntimeError("Codex EXEC_INTENT warmup returned non-object JSON")
+        if not result.success:
+            raise RuntimeError(result.error_code or "STARTUP_MODEL_WARMUP_FAILED")
+        trace = model_attempt_result_trace(result)
         latency_ms = int(round((time.perf_counter() - started_at) * 1000))
-        detail = f"model={model_id}, latency_ms={latency_ms}, route={parsed.get('route') or 'unknown'}, {prewarm_detail}"
-        _logger.info("Codex EXEC_INTENT 预热完成: %s", detail)
+        detail = (
+            f"provider={trace.get('final_provider') or 'unknown'}, "
+            f"model={trace.get('final_model') or 'unknown'}, "
+            f"route={trace.get('route_decision_id') or 'unknown'}, latency_ms={latency_ms}"
+        )
+        _logger.info("Server-owned model route 预热完成: %s", detail)
         return f"OK ({detail})"
     except Exception as exc:
-        _logger.warning("Codex EXEC_INTENT 预热失败（降级）: %s", exc)
+        _logger.warning("Server-owned model route 预热失败（降级）: %s", exc)
         return f"DEGRADED: {exc}"
 
 

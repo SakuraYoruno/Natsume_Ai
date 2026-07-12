@@ -16,8 +16,9 @@ import time
 from typing import Any, Dict
 
 from host_brain.app.dependencies import get_ledger
-from host_brain.channels.vts import TRIGGER_HOST, resolve_vts_expression
+from host_brain.channels.embodiment import submit_avatar_command
 from host_brain.channels.vts_rate_limiter import VTSRateLimiter
+from natsume_contracts.edge.v1 import now_ms
 
 _logger = logging.getLogger("Natsume.vts_emotion_driver")
 
@@ -130,31 +131,29 @@ async def _drive_stream_vts_emotion(
             "detail": limit_result.detail,
         }
 
-    edge_available = _parse_bool_env("HOST_STREAM_VTS_EDGE_AVAILABLE", default=True)
     timeout_ms = _resolve_stream_vts_timeout_ms()
     try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                resolve_vts_expression,
-                emotion_tag=normalized_emotion_tag,
-                ledger=ledger,
+        receipt = await asyncio.wait_for(
+            submit_avatar_command(
+                action="set_expression",
+                payload={"emotion_tag": normalized_emotion_tag},
                 request_id=request_id,
-                trigger=TRIGGER_HOST,
-                ts_ms=ts_ms,
-                edge_available=edge_available,
+                deadline_ms=now_ms() + timeout_ms,
+                idempotency_key=f"{request_id}:stream-vts:{normalized_emotion_tag}:{int(ts_ms)}",
             ),
             timeout=float(timeout_ms) / 1000.0,
         )
+        effect = dict(receipt.event or {})
 
         # 方向 C：计算过渡帧（VTS 渐变动画）
         transition_frames: list[dict[str, Any]] = []
         try:
             from host_brain.channels.vts import build_emotion_transition_frames  # noqa: PLC0415
             _prev_tag = str((emotion_context or {}).get("_prev_emotion_tag") or "").strip().upper()
-            if result.status == "APPLIED" and result.emotion_tag:
+            if receipt.success:
                 frames = build_emotion_transition_frames(
                     from_tag=_prev_tag or None,
-                    to_tag=result.emotion_tag,
+                    to_tag=normalized_emotion_tag,
                 )
                 if len(frames) > 1:
                     transition_frames = [
@@ -171,12 +170,13 @@ async def _drive_stream_vts_emotion(
             pass
 
         return {
-            "status": str(result.status),
-            "reason_code": result.reason_code,
-            "emotion_tag": result.emotion_tag,
-            "expression_id": result.expression_id,
-            "trigger": result.trigger,
-            "detail": result.detail,
+            "status": "APPLIED" if receipt.success else str(receipt.status),
+            "reason_code": receipt.reason_code,
+            "emotion_tag": normalized_emotion_tag,
+            "expression_id": effect.get("expression_id"),
+            "trigger": "HOST_COMMAND",
+            "detail": receipt.detail,
+            "command_id": receipt.command_id,
             "transition_frames": transition_frames,
         }
     except asyncio.TimeoutError:

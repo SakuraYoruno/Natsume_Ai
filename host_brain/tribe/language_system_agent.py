@@ -428,7 +428,7 @@ class LanguageSystemAgent:
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("language_system_agent.wernicke_deep_parse") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -441,21 +441,11 @@ class LanguageSystemAgent:
                 intent_type=str(intent_type or "normal"),
                 user_text=str(user_text or "")[:300],
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="wernicke_parser",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="language_wernicke_deep_parse",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=128,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _result = {
                 "topic_entity": str(_parsed.get("topic_entity") or "").strip()[:30],
                 "emotional_subtext": str(_parsed.get("emotional_subtext") or "").strip()[:50],
@@ -503,7 +493,7 @@ class LanguageSystemAgent:
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("language_system_agent.broca_opening_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -517,21 +507,11 @@ class LanguageSystemAgent:
                 bond_stage=str(bond_stage or "friend"),
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="broca_opener",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="language_broca_opening_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.3,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("opening_hint") or "").strip()[:30]
             if _hint:
                 _log.debug("LanguageSystemAgent.broca_generate_opening_hint: %s", _hint)

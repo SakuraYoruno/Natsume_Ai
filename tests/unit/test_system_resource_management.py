@@ -473,25 +473,24 @@ def test_resource_manager_does_not_trim_for_vram_only_pressure(monkeypatch, tmp_
     assert calls == []
 
 
-def test_resource_manager_records_llm_attempts_when_pool_exhausted(monkeypatch, tmp_path) -> None:
+def test_resource_manager_records_governed_model_attempt_failure(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
-    def fake_complete_llm_with_pool_sync(**kwargs):
+    def fake_complete_compiled_prompt_sync(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
-            pool_exhausted=True,
+            success=False,
             content="",
-            final_model="",
-            final_provider="",
+            error_code="MODEL_ROUTE_EXHAUSTED",
             cached=False,
             attempts=[
                 SimpleNamespace(
                     provider="deepseek",
-                    model="deepseek-v4-flash",
+                    model_id="deepseek-v4-flash",
                     status="FAILED",
                     latency_ms=5002,
-                    reason_code="POOL_TIMEOUT",
-                    detail="provider hard timeout>5000ms",
+                    error_code="PROVIDER_TIMEOUT",
+                    error_message="provider hard timeout>5000ms",
                 )
             ],
         )
@@ -501,12 +500,8 @@ def test_resource_manager_records_llm_attempts_when_pool_exhausted(monkeypatch, 
     monkeypatch.setenv("HOST_RESOURCE_MANAGER_LLM_MODEL_ID", "deepseek-v4-flash")
     monkeypatch.setenv("HOST_RESOURCE_MANAGER_LLM_API_KEY", "unit-secret")
     monkeypatch.setattr(
-        "host_brain.app.config.load_host_config",
-        lambda: SimpleNamespace(success=True, config=None),
-    )
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.complete_llm_with_pool_sync",
-        fake_complete_llm_with_pool_sync,
+        "host_brain.model_runtime.invocation.complete_compiled_prompt_sync",
+        fake_complete_compiled_prompt_sync,
     )
 
     manager = SystemResourceManager(
@@ -522,13 +517,14 @@ def test_resource_manager_records_llm_attempts_when_pool_exhausted(monkeypatch, 
     )
 
     assert decision == {}
-    assert captured["timeout_ms"] == 30000
+    assert captured["deadline_ms"] == 30000
     assert captured["cognitive_tier"] == "C"
-    assert captured["provider_name"] == "deepseek"
-    assert captured["model_id"] == "deepseek-v4-flash"
+    assert captured["prompt_id"] == "resource.manager.analysis.json"
+    assert "provider_name" not in captured
+    assert "model_id" not in captured
     status = manager.get_status()
     assert "deepseek/deepseek-v4-flash" in str(status["last_llm_error"])
-    assert status["last_llm_attempts"][0]["reason_code"] == "POOL_TIMEOUT"
+    assert status["last_llm_attempts"][0]["reason_code"] == "PROVIDER_TIMEOUT"
 
 
 def test_resource_manager_no_pressure_summary_does_not_claim_llm_unavailable(tmp_path) -> None:

@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass, replace
 import inspect
 import json
+import re
 import threading
 import time
 import uuid
@@ -68,6 +69,15 @@ class _PreparedCall:
 
 def _safe_error_message(exc: BaseException, *, limit: int = 1000) -> str:
     value = f"{type(exc).__name__}: {exc}".strip()
+    for pattern in (
+        re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
+        re.compile(r"(?i)\bsk-[A-Za-z0-9_-]{8,}"),
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|authorization)"
+            r"\s*[:=]\s*[^\s,;]+"
+        ),
+    ):
+        value = pattern.sub("[REDACTED]", value)
     return value if len(value) <= limit else value[: limit - 3] + "..."
 
 
@@ -170,7 +180,10 @@ class ModelAttemptService:
             )
 
         attempts: list[ModelAttemptRecord] = []
-        budget = min(request.max_attempts, prepared.route.max_attempts)
+        # Attempt budget is a route-policy decision.  Request/domain code may
+        # provide semantic evaluation, but it cannot raise or lower the number
+        # of provider attempts selected by the server-owned route.
+        budget = prepared.route.max_attempts
         target_index = 0
         retry_reason = "initial"
         prompt = prepared.prompt
@@ -338,7 +351,7 @@ class ModelAttemptService:
                 yield cached.response.content
             return
 
-        budget = min(request.max_attempts, prepared.route.max_attempts)
+        budget = prepared.route.max_attempts
         target_index = 0
         attempt_count = 0
         retry_reason = "initial"

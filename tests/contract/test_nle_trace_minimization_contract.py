@@ -121,23 +121,33 @@ def test_t_nle_12_agent_executor_persists_only_redacted_trace(monkeypatch, tmp_p
     thought_sentinel = "agent executor raw thought sentinel"
     long_answer = "publishable executor result " * 40
 
-    def _complete(**_kwargs):  # noqa: ANN003
-        return SimpleNamespace(
-            content=json.dumps(
-                {
-                    "thought": thought_sentinel,
-                    "tool_id": "agent_finish",
-                    "tool_args": {},
-                    "final_answer": long_answer,
-                }
-            ),
-            final_provider="test-provider",
-            final_model="test-model",
-        )
+    from host_brain.model_runtime import build_live_production_prompt_registry
 
+    class _AttemptService:
+        def complete_sync(self, _request):  # noqa: ANN001, ANN202
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "thought": thought_sentinel,
+                        "tool_id": "agent_finish",
+                        "tool_args": {},
+                        "final_answer": long_answer,
+                    }
+                ),
+                success=True,
+            )
+
+    registry = build_live_production_prompt_registry()
+    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: _AttemptService())
     monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.complete_llm_with_pool_sync",
-        _complete,
+        "host_brain.agent_runtime.agent_executor.model_attempt_result_trace",
+        lambda _result: {
+            "route_decision_id": "route-redaction-test",
+            "final_provider": "test-provider",
+            "final_model": "test-model",
+            "attempts": [],
+        },
     )
     order = AgentWorkOrder.from_mapping(
         {

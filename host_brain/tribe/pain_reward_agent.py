@@ -717,7 +717,7 @@ class PainRewardAgent:
         _log = _logging.getLogger("Natsume.tribe.pain_reward_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("pain_reward_agent.hedonic_reflection") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -731,21 +731,11 @@ class PainRewardAgent:
                 net_valence=float(net_valence),
                 bond_stage=str(bond_stage or "friend"),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="hedonic_reflector",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="pain_reward_hedonic_reflection",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.3,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _reflection = str(_parsed.get("hedonic_reflection") or "").strip()[:60]
             if _reflection:
                 _log.debug("PainRewardAgent.generate_hedonic_reflection: %s", _reflection)

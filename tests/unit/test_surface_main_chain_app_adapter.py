@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -17,13 +18,23 @@ from host_brain.app.surface_main_chain_adapter import (
     surface_main_chain_enabled,
     surface_main_chain_sse_generator,
 )
+from host_brain.app import dependencies
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
+)
 
 
 SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬，但帮忙时先给能执行的一步。"
 
 
 @pytest.fixture(autouse=True)
-def _disable_surface_quote_guidance(monkeypatch) -> None:  # noqa: ANN001
+def _disable_surface_quote_guidance(monkeypatch):  # noqa: ANN001
     monkeypatch.setattr("host_brain.persona.surface_runtime.render_surface_original_quote_guidance", lambda *_args, **_kwargs: "")
     empty_snapshot = {
         "person_id": "user-1",
@@ -57,6 +68,60 @@ def _disable_surface_quote_guidance(monkeypatch) -> None:  # noqa: ANN001
             "replayed": False,
         },
     )
+
+    async def _test_transport(attempt):  # noqa: ANN001
+        from host_brain.integrations import llm_helpers
+
+        result = llm_helpers.acomplete_llm_with_pool(
+            request_id=attempt.request_id,
+            scene_type=attempt.scene_type,
+            cognitive_tier=attempt.cognitive_tier,
+            provider_name="mock",
+            model_id="mock-chat",
+            api_key=None,
+            timeout_ms=attempt.timeout_ms,
+            messages=attempt.prompt.as_message_dicts(),
+            gen_params=dict(attempt.target.metadata.get("generation_parameters") or {}),
+            response_format=attempt.prompt.output_contract.response_format(),
+            base_url_override=None,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        if bool(getattr(result, "pool_exhausted", False)):
+            raise RuntimeError("test provider exhausted")
+        return {"content": str(getattr(result, "content", "") or "")}
+
+    route = RouteDecision(
+        decision_id="test-surface-route",
+        targets=(
+            ProviderTarget(
+                adapter_id="test.surface",
+                provider="mock",
+                model_id="mock-chat",
+                timeout_ms=5_000,
+                metadata={
+                    "generation_parameters": {
+                        "temperature": 0.78,
+                        "top_p": 0.9,
+                        "max_tokens": 700,
+                    }
+                },
+            ),
+        ),
+        reason="TEST_SURFACE_ROUTE",
+        max_attempts=2,
+    )
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(route),
+        provider_adapters=[
+            CallableProviderAdapter("test.surface", complete_fn=_test_transport)
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    yield
+    dependencies.reset_model_runtime_composition()
 
 
 def _parse_sse(raw: str) -> dict:
@@ -167,6 +232,10 @@ def test_proactive_context_followup_forces_bound_message_cause(monkeypatch) -> N
         "host_brain.app.context.memory_context_orchestrator.build_memory_context_debug",
         lambda **_kwargs: pack,
     )
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_ledger",
+        lambda: SimpleNamespace(),
+    )
     agent_input = _agent_input(user_message="怎么了")
     trace: dict[str, object] = {}
 
@@ -232,6 +301,44 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
     packet = trace.get("surface_memory_recall_packet")
     assert isinstance(packet, dict)
     assert "集合记忆" in "\n".join(packet.get("facts") or [])
+
+
+@pytest.mark.asyncio
+async def test_surface_semantic_retry_is_owned_by_one_model_attempt_request(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict] = []
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        if len(provider_calls) == 1:
+            return _surface_json_result("")
+        return _surface_json_result("我这里只看到文字，还没有收到声音。")
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    trace: dict[str, object] = {}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(user_message="听得到吗"),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "我这里只看到文字，还没有收到声音。"
+    assert len(provider_calls) == 2
+    attempt_trace = trace["surface_model_attempt"]
+    assert attempt_trace["route_decision_id"] == "test-surface-route"
+    assert [item["status"] for item in attempt_trace["attempts"]] == [
+        "rejected",
+        "succeeded",
+    ]
+    assert len({item["route_decision_id"] for item in attempt_trace["attempts"]}) == 1
+    generate_calls = result.runtime.generation_trace["runtime_timings_ms"]["generate_calls"]
+    assert [item["kind"] for item in generate_calls] == ["initial"]
 
 
 def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(monkeypatch) -> None:
@@ -914,7 +1021,7 @@ async def test_surface_main_chain_low_info_uses_surface_chain(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_audit_uses_pool_final_model(monkeypatch) -> None:
+async def test_surface_main_chain_audit_uses_canonical_route_target(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
@@ -933,9 +1040,12 @@ async def test_surface_main_chain_audit_uses_pool_final_model(monkeypatch) -> No
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
-    assert commit["audit_refs"]["provider_name"] == "gemini"
-    assert commit["audit_refs"]["trace_stage_meta"]["surface_llm_pool"]["final_model"] == "gemini-2.5-flash-lite"
+    assert commit["audit_refs"]["model_id"] == "mock-chat"
+    assert commit["audit_refs"]["provider_name"] == "mock"
+    attempt_trace = commit["audit_refs"]["trace_stage_meta"]["surface_model_attempt"]
+    assert attempt_trace["route_decision_id"] == "test-surface-route"
+    assert attempt_trace["final_model"] == "mock-chat"
+    assert attempt_trace["attempt_ids"]
 
 
 @pytest.mark.asyncio
@@ -1013,7 +1123,7 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
     assert "改服务端口再重启" in text
     assert "干掉" not in text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
@@ -1210,7 +1320,7 @@ async def test_surface_main_chain_routes_auditory_text_check_through_model(monke
     assert "在呢" not in result.selected_text
     assert "听到了" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
@@ -1313,7 +1423,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
     assert "lsof" not in result.selected_text
     assert "grep" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 @pytest.mark.asyncio
@@ -1359,7 +1469,7 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
     assert commit["audit_refs"]["model_id"] == "mock-chat"
     assert commit["audit_refs"]["provider_name"] == "mock"
     assert "surface_quick_reply" not in commit["audit_refs"]["trace_stage_meta"]
-    assert "surface_llm_pool" in commit["audit_refs"]["trace_stage_meta"]
+    assert "surface_model_attempt" in commit["audit_refs"]["trace_stage_meta"]
     assert foreground_commands
     assert foreground_commands[0]["command_type"] == "foreground_completed"
 
@@ -1393,7 +1503,7 @@ async def test_surface_main_chain_routes_simple_task_split_through_model(monkeyp
     assert result.selected_text == "老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。"
     assert "空壳" not in result.selected_text
     assert "surface_quick_reply" not in trace
-    assert "surface_llm_pool" in trace
+    assert "surface_model_attempt" in trace
 
 
 def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) -> None:

@@ -403,7 +403,11 @@ class GovernedTaskCoordinator:
             target_status="RUNNING",
         )
         execution_context = {
+            "execution_mode": "governed_task_runtime",
             "command_id": admitted.command_id,
+            "request_id": command.request_id,
+            "principal_id": command.principal_id,
+            "target_id": command.target_id,
             "work_order_id": admitted.work_order_id,
             "assignment_id": admitted.assignment_id,
             "executor": admitted.executor,

@@ -6,6 +6,10 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from natsume_contracts.edge.service_catalog_v1 import (
+    EdgeServiceDescriptor,
+    edge_required_services,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     INFRA_NODE_MISSING_SERVICE,
@@ -296,7 +300,12 @@ class ServiceStartupOrchestrator:
         }
 
 
-def build_default_service_registry() -> ServiceRegistry:
+def build_default_service_registry(
+    *,
+    edge_service_catalog: Sequence[EdgeServiceDescriptor] | None = None,
+) -> ServiceRegistry:
+    """Build the Host registry from Host declarations and a public Edge catalog."""
+
     registry = ServiceRegistry()
     host_required = (
         ServiceSpec(service_id="host.audit.sqlite_ledger", owner=OWNER_HOST, required=True),
@@ -310,17 +319,11 @@ def build_default_service_registry() -> ServiceRegistry:
     for spec in host_required:
         registry.register(spec)
 
-    # edge_client 为可选外部依赖，不可用时降级为空列表并记录 WARNING
-    try:
-        from edge_client.rpc import edge_required_services  # type: ignore[import-untyped]
-        edge_specs = edge_required_services()
-    except Exception as _exc:
-        import logging as _logging
-        _logging.getLogger("Natsume.core.services").warning(
-            "⚠️ [DEGRADED] edge_client 不可用，Edge 服务探针已跳过: %s", _exc
-        )
-        edge_specs = []
-
+    edge_specs = (
+        tuple(edge_service_catalog)
+        if edge_service_catalog is not None
+        else edge_required_services()
+    )
     for edge_spec in edge_specs:
         registry.register(
             ServiceSpec(

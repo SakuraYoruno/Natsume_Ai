@@ -40,24 +40,28 @@ async def trigger_reply_performance(
         }
 
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.channels.vts import TRIGGER_LLM, resolve_vts_expression  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
 
-        result = resolve_vts_expression(
-            emotion_tag=performance.emotion_tag,
-            ledger=get_ledger(),
+        receipt = await submit_avatar_command(
+            action="set_expression",
+            payload={
+                "emotion_tag": performance.emotion_tag,
+                "emotion_intensity": performance.emotion_intensity,
+            },
             request_id=request_id,
-            trigger=TRIGGER_LLM,
+            idempotency_key=f"{request_id}:reply-performance:vts",
         )
+        effect = dict(receipt.event or {})
         return {
             "invoked": True,
             "affected_output": True,
             "source": performance.source or "reply_envelope",
-            "status": result.status,
-            "success": bool(result.success),
-            "reason_code": result.reason_code,
-            "emotion_tag": result.emotion_tag,
-            "expression_id": result.expression_id,
+            "status": receipt.status,
+            "success": bool(receipt.success),
+            "reason_code": receipt.reason_code,
+            "emotion_tag": performance.emotion_tag,
+            "expression_id": effect.get("expression_id"),
+            "command_id": receipt.command_id,
             "performance": performance.as_dict(),
         }
     except Exception as exc:

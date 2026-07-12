@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -64,13 +66,13 @@ def test_tool_executor_registry_dispatches_and_passthroughs() -> None:
 
     registry.register(ToolExecutorSpec("demo", _handler, aliases=("demo_alias",)))
 
-    result_primary = registry.dispatch({"tool": "demo"})
-    result_alias = registry.dispatch({"tool": "demo_alias"})
-    untouched = registry.dispatch({"tool": "missing", "x": 1})
+    result_primary = registry._dispatch_unchecked({"tool": "demo"})
+    result_alias = registry._dispatch_unchecked({"tool": "demo_alias"})
 
     assert result_primary["status"] == "EXECUTED"
     assert result_alias["status"] == "EXECUTED"
-    assert untouched == {"tool": "missing", "x": 1}
+    with pytest.raises(LookupError, match="not registered"):
+        registry._dispatch_unchecked({"tool": "missing", "x": 1})
     assert seen == ["demo", "demo_alias"]
 
 

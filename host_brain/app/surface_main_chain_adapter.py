@@ -23,8 +23,14 @@ from host_brain.persona.surface_affect_control import (
     affect_control_packet_from_mapping,
     build_surface_affect_control_packet,
 )
-from host_brain.persona.surface_main_chain import SurfaceMainChain, SurfaceMainChainInput, SurfaceMainChainResult
+from host_brain.persona.surface_main_chain import (
+    SurfaceMainChain,
+    SurfaceMainChainInput,
+    SurfaceMainChainResult,
+    compile_surface_main_chain_input,
+)
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
+from host_brain.persona.surface_runtime import evaluate_surface_model_response_for_retry
 from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
 from host_brain.persona.body_sense import get_body_sense_model
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
@@ -466,38 +472,12 @@ async def run_surface_main_chain_for_surface_reply_input(
     *,
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainResult:
-    llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
-    if not bool(llm_runtime.get("available")):
-        try:
-            from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-                resolve_host_llm_runtime_async,
-                resolve_surface_reply_llm_runtime,
-            )
-
-            base_runtime = await resolve_host_llm_runtime_async(scene_type="CHAT_SURFACE")
-            recovered_runtime = _safe_mapping(
-                resolve_surface_reply_llm_runtime(base_runtime=dict(base_runtime or {}))
-            )
-            if bool(recovered_runtime.get("available")):
-                llm_runtime = recovered_runtime
-                _set_agent_input_mapping(agent_input, "llm_runtime", llm_runtime)
-                if isinstance(trace_stage_meta, dict):
-                    trace_stage_meta["surface_llm_runtime_recovered"] = {
-                        "available": True,
-                        "provider_name": str(llm_runtime.get("provider_name") or ""),
-                        "model_id": str(llm_runtime.get("model_id") or ""),
-                    }
-        except Exception as exc:
-            if isinstance(trace_stage_meta, dict):
-                trace_stage_meta["surface_llm_runtime_recovered"] = {
-                    "available": False,
-                    "error": type(exc).__name__,
-                }
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
     surface_input = build_surface_main_chain_input_from_surface_reply_input(
         agent_input,
         trace_stage_meta=trace_stage_meta,
     )
+    compiled_request = compile_surface_main_chain_input(surface_input).request
     if isinstance(trace_stage_meta, dict):
         guard_packet = _raw_memory_packet_payload_from_agent_input(agent_input) or _surface_memory_packet_for_output_guard(
             agent_input=agent_input,
@@ -507,64 +487,83 @@ async def run_surface_main_chain_for_surface_reply_input(
             trace_stage_meta["surface_memory_recall_packet"] = guard_packet
 
     async def _generate(messages: list[dict[str, str]]) -> str:
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.app.dependencies import get_model_attempt_service  # noqa: PLC0415
+        from host_brain.model_runtime.contracts import (  # noqa: PLC0415
+            ModelAttemptRequest,
+            PromptRef,
+            RetryDirective,
+        )
+        from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+            SURFACE_MAIN_JSON_PROMPT_ID,
+            SURFACE_MAIN_TEXT_PROMPT_ID,
+        )
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        if not bool(llm_runtime.get("available")):
-            raise RuntimeError("surface main chain llm runtime unavailable")
+        prompt_id = (
+            SURFACE_MAIN_JSON_PROMPT_ID
+            if _surface_main_chain_response_format() is not None
+            else SURFACE_MAIN_TEXT_PROMPT_ID
+        )
+
+        def _retry_evaluator(response: Any, attempt: Any) -> Any:
+            evaluation = evaluate_surface_model_response_for_retry(
+                compiled_request,
+                raw_output=str(response.content or ""),
+                current_messages=attempt.prompt.messages,
+            )
+            if not evaluation.retry:
+                return RetryDirective.accept()
+            return RetryDirective(
+                retry=True,
+                reason=evaluation.reason,
+                rendered_prompt=attempt.prompt.with_messages(evaluation.messages),
+                reuse_target=True,
+                metadata={"violation_codes": list(evaluation.violation_codes)},
+            )
+
         generate_started = time.perf_counter()
-        result = await acomplete_llm_with_pool(
-            request_id=request_id,
-            scene_type="CHAT_SURFACE",
-            cognitive_tier="A",
-            provider_name=str(llm_runtime.get("provider_name") or "").strip(),
-            model_id=str(llm_runtime.get("model_id") or "").strip(),
-            api_key=str(llm_runtime.get("llm_api_key") or "").strip(),
-            timeout_ms=int(llm_runtime.get("timeout_ms") or 30_000),
-            messages=messages,
-            gen_params=_surface_gen_params(llm_runtime),
-            response_format=_surface_main_chain_response_format(),
-            base_url_override=str(llm_runtime.get("base_url_override") or "").strip() or None,
+        result = await get_model_attempt_service().complete(
+            ModelAttemptRequest(
+                request_id=request_id or "surface-main-chain",
+                scene_type="CHAT_SURFACE",
+                cognitive_tier="A",
+                prompt=PromptRef(prompt_id, {"messages": messages}),
+                deadline_ms=max(
+                    1_000,
+                    min(
+                        120_000,
+                        _coerce_int(
+                            os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
+                            default=60_000,
+                        ),
+                    ),
+                ),
+                foreground=True,
+                retry_evaluator=_retry_evaluator,
+                metadata={"chain": "surface_main"},
+            )
         )
         if isinstance(trace_stage_meta, dict):
-            pool_trace = _llm_pool_result_trace(result)
-            pool_trace["generate_elapsed_ms"] = int((time.perf_counter() - generate_started) * 1000)
-            pool_trace["message_count"] = len(messages)
-            trace_stage_meta["surface_llm_pool"] = pool_trace
-            trace_stage_meta.setdefault("surface_llm_pool_calls", []).append(dict(pool_trace))
-        if bool(getattr(result, "pool_exhausted", False)):
-            fallback_runtime = _surface_gemini_fallback_runtime(llm_runtime, result=result)
-            if fallback_runtime:
-                fallback_started = time.perf_counter()
-                fallback_result = await acomplete_llm_with_pool(
-                    request_id=request_id,
-                    scene_type="CHAT_SURFACE",
-                    cognitive_tier="A",
-                    provider_name=str(fallback_runtime.get("provider_name") or "").strip(),
-                    model_id=str(fallback_runtime.get("model_id") or "").strip(),
-                    api_key=str(fallback_runtime.get("llm_api_key") or "").strip(),
-                    timeout_ms=int(fallback_runtime.get("timeout_ms") or llm_runtime.get("timeout_ms") or 30_000),
-                    messages=messages,
-                    gen_params=_surface_gen_params(fallback_runtime) or _surface_gen_params(llm_runtime),
-                    response_format=_surface_main_chain_response_format(),
-                    base_url_override=str(fallback_runtime.get("base_url_override") or "").strip() or None,
-                )
-                if isinstance(trace_stage_meta, dict):
-                    primary_failed_trace = _llm_pool_result_trace(result)
-                    fallback_trace = _llm_pool_result_trace(fallback_result)
-                    fallback_trace["generate_elapsed_ms"] = int((time.perf_counter() - fallback_started) * 1000)
-                    fallback_trace["message_count"] = len(messages)
-                    trace_stage_meta["surface_llm_pool_primary_failed"] = primary_failed_trace
-                    trace_stage_meta["surface_llm_pool"] = fallback_trace
-                    trace_stage_meta.setdefault("surface_llm_pool_calls", []).append(dict(fallback_trace))
-                result = fallback_result
-        if bool(getattr(result, "pool_exhausted", False)):
-            raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
-        content = str(getattr(result, "content", "") or "").strip()
+            attempt_trace = model_attempt_result_trace(result)
+            attempt_trace["generate_elapsed_ms"] = int(
+                (time.perf_counter() - generate_started) * 1000
+            )
+            attempt_trace["message_count"] = len(messages)
+            trace_stage_meta["surface_model_attempt"] = attempt_trace
+        if not result.success:
+            raise RuntimeError(
+                f"{result.error_code or 'SURFACE_MODEL_ATTEMPT_FAILED'}: "
+                f"{result.error_message or 'model attempt failed'}"
+            )
+        content = str(result.content or "").strip()
         if not content:
             raise RuntimeError("SURFACE_LLM_EMPTY_RESPONSE")
         return content
 
-    return await SurfaceMainChain(_generate).run(surface_input)
+    return await SurfaceMainChain(
+        _generate,
+        model_retries_owned_externally=True,
+    ).run(surface_input)
 
 
 async def surface_main_chain_sse_generator(
@@ -1436,14 +1435,16 @@ async def _generate_memory_guard_empty_repair_reply(
     readiness: Mapping[str, Any],
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> str:
-    llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
-    if not bool(llm_runtime.get("available")):
-        return ""
     user_message = str(getattr(agent_input, "user_message", "") or "").strip()
     if not user_message:
         return ""
     try:
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.app.dependencies import get_model_attempt_service  # noqa: PLC0415
+        from host_brain.model_runtime.contracts import ModelAttemptRequest, PromptRef  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+            SURFACE_MEMORY_REPAIR_PROMPT_ID,
+        )
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         compiled_soul = get_compiled_soul()
         soul_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
@@ -1495,24 +1496,37 @@ async def _generate_memory_guard_empty_repair_reply(
                 "content": json.dumps(prompt_payload, ensure_ascii=False),
             },
         ]
-        result = await acomplete_llm_with_pool(
-            request_id=str(getattr(agent_input, "request_id", "") or "").strip(),
-            scene_type="CHAT_SURFACE",
-            cognitive_tier="A",
-            provider_name=str(llm_runtime.get("provider_name") or "").strip(),
-            model_id=str(llm_runtime.get("model_id") or "").strip(),
-            api_key=str(llm_runtime.get("llm_api_key") or "").strip(),
-            timeout_ms=min(int(llm_runtime.get("timeout_ms") or 30_000), 12_000),
-            messages=messages,
-            gen_params={"temperature": 0.65, "max_tokens": 120},
-            response_format={"type": "json_object"},
-            base_url_override=str(llm_runtime.get("base_url_override") or "").strip() or None,
+        parent_request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+        result = await get_model_attempt_service().complete(
+            ModelAttemptRequest(
+                request_id=f"{parent_request_id or 'surface'}:memory-guard-repair",
+                scene_type="CHAT_SURFACE_MEMORY_REPAIR",
+                cognitive_tier="A",
+                prompt=PromptRef(
+                    SURFACE_MEMORY_REPAIR_PROMPT_ID,
+                    {"messages": messages},
+                ),
+                deadline_ms=max(
+                    1_000,
+                    min(
+                        12_000,
+                        _coerce_int(
+                            os.environ.get("HOST_SURFACE_MEMORY_REPAIR_DEADLINE_MS"),
+                            default=12_000,
+                        ),
+                    ),
+                ),
+                foreground=True,
+                metadata={"chain": "surface_memory_guard_repair"},
+            )
         )
         if isinstance(trace_stage_meta, dict):
-            trace_stage_meta["surface_memory_guard_repair_llm_pool"] = _llm_pool_result_trace(result)
-        if bool(getattr(result, "pool_exhausted", False)):
+            trace_stage_meta["surface_memory_guard_repair_model_attempt"] = (
+                model_attempt_result_trace(result)
+            )
+        if not result.success:
             return ""
-        content = str(getattr(result, "content", "") or "").strip()
+        content = str(result.content or "").strip()
         if not content:
             return ""
         try:
@@ -1875,85 +1889,12 @@ def _surface_timings_ms(*, total_latency_ms: int, llm_latency_ms: int) -> dict[s
     }
 
 
-def _llm_pool_result_trace(result: Any) -> dict[str, Any]:
-    attempts = []
-    for item in list(getattr(result, "attempts", None) or []):
-        attempts.append(
-            {
-                "model": str(getattr(item, "model", "") or ""),
-                "provider": str(getattr(item, "provider", "") or ""),
-                "status": str(getattr(item, "status", "") or ""),
-                "reason_code": str(getattr(item, "reason_code", "") or ""),
-                "latency_ms": _coerce_int(getattr(item, "latency_ms", 0), default=0),
-                "detail": str(getattr(item, "detail", "") or ""),
-            }
-        )
-    return {
-        "pool_exhausted": bool(getattr(result, "pool_exhausted", False)),
-        "final_provider": str(getattr(result, "final_provider", "") or ""),
-        "final_model": str(getattr(result, "final_model", "") or ""),
-        "cached": bool(getattr(result, "cached", False)),
-        "total_latency_ms": _coerce_int(getattr(result, "total_latency_ms", 0), default=0),
-        "attempts": attempts,
-    }
-
-
-def _surface_gemini_fallback_runtime(base_runtime: Mapping[str, Any], *, result: Any) -> dict[str, Any]:
-    attempts = list(getattr(result, "attempts", None) or [])
-    if not attempts:
-        return {}
-    recoverable_reason_codes = {
-        "POOL_BILLING_UNAVAILABLE",
-        "POOL_AUTH_FAILED",
-        "POOL_COOLDOWN_ACTIVE",
-        "POOL_CALL_FAILED",
-        "POOL_FORMAT_INVALID",
-        "POOL_RATE_LIMITED",
-        "POOL_PROVIDER_UNAVAILABLE",
-        "POOL_TIMEOUT",
-    }
-    if not any(str(getattr(item, "reason_code", "") or "") in recoverable_reason_codes for item in attempts):
-        return {}
-    if str(base_runtime.get("provider_name") or "").strip().lower() == "gemini":
-        return {}
-    try:
-        from host_brain.app.model_router import resolve_gemini_model_route  # noqa: PLC0415
-
-        route = resolve_gemini_model_route(role="surface_reply", route_key="CHAT_SURFACE_FALLBACK")
-        api_key = str(route.get("api_key") or "").strip()
-        if not api_key:
-            return {}
-        route_model_id = str(route.get("model_id") or "").strip()
-        env_model_id = str(os.environ.get("HOST_GEMINI_MODEL_ID") or "").strip()
-        model_id = route_model_id or env_model_id or "gemini-2.5-flash-lite"
-        if not model_id.lower().startswith("gemini-"):
-            model_id = env_model_id if env_model_id.lower().startswith("gemini-") else "gemini-2.5-flash-lite"
-        base_url = str(
-            route.get("base_url")
-            or os.environ.get("HOST_GEMINI_BASE_URL")
-            or "https://generativelanguage.googleapis.com/v1beta/openai"
-        ).strip()
-        if base_url and not base_url.lower().rstrip("/").endswith("/v1"):
-            base_url = base_url.rstrip("/") + "/v1"
-        return {
-            "available": True,
-            "provider_name": "gemini",
-            "model_id": model_id,
-            "llm_api_key": api_key,
-            "timeout_ms": _coerce_int(base_runtime.get("timeout_ms"), default=30_000),
-            "base_url_override": base_url,
-            "agent_gen_params": dict(_surface_gen_params(base_runtime)),
-        }
-    except Exception:
-        return {}
-
-
 def _surface_model_audit_fields(*, agent_input: Any, trace_stage_meta: Mapping[str, Any]) -> dict[str, Any]:
-    runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
-    pool_trace = _safe_mapping(trace_stage_meta.get("surface_llm_pool"))
+    del agent_input
+    attempt_trace = _safe_mapping(trace_stage_meta.get("surface_model_attempt"))
     return {
-        "model_id": str(pool_trace.get("final_model") or runtime.get("model_id") or "").strip(),
-        "provider_name": str(pool_trace.get("final_provider") or runtime.get("provider_name") or "").strip(),
+        "model_id": str(attempt_trace.get("final_model") or "").strip(),
+        "provider_name": str(attempt_trace.get("final_provider") or "").strip(),
     }
 
 
@@ -4850,17 +4791,6 @@ def _sanitize_account_login_reply(text: str, *, agent_input: Any | None = None) 
         "还要你明确确认书名、链接和最高积分后才会继续。",
         True,
     )
-
-
-def _surface_gen_params(llm_runtime: Mapping[str, Any]) -> dict[str, Any]:
-    raw = llm_runtime.get("surface_gen_params") or llm_runtime.get("agent_gen_params") or {}
-    if not isinstance(raw, Mapping):
-        return {"temperature": 0.78, "top_p": 0.9, "max_tokens": 220}
-    params = {key: value for key, value in dict(raw).items() if value is not None}
-    params.setdefault("temperature", 0.78)
-    params.setdefault("top_p", 0.9)
-    params.setdefault("max_tokens", 220)
-    return params
 
 
 def _has_multimodal_payload(agent_input: Any) -> bool:

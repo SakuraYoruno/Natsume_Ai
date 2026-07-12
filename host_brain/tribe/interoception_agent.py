@@ -203,7 +203,7 @@ class InteroceptionAgent:
         _log = _logging.getLogger("Natsume.tribe.interoception_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("interoception_agent.interoceptive_narrative") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -216,21 +216,11 @@ class InteroceptionAgent:
                 body_budget=round(float(body_budget), 3),
                 recovery_urgency=round(float(recovery_urgency), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="interoception_narrator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="interoception_narrative",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.2,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("interoceptive_hint") or "").strip()[:40]
             if _hint:
                 _log.debug("InteroceptionAgent.generate_interoceptive_narrative: %s", _hint)

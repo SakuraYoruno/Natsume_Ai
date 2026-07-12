@@ -145,17 +145,7 @@ def _repair_browser_backend() -> dict[str, Any]:
     }
 
 
-_repair_plan_cache: dict[str, tuple[dict[str, Any] | None, float]] = {}
-_REPAIR_CACHE_TTL_S = 300
-
-
-def _get_error_fingerprint(previous_error: str) -> str:
-    return previous_error.strip().lower()[:120]
-
-
 _REPAIR_PLANNER_ENABLED_ENV = "REPAIR_AGENT_LLM_ENABLED"
-_REPAIR_PLANNER_PROVIDER_ENV = "REPAIR_AGENT_LLM_PROVIDER"
-_REPAIR_PLANNER_MODEL_ENV = "REPAIR_AGENT_LLM_MODEL_ID"
 _REPAIR_PLANNER_TIMEOUT_MS = 15_000
 
 _DANGEROUS_KEYWORDS = frozenset(
@@ -198,54 +188,47 @@ def _build_repair_planner_user_prompt(task_text: str, previous_error: str) -> st
 
 
 def _call_repair_planner_llm(task_text: str, previous_error: str) -> dict[str, Any] | None:
-    fingerprint = _get_error_fingerprint(previous_error)
-    now = time.time()
     try:
-        from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
-            _load_api_key_from_env,
-            stream_llm_chunks,
-        )
-
-        provider_name = str(os.environ.get(_REPAIR_PLANNER_PROVIDER_ENV) or "gemini").strip().lower()
-        model_id = str(
-            os.environ.get(_REPAIR_PLANNER_MODEL_ENV)
-            or os.environ.get("HOST_SURFACE_REPLY_MODEL_ID")
-            or "gemini-2.0-flash"
-        ).strip()
-        api_key = _load_api_key_from_env(provider_name)
-        if not api_key:
-            _logger.warning("[RepairAgent] LLM 规划器缺少 API Key（provider=%s），降级到规则路径", provider_name)
-            return None
+        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import REPAIR_AGENT_PLAN_PROMPT_ID  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         user_prompt = _build_repair_planner_user_prompt(task_text=task_text, previous_error=previous_error)
-
-        chunks: list[str] = []
-        for chunk in stream_llm_chunks(
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=api_key,
-            timeout_ms=_REPAIR_PLANNER_TIMEOUT_MS,
+        result = complete_compiled_prompt_sync(
+            prompt_id=REPAIR_AGENT_PLAN_PROMPT_ID,
+            request_id=f"repair-planner::{int(time.time() * 1000)}",
+            scene_type="REPAIR_PLANNER",
+            cognitive_tier="B",
+            deadline_ms=_REPAIR_PLANNER_TIMEOUT_MS,
             messages=[
                 {"role": "system", "content": _resolve_repair_planner_system_prompt()},
                 {"role": "user", "content": user_prompt},
             ],
-            gen_params={"temperature": 0.1, "top_p": 0.8},
-        ):
-            chunks.append(chunk)
-
-        raw = "".join(chunks).strip()
-        if "```" in raw:
-            import re  # noqa: PLC0415
-
-            match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", raw)
-            raw = match.group(1).strip() if match else raw
-        plan = json.loads(raw)
+            foreground=True,
+            metadata={"chain": "repair_agent_planner"},
+        )
+        attempt_trace = model_attempt_result_trace(result)
+        if not result.success:
+            _logger.warning(
+                "[RepairAgent] canonical planner unavailable reason=%s route=%s",
+                result.error_code,
+                attempt_trace.get("route_decision_id"),
+            )
+            return {
+                "repair_type": "unsupported",
+                "commands": [],
+                "summary": "",
+                "can_retry": False,
+                "model_attempt_trace": attempt_trace,
+            }
+        plan = json.loads(str(result.content or "{}"))
+        if not isinstance(plan, Mapping):
+            return None
+        plan = {**dict(plan), "model_attempt_trace": attempt_trace}
         _logger.info("[RepairAgent] LLM 规划器返回 repair_type=%s", plan.get("repair_type"))
-        _repair_plan_cache[fingerprint] = (plan, now)
         return plan
     except Exception as exc:
         _logger.warning("[RepairAgent] LLM 规划器调用失败（%s），降级到规则路径", exc)
-        _repair_plan_cache[fingerprint] = (None, now)
         return None
 
 
@@ -257,9 +240,10 @@ def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
     commands = list(plan.get("commands") or [])
     summary = str(plan.get("summary") or "").strip()
     can_retry = bool(plan.get("can_retry", True))
+    model_attempt_trace = dict(plan.get("model_attempt_trace") or {})
 
     if repair_type == "unsupported" or not commands:
-        return {
+        result = {
             "success": False,
             "summary": summary
             or _mapping_text(
@@ -270,6 +254,9 @@ def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "actions": [],
             "ok_actions": 0,
         }
+        if model_attempt_trace:
+            result["model_attempt_trace"] = model_attempt_trace
+        return result
 
     actions: list[dict[str, Any]] = []
     for step in commands:
@@ -317,7 +304,7 @@ def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
         )
         effective_can_retry = False
 
-    return {
+    result = {
         "success": partial_success,
         "all_success": all_success,
         "summary": effective_summary,
@@ -326,6 +313,9 @@ def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "ok_actions": ok_actions,
         "can_retry": effective_can_retry,
     }
+    if model_attempt_trace:
+        result["model_attempt_trace"] = model_attempt_trace
+    return result
 
 
 def _build_repair_result(*, task_text: str, previous_error: str) -> dict[str, Any]:
@@ -342,23 +332,10 @@ def _build_repair_result(*, task_text: str, previous_error: str) -> dict[str, An
 
     llm_enabled = str(os.environ.get(_REPAIR_PLANNER_ENABLED_ENV) or "true").strip().lower()
     if llm_enabled not in ("false", "0", "no", "off"):
-        fingerprint = _get_error_fingerprint(previous_error)
-        now = time.time()
-        cached_plan: dict[str, Any] | None = None
-        cached_ts: float | None = None
-        if fingerprint in _repair_plan_cache:
-            cached_plan, cached_ts = _repair_plan_cache[fingerprint]
-        if cached_ts is not None and now - cached_ts < _REPAIR_CACHE_TTL_S:
-            _logger.info("[RepairAgent] 命中修复缓存，跳过 LLM 调用，fingerprint=%s…", fingerprint[:40])
-            if cached_plan is not None:
-                return _execute_repair_plan(cached_plan)
-            _logger.info("[RepairAgent] 缓存命中但上次 LLM 失败，走规则兜底")
-        else:
-            _logger.info("[RepairAgent] 尝试 LLM 规划器，error_prefix=%s", normalized_error[:60])
-            plan = _call_repair_planner_llm(task_text=task_text, previous_error=previous_error)
-            _repair_plan_cache[fingerprint] = (plan, now)
-            if plan is not None:
-                return _execute_repair_plan(plan)
+        _logger.info("[RepairAgent] 尝试 canonical LLM 规划器，error_prefix=%s", normalized_error[:60])
+        plan = _call_repair_planner_llm(task_text=task_text, previous_error=previous_error)
+        if plan is not None:
+            return _execute_repair_plan(plan)
 
     _logger.info("[RepairAgent] 规则兜底路径，error=%s", normalized_error[:60])
     return {
@@ -416,6 +393,10 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
             "ok_actions": int(repair_result.get("ok_actions") or 0),
             "ts_ms": int(time.time() * 1000),
         }
+        if repair_result.get("model_attempt_trace"):
+            out["repair_agent_trace"]["model_attempt"] = dict(
+                repair_result["model_attempt_trace"]
+            )
     except Exception as exc:
         handler_error_templates = _mapping_section(_repair_runtime_templates(), "handler_error")
         artifacts = out.setdefault("agent_artifacts", {})

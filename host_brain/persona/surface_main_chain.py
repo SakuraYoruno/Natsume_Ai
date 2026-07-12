@@ -146,8 +146,16 @@ class SurfaceMainChainResult:
 class SurfaceMainChain:
     """Narrow runtime facade for the current surface main chain."""
 
-    def __init__(self, generate: GenerateSurface) -> None:
-        self._runtime = SurfaceRuntime(generate)
+    def __init__(
+        self,
+        generate: GenerateSurface,
+        *,
+        model_retries_owned_externally: bool = False,
+    ) -> None:
+        self._runtime = SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=model_retries_owned_externally,
+        )
 
     async def run(self, payload: SurfaceMainChainInput | Mapping[str, Any]) -> SurfaceMainChainResult:
         compiled = compile_surface_main_chain_input(payload)

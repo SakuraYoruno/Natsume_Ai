@@ -2,16 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
-import socket
 import time
-import urllib.error
-import urllib.request
-from urllib.parse import urlsplit
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from natsume_contracts.bridge_auth import build_http_auth_headers
+from host_brain.channels.embodiment import queue_mateengine_command
 
 
 DEFAULT_MATEENGINE_SIGNAL_HOST = "127.0.0.1"
@@ -703,110 +698,42 @@ def _http_json(
     scope: str,
     payload: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any], str | None]:
-    data = b""
-    headers = {"Content-Type": "application/json; charset=utf-8"}
-    if payload is not None:
-        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    key_id = str(os.getenv("NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID") or "").strip()
-    secret = str(os.getenv("NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET") or "")
-    principal = str(
-        os.getenv("NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL")
-        or "host.mateengine.bridge"
-    ).strip()
-    if not key_id or len(secret.encode("utf-8")) < 32 or not principal or not scope:
-        return False, {}, "HOST_MATEENGINE_BRIDGE_CREDENTIAL_REQUIRED"
-    parsed = urlsplit(url)
-    path = parsed.path or "/"
-    headers.update(
-        build_http_auth_headers(
-            secret=secret.encode("utf-8"),
-            key_id=key_id,
-            method=method,
-            path=path,
-            timestamp_ms=int(time.time() * 1000),
-            nonce=secrets.token_urlsafe(24),
-            principal=principal,
-            scope=scope,
-            raw_body=data,
-        )
-    )
-    request = urllib.request.Request(
-        url=url,
-        data=(data if payload is not None else None),
-        headers=headers,
-        method=method.upper(),
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=_mateengine_bridge_timeout_s()) as resp:
-            raw = resp.read()
-            if not raw:
-                return True, {}, None
-            decoded = raw.decode("utf-8", errors="replace")
-            parsed = json.loads(decoded)
-            return 200 <= int(resp.status) < 300, dict(parsed) if isinstance(parsed, dict) else {"data": parsed}, None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        return False, {}, f"HTTP {exc.code}: {detail}"
-    except (OSError, json.JSONDecodeError) as exc:
-        return False, {}, str(exc)
+    return False, {}, "HOST_DEVICE_EFFECT_RETIRED_USE_EDGE_EMBODIMENT_COMMAND"
 
 
 def get_mateengine_bridge_health() -> MateEngineActionResult:
-    base_url = _mateengine_bridge_base_url()
-    target = f"{base_url}/health"
-    if not _mateengine_bridge_enabled():
-        return MateEngineActionResult(
-            ok=False,
-            status="disabled",
-            backend="mateengine_bridge",
-            target=target,
-            payload={},
-            error="HOST_MATEENGINE_BRIDGE_ENABLED is disabled",
-        )
-    ok, response, error = _http_json(
-        method="GET",
-        url=target,
-        scope="bridge:mateengine:read",
+    receipt = queue_mateengine_command(
+        action="health",
+        payload={},
+        request_id=f"mateengine_health_{int(time.time() * 1000)}",
     )
     return MateEngineActionResult(
-        ok=ok,
-        status="ok" if ok else "failed",
-        backend="mateengine_bridge",
-        target=target,
+        ok=receipt.success,
+        status=receipt.status.lower(),
+        backend="edge_embodiment_v1",
+        target="edge://mateengine/health",
         payload={},
-        response=response,
-        error=error,
+        response=dict(receipt.event or {}),
+        error=None if receipt.success else receipt.detail,
     )
 
 
 def send_mateengine_command(command: dict[str, Any]) -> MateEngineActionResult:
-    base_url = _mateengine_bridge_base_url()
-    target = f"{base_url}/command"
     payload = dict(command or {})
-    if not _mateengine_bridge_enabled():
-        return MateEngineActionResult(
-            ok=False,
-            status="disabled",
-            backend="mateengine_bridge",
-            target=target,
-            payload=payload,
-            error="HOST_MATEENGINE_BRIDGE_ENABLED is disabled",
-        )
-    ok, response, error = _http_json(
-        method="POST",
-        url=target,
-        scope="bridge:mateengine:admin",
-        payload=payload,
+    request_id = str(payload.get("request_id") or f"mateengine_{int(time.time() * 1000)}")
+    receipt = queue_mateengine_command(
+        action="command",
+        payload={"command": payload},
+        request_id=request_id,
     )
-    response_ok = bool(response.get("success", ok)) if response else ok
     return MateEngineActionResult(
-        ok=bool(ok and response_ok),
-        status="sent" if ok and response_ok else "failed",
-        backend="mateengine_bridge",
-        target=target,
+        ok=receipt.success,
+        status=receipt.status.lower(),
+        backend="edge_embodiment_v1",
+        target="edge://mateengine/command",
         payload=payload,
-        response=response,
-        error=error or (None if response_ok else str((response or {}).get("detail") or "command failed")),
+        response=receipt.as_dict(),
+        error=None if receipt.success else receipt.detail,
     )
 
 
@@ -1114,37 +1041,20 @@ def send_mateengine_signal(
             error=str(exc),
         )
 
-    if not _mateengine_enabled():
-        return MateEngineSignalResult(
-            ok=False,
-            status="disabled",
-            host=target_host,
-            port=target_port,
-            payload=payload,
-            error="HOST_MATEENGINE_SIGNAL_ENABLED is disabled",
-        )
-
-    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            bytes_sent = sock.sendto(data, (target_host, target_port))
-    except OSError as exc:
-        return MateEngineSignalResult(
-            ok=False,
-            status="failed",
-            host=target_host,
-            port=target_port,
-            payload=payload,
-            error=str(exc),
-        )
-
+    receipt = queue_mateengine_command(
+        action="signal",
+        payload={"signal": payload},
+        request_id=str(payload.get("id") or f"mateengine_signal_{int(time.time() * 1000)}"),
+    )
+    event = dict(receipt.event or {})
     return MateEngineSignalResult(
-        ok=True,
-        status="sent",
-        host=target_host,
-        port=target_port,
+        ok=receipt.success,
+        status=receipt.status.lower(),
+        host=str(event.get("host") or target_host),
+        port=int(event.get("port") or target_port),
         payload=payload,
-        bytes_sent=bytes_sent,
+        bytes_sent=int(event.get("bytes_sent") or 0),
+        error=None if receipt.success else receipt.detail,
     )
 
 
@@ -1181,37 +1091,20 @@ def send_mateengine_say(
     if ttl is not None:
         payload["ttl"] = float(ttl)
 
-    if not _mateengine_enabled():
-        return MateEngineBridgeResult(
-            ok=False,
-            status="disabled",
-            host=target_host,
-            port=target_port,
-            payload=payload,
-            error="HOST_MATEENGINE_SIGNAL_ENABLED is disabled",
-        )
-
-    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            bytes_sent = sock.sendto(data, (target_host, target_port))
-    except OSError as exc:
-        return MateEngineBridgeResult(
-            ok=False,
-            status="failed",
-            host=target_host,
-            port=target_port,
-            payload=payload,
-            error=str(exc),
-        )
-
+    receipt = queue_mateengine_command(
+        action="signal",
+        payload={"signal": payload},
+        request_id=f"mateengine_say_{int(time.time() * 1000)}",
+    )
+    event = dict(receipt.event or {})
     return MateEngineBridgeResult(
-        ok=True,
-        status="sent",
-        host=target_host,
-        port=target_port,
+        ok=receipt.success,
+        status=receipt.status.lower(),
+        host=str(event.get("host") or target_host),
+        port=int(event.get("port") or target_port),
         payload=payload,
-        bytes_sent=bytes_sent,
+        bytes_sent=int(event.get("bytes_sent") or 0),
+        error=None if receipt.success else receipt.detail,
     )
 
 # Desktop pet behavior orchestration layer.

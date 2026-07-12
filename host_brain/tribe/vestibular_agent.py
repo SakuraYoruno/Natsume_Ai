@@ -241,7 +241,7 @@ class VestibularAgent:
         _log = _logging.getLogger("Natsume.tribe.vestibular_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("vestibular_agent.stability_assessment") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -255,21 +255,11 @@ class VestibularAgent:
                 topic_shift_rate=round(float(topic_shift_rate), 3),
                 emotion_volatility=round(float(emotion_volatility), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="vestibular_assessor",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="vestibular_stability_assessment",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=48,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _insight = str(_parsed.get("instability_insight") or "").strip()[:60]
             if _insight:
                 _log.debug("VestibularAgent.generate_stability_assessment: %s", _insight)

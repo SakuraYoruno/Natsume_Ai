@@ -61,47 +61,47 @@
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 45
+          "line": 43
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._delete_authorized_document",
-          "line": 1328
+          "line": 1235
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1333
+          "line": 1240
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._replace_authorized_payload",
-          "line": 1336
+          "line": 1243
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1341
+          "line": 1248
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.open",
-          "line": 380
+          "line": 390
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.replace",
-          "line": 384
+          "line": 394
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.unlink",
-          "line": 387
+          "line": 397
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.unlink",
-          "line": 413
+          "line": 423
         }
       ]
     },
@@ -112,30 +112,6 @@
     }
   ],
   "allowlist": [
-    {
-      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
-      "path": "edge_client/rpc/fallback_llm.py",
-      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
-      "owner": "EDGE_RUNTIME",
-      "reason": "Existing Edge fallback audit coupling captured by TASK-0461.",
-      "remove_task": "M55_EDGE_RUNTIME"
-    },
-    {
-      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
-      "path": "edge_client/rpc/resource_gate.py",
-      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
-      "owner": "EDGE_RUNTIME",
-      "reason": "Existing Edge resource-gate audit coupling captured by TASK-0461.",
-      "remove_task": "M55_EDGE_RUNTIME"
-    },
-    {
-      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
-      "path": "edge_client/rpc/voice.py",
-      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
-      "owner": "EDGE_RUNTIME",
-      "reason": "Existing Edge voice audit coupling captured by TASK-0461.",
-      "remove_task": "M55_EDGE_RUNTIME"
-    },
     {
       "rule_id": "NLE-BND-AGENTRUNTIME-APP",
       "path": "host_brain/agent_runtime/agent_tools.py",

@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
-
 import pytest
 
+from host_brain.app import dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     ORCH_DEPENDENCY_UNAVAILABLE,
@@ -33,22 +32,58 @@ from host_brain.integrations.graph_runtime import (
     STATUS_OK,
     GraphRuntimeContract,
 )
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
+)
 
 
 NOW_MS = 1_800_300_000_000
+
+
+@pytest.fixture(autouse=True)
+def _canonical_model_composition():  # noqa: ANN202
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(
+            RouteDecision(
+                "route-graph-drill",
+                (ProviderTarget("graph-test", "mock", "mock-v1", timeout_ms=3000),),
+                "contract-test",
+                max_attempts=1,
+            )
+        ),
+        provider_adapters=[
+            CallableProviderAdapter(
+                "graph-test",
+                complete_fn=lambda _: json.dumps(
+                    {
+                        "narrative": {"text": "ok"},
+                        "intent_draft": {},
+                        "meta": {"draft_only": True},
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    try:
+        yield
+    finally:
+        dependencies.reset_model_runtime_composition()
 
 
 def _make_runtime() -> tuple[GraphRuntimeContract, SQLiteLedger]:
     ledger = SQLiteLedger(db_path=":memory:")
     runtime = GraphRuntimeContract(ledger=ledger, default_timeout_ms=5000)
     return runtime, ledger
-
-
-def _mock_provider(_payload: Any) -> str:
-    return json.dumps(
-        {"narrative": {"text": "ok"}, "intent_draft": {}, "meta": {"draft_only": True}},
-        ensure_ascii=False,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,16 +137,15 @@ class TestDrillFaultInjection:
             "entry_node": "respond",
             "model_profile_id": "test",
             "model_nodes": {
-                "model_a": {
+                "renderer_ja_c_style": {
                     "provider": "mock",
                     "model_id": "mock-v1",
                     "temperature": 0.5,
                     "max_output_tokens": 200,
                     "expected_param_hash": "deliberately-wrong",
-                    "provider_fn": _mock_provider,
                 },
             },
-            "node_bindings": [{"node_id": "respond", "model_node_id": "model_a"}],
+            "node_bindings": [{"node_id": "respond", "model_node_id": "renderer_ja_c_style"}],
             "edges": [],
             "fallback_edges": [],
         }
@@ -128,15 +162,14 @@ class TestDrillFaultInjection:
             "entry_node": "respond",
             "model_profile_id": "test",
             "model_nodes": {
-                "model_a": {
+                "renderer_ja_c_style": {
                     "provider": "mock",
                     "model_id": "mock-v1",
                     "temperature": 0.5,
                     "max_output_tokens": 200,
-                    "provider_fn": _mock_provider,
                 },
             },
-            "node_bindings": [{"node_id": "respond", "model_node_id": "model_a", "require_approval_token": True}],
+            "node_bindings": [{"node_id": "respond", "model_node_id": "renderer_ja_c_style", "require_approval_token": True}],
             "edges": [],
             "fallback_edges": [],
         }
@@ -153,16 +186,15 @@ class TestDrillFaultInjection:
             "entry_node": "respond",
             "model_profile_id": "test",
             "model_nodes": {
-                "model_a": {
+                "renderer_ja_c_style": {
                     "provider": "openai",
                     "model_id": "gpt-5",
                     "temperature": 0.5,
                     "max_output_tokens": 200,
                     "available": False,
-                    "provider_fn": _mock_provider,
                 },
             },
-            "node_bindings": [{"node_id": "respond", "model_node_id": "model_a"}],
+            "node_bindings": [{"node_id": "respond", "model_node_id": "renderer_ja_c_style"}],
             "edges": [],
             "fallback_edges": [],
         }
@@ -173,6 +205,38 @@ class TestDrillFaultInjection:
             ts_ms=NOW_MS,
         )
         assert result.status == STATUS_DEGRADED
+
+    def test_transport_fields_are_rejected_before_graph_execution(self) -> None:
+        runtime, ledger = _make_runtime()
+        graph = {
+            "graph_id": "drill.transport_field",
+            "version": "v1",
+            "entry_node": "respond",
+            "model_profile_id": "test",
+            "model_nodes": {
+                "renderer_ja_c_style": {
+                    "provider": "mock",
+                    "model_id": "mock-v1",
+                    "api_key": "must-never-enter-state",
+                }
+            },
+            "node_bindings": [
+                {"node_id": "respond", "model_node_id": "renderer_ja_c_style"}
+            ],
+            "edges": [],
+            "fallback_edges": [],
+        }
+
+        result = runtime.run_graph(
+            request_id="drill_transport_field",
+            graph_config=graph,
+            ts_ms=NOW_MS,
+        )
+
+        assert result.status == STATUS_FAILED
+        assert result.reason_code == ORCH_PARAM_DRIFT
+        assert ledger.model_control_log == []
+        assert "must-never-enter-state" not in str(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +251,8 @@ class TestEnvReadinessExtended:
         runtime, _ = _make_runtime()
         scenarios = [
             {"graph_id": "env.ok", "version": "v1", "entry_node": "r", "model_profile_id": "test",
-             "model_nodes": {"m": {"provider": "mock", "model_id": "m", "temperature": 0, "max_output_tokens": 10, "provider_fn": _mock_provider}},
-             "node_bindings": [{"node_id": "r", "model_node_id": "m"}], "edges": [], "fallback_edges": []},
+             "model_nodes": {"renderer_ja_c_style": {"provider": "mock", "model_id": "mock-v1", "temperature": 0, "max_output_tokens": 10}},
+             "node_bindings": [{"node_id": "r", "model_node_id": "renderer_ja_c_style"}], "edges": [], "fallback_edges": []},
         ]
         for sc in scenarios:
             result = runtime.run_graph(request_id="env_001", graph_config=sc, ts_ms=NOW_MS)
@@ -223,10 +287,9 @@ class TestOrchFaultReplay:
         graph = {
             "graph_id": "orch.replay", "version": "v1", "entry_node": "r",
             "model_profile_id": "test",
-            "model_nodes": {"m": {"provider": "mock", "model_id": "m", "temperature": 0.5,
-                                   "max_output_tokens": 100, "expected_param_hash": "bad",
-                                   "provider_fn": _mock_provider}},
-            "node_bindings": [{"node_id": "r", "model_node_id": "m"}],
+            "model_nodes": {"renderer_ja_c_style": {"provider": "mock", "model_id": "mock-v1", "temperature": 0.5,
+                                   "max_output_tokens": 100, "expected_param_hash": "bad"}},
+            "node_bindings": [{"node_id": "r", "model_node_id": "renderer_ja_c_style"}],
             "edges": [], "fallback_edges": [],
         }
         runtime.run_graph(request_id="orch_replay_001", graph_config=graph, ts_ms=NOW_MS)
@@ -243,10 +306,9 @@ class TestOrchFaultReplay:
         g1 = {
             "graph_id": "g1", "version": "v1", "entry_node": "r",
             "model_profile_id": "test",
-            "model_nodes": {"m": {"provider": "mock", "model_id": "m", "temperature": 0,
-                                   "max_output_tokens": 10, "expected_param_hash": "x",
-                                   "provider_fn": _mock_provider}},
-            "node_bindings": [{"node_id": "r", "model_node_id": "m"}],
+            "model_nodes": {"renderer_ja_c_style": {"provider": "mock", "model_id": "mock-v1", "temperature": 0,
+                                   "max_output_tokens": 10, "expected_param_hash": "x"}},
+            "node_bindings": [{"node_id": "r", "model_node_id": "renderer_ja_c_style"}],
             "edges": [], "fallback_edges": [],
         }
         runtime.run_graph(request_id="multi_001", graph_config=g1, ts_ms=NOW_MS)
@@ -254,9 +316,9 @@ class TestOrchFaultReplay:
         g2 = {
             "graph_id": "g2", "version": "v1", "entry_node": "r",
             "model_profile_id": "test",
-            "model_nodes": {"m": {"provider": "mock", "model_id": "m", "temperature": 0,
-                                   "max_output_tokens": 10, "provider_fn": _mock_provider}},
-            "node_bindings": [{"node_id": "r", "model_node_id": "m", "require_approval_token": True}],
+            "model_nodes": {"renderer_ja_c_style": {"provider": "mock", "model_id": "mock-v1", "temperature": 0,
+                                   "max_output_tokens": 10}},
+            "node_bindings": [{"node_id": "r", "model_node_id": "renderer_ja_c_style", "require_approval_token": True}],
             "edges": [], "fallback_edges": [],
         }
         runtime.run_graph(request_id="multi_002", graph_config=g2, payload={"input": "x"}, ts_ms=NOW_MS + 1)

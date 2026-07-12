@@ -397,6 +397,24 @@ class PromptRegistry:
         return self.validate_rendered(rendered)
 
     def validate_rendered(self, prompt: RenderedPrompt) -> RenderedPrompt:
+        # A syntactically valid ``RenderedPrompt`` is not sufficient authority
+        # to enter the model plane.  Callers may derive repair messages from a
+        # registered prompt, but they may not mint a new prompt id/version or
+        # replace its output contract/cache policy outside this registry.
+        with self._lock:
+            definition = self._definitions.get(prompt.prompt_id)
+        if definition is None:
+            raise UnknownPromptError(f"unknown prompt: {prompt.prompt_id}")
+        if prompt.version != definition.info.version:
+            raise PromptVersionError(
+                f"prompt version mismatch for {prompt.prompt_id}: "
+                f"rendered {prompt.version}, registered {definition.info.version}"
+            )
+        if prompt.output_contract != definition.info.output_contract:
+            raise PromptSchemaError(
+                "rendered prompt output contract does not match the registered contract"
+            )
+        _restricted_cache_policy(definition.info.cache_policy, prompt.cache_policy)
         messages = _normalize_messages(prompt.messages, context=f"rendered prompt {prompt.prompt_id}")
         expected_digest = rendered_prompt_digest(
             prompt_id=prompt.prompt_id,

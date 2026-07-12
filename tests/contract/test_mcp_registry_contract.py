@@ -7,9 +7,11 @@ import unittest
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.governor.tokens import TokenService
 from host_brain.core.errors import (
     MCP_PROVIDER_UNAVAILABLE,
     MCP_TOOL_NOT_REGISTERED,
+    MCP_WRITE_TOKEN_INVALID,
     MCP_WRITE_TOKEN_REQUIRED,
 )
 from host_brain.mcp.tool_broker import MCPToolBroker
@@ -157,8 +159,13 @@ class TestMCPBrokerContract(unittest.TestCase):
         set_global_degradation_state_machine(DegradationStateMachine())
         self.registry = MCPToolRegistry(db_path=":memory:")
         self.ledger = SQLiteLedger(db_path=":memory:")
-        self.broker = MCPToolBroker(registry=self.registry, ledger=self.ledger)
         self.ts_base = 1_800_000_000_000
+        self.token_service = TokenService()
+        self.broker = MCPToolBroker(
+            registry=self.registry,
+            ledger=self.ledger,
+            token_service=self.token_service,
+        )
 
     def tearDown(self) -> None:
         set_global_degradation_state_machine(None)
@@ -252,6 +259,13 @@ class TestMCPBrokerContract(unittest.TestCase):
     def test_t_mcp_02_write_with_token_approved(self) -> None:
         """WRITE 有 token → 正常执行。"""
         self._register_tools()
+        token = self.token_service.issue_approval_token(
+            intent_id="intent_mcp_w02",
+            skill_name="mcp::github::create_issue",
+            session_id="session_mcp",
+            seq=2,
+            now_ts_ms=self.ts_base,
+        )
         result = self.broker.call(
             provider_id="github",
             tool_id="create_issue",
@@ -260,12 +274,28 @@ class TestMCPBrokerContract(unittest.TestCase):
             session_id="session_mcp",
             seq=2,
             args={"title": "Feature"},
-            approval_token_ref="token_abc123",
+            approval_token_ref=token,
             ts_ms=self.ts_base,
         )
         self.assertTrue(result.success)
         self.assertEqual("APPROVE", result.decision)
         self.assertEqual(1001, result.output["id"])
+
+    def test_t_mcp_02_write_with_forged_token_is_rejected(self) -> None:
+        self._register_tools()
+        result = self.broker.call(
+            provider_id="github",
+            tool_id="create_issue",
+            request_id="req_mcp_forged",
+            intent_id="intent_mcp_forged",
+            session_id="session_mcp",
+            seq=3,
+            args={"title": "must not run"},
+            approval_token_ref="token_attacker_controlled",
+            ts_ms=self.ts_base,
+        )
+        self.assertFalse(result.success)
+        self.assertEqual(MCP_WRITE_TOKEN_INVALID, result.reason_code)
 
     def test_t_mcp_02_fixture_write_no_token(self) -> None:
         """Fixture write_no_token.json 结构正确。"""

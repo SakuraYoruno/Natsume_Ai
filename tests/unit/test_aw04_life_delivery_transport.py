@@ -143,21 +143,21 @@ def test_gateway_delivery_uses_outbox_key_for_transport_idempotency(monkeypatch)
 def test_embodiment_destinations_are_independent_outbox_operations(monkeypatch) -> None:
     captured: list[tuple[str, str]] = []
 
-    def _resolve_vts_expression(**kwargs):
+    async def _submit_avatar_command(**kwargs):
         captured.append(("vts", kwargs["request_id"]))
-        return {"status": "APPLIED"}
+        return {"status": "ACCEPTED", "success": True}
 
-    def _send_mateengine_action(**kwargs):
-        captured.append(("mate", kwargs["request_id"]))
-        return {"status": "sent"}
+    async def _submit_embodiment_command(command):
+        captured.append(("mate", command.request_id))
+        return {"status": "ACCEPTED", "success": True}
 
     monkeypatch.setattr(
-        "host_brain.channels.vts.resolve_vts_expression",
-        _resolve_vts_expression,
+        "host_brain.channels.embodiment.submit_avatar_command",
+        _submit_avatar_command,
     )
     monkeypatch.setattr(
-        "host_brain.channels.mateengine.send_mateengine_action",
-        _send_mateengine_action,
+        "host_brain.channels.embodiment.submit_embodiment_command",
+        _submit_embodiment_command,
     )
     transport = LifeDeliveryTransport(ledger=_Ledger(SURFACE_DECISION))
 

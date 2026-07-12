@@ -27,7 +27,10 @@ from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_s
 from host_brain.app.skill_family_router import build_skill_route_decision
 from host_brain.app.settings.orchestration import get_orchestration_settings
 from host_brain.agent_runtime.skill_ids import AGENT_RUN_MODE_BY_SKILL_ID, is_agent_runtime_skill
-from host_brain.skills.executor_registry import dispatch_executor_payload
+from host_brain.skills.executor_registry import (
+    bind_validated_skill_authority,
+    dispatch_executor_payload,
+)
 
 
 _logger = logging.getLogger("Natsume.executive_runtime_core")
@@ -614,6 +617,179 @@ def _maybe_build_multi_step_plan(
     return build_skill_dag_plan(plan_id=f"plan::{request_id}", steps=steps)
 
 
+def _build_http_plan_node_grants(
+    *,
+    plan: SkillDagPlan,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    intent_draft: dict[str, Any],
+    governor_result: dict[str, Any],
+    skill_registry: Any,
+) -> dict[str, dict[str, Any]]:
+    """Derive exact, durable child grants from one approved HTTP plan.
+
+    The parent ``exec_intent`` token is only authority to derive the immutable
+    approved DAG. It is never reused to execute a child capability.
+    """
+
+    from host_brain.app.dependencies import get_ledger, get_token_service  # noqa: PLC0415
+    from host_brain.governor.action_arbiter import build_governed_action_binding  # noqa: PLC0415
+    from host_brain.governor.route_token import compile_route_decision  # noqa: PLC0415
+    from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+    from host_brain.orchestration.governor_grant import (  # noqa: PLC0415
+        durable_governor_binding,
+        governor_grant_ref,
+    )
+
+    ledger = get_ledger()
+    parent_ref = governor_grant_ref(request_id, governor_result)
+    parent_decision = DurableGovernorGrantResolver(ledger).require(
+        request_id=request_id,
+        expected_ref=parent_ref,
+    )
+    parent_binding = durable_governor_binding(parent_decision)
+    now_value = int(time.time() * 1000)
+    try:
+        parent_seq = int(parent_binding.get("seq") or 0)
+        parent_expiry = int(parent_binding.get("expires_at_ms") or 0)
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("PLAN_PARENT_GRANT_INVALID") from exc
+    parent_intent_id = _normalize_text(parent_binding.get("intent_id"))
+    parent_scope = _normalize_text(parent_binding.get("scope"), lower=True)
+    parent_principal = _normalize_text(parent_binding.get("principal_id"))
+    if (
+        _normalize_text(parent_binding.get("action_kind")) != "exec_intent"
+        or parent_intent_id != _normalize_text(intent_draft.get("id") or intent_draft.get("intent_id"))
+        or _normalize_text(parent_binding.get("session_id")) != session_id
+        or parent_seq != int(intent_draft.get("seq") or 0)
+        or parent_scope != (_normalize_text(intent_draft.get("target"), lower=True) or "host")
+        or parent_principal != person_id
+        or parent_expiry <= now_value
+    ):
+        raise PermissionError("PLAN_PARENT_GRANT_BINDING_MISMATCH")
+
+    # Rebuild the DAG from the immutable proposal stored before Governor
+    # approval. A caller cannot append or substitute a node after approval.
+    trace = ledger.trace_request(request_id)
+    approved_draft: dict[str, Any] | None = None
+    for raw_row in list(trace.get("intent_log") or []):
+        if not isinstance(raw_row, Mapping):
+            continue
+        if _normalize_text(raw_row.get("intent_id")) != parent_intent_id:
+            continue
+        raw_draft = raw_row.get("normalized_json")
+        if isinstance(raw_draft, str):
+            try:
+                raw_draft = json.loads(raw_draft)
+            except json.JSONDecodeError:
+                raw_draft = None
+        if isinstance(raw_draft, Mapping):
+            approved_draft = dict(raw_draft)
+    if approved_draft is None:
+        raise PermissionError("PLAN_APPROVED_PROPOSAL_MISSING")
+    approved_steps = approved_draft.get("planned_steps")
+    if not isinstance(approved_steps, list):
+        approved_steps = approved_draft.get("steps")
+    if not isinstance(approved_steps, list):
+        raise PermissionError("PLAN_APPROVED_NODES_MISSING")
+    approved_plan = build_skill_dag_plan(
+        plan_id=plan.plan_id,
+        steps=[dict(item or {}) for item in approved_steps],
+        parallel_window=plan.parallel_window,
+    )
+    if [node.as_dict() for node in approved_plan.nodes] != [node.as_dict() for node in plan.nodes]:
+        raise PermissionError("PLAN_APPROVED_DAG_MISMATCH")
+
+    token_service = get_token_service()
+    grants: dict[str, dict[str, Any]] = {}
+    for node in plan.nodes:
+        if node.route != "skill":
+            continue
+        child_seq = parent_seq * 10_000 + int(node.step_index)
+        child_intent_id = f"{parent_intent_id}::node::{node.node_id}"
+        child_args = _merge_plan_node_args(
+            base_intent_draft=approved_draft,
+            node=node,
+            task_text=_normalize_text(node.task_description or node.description),
+        )
+        child_intent = {
+            "schema_version": "Natsume.intent.v1",
+            "id": child_intent_id,
+            "ts_ms": now_value,
+            "session_id": session_id,
+            "seq": child_seq,
+            "person_id": person_id,
+            "principal_id": parent_principal,
+            "type": "query",
+            "action": node.target_id,
+            "route": "skill",
+            "target_id": node.target_id,
+            "target": parent_scope,
+            "args": child_args,
+            "nonce": f"nonce::{request_id}::{node.node_id}",
+            "source": "executive_plan_node_grant",
+        }
+        token_ref = token_service.issue_approval_token(
+            intent_id=child_intent_id,
+            skill_name=node.target_id,
+            session_id=session_id,
+            seq=child_seq,
+            now_ts_ms=now_value,
+        )
+        skill_meta = skill_registry.require(node.target_id)
+        child_expiry = min(parent_expiry, now_value + 60_000)
+        if child_expiry <= now_value:
+            raise PermissionError("PLAN_NODE_GRANT_EXPIRED")
+        binding = build_governed_action_binding(
+            intent_envelope=child_intent,
+            approval_token_ref=token_ref,
+            risk_level=max(int(node.risk_level), int(skill_meta.risk_level)),
+            issued_at_ms=now_value,
+            expires_at_ms=child_expiry,
+        )
+        committed = compile_route_decision(
+            approved=True,
+            reason_code="PLAN_NODE_DERIVED_APPROVE",
+            committed_at_ms=now_value,
+            proposer_node_id="executive_plan_node_grant",
+            tier="full",
+        )
+        child_decision = {
+            "request_id": request_id,
+            "intent_id": child_intent_id,
+            "decision": "APPROVE",
+            "reason_code": "PLAN_NODE_DERIVED_APPROVE",
+            "rule_trace": [{
+                "gate_id": "PLAN_PARENT_GRANT",
+                "hit": False,
+                "reason_hint": "EXACT_APPROVED_NODE",
+            }],
+            "tokens": {"approval_token_ref": token_ref},
+            "approved_action_binding": binding,
+            "snapshot_refs": {
+                "parent_governor_grant_ref": parent_ref,
+                "plan_id": plan.plan_id,
+                "node_id": node.node_id,
+            },
+            "stage": "S_PLAN_NODE_GRANT",
+            "ts_ms": now_value,
+            "committed_route_token_ref": committed.token.value,
+            "committed_route_token": {
+                "token": committed.token.value,
+                "reason_code": committed.reason_code,
+                "committed_at_ms": committed.committed_at_ms,
+                "proposer_node_id": committed.proposer_node_id,
+            },
+        }
+        ledger.log_governor(child_decision)
+        grants[node.node_id] = {
+            **child_decision,
+            "_node_intent_draft": child_intent,
+        }
+    return grants
+
+
 def _format_elapsed(elapsed_ms: int) -> str:
     seconds = max(0, int(elapsed_ms // 1000))
     if seconds < 60:
@@ -1042,6 +1218,14 @@ def _execute_skill(
 
     args = _extract_skill_args(intent_draft, request_body, task_text)
     if is_agent_runtime_skill(skill_id):
+        if governed_execution_context is not None:
+            # The admitted Host command owns the root WorkOrder identity.  A
+            # governed skill must not mint a second WorkOrder inside its
+            # normalizer, otherwise the sealed Task authority cannot bind the
+            # actual executor payload to the durable command/graph.
+            args["work_order_id"] = str(
+                governed_execution_context.get("work_order_id") or ""
+            ).strip()
         args.setdefault("approval_confirmed", True)
         args.setdefault("confirmed", True)
         if approval_token_ref:
@@ -1098,7 +1282,68 @@ def _execute_skill(
                 payload.setdefault("_context", exec_context)
         else:
             payload = handler_payload
-        raw_result = dispatch_executor_payload(payload)
+        if not isinstance(payload, dict):
+            raise PermissionError("SKILL_EXECUTOR_PAYLOAD_INVALID")
+        if not str(payload.get("tool") or "").strip():
+            # Pure/read-only handlers still cross the canonical capability
+            # Broker; the private projection adapter only returns their
+            # normalized result after authority admission and durable claim.
+            payload = {
+                "tool": "skill_result",
+                "result": payload,
+                "_context": exec_context,
+            }
+        governed_authority = (
+            {
+                "execution_mode": "governed_task_runtime",
+                **dict(governed_execution_context),
+            }
+            if governed_execution_context is not None
+            else None
+        )
+        try:
+            authority_seq = int(intent_draft.get("seq") or 0)
+        except (TypeError, ValueError):
+            authority_seq = 0
+        dispatch_authority = bind_validated_skill_authority(
+            payload=payload,
+            request_id=request_id,
+            skill_id=skill_id,
+            principal_id=person_id,
+            # A Task-governed dispatch is bound to the admitted HostCommand
+            # target.  Token-governed dispatches are instead bound to the
+            # Governor scope (normally the SkillMeta scope, e.g. ``host``).
+            target_id=(
+                _normalize_text(
+                    dict(governed_execution_context or {}).get("target_id"),
+                    lower=True,
+                )
+                if governed_execution_context is not None
+                else (
+                    _normalize_text(intent_draft.get("target"), lower=True)
+                    or _normalize_text(skill_meta.scope, lower=True)
+                )
+            ),
+            intent_id=execution_intent_id,
+            session_id=session_id,
+            seq=authority_seq,
+            approval_token_ref=approval_token_ref or None,
+            governed_execution_context=governed_authority,
+            # ``False`` is the worker-thread audit suppression sentinel, not a
+            # ledger candidate.  Authority verification must still bind to
+            # the process canonical ledger used by the governed coordinator.
+            durable_ledger=None if ledger is False else ledger,
+            validated_by=(
+                "governed_host_adapter.durable_grant"
+                if governed_execution_context is not None
+                else (
+                    "executive_runtime.token_service"
+                    if token_service is not None
+                    else "executive_runtime.governor_output"
+                )
+            ),
+        )
+        raw_result = dispatch_executor_payload(payload, authority=dispatch_authority)
         result_text = _flatten_result_text(raw_result)
         result_mapping = _coerce_mapping(raw_result)
         raw_status = _normalize_text(result_mapping.get("status"), lower=True)
@@ -1503,17 +1748,33 @@ async def _execute_plan_node(
             node=node,
             task_text=task_text,
         )
+        node_governor_result = dict(governor_result or {})
+        node_intent_draft: dict[str, Any] | None = None
+        node_grants = node_governor_result.pop("node_grants", None)
+        if isinstance(node_grants, Mapping):
+            candidate = node_grants.get(node.node_id) or node_grants.get(node.target_id)
+            if isinstance(candidate, Mapping):
+                node_governor_result = dict(candidate)
+                raw_node_intent = node_governor_result.pop("_node_intent_draft", None)
+                if isinstance(raw_node_intent, Mapping):
+                    node_intent_draft = dict(raw_node_intent)
+        if node_intent_draft is not None:
+            plan_intent_draft = node_intent_draft
         return await asyncio.to_thread(
             _execute_skill,
             request_body=request_body,
             request_id=request_id,
             session_id=session_id,
             person_id=person_id,
-            intent_id=intent_id,
+            intent_id=(
+                _normalize_text(node_intent_draft.get("id"))
+                if node_intent_draft is not None
+                else intent_id
+            ),
             skill_id=node.target_id,
             task_text=task_text,
             user_message=task_text,
-            governor_result=governor_result,
+            governor_result=node_governor_result,
             intent_draft=plan_intent_draft,
             emotion_context=emotion_context,
             render_target_lang=render_target_lang,
@@ -2464,7 +2725,7 @@ async def _executive_runtime_core_impl(
             _bond_intimacy = float((bond_summary or {}).get("intimacy_score") or 0.0)
             # 提取 recall 摘要
             _recall_summary = str((retrieval_summary or {}).get("summary") or "")
-            _prefrontal_plan = _pf_agent.plan_response(
+            _prefrontal_plan = await _pf_agent.plan_response(
                 user_message=sanitized_message,
                 motive_state=_motive_state,
                 recall_summary=_recall_summary,
@@ -2752,6 +3013,16 @@ async def _executive_runtime_core_impl(
                 "plan": plan.as_dict(),
             },
         )
+        plan_governor_result = dict(governor_result or {})
+        plan_governor_result["node_grants"] = _build_http_plan_node_grants(
+            plan=plan,
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            intent_draft=dict(intent_draft or {}),
+            governor_result=dict(governor_result or {}),
+            skill_registry=skill_registry,
+        )
         plan_outcome, plan_meta = await _execute_skill_dag(
             plan=plan,
             request_body=request_body,
@@ -2759,7 +3030,7 @@ async def _executive_runtime_core_impl(
             session_id=session_id,
             person_id=person_id,
             intent_id=intent_id,
-            governor_result=governor_result,
+            governor_result=plan_governor_result,
             intent_draft=intent_draft,
             emotion_context=emotion_context,
             render_target_lang=render_target_lang,

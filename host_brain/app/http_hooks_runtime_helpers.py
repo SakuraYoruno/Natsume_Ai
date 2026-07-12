@@ -1369,8 +1369,6 @@ def run_proactive_intent_dispatch(
     motive_state_override: Mapping[str, Any] | None = None,
     render_policy_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
-
     skill_name = str(system_intent.get("skill_name", "") or "").strip()
     args = dict(system_intent.get("args") or {})
     if skill_name == "audit_retention":
@@ -1428,6 +1426,14 @@ def run_proactive_intent_dispatch(
         if personality_result is not None:
             return personality_result
         return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
+
+    authority_inputs = _scheduler_skill_authority_inputs(system_intent)
+    if authority_inputs is None:
+        return {
+            "status": "REJECTED",
+            "reason_code": "SKILL_AUTHORITY_MISSING",
+            "skill_name": skill_name,
+        }
 
     last_interaction_ts = (
         int(last_interaction_ts_override)
@@ -1614,7 +1620,23 @@ def run_proactive_intent_dispatch(
         "intention_hint": proactive_intention_hint,
         "pending_topics": list(recent_topics[:3]),
     }
-    return execute_proactive_talk(args=args, context=context)
+    del context, authority_inputs
+    return {
+        "status": "REJECTED",
+        "reason_code": "SKILL_AUTHORITY_MISSING",
+        "skill_name": skill_name,
+    }
+
+
+def _scheduler_skill_authority_inputs(
+    system_intent: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any] | None] | None:
+    # Scheduler intents are persisted data, not an authority boundary. Raw
+    # token/command strings in that document must never mint an execution
+    # attestation. Scheduler Skill execution must re-enter through Governor or
+    # the governed Task adapter; this legacy direct route therefore fails shut.
+    del system_intent
+    return None
 
 
 def _run_codex_production_scheduler_skill(
@@ -1635,9 +1657,17 @@ def _run_codex_production_scheduler_skill(
     if skill_name not in AGENT_PRODUCTION_SKILL_IDS:
         return None
 
+    authority_inputs = _scheduler_skill_authority_inputs(system_intent)
+    if authority_inputs is None:
+        return {
+            "status": "REJECTED",
+            "reason_code": "SKILL_AUTHORITY_MISSING",
+            "skill_name": skill_name,
+            "scheduler_driver": "natsume_scheduler",
+        }
+
     try:
         from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry  # noqa: PLC0415
-        from host_brain.skills.executor_registry import dispatch_executor_payload  # noqa: PLC0415
 
         args = dict(system_intent.get("args") or {})
         registry = build_agent_runtime_skill_registry()
@@ -1655,7 +1685,13 @@ def _run_codex_production_scheduler_skill(
         if isinstance(payload, dict):
             payload.setdefault("start_background", True)
             payload.setdefault("scheduler_driver", "natsume_scheduler")
-        result = dispatch_executor_payload(payload)
+        if not isinstance(payload, dict):
+            raise ValueError("production skill handler returned no executor payload")
+        del payload, authority_inputs
+        result = {
+            "status": "REJECTED",
+            "reason_code": "SKILL_AUTHORITY_MISSING",
+        }
         if isinstance(result, dict):
             result.setdefault("scheduler_driver", "natsume_scheduler")
             result.setdefault("skill_name", skill_name)
@@ -1947,24 +1983,35 @@ def _build_scheduler_narrative_llm_generator(*, logger: Any) -> Callable[[dict[s
         except (TypeError, ValueError):
             timeout_s = 60.0
         try:
-            from host_brain.integrations.llm_helpers import complete_prompt_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                SCHEDULER_NARRATIVE_PROMPT_ID,
+            )
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-            text = complete_prompt_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                prompt_id=SCHEDULER_NARRATIVE_PROMPT_ID,
                 request_id=str((llm_input or {}).get("request_id") or "scheduler_narrative"),
-                scene_type=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_SCENE") or "SCHEDULER_NARRATIVE"),
-                cognitive_tier=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_TIER") or "C"),
-                prompt=prompt,
-                timeout_ms=max(1000, int(max(1.0, timeout_s) * 1000)),
-                gen_params={
-                    "temperature": 0.45,
-                    "max_tokens": 700,
-                },
-            ).strip()
+                scene_type="SCHEDULER_NARRATIVE",
+                cognitive_tier="C",
+                messages=({"role": "user", "content": prompt},),
+                deadline_ms=max(1000, int(max(1.0, timeout_s) * 1000)),
+                foreground=False,
+                metadata={"chain": "scheduler_narrative"},
+            )
+            attempt_trace = model_attempt_result_trace(result)
+            text = str(result.content or "").strip() if result.success else ""
             if not text:
                 text = _fallback_scheduler_narrative(llm_input or {})
-            return {"narrative": text, "content": text}
+            return {
+                "narrative": text,
+                "content": text,
+                "model_attempt": attempt_trace,
+                "fallback_to_template": not result.success,
+                "fallback_reason": result.error_code if not result.success else "",
+            }
         except Exception as exc:
-            logger.warning("scheduler narrative model-pool generation failed: %s", exc)
+            logger.warning("scheduler narrative model attempt failed: %s", exc)
             text = _fallback_scheduler_narrative(llm_input or {})
             return {
                 "narrative": text,
@@ -2013,6 +2060,14 @@ def _run_personality_scheduler_skill(
         return {
             "status": "REJECTED",
             "reason_code": "SKILL_NOT_SCHEDULER_ALLOWED",
+            "skill_name": skill_name,
+        }
+
+    authority_inputs = _scheduler_skill_authority_inputs(system_intent)
+    if authority_inputs is None:
+        return {
+            "status": "REJECTED",
+            "reason_code": "SKILL_AUTHORITY_MISSING",
             "skill_name": skill_name,
         }
 
@@ -2102,26 +2157,11 @@ def _run_personality_scheduler_skill(
         }
 
     if str(result.get("tool") or "").strip():
-        try:
-            from host_brain.skills.executor_registry import dispatch_executor_payload  # noqa: PLC0415
-
-            dispatched_result = dispatch_executor_payload(result)
-            if isinstance(dispatched_result, dict):
-                result = dispatched_result
-            else:
-                result = {
-                    "status": "OK",
-                    "reason_code": None,
-                    "result": dispatched_result,
-                }
-        except Exception as exc:
-            logger.warning("Personality scheduler executor dispatch failed: skill=%s err=%s", skill_name, exc)
-            return {
-                "status": "FAILED",
-                "reason_code": "PERSONALITY_EXECUTOR_DISPATCH_FAILED",
-                "skill_name": skill_name,
-                "detail": str(exc),
-            }
+        return {
+            "status": "REJECTED",
+            "reason_code": "SKILL_AUTHORITY_MISSING",
+            "skill_name": skill_name,
+        }
 
     payload = dict(result)
     payload.setdefault("status", "OK")
@@ -2451,24 +2491,41 @@ def _build_llm_generator(
             )
         )
 
-        prompt = _mapping_text(templates, "prompt_separator").join(prompt_parts)
+        separator = _mapping_text(templates, "prompt_separator", default="\n") or "\n"
+        prompt = separator.join(part for part in prompt_parts if str(part or "").strip()).strip()
+        if not prompt:
+            prompt = (
+                f"Generate one brief, natural proactive greeting for {user_name} "
+                f"during {time_period}. Avoid pressure and do not invent facts."
+            )
         try:
-            from host_brain.integrations.llm_helpers import complete_prompt_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                PROACTIVE_TALK_PROMPT_ID,
+            )
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-            text = complete_prompt_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                prompt_id=PROACTIVE_TALK_PROMPT_ID,
                 request_id="proactive_talk_scheduler",
-                scene_type=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_SCENE") or "PROACTIVE_TALK"),
-                cognitive_tier=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIER") or "C"),
-                prompt=prompt,
-                timeout_ms=max(1000, int(float(str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIMEOUT_SECONDS") or "30")) * 1000)),
-                gen_params={
-                    "temperature": 0.55,
-                    "max_tokens": 180,
-                },
-            ).strip()
-            return {"greeting": text, "content": text}
+                scene_type="PROACTIVE_TALK",
+                cognitive_tier="C",
+                messages=({"role": "user", "content": prompt},),
+                deadline_ms=max(1000, int(float(str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIMEOUT_SECONDS") or "30")) * 1000)),
+                foreground=False,
+                metadata={"chain": "proactive_talk"},
+            )
+            attempt_trace = model_attempt_result_trace(result)
+            text = str(result.content or "").strip() if result.success else ""
+            return {
+                "greeting": text,
+                "content": text,
+                "model_attempt": attempt_trace,
+                "fallback_to_template": not result.success,
+                "fallback_reason": result.error_code if not result.success else "",
+            }
         except Exception as exc:
-            logger.warning("proactive_talk model-pool generation failed: %s", exc)
+            logger.warning("proactive_talk model attempt failed: %s", exc)
             return {
                 "greeting": "",
                 "content": "",

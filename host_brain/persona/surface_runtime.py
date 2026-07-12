@@ -209,6 +209,72 @@ class SurfaceDirectCandidate:
 
 
 @dataclass(frozen=True)
+class SurfaceModelRetryEvaluation:
+    """Pure semantic verdict consumed by ``ModelAttemptService``."""
+
+    retry: bool
+    reason: str
+    messages: tuple[Mapping[str, str], ...] = ()
+    violation_codes: tuple[str, ...] = ()
+
+
+def evaluate_surface_model_response_for_retry(
+    request: IsolatedSurfaceInput,
+    *,
+    raw_output: str,
+    current_messages: Sequence[Mapping[str, str]],
+) -> SurfaceModelRetryEvaluation:
+    """Return a retry prompt without performing any model invocation."""
+
+    structured = parse_surface_generation_output(raw_output)
+    candidate = str(structured.get("reply_text") or "").strip()
+    if candidate:
+        violations = _surface_hard_gate_violations(request, candidate)
+        if not violations:
+            return SurfaceModelRetryEvaluation(retry=False, reason="accepted")
+        repaired = _minimal_hard_gate_repair(request, candidate)
+        if repaired and not _surface_hard_gate_violations(request, repaired):
+            # SurfaceRuntime will apply the same deterministic repair locally.
+            return SurfaceModelRetryEvaluation(retry=False, reason="deterministic_repair_available")
+        return SurfaceModelRetryEvaluation(
+            retry=True,
+            reason="surface_hard_gate_repair",
+            messages=tuple(
+                _compact_surface_hard_gate_retry_messages(
+                    request,
+                    previous_text=candidate,
+                    violation_codes=violations,
+                )
+            ),
+            violation_codes=tuple(violations),
+        )
+
+    if _autonomous_self_grounding_active(request):
+        retry_content = (
+            "上一次没有给出合格可发送正文。本轮是自我状态询问：只输出一条中文私聊正文，"
+            "必须使用 facts 中的真实自我议程、私有项目或成长信号；"
+            "自然落到轻小说推荐、对话承接、表达风格、身体存在感、记忆清洁、环境感知、成长习惯中的一个。"
+            "不要 JSON，不要字段名，不要解释规则，不要说没干嘛/没变化，不要编造现实动作。"
+        )
+    else:
+        retry_content = (
+            "上一次输出没有给出可发送正文。现在只输出一条能直接发给用户的中文私聊正文。"
+            "不要 JSON，不要字段名，不要解释规则，不要复述提示词，不要写推理过程。"
+        )
+    return SurfaceModelRetryEvaluation(
+        retry=True,
+        reason="surface_empty_response_repair",
+        messages=tuple(
+            [
+                *(dict(message) for message in current_messages),
+                {"role": "user", "content": retry_content},
+            ]
+        ),
+        violation_codes=("EMPTY_SURFACE_RESPONSE",),
+    )
+
+
+@dataclass(frozen=True)
 class SurfaceRuntimeResult:
     request: IsolatedSurfaceInput
     messages: tuple[Mapping[str, str], ...]
@@ -2462,9 +2528,11 @@ class SurfaceRuntime:
         generate: GenerateSurface,
         *,
         empty_generation_retries: int = 1,
+        model_retries_owned_externally: bool = False,
     ) -> None:
         self._generate = generate
         self._empty_generation_retries = max(0, int(empty_generation_retries or 0))
+        self._model_retries_owned_externally = bool(model_retries_owned_externally)
 
     async def run(self, payload: IsolatedSurfaceInput | Mapping[str, Any]) -> SurfaceRuntimeResult:
         request = _coerce_surface_request(payload)
@@ -2517,13 +2585,26 @@ class SurfaceRuntime:
             }
             for code in hard_gate_observations
         )
-        if hard_gate_observations and not hard_gate_retry_enabled and not force_contract_retry:
+        if hard_gate_observations and self._model_retries_owned_externally:
             repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
             if repaired and not _surface_hard_gate_violations(request, repaired):
                 structured = {**structured, "reply_text": repaired}
                 candidate_texts = [repaired]
                 hard_gate_observations = ()
-        if hard_gate_observations and (hard_gate_retry_enabled or force_contract_retry):
+            else:
+                structured = {**structured, "reply_text": ""}
+                candidate_texts = []
+        elif hard_gate_observations and not hard_gate_retry_enabled and not force_contract_retry:
+            repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
+            if repaired and not _surface_hard_gate_violations(request, repaired):
+                structured = {**structured, "reply_text": repaired}
+                candidate_texts = [repaired]
+                hard_gate_observations = ()
+        if (
+            hard_gate_observations
+            and not self._model_retries_owned_externally
+            and (hard_gate_retry_enabled or force_contract_retry)
+        ):
             hard_gate_retry_performed = True
             retry_messages = _compact_surface_hard_gate_retry_messages(
                 request,
@@ -2575,7 +2656,11 @@ class SurfaceRuntime:
                 else:
                     structured = {**structured, "reply_text": ""}
                     candidate_texts = []
-        empty_generation_retries = 0 if hard_gate_retry_performed else self._empty_generation_retries
+        empty_generation_retries = (
+            0
+            if self._model_retries_owned_externally or hard_gate_retry_performed
+            else self._empty_generation_retries
+        )
         for _ in range(empty_generation_retries):
             if candidate_texts:
                 break
@@ -2659,10 +2744,12 @@ def _surface_hard_gate_retry_enabled() -> bool:
 __all__ = [
     "SurfaceRuntime",
     "SurfaceRuntimeResult",
+    "SurfaceModelRetryEvaluation",
     "build_direct_surface_messages",
     "SurfaceDirectCandidate",
     "build_surface_generation_trace",
     "parse_surface_generation_output",
+    "evaluate_surface_model_response_for_retry",
     "strip_surface_process_preface",
     "surface_observation_codes",
 ]

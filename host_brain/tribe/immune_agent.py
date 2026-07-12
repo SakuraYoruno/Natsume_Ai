@@ -712,7 +712,7 @@ class ImmuneAgent:
 
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("immune_agent.semantic_intent_analysis") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -727,27 +727,11 @@ class ImmuneAgent:
                 text=str(text or "")[:300],
             )
 
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="immune_semantic_scanner",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="immune_semantic_intent",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.0,
             )
-            _raw_text = str(_raw or "").strip()
-
-            import json as _json  # noqa: PLC0415
-            import re as _re  # noqa: PLC0415
-            _match = _re.search(r"\{.*\}", _raw_text, _re.DOTALL)
-            if _match:
-                _parsed = _json.loads(_match.group())
-            else:
-                _parsed = {}
 
             _intent_class = str(_parsed.get("intent_class") or "SAFE").strip().upper()
             if _intent_class not in {"SAFE", "SUSPICIOUS", "HARMFUL"}:

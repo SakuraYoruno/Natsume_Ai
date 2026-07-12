@@ -6,11 +6,50 @@ import json
 import pytest
 
 import host_brain.persona.evolution_desire_engine as ede
+from host_brain.app import dependencies
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
+)
 from host_brain.persona.evolution_desire_engine import EvolutionDesireEngine
 from host_brain.persona.personality_traits import PersonalityTraits
+
+
+@pytest.fixture(autouse=True)
+def _canonical_model_runtime():
+    class _Route:
+        async def resolve(self, _request, _prompt):  # noqa: ANN001
+            return RouteDecision(
+                decision_id="route::evolution-helper-test",
+                targets=(ProviderTarget("test.evolution-helper", "mock", "empty-model"),),
+                reason="TEST_CANONICAL_ROUTE",
+                max_attempts=1,
+            )
+
+    async def _complete(_attempt):  # noqa: ANN001
+        return {"content": ""}
+
+    dependencies.reset_model_runtime_composition(
+        build_model_runtime_composition(
+            prompt_registry=build_live_production_prompt_registry(),
+            route_policy=_Route(),
+            provider_adapters=[
+                CallableProviderAdapter("test.evolution-helper", complete_fn=_complete)
+            ],
+            audit_repository=InMemoryAttemptAuditRepository(),
+        )
+    )
+    try:
+        yield
+    finally:
+        dependencies.reset_model_runtime_composition()
 
 
 def test_generate_desire_returns_empty_when_all_candidate_sources_empty(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from host_brain.app import dependencies
@@ -117,32 +119,39 @@ def test_warmup_codex_exec_intent_pool_reports_ready(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
     monkeypatch.setenv("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", "true")
-    monkeypatch.setenv("HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED", "false")
-    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-test")
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers._codex_pool_migration_enabled",
-        lambda scene_type: scene_type == "EXEC_INTENT",
-    )
-    monkeypatch.setattr(
-        "host_brain.integrations.codex_cli_provider.resolve_codex_cli_model",
-        lambda model_id=None: str(model_id or "gpt-test"),
-    )
-
-    def _fake_invoke(**kwargs):
+    def _fake_complete(**kwargs):
         calls.update(kwargs)
-        return '{"route":"chat"}'
+        return SimpleNamespace(
+            success=True,
+            content="ready",
+            request_id="startup-warmup",
+            cached=False,
+            route_decision=SimpleNamespace(
+                decision_id="route-warmup",
+                reason="server-owned",
+                max_attempts=1,
+            ),
+            attempts=(),
+            final_target=SimpleNamespace(
+                adapter_id="production.codex",
+                provider="codex",
+                model_id="gpt-test",
+            ),
+            error_code=None,
+        )
 
     monkeypatch.setattr(
-        "host_brain.integrations.codex_cli_provider.invoke_codex_cli_text",
-        _fake_invoke,
+        "host_brain.model_runtime.invocation.complete_compiled_prompt_sync",
+        _fake_complete,
     )
 
     status = warmup_codex_exec_intent_pool()
 
     assert status.startswith("OK")
     assert "model=gpt-test" in status
-    assert calls["feature_key"] == "pool:EXEC_INTENT:C"
-    assert calls["response_format"] == {"type": "json_object"}
+    assert calls["scene_type"] == "STARTUP_MODEL_WARMUP"
+    assert calls["prompt_id"] == "startup.model_warmup.text"
+    assert "model_id" not in calls
 
 
 def test_warmup_codex_exec_intent_pool_skips_when_disabled(monkeypatch) -> None:

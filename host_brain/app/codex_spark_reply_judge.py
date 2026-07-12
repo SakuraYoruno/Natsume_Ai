@@ -12,30 +12,7 @@ from host_brain.app.settings.codex_spark import CodexSparkReplyJudgeSettings
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 
 
-_DEFAULT_MODEL_ID = "gpt-5.3-codex-spark"
-_DEFAULT_TIMEOUT_MS = 12_000
 _MAX_TEXT_CHARS = 420
-
-
-def _parse_bool(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    text = str(value).strip().lower()
-    if not text:
-        return default
-    if text in {"1", "true", "yes", "on", "y"}:
-        return True
-    if text in {"0", "false", "no", "off", "n"}:
-        return False
-    return default
-
-
-def _parse_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except Exception:
-        parsed = default
-    return max(minimum, min(maximum, parsed))
 
 
 def _enabled() -> bool:
@@ -48,10 +25,6 @@ def _rewrite_enabled() -> bool:
 
 def _judge_mode() -> str:
     return str(CodexSparkReplyJudgeSettings().mode or "suspicious").strip().lower()
-
-
-def _model_id() -> str:
-    return str(CodexSparkReplyJudgeSettings().model_id or _DEFAULT_MODEL_ID).strip() or _DEFAULT_MODEL_ID
 
 
 def _timeout_ms() -> int:
@@ -249,18 +222,26 @@ def _messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
 
 
 def _judge_sync(payload: Mapping[str, Any], *, request_id: str) -> dict[str, Any]:
-    from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text  # noqa: PLC0415
+    from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+    from host_brain.model_runtime.live_prompts import SURFACE_REPLY_JUDGE_PROMPT_ID  # noqa: PLC0415
+    from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-    raw = invoke_codex_cli_text(
-        model_id=_model_id(),
+    result = complete_compiled_prompt_sync(
+        prompt_id=SURFACE_REPLY_JUDGE_PROMPT_ID,
+        request_id=f"{request_id or int(time.time() * 1000)}:surface-reply-judge",
+        scene_type="SURFACE_REPLY_JUDGE",
+        cognitive_tier="B",
         messages=_messages(payload),
-        timeout_ms=_timeout_ms(),
-        response_format={"type": "json_object"},
-        feature_key=f"surface_spark_reply_judge:{request_id or int(time.time() * 1000)}",
+        deadline_ms=_timeout_ms(),
+        foreground=True,
+        metadata={"caller": "surface_reply_judge", "parent_request_id": request_id},
     )
-    parsed = _extract_json_object(raw)
+    if not result.success:
+        raise RuntimeError(result.error_code or "SURFACE_REPLY_JUDGE_MODEL_FAILED")
+    parsed = _extract_json_object(result.content)
     if not parsed:
         return {"ok": True, "action": "keep", "issues": ["INVALID_JUDGE_JSON"], "final_reply": ""}
+    parsed["_model_attempt"] = model_attempt_result_trace(result)
     return parsed
 
 
@@ -277,7 +258,7 @@ async def judge_surface_reply_with_codex_spark(
     if mode not in {"always", "all"} and not _looks_suspicious_candidate(candidate):
         return candidate, {
             "status": "SKIPPED",
-            "model_id": _model_id(),
+            "model_id": "server_owned_route",
             "reason_code": "SPARK_REPLY_JUDGE_NOT_SUSPICIOUS",
         }
 
@@ -289,11 +270,12 @@ async def judge_surface_reply_with_codex_spark(
     except Exception as exc:
         return candidate, {
             "status": "DEGRADED",
-            "model_id": _model_id(),
+            "model_id": "server_owned_route",
             "latency_ms": max(0, int(time.time() * 1000) - started_ms),
             "error": type(exc).__name__,
         }
 
+    model_attempt = dict(judged.pop("_model_attempt", {}) or {})
     final_reply = _compact_text(judged.get("final_reply"), limit=900)
     action = str(judged.get("action") or "").strip().lower()
     ok = bool(judged.get("ok", action != "rewrite"))
@@ -303,7 +285,9 @@ async def judge_surface_reply_with_codex_spark(
 
     meta = {
         "status": "OK",
-        "model_id": _model_id(),
+        "model_id": str(model_attempt.get("final_model") or ""),
+        "provider": str(model_attempt.get("final_provider") or ""),
+        "model_attempt": model_attempt,
         "latency_ms": max(0, int(time.time() * 1000) - started_ms),
         "ok": ok,
         "action": "rewrite" if should_rewrite else "keep",

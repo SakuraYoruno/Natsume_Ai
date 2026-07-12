@@ -37,7 +37,7 @@ class TestVTSWorkerThreadFix:
         mock_post_vts = AsyncMock(side_effect=lambda **kwargs: loop.call_soon_threadsafe(post_vts_called.set) or None)
 
         with patch(
-            "host_brain.channels.edge_rpc_client.post_vts",
+            "host_brain.channels.embodiment.submit_avatar_command",
             new=mock_post_vts,
         ):
             # 模拟 chat_stream_handler 中的调用方式：通过 asyncio.to_thread 在 worker 线程中执行

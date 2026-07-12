@@ -12,13 +12,14 @@ Phase II 核心模块——根据 PersonalityTraits 和情感场景，
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.app.model_attempt_port import complete_compiled_model_sync
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime import EMOTION_REACTIVITY_PROMPT_ID
 from host_brain.persona.personality_traits import PersonalityTraits
 
 
@@ -66,20 +67,6 @@ _SUSTAINED_NEGATIVE_COMPANION = "sustained_negative"
 def _load_reactivity_llm_templates() -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged("emotion_reactivity.llm_hint.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _pool_credentials_available() -> bool:
-    for key in (
-        "HOST_GEMINI_API_KEY",
-        "GEMINI_API_KEY",
-        "HOST_MINIMAX_API_KEY",
-        "MINIMAX_API_KEY",
-        "OPENAI_API_KEY",
-        "HOST_OPENAI_API_KEY",
-    ):
-        if str(os.environ.get(key) or "").strip():
-            return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -307,22 +294,17 @@ class EmotionReactivityProfile:
         return max(0.1, min(0.8, adjusted))
 
 
-def render_reactivity_hint_with_pool(
+def render_reactivity_hint(
     *,
     user_emotion_tag: str,
     bond_stage: str,
     modifiers: ReactivityModifiers,
     render_target_lang: str = "zh",
     timeout_ms: int = 1800,
+    model_attempt_sink: dict[str, Any] | None = None,
 ) -> str:
-    if not _pool_credentials_available():
-        return ""
     templates = _load_reactivity_llm_templates()
     if not templates:
-        return ""
-    try:
-        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
-    except Exception:
         return ""
 
     lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
@@ -351,11 +333,9 @@ def render_reactivity_hint_with_pool(
             "请输出 JSON：{{\"reactivity_hint\":\"...\"}}"
         )
     try:
-        result = complete_llm_with_pool_sync(
-            request_id=f"reactivity::{int(time.time() * 1000)}",
-            scene_type="EMOTION_REACTIVITY",
-            cognitive_tier="B",
-            messages=[
+        completion = complete_compiled_model_sync(
+            prompt_id=EMOTION_REACTIVITY_PROMPT_ID,
+            messages=(
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -370,17 +350,23 @@ def render_reactivity_hint_with_pool(
                         transition_intensity=float(modifiers.transition_intensity),
                     ),
                 },
-            ],
-            timeout_ms=max(800, int(timeout_ms)),
-            gen_params={"temperature": 0.4},
-            response_format="json_object",
+            ),
+            request_id=f"reactivity::{int(time.time() * 1000)}",
+            scene_type="EMOTION_REACTIVITY",
+            cognitive_tier="B",
+            deadline_ms=max(800, int(timeout_ms)),
+            foreground=True,
+            metadata={"caller": "emotion_reactivity_hint"},
         )
     except Exception:
         return ""
-    if result.pool_exhausted:
+    if model_attempt_sink is not None:
+        model_attempt_sink.clear()
+        model_attempt_sink.update(dict(completion.trace))
+    if not completion.success:
         return ""
     try:
-        parsed = json.loads(result.content)
+        parsed = json.loads(completion.content)
     except Exception:
         return ""
     return str(parsed.get("reactivity_hint") or "").strip()

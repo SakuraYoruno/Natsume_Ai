@@ -98,7 +98,7 @@ async def test_complete_resolves_route_once_and_owns_semantic_retry_audit() -> N
         audit_repository=audit,
     )
 
-    result = await service.complete(_request(max_attempts=2, retry_evaluator=_retry))
+    result = await service.complete(_request(max_attempts=1, retry_evaluator=_retry))
 
     assert result.success is True
     assert result.content == "answer-2"
@@ -159,6 +159,39 @@ async def test_provider_failure_falls_through_route_with_one_global_budget() -> 
     assert calls == ["first", "second"]
     assert route.calls == 1
     assert result.attempts[1].retry_reason.startswith("provider_fallback:")
+
+
+async def test_provider_error_audit_redacts_credentials() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-secret-error",
+            (ProviderTarget("fake", "provider", "model"),),
+            "redaction-test",
+            max_attempts=1,
+        )
+    )
+
+    async def _complete(_attempt):
+        raise RuntimeError(
+            "authorization=Bearer abcdefghijklmnop api_key=sk-super-secret-value"
+        )
+
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=_complete)]
+        ),
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+
+    result = await service.complete(_request())
+
+    message = result.attempts[0].error_message or ""
+    assert result.success is False
+    assert "sk-super-secret-value" not in message
+    assert "abcdefghijklmnop" not in message
+    assert "[REDACTED]" in message
 
 
 async def test_schema_repair_is_an_explicit_attempt_inside_the_same_route() -> None:

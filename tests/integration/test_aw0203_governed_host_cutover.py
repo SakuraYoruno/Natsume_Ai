@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime import production_executor
+from host_brain.app import dependencies
 from host_brain.agent_runtime.task_store import DurableTaskStore
 from host_brain.app.governed_task_adapter import build_governed_host_runtime
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
@@ -12,6 +14,11 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence import HostCommandRepository
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
+from host_brain.skills import executor_registry
+from host_brain.skills.executor_registry import (
+    _verify_durable_governed_authority,
+    bind_validated_skill_authority,
+)
 
 
 @pytest.mark.asyncio
@@ -26,7 +33,11 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     )
     assert migrated.success is True, migrated.as_dict()
 
-    ledger = SQLiteLedger(str(db_path))
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    monkeypatch.setattr(dependencies, "_ledger", ledger)
+    monkeypatch.setattr(executor_registry, "_SKILL_CAPABILITY_BROKER", None)
+    monkeypatch.setattr(production_executor, "_PRODUCTION_CAPABILITY_BROKER", None)
+    monkeypatch.setattr(production_executor, "_PRODUCTION_DOMAIN_PACK_RUNTIME", None)
     runtime = None
     try:
         request_id = "request-aw0203-cutover"
@@ -139,8 +150,42 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
         first = []
         async for event in runtime.execute_stream(**request):
             if event.get("execution_receipt"):
-                assert calls == ["production-worker-finished"]
+                assert calls == ["production-worker-finished"], [*first, event]
             first.append(event)
+        durable_receipt = first[-1]["execution_receipt"]
+        for forged_command_id, forged_attempt_id in (
+            ("host-command://chat/forged", durable_receipt["attempt_id"]),
+            (durable_receipt["command_id"], "attempt::governed::forged"),
+        ):
+            forged_authority = bind_validated_skill_authority(
+                payload={
+                    "tool": "codex_production",
+                    "work_order": {
+                        "work_order_id": durable_receipt["work_order_id"],
+                    },
+                },
+                request_id=request_id,
+                skill_id="agent_memory_curator",
+                principal_id="person-aw0203",
+                target_id="agent_memory_curator",
+                governed_execution_context={
+                    "execution_mode": "governed_task_runtime",
+                    "command_id": forged_command_id,
+                    "attempt_id": forged_attempt_id,
+                    "request_id": request_id,
+                    "principal_id": "person-aw0203",
+                    "target_id": "agent_memory_curator",
+                    "work_order_id": durable_receipt["work_order_id"],
+                    "graph_id": durable_receipt["graph_id"],
+                    "graph_revision": durable_receipt["graph_revision"],
+                    "node_id": durable_receipt["node_id"],
+                    "lease_id": "lease::governed::forged",
+                    "fencing_token": 1,
+                },
+                durable_ledger=ledger,
+                validated_by="integration.forged_authority_fixture",
+            )
+            assert _verify_durable_governed_authority(forged_authority) is not None
         replay_governor = {**governor, "ts_ms": ts_ms + 5_000}
         ledger.log_governor(replay_governor)
         replay_request = {

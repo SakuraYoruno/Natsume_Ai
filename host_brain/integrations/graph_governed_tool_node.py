@@ -1,31 +1,50 @@
-"""GovernedToolNode：工具调用执行节点（Governor 门控 + 直接工具执行 + Evidence Plane 审计）。
-
-直接执行工具调用，不依赖 LangGraph ToolNode（ToolNode 需要 messages 格式，与 react_loop 不兼容）。
-Governor 门控和 Evidence Plane 审计作为不可绕过的前置/后置钩子保留。
-"""
+"""Graph adapter for the canonical CapabilityBroker tool boundary."""
 
 from __future__ import annotations
 
-import logging
+import hashlib
+import json
 import time
 from typing import Any
 
-_logger = logging.getLogger(__name__)
+from host_brain.capability_plane.adapters import object_tool_adapter
+from host_brain.capability_plane.broker import (
+    CapabilityBroker,
+    CapabilityDescriptor,
+    InMemoryCapabilityAuditSink,
+)
+from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
+from host_brain.capability_plane.journal import CapabilityExecutionJournal
+from host_brain.capability_plane.policies import GovernorToolCapabilityPolicy
+
+
+class _EvidencePlaneSink(InMemoryCapabilityAuditSink):
+    def __init__(self, evidence_plane: Any) -> None:
+        super().__init__()
+        self._plane = evidence_plane
+
+    def record(self, attempt, evidence, receipt) -> None:  # noqa: ANN001
+        super().record(attempt, evidence, receipt)
+        if self._plane is None:
+            return
+        if callable(getattr(self._plane, "write_capability_execution", None)):
+            self._plane.write_capability_execution(
+                attempt=attempt,
+                evidence=evidence,
+                receipt=receipt,
+            )
+            return
+        if callable(getattr(self._plane, "write_tool_execution", None)):
+            self._plane.write_tool_execution(
+                request_id=attempt.request_id,
+                tool_calls=[{"tool": attempt.capability_id}],
+                tool_results=[receipt.to_dict()],
+                ts_ms=attempt.finished_at_ms,
+            )
 
 
 class GovernedToolNode:
-    """工具调用执行节点（Governor 门控 + 直接工具执行 + Evidence Plane 审计）。
-
-    核心约束（FIX-PLAN §5.2）：
-    1. Governor 门控（保留，不可绕过）：
-       - 工具调用前调用 governor.evaluate_tool_call()
-       - 裁决结果写入 committed_route_token
-       - 非 GOV_APPROVE 时直接返回，不执行工具
-    2. Evidence Plane 审计（保留，不可绕过）：
-       - 工具调用后写入 Evidence Plane
-    3. 直接工具执行：
-       - 通过工具名称查找并调用工具
-    """
+    """Execute each graph tool call through one fail-closed broker."""
 
     def __init__(
         self,
@@ -34,115 +53,97 @@ class GovernedToolNode:
         governor: Any = None,
         evidence_plane: Any = None,
         governor_rules_cache: Any = None,
+        capability_broker: CapabilityBroker | None = None,
+        execution_journal: CapabilityExecutionJournal | None = None,
     ) -> None:
-        self._tools = list(tools or [])
-        self._governor = governor
-        self._evidence_plane = evidence_plane
         self._governor_rules_cache = governor_rules_cache
-        # 构建工具名称到工具的映射
-        self._tool_map: dict[str, Any] = {}
-        for tool in self._tools:
-            name = getattr(tool, "name", None) or str(tool)
-            if name:
-                self._tool_map[name] = tool
+        policy = GovernorToolCapabilityPolicy(governor, rules_provider=self._get_tribe_params)
+        self._broker = capability_broker or CapabilityBroker(
+            policy=policy,
+            audit_sink=_EvidencePlaneSink(evidence_plane),
+            execution_journal=execution_journal,
+        )
+        for tool in list(tools or []):
+            name = str(getattr(tool, "name", None) or "").strip()
+            if not name:
+                continue
+            self._broker.register(
+                CapabilityDescriptor(
+                    capability_id=name,
+                    kind=CapabilityKind.TOOL,
+                    version=str(getattr(tool, "version", "1") or "1"),
+                    risk_level=int(getattr(tool, "risk_level", 5) or 5),
+                    adapter=object_tool_adapter(tool),
+                )
+            )
 
     def _get_tribe_params(self) -> dict[str, Any]:
-        """获取 TRIBE 族动态参数（用于 Governor 裁决）。"""
         try:
             cache = self._governor_rules_cache
             if cache is None:
                 from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+
                 cache = get_governor_rules_cache()
-            return cache.get_effective_rules()
+            return dict(cache.get_effective_rules() or {})
         except Exception:
             return {}
 
-    def _execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> Any:
-        """直接执行工具调用。"""
-        tool = self._tool_map.get(tool_name)
-        if tool is None:
-            return {"error": f"工具 '{tool_name}' 未找到", "result": None}
-        try:
-            # 优先使用 .func(**kwargs)（LangChain StructuredTool 的底层函数）
-            # 避免 .invoke() 的 Pydantic 参数解析问题
-            if hasattr(tool, "func") and callable(tool.func):
-                result = tool.func(**tool_args)
-            elif hasattr(tool, "invoke"):
-                result = tool.invoke(tool_args)
-            elif callable(tool):
-                result = tool(**tool_args)
-            else:
-                result = {"error": f"工具 '{tool_name}' 不可调用", "result": None}
-            return result
-        except Exception as exc:
-            return {"error": str(exc), "result": None}
-
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
-        """执行工具调用（Governor 门控 → 直接工具执行 → Evidence Plane 审计）。
-
-        Args:
-            state: 包含 tool_calls 列表的字典
-
-        Returns:
-            更新后的字典，包含 tool_results
-        """
         tool_calls = list(state.get("tool_calls") or [])
-        request_id = str(state.get("request_id") or "")
-        ts_ms = int(time.time() * 1000)
+        request_id = str(state.get("request_id") or "").strip()
+        if not request_id and tool_calls:
+            return {**state, "committed_route_token": "CAPABILITY_REQUEST_ID_MISSING", "tool_results": []}
 
-        # 1. Governor 门控（保留，不可绕过）
-        governor_approved = False
-        if self._governor is not None and tool_calls:
+        results: list[dict[str, Any]] = []
+        route_token = "GOV_APPROVE"
+        deadline_at_ms = state.get("tool_deadline_at_ms")
+        for index, raw in enumerate(tool_calls):
+            call = dict(raw) if isinstance(raw, dict) else {}
+            tool_name = str(call.get("tool") or "").strip()
+            tool_args = dict(call.get("args") or {})
+            args_digest = hashlib.sha256(
+                json.dumps(tool_args, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+            attempt_id = f"{request_id}:tool:{index}:{tool_name or 'unknown'}"
             try:
-                tribe_params = self._get_tribe_params()
-                gov_result = self._governor.evaluate_tool_call(
-                    tool_calls=tool_calls,
-                    tribe_params=tribe_params,
+                request = CapabilityRequest(
+                    request_id=request_id,
+                    attempt_id=attempt_id,
+                    idempotency_key=f"graph-tool::{request_id}::{index}::{tool_name}::{args_digest}",
+                    capability_id=tool_name or "unknown",
+                    kind=CapabilityKind.TOOL,
+                    args=tool_args,
+                    context={"agent_id": str(state.get("agent_id") or "")},
+                    created_at_ms=int(time.time() * 1000),
+                    deadline_at_ms=int(deadline_at_ms) if deadline_at_ms is not None else None,
                 )
-                route_token = str(getattr(gov_result, "token", "") or "").strip()
-                if route_token and route_token != "GOV_APPROVE":
-                    _logger.info(
-                        "GovernedToolNode: Governor 拒绝工具调用，token=%s request_id=%s",
-                        route_token, request_id,
-                    )
-                    return {
-                        **state,
-                        "committed_route_token": route_token,
-                        "tribe_governor_params": tribe_params,
-                    }
-                governor_approved = True
+                receipt = self._broker.execute(request)
             except Exception as exc:
-                _logger.warning("GovernedToolNode: Governor 门控异常（降级允许执行）: %s", exc)
-
-        # 2. 直接执行工具
-        tool_results = []
-        for tc in tool_calls:
-            tool_name = str(tc.get("tool") or "").strip()
-            tool_args = dict(tc.get("args") or {})
-            if governor_approved:
-                tool_args["_governor_approved"] = True
-            result = self._execute_tool(tool_name, tool_args)
-            tool_results.append({
+                route_token = "CAPABILITY_REQUEST_INVALID"
+                results.append({
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "result": {"error": f"CAPABILITY_REQUEST_INVALID:{type(exc).__name__}", "result": None},
+                    "ts_ms": int(time.time() * 1000),
+                })
+                continue
+            if not receipt.success:
+                route_token = route_token if route_token != "GOV_APPROVE" else str(receipt.reason_code or "CAPABILITY_REJECTED")
+                output = {"error": str(receipt.reason_code or receipt.detail), "result": None}
+            else:
+                output = receipt.output
+            results.append({
                 "tool": tool_name,
                 "args": tool_args,
-                "result": result,
+                "result": output,
                 "ts_ms": int(time.time() * 1000),
+                "capability_receipt": receipt.to_dict(),
             })
-
-        merged = {**state, "tool_results": tool_results}
-
-        # 3. Evidence Plane 审计（保留，不可绕过）
-        if self._evidence_plane is not None:
-            try:
-                self._evidence_plane.write_tool_execution(
-                    request_id=request_id,
-                    tool_calls=tool_calls,
-                    tool_results=tool_results,
-                    ts_ms=ts_ms,
-                )
-            except Exception:
-                pass  # 静默降级，不影响主流程
-
+        merged = {**state, "tool_results": results}
+        if route_token != "GOV_APPROVE":
+            merged["committed_route_token"] = route_token
+        elif tool_calls:
+            merged["committed_route_token"] = "GOV_APPROVE"
         return merged
 
 

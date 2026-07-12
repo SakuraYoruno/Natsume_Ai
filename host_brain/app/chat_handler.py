@@ -189,18 +189,21 @@ def _send_mateengine_chat_bubble(
     if not text or not _mateengine_chat_bubble_enabled():
         return
     try:
-        from host_brain.channels.mateengine import send_mateengine_action, send_mateengine_say  # noqa: PLC0415
+        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
 
-        result = send_mateengine_action(
-            action="speak",
-            state="speaking",
-            text=text,
+        queue_mateengine_command(
+            action="command",
+            payload={
+                "command": {
+                    "type": "say",
+                    "text": text,
+                    "emotion": str(emotion_tag or "NEUTRAL").strip().upper(),
+                    "intensity": emotion_intensity,
+                }
+            },
             request_id=request_id,
-            emotion_tag=emotion_tag,
-            intensity=emotion_intensity,
+            idempotency_key=f"{request_id}:mateengine:chat-bubble",
         )
-        if not result.ok:
-            send_mateengine_say(text=text)
     except Exception as exc:
         _logger.debug(
             "[%s] MateEngine chat bubble send failed: %s",
@@ -280,13 +283,19 @@ def _send_mateengine_state_cue(
     lifecycle["state_cued"] = True
     lifecycle["last_state"] = clean_state
     try:
-        from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
 
-        send_mateengine_action(
-            action="state",
-            state=clean_state,
-            text=cue_text,
+        queue_mateengine_command(
+            action="command",
+            payload={
+                "command": {
+                    "type": "state",
+                    "state": clean_state,
+                    "text": cue_text,
+                }
+            },
             request_id=request_id,
+            idempotency_key=f"{request_id}:mateengine:state:{clean_state}",
         )
     except Exception as exc:
         _logger.debug(

@@ -34,8 +34,6 @@ from host_brain.app.prompt_builder import (
 from host_brain.app.provider_factory import (
     _GEMINI_PRIMARY_RETRY_NODE_ID,
     _GEMINI_PRIMARY_RETRY_MODEL_IDS,
-    build_host_provider_fn,
-    build_host_provider_fn_for_node,
     resolve_gemini_primary_fallback_model_id,
     resolve_host_llm_model_id,
 )
@@ -460,7 +458,9 @@ def _build_graph_config_by_profile(
     chat_base_url_override: str | None = None,
     cloud_base_url_override: str | None = None,
 ) -> dict[str, Any]:
-    _ = provider_fn
+    # Legacy transport inputs are accepted only for call-site compatibility;
+    # graph configuration is a secret-free projection of the RouteCatalog.
+    del provider_fn, api_key, cloud_api_key, chat_base_url_override, cloud_base_url_override
     resolved_scene_type = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
     is_chat_fast_path = execution_profile == PROFILE_CHAT_FAST
     use_supervised = execution_profile == PROFILE_WORKFLOW_SUPERVISED
@@ -472,46 +472,10 @@ def _build_graph_config_by_profile(
     resolved_chat_provider = str(provider_name or _HOST_CHAT_14B_DEFAULT_PROVIDER).strip().lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
     resolved_chat_model_id = str(model_id or "").strip() or _HOST_CHAT_14B_DEFAULT_MODEL_ID
     resolved_chat_timeout_ms = max(800, int(timeout_ms))
-    chat_codex_experiment = _surface_reply_codex_experiment_enabled(
-        scene_type=resolved_scene_type,
-        execution_profile=execution_profile,
-    )
-    if chat_codex_experiment:
-        resolved_chat_provider = PROVIDER_CODEX
-        resolved_chat_model_id = _resolve_surface_reply_codex_model_id()
-        resolved_chat_timeout_ms = max(
-            resolved_chat_timeout_ms,
-            _parse_int(
-                os.environ.get("HOST_SURFACE_REPLY_CODEX_MIN_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
-                default=45_000,
-                min_value=800,
-                max_value=10 * 60 * 1000,
-            ),
-        )
-    resolved_chat_base_url_override = (
-        _normalize_openai_compat_base_url(chat_base_url_override)
-        if resolved_chat_provider == PROVIDER_OPENAI
-        else None
-    )
-    if resolved_chat_provider == PROVIDER_OPENAI and not resolved_chat_base_url_override:
-        resolved_chat_base_url_override = _resolve_host_14b_base_url(provider_name=resolved_chat_provider)
-    resolved_chat_api_key = _resolve_provider_api_key(
-        provider_name=resolved_chat_provider,
-        preferred_api_key=str(api_key or "").strip() or None,
-    )
-    if chat_codex_experiment:
-        resolved_chat_api_key = None
-    if _provider_requires_api_key(resolved_chat_provider) and not resolved_chat_api_key:
-        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", "HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
-            resolved_chat_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
-    resolved_chat_available = _is_provider_available(
-        provider_name=resolved_chat_provider,
-        api_key=resolved_chat_api_key,
-        configured_available=bool(available),
-    )
+    resolved_chat_available = bool(available and resolved_chat_provider != PROVIDER_DISABLED)
 
     resolved_cloud_provider = (
-        str(cloud_provider_name or os.environ.get("HOST_CHAT_CLOUD_PROVIDER") or _HOST_CHAT_CLOUD_DEFAULT_PROVIDER)
+        str(cloud_provider_name or resolved_chat_provider or _HOST_CHAT_CLOUD_DEFAULT_PROVIDER)
         .strip()
         .lower()
         or _HOST_CHAT_CLOUD_DEFAULT_PROVIDER
@@ -520,50 +484,19 @@ def _build_graph_config_by_profile(
         PROVIDER_OPENAI,
             PROVIDER_GEMINI,
         PROVIDER_DEEPSEEK,
+        PROVIDER_CODEX,
         PROVIDER_MOCK,
         PROVIDER_DISABLED,
     }:
         resolved_cloud_provider = _HOST_CHAT_CLOUD_DEFAULT_PROVIDER
-    graph_codex_migrated = _graph_codex_migration_enabled(
-        scene_type=resolved_scene_type,
-        execution_profile=execution_profile,
-    )
-    if graph_codex_migrated:
-        resolved_cloud_provider = PROVIDER_CODEX
     resolved_cloud_timeout_ms = max(800, int(cloud_timeout_ms or resolved_chat_timeout_ms))
-    if graph_codex_migrated:
-        resolved_cloud_timeout_ms = max(
-            resolved_cloud_timeout_ms,
-            _parse_int(os.environ.get("HOST_GRAPH_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000),
-        )
-    resolved_cloud_model_id = (
-        resolve_codex_cli_model(os.environ.get("HOST_GRAPH_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
-        if graph_codex_migrated
-        else (str(cloud_model_id or "").strip() or resolve_host_llm_model_id(resolved_cloud_provider))
-    )
-    resolved_cloud_base_url_override = (
-        _normalize_openai_compat_base_url(cloud_base_url_override)
-        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI})
-        else None
-    )
-    resolved_cloud_api_key = None if graph_codex_migrated else _resolve_provider_api_key(
-        provider_name=resolved_cloud_provider,
-        preferred_api_key=str(cloud_api_key or "").strip() or None,
-    )
+    resolved_cloud_model_id = str(cloud_model_id or "").strip() or resolved_chat_model_id
     resolved_cloud_available_flag = (
-        True
-        if graph_codex_migrated
-        else (
         bool(cloud_available)
         if cloud_available is not None
         else bool(resolved_cloud_provider != PROVIDER_DISABLED)
-        )
     )
-    resolved_cloud_available = _is_provider_available(
-        provider_name=resolved_cloud_provider,
-        api_key=resolved_cloud_api_key,
-        configured_available=resolved_cloud_available_flag,
-    )
+    resolved_cloud_available = bool(resolved_cloud_available_flag)
 
     base_timeout_ms = max(800, int(resolved_cloud_timeout_ms))
     node_model_ids: dict[str, str] = {
@@ -625,23 +558,14 @@ def _build_graph_config_by_profile(
         node_timeout = int(
             node_timeouts.get(node_id, resolved_chat_timeout_ms if is_chat_node else resolved_cloud_timeout_ms)
         )
-        node_api_key = resolved_chat_api_key if is_chat_node else resolved_cloud_api_key
         node_available = resolved_chat_available if is_chat_node else resolved_cloud_available
-        node_base_url_override = resolved_chat_base_url_override if is_chat_node else resolved_cloud_base_url_override
         node_override: dict[str, Any] = {
             "provider": node_provider,
             "model_id": node_model_id,
             "timeout_ms": node_timeout,
-            "api_key": str(node_api_key or "").strip() or None,
             "available": bool(node_available),
-            "provider_fn": build_host_provider_fn_for_node(
-                provider_name=node_provider,
-                model_id=node_model_id,
-                api_key=node_api_key,
-                timeout_ms=node_timeout,
-                node_id=node_id,
-                base_url_override=node_base_url_override,
-            ),
+            # Transport callables and credentials are intentionally absent.
+            # GraphExecutor crosses the canonical ModelAttemptService port.
         }
         # 需求 2.1：CHAT 快速路径下，chat_direct_ja 节点限制 max_output_tokens=200
         if (is_chat_fast_path or use_supervised) and node_id == CHAT_DIRECT_NODE_ID:
@@ -914,13 +838,11 @@ def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
     return runtime
 
 
-# LLM 运行时解析函数已移至 graph_config_llm_runtime.py
-from host_brain.app.graph_config_llm_runtime import (  # noqa: F401, E402
+# Production callers consume the canonical secret-free RouteCatalog projection.
+from host_brain.app.route_catalog_runtime import (  # noqa: F401, E402
     resolve_host_llm_runtime,
     resolve_host_llm_runtime_async,
     resolve_surface_reply_llm_runtime,
     resolve_executive_router_llm_runtime,
     resolve_subagent_llm_runtime,
-    _HOST_CHAT_14B_DEFAULT_PROVIDER,
-    _HOST_CHAT_14B_DEFAULT_MODEL_ID,
 )

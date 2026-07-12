@@ -2,12 +2,11 @@
 
 三级推理管线：
   Level 1: 关键词引擎（<1ms，现有 Phase 6 逻辑）
-  Level 2: 轻量 LLM 推理（Gemini Flash，50-300ms，结构化 JSON 输出）
+  Level 2: 服务端路由的轻量 LLM 推理（结构化 JSON 输出）
   Level 3: Fallback（LLM 超时/失败时回退关键词结果）
 
 环境变量：
   HOST_EMOTION_LLM_INFERENCE_ENABLED: 主开关（默认 false）
-  HOST_EMOTION_LLM_MODEL_ID: 推理用模型（默认 gemini-2.5-flash-lite）
   HOST_EMOTION_LLM_TIMEOUT_MS: LLM 推理超时毫秒（默认 300）
   HOST_EMOTION_LLM_CONFIDENCE_THRESHOLD: Level 1 跳过阈值（默认 0.7）
 """
@@ -189,15 +188,12 @@ async def infer_emotion_via_llm(
 ) -> EmotionLlmResult:
     """Level 2: 使用轻量 LLM 进行情感推理。
 
-    通过 LangChain ChatOpenAI 调用 Gemini Flash（OpenAI 兼容接口），
-    强制 JSON 输出格式，300ms 硬超时。
+    通过唯一 ModelAttemptService 路由，使用注册 Prompt 与结构化输出合同。
 
     Returns:
         EmotionLlmResult: 推理结果（含 user_emotion/natsume_emotion/reason/confidence）
     """
     t0 = time.monotonic()
-    model_id = str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash-lite").strip()
-
     prompt_text = _build_inference_prompt(
         user_message=user_message,
         conversation_history=conversation_history,
@@ -212,16 +208,10 @@ async def infer_emotion_via_llm(
     )
 
     try:
-        # 在线程中执行同步 LLM 调用，设置硬超时
-        raw_text = await asyncio.wait_for(
-            asyncio.to_thread(
-                _sync_llm_emotion_call,
-                model_id=model_id,
-                system_prompt=system_prompt,
-                user_prompt=prompt_text,
-                timeout_ms=timeout_ms,
-            ),
-            timeout=max(0.5, timeout_ms / 1000.0 + 0.2),  # 额外 200ms 缓冲
+        raw_text = await _llm_emotion_call(
+            system_prompt=system_prompt,
+            user_prompt=prompt_text,
+            timeout_ms=timeout_ms,
         )
 
         latency_ms = int((time.monotonic() - t0) * 1000)
@@ -274,48 +264,29 @@ async def infer_emotion_via_llm(
         )
 
 
-def _sync_llm_emotion_call(
+async def _llm_emotion_call(
     *,
-    model_id: str,
     system_prompt: str,
     user_prompt: str,
     timeout_ms: int,
 ) -> str:
-    """同步 LLM 调用（在独立线程中执行）。"""
-    from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
-        _load_api_key_from_env,
-    )
+    """调用唯一模型 authority；route/provider/deadline 由服务端策略决定。"""
+    from host_brain.model_runtime.invocation import complete_compiled_prompt  # noqa: PLC0415
+    from host_brain.model_runtime.live_prompts import EMOTION_INFERENCE_PROMPT_ID  # noqa: PLC0415
 
-    provider_name = str(os.environ.get("HOST_EMOTION_LLM_PROVIDER") or "gemini").strip().lower()
-    api_key = _load_api_key_from_env(provider_name)
-
-    from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
-
-    base_url_override: str | None = None
-    if provider_name == "gemini":
-        base_url_override = str(
-            os.environ.get("HOST_GEMINI_BASE_URL")
-            or "https://generativelanguage.googleapis.com/v1beta/openai"
-        ).strip()
-
-    result = complete_llm_with_pool_sync(
+    result = await complete_compiled_prompt(
+        prompt_id=EMOTION_INFERENCE_PROMPT_ID,
         request_id=f"emotion_inference::{int(time.time() * 1000)}",
         scene_type="EMOTION",
         cognitive_tier="B",
-        provider_name=provider_name,
-        model_id=model_id,
-        api_key=api_key,
-        timeout_ms=timeout_ms,
+        deadline_ms=timeout_ms,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        gen_params={"temperature": 0.1, "top_p": 0.8},
-        response_format="json_object",
-        base_url_override=base_url_override,
     )
-    if result.pool_exhausted:
-        raise RuntimeError("emotion llm pool exhausted")
+    if not result.success:
+        raise RuntimeError(result.error_code or "MODEL_ATTEMPT_FAILED")
     return str(result.content or "").strip()
 
 
@@ -467,7 +438,7 @@ class EmotionInferenceCascade:
                 "confidence": llm_result.confidence,
                 "keyword_result": dict(keyword_result),
                 "latency_ms": llm_result.latency_ms,
-                "llm_model": str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash-lite"),
+                "llm_model": "server_routed",
                 "signal_counts": keyword_result.get("signal_counts", {}),
             }
 

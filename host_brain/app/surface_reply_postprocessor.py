@@ -28,19 +28,23 @@ async def _post_speak_sentence(
 ) -> None:
     """Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。"""
     try:
-        from host_brain.channels.edge_rpc_client import post_speak
+        from host_brain.channels.embodiment import submit_voice_command
         from host_brain.channels.tts_context_router import TtsContextRouter
         tts_params = TtsContextRouter().route(text=text, emotion_tag=emotion_tag)
-        await post_speak(
-            text=text,
-            utterance_id=utterance_id,
+        await submit_voice_command(
+            action="speak",
+            payload={
+                "text": text,
+                "utterance_id": utterance_id,
+                "session_id": session_id,
+                "emotion_tag": emotion_tag,
+                "speed": float(tts_params.speed_scale),
+                "pitch": float(tts_params.pitch_shift),
+                "style_note": str(tts_params.style_note or ""),
+                "lang_hint": str(tts_params.lang_hint or "zh"),
+            },
             request_id=request_id,
-            session_id=session_id,
-            emotion_tag=emotion_tag,
-            speed=float(tts_params.speed_scale),
-            pitch=float(tts_params.pitch_shift),
-            style_note=str(tts_params.style_note or ""),
-            lang_hint=str(tts_params.lang_hint or "zh"),
+            idempotency_key=f"{request_id}:sentence-tts:{utterance_id}",
         )
     except Exception as exc:
         _logger.debug("[%s] P7 sentence TTS failed (non-critical): %s", request_id, exc)

@@ -983,6 +983,19 @@ def _proactive_content_matches_binding(content: str, state_binding: Mapping[str,
     return text
 
 
+def _proactive_candidate_from_model_content(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return raw
+    if not isinstance(parsed, Mapping):
+        return raw
+    return str(parsed.get("narrative") or "").strip()
+
+
 async def _compose_life_proactive_content(*, director_pack: Mapping[str, Any], state: Mapping[str, Any], motive: str, pressure: float, provided_content: str = "", state_binding: Mapping[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     provided = _sanitize_proactive_content(provided_content)
     if provided:
@@ -990,13 +1003,13 @@ async def _compose_life_proactive_content(*, director_pack: Mapping[str, Any], s
     if not _bool_env("HOST_LIFE_PROACTIVE_MODEL_COMPOSER_ENABLED", True):
         return "", {"source": "none", "model_used": False, "reason_code": "MODEL_COMPOSER_DISABLED"}
     try:
-        from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async, resolve_surface_reply_llm_runtime  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.model_runtime.contracts import RetryDirective  # noqa: PLC0415
+        from host_brain.model_runtime.invocation import complete_compiled_prompt  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+            LIFE_PROACTIVE_COMPOSE_PROMPT_ID,
+        )
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        base_runtime = await resolve_host_llm_runtime_async(scene_type="CHAT_SURFACE")
-        runtime = resolve_surface_reply_llm_runtime(base_runtime=dict(base_runtime or {}))
-        if not bool(runtime.get("available")):
-            return "", {"source": "model", "model_used": False, "reason_code": "LLM_UNAVAILABLE"}
         suppress_work_context = bool(_map(director_pack).get("suppress_work_context"))
         work = _map(state.get("work")) if not suppress_work_context else {}
         payload = {
@@ -1036,33 +1049,17 @@ async def _compose_life_proactive_content(*, director_pack: Mapping[str, Any], s
             },
             {"role": "user", "content": _dumps(payload)},
         ]
-        result = await acomplete_llm_with_pool(
-            request_id=_event_id("lifepro_llm"),
-            scene_type="CHAT_SURFACE",
-            cognitive_tier="A",
-            provider_name=str(runtime.get("provider_name") or "").strip(),
-            model_id=str(runtime.get("model_id") or "").strip(),
-            api_key=str(runtime.get("llm_api_key") or "").strip(),
-            timeout_ms=min(int(runtime.get("timeout_ms") or 30_000), 12_000),
-            messages=messages,
-            gen_params={"temperature": 0.72, "max_tokens": 120},
-            response_format={"type": "json_object"},
-            base_url_override=str(runtime.get("base_url_override") or "").strip() or None,
-        )
-        if bool(getattr(result, "pool_exhausted", False)):
-            return "", {"source": "model", "model_used": True, "reason_code": "POOL_EXHAUSTED"}
-        raw = str(getattr(result, "content", "") or "").strip()
-        if not raw:
-            return "", {"source": "model", "model_used": True, "reason_code": "EMPTY_MODEL_CONTENT"}
-        try:
-            parsed = json.loads(raw)
-            candidate = str(parsed.get("narrative") or "").strip() if isinstance(parsed, Mapping) else raw
-        except Exception:
-            candidate = raw
-        content = _proactive_content_matches_binding(_sanitize_proactive_content(candidate), state_binding)
-        if not content and candidate:
+
+        def _semantic_retry(response: Any, attempt: Any) -> Any:
+            candidate = _proactive_candidate_from_model_content(response.content)
+            accepted = _proactive_content_matches_binding(
+                _sanitize_proactive_content(candidate),
+                state_binding,
+            )
+            if accepted:
+                return RetryDirective.accept()
             repair_messages = [
-                *messages,
+                *attempt.prompt.as_message_dicts(),
                 {
                     "role": "user",
                     "content": (
@@ -1073,27 +1070,46 @@ async def _compose_life_proactive_content(*, director_pack: Mapping[str, Any], s
                     ),
                 },
             ]
-            repair_result = await acomplete_llm_with_pool(
-                request_id=_event_id("lifepro_repair_llm"),
-                scene_type="CHAT_SURFACE",
-                cognitive_tier="A",
-                provider_name=str(runtime.get("provider_name") or "").strip(),
-                model_id=str(runtime.get("model_id") or "").strip(),
-                api_key=str(runtime.get("llm_api_key") or "").strip(),
-                timeout_ms=min(int(runtime.get("timeout_ms") or 30_000), 12_000),
-                messages=repair_messages,
-                gen_params={"temperature": 0.78, "max_tokens": 120},
-                response_format={"type": "json_object"},
-                base_url_override=str(runtime.get("base_url_override") or "").strip() or None,
+            return RetryDirective(
+                retry=True,
+                reason="life_proactive_content_repair",
+                rendered_prompt=attempt.prompt.with_messages(repair_messages),
+                reuse_target=True,
+                metadata={"candidate_rejected": True},
             )
-            repair_raw = str(getattr(repair_result, "content", "") or "").strip()
-            try:
-                repair_parsed = json.loads(repair_raw)
-                repair_candidate = str(repair_parsed.get("narrative") or "").strip() if isinstance(repair_parsed, Mapping) else repair_raw
-            except Exception:
-                repair_candidate = repair_raw
-            content = _proactive_content_matches_binding(_sanitize_proactive_content(repair_candidate), state_binding)
-        return content, {"source": "model", "model_used": True, "provider_name": str(runtime.get("provider_name") or ""), "model_id": str(runtime.get("model_id") or ""), "reason_code": "" if content else "MODEL_CONTENT_REJECTED"}
+
+        result = await complete_compiled_prompt(
+            prompt_id=LIFE_PROACTIVE_COMPOSE_PROMPT_ID,
+            request_id=_event_id("lifepro_llm"),
+            scene_type="LIFE_PROACTIVE",
+            cognitive_tier="A",
+            deadline_ms=12_000,
+            messages=messages,
+            foreground=False,
+            retry_evaluator=_semantic_retry,
+            metadata={"chain": "life_proactive_composer"},
+        )
+        trace = model_attempt_result_trace(result)
+        if not result.success:
+            return "", {
+                "source": "model",
+                "model_used": True,
+                "reason_code": result.error_code or "MODEL_ATTEMPT_FAILED",
+                "model_attempt": trace,
+            }
+        candidate = _proactive_candidate_from_model_content(result.content)
+        content = _proactive_content_matches_binding(
+            _sanitize_proactive_content(candidate),
+            state_binding,
+        )
+        return content, {
+            "source": "model",
+            "model_used": True,
+            "provider_name": trace.get("final_provider", ""),
+            "model_id": trace.get("final_model", ""),
+            "reason_code": "" if content else "MODEL_CONTENT_REJECTED",
+            "model_attempt": trace,
+        }
     except Exception as exc:
         return "", {"source": "model", "model_used": False, "reason_code": type(exc).__name__, "detail": str(exc)[:160]}
 

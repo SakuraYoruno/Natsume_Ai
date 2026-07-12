@@ -550,6 +550,12 @@ class LlmGatewayContract:
             except Exception:
                 reason_code = "HOST_PROVIDER_CONSTRUCTION_FAILED"
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, f"host provider unavailable: {reason_code}"
+        if provider_kind == "canonical_model_attempt":
+            if not (provider_explicitly_configured and callable(provider)):
+                return False, SERVICE_UNAVAILABLE_DEPENDENCY, "canonical model-attempt port missing"
+            # Credentials, provider availability and route selection are owned
+            # by ModelAttemptService/ProviderAdapter behind this port.
+            return True, "", ""
         if provider_name == PROVIDER_CODEX:
             if not api_key and not (provider_explicitly_configured and callable(provider)):
                 return False, SERVICE_UNAVAILABLE_COLD_START, "Codex credential or callable missing"

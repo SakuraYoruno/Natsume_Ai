@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.model_attempt_port import complete_compiled_model_sync
 from host_brain.core.ids import now_ms
+from host_brain.model_runtime import INITIATIVE_TOPIC_PROMPT_ID
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -292,7 +295,7 @@ class InitiativeGovernorAgent:
         """Governor 决策 ALLOW 时调用 LLM 生成主动发声的话题建议。
 
         触发条件：evaluate_initiative() 返回 ALLOW。
-        调用：Flash 小模型。
+        调用：服务端 RoutePolicy 选择模型。
         开关：GOVERNOR_PROACTIVE_TOPIC_ENABLED（默认 false）。
         输出传递：DefaultModeAgent 独白生成的 topic_seed 参数。
 
@@ -303,9 +306,9 @@ class InitiativeGovernorAgent:
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.initiative_governor_agent")
+        _model_attempt_trace: dict[str, Any] = {}
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("initiative_governor_agent.proactive_topic") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -320,39 +323,50 @@ class InitiativeGovernorAgent:
                 bond_stage=str(bond_stage or "friend"),
                 recent_topics=str(recent_topics or "")[:100],
             )
-            _pool_result = complete_llm_with_pool_sync(
+            _completion = complete_compiled_model_sync(
+                prompt_id=INITIATIVE_TOPIC_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ),
                 request_id=f"initiative-topic::{int(time.time() * 1000)}",
                 scene_type="INITIATIVE_TOPIC",
                 cognitive_tier="C",
-                timeout_ms=2000,
-                messages=[
-                    {"role": "system", "content": _system_prompt},
-                    {"role": "user", "content": _user_prompt},
-                ],
-                gen_params={"temperature": 0.4, "max_tokens": 64},
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                response_format="json_object",
+                deadline_ms=2_000,
+                foreground=False,
+                metadata={"caller": "initiative_proactive_topic"},
             )
-            if _pool_result.pool_exhausted:
-                raise RuntimeError("initiative topic llm pool exhausted")
-            _raw = _pool_result.content
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
+            _model_attempt_trace = dict(_completion.trace)
+            if not _completion.success:
+                raise RuntimeError(
+                    _completion.result.error_code or "INITIATIVE_TOPIC_MODEL_ATTEMPT_FAILED"
+                )
+            _parsed = json.loads(_completion.content)
             _topic = str(_parsed.get("topic_seed") or "").strip()[:50]
             if _topic:
                 _log.debug("InitiativeGovernorAgent.generate_proactive_topic: %s", _topic)
                 try:
                     self.state_registry.set_state(
                         "initiative_governor_agent",
-                        {"last_proactive_topic": _topic},
+                        {
+                            "last_proactive_topic": _topic,
+                            "last_proactive_topic_model_attempt": _model_attempt_trace,
+                        },
                         writer="initiative_governor_agent",
                     )
                 except Exception:
                     pass
             return _topic or None
         except Exception as exc:
+            if _model_attempt_trace:
+                try:
+                    self.state_registry.set_state(
+                        "initiative_governor_agent",
+                        {"last_proactive_topic_model_attempt": _model_attempt_trace},
+                        writer="initiative_governor_agent",
+                    )
+                except Exception:
+                    pass
             _log.debug("InitiativeGovernorAgent.generate_proactive_topic 失败（降级）: %s", exc)
             return None
 

@@ -16,6 +16,7 @@ from host_brain.app.chat_runtime_input import (
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms
+from host_brain.core.errors import ORCH_PARAM_DRIFT
 from host_brain.integrations.graph_contract import (
     DEFAULT_MODEL_PLANE_DIR,
     DEFAULT_POLICY_TIMEOUT_MS,
@@ -34,7 +35,10 @@ from host_brain.integrations.graph_contract import (
     pick_model_profile_id,
     validate_graph_config,
 )
-from host_brain.integrations.graph_model_resolve import resolve_model_nodes
+from host_brain.integrations.graph_model_resolve import (
+    resolve_model_nodes,
+    sanitize_model_node_spec,
+)
 from host_brain.integrations.graph_executor import GraphExecutor
 from host_brain.integrations.graph_checkpoint import HostPolicyGuard
 from host_brain.integrations.graph_fallback import (
@@ -79,16 +83,12 @@ def _inject_execution_profile_from_payload_only(
 
 
 def _sanitize_model_nodes_for_state(model_nodes: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Strip non-serializable callable fields before storing model nodes in state."""
+    """Store only the canonical, secret-free model-node schema in graph state."""
 
-    sanitized: dict[str, dict[str, Any]] = {}
-    for model_node_id, spec in model_nodes.items():
-        sanitized[str(model_node_id)] = {
-            str(key): value
-            for key, value in dict(spec).items()
-            if not callable(value)
-        }
-    return sanitized
+    return {
+        str(model_node_id): sanitize_model_node_spec(str(model_node_id), spec)
+        for model_node_id, spec in model_nodes.items()
+    }
 
 
 class GraphRuntimeContract:
@@ -168,11 +168,12 @@ class GraphRuntimeContract:
                 model_profile_id=model_profile_id,
                 model_plane_dir=self._model_plane_dir,
             )
-        except KeyError as exc:
+        except (KeyError, ValueError) as exc:
+            reason_code = ORCH_PARAM_DRIFT if isinstance(exc, ValueError) else "ORCH_NODE_MISSING"
             return self._finalize(
                 request_id=request_id,
                 status=STATUS_FAILED,
-                reason_code="ORCH_NODE_MISSING",
+                reason_code=reason_code,
                 stage=S_ORCH_VALIDATE,
                 detail=str(exc),
                 graph_config=graph_config,

@@ -52,9 +52,14 @@ async def get_avatar_state():
     """Read-only Edge avatar behavior state for monitor pages."""
     now = _now_ms()
     try:
-        from host_brain.channels.edge_rpc_client import post_vts  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
 
-        result = await post_vts(action="status", request_id=f"obs_avatar_state_{now}")
+        result = await submit_avatar_command(
+            action="status",
+            payload={},
+            request_id=f"obs_avatar_state_{now}",
+            idempotency_key=f"obs:avatar-state:{now}",
+        )
         return {
             "status": "OK" if bool(result.success) else "DEGRADED",
             "success": bool(result.success),

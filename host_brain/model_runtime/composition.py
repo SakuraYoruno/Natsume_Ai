@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import threading
 from typing import Any, Iterable
 
+from host_brain.core.trace_redaction import sanitize_public_payload
+
 from host_brain.model_runtime.contracts import (
     AttemptAuditRepository,
     ModelAttemptRecord,
@@ -35,34 +37,18 @@ class InMemoryAttemptAuditRepository:
 
 
 class LedgerAttemptAuditRepository:
-    """Adapter to the existing typed ``llm_node_call_log`` ledger API.
-
-    Migration 0080 can later replace this projection with a dedicated attempt
-    table without changing ``ModelAttemptService``.
-    """
+    """Durable adapter to the canonical model-attempt audit journal."""
 
     def __init__(self, ledger: Any) -> None:
-        writer = getattr(ledger, "log_llm_node_call", None)
+        writer = getattr(ledger, "log_model_attempt", None)
         if not callable(writer):
-            raise TypeError("ledger must expose log_llm_node_call(row)")
-        self._ledger = ledger
+            raise TypeError("ledger must expose log_model_attempt(row)")
+        self._writer = writer
 
     async def record_attempt(self, record: ModelAttemptRecord) -> None:
-        reason = record.error_code or record.retry_reason
-        self._ledger.log_llm_node_call(
-            {
-                "request_id": record.request_id,
-                "node_id": f"model_attempt:{record.attempt_id}",
-                "provider": record.provider,
-                "model_id": record.model_id,
-                "status": record.status.value.upper(),
-                "reason_code": reason,
-                "latency_ms": record.latency_ms,
-                "input_digest": record.prompt_digest,
-                "output_digest": record.output_digest,
-                "ts_ms": record.ended_at_ms or record.started_at_ms,
-            }
-        )
+        payload = record.as_dict()
+        payload["metadata"] = sanitize_public_payload(payload.get("metadata") or {})
+        self._writer(payload)
 
 
 @dataclass(frozen=True, slots=True)

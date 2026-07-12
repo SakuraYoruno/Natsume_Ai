@@ -1,14 +1,8 @@
 """Durable Gateway inbox/outbox worker runtime.
 
-This module is deliberately a thin adapter over
-``host_brain.eventing.gateway_transport``.  The central transport store owns
-schema, idempotency, leases, fencing, retry scheduling and DLQ state.  Edge
-Gateway only supplies delivery callbacks and lifecycle management here.
-
-Architecture debt: constructing the central store in Edge currently requires
-an Edge -> Host import in ``bootstrap.py``.  TASK-0584 must remove that import
-by moving the transport port/factory behind a contracts/composition boundary;
-the store implementation must not be copied into Edge in the meantime.
+The injected transport-store port owns schema, idempotency, leases, fencing,
+retry scheduling and DLQ state. Edge Gateway supplies delivery callbacks and
+lifecycle management without importing any concrete Host repository.
 """
 
 from __future__ import annotations

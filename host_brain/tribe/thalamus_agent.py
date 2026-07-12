@@ -3202,10 +3202,10 @@ async def classify_task_intent_by_llm(
         if str(os.environ.get("HOST_CORTEX_INTENT_LLM_ENABLED", "true")).strip().lower() in {"0", "false", "no", "off"}:
             return None
 
-        from collections.abc import Mapping as _Mapping  # noqa: PLC0415
-
+        from host_brain.app.dependencies import get_model_attempt_service  # noqa: PLC0415
         from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.model_runtime.contracts import ModelAttemptRequest, PromptRef  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         ctx = dict(tribe_context or {})
         vital_signs = dict(ctx.get("vital_signs") or {})
@@ -3213,39 +3213,31 @@ async def classify_task_intent_by_llm(
         emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
         tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
 
-        raw_templates = _resolve_intent_classification_prompt_templates()
-        templates = dict(raw_templates) if isinstance(raw_templates, _Mapping) else {}
-        system_prompt = str(templates.get("system_prompt") or "").strip()
-        user_prompt_template = str(templates.get("user_prompt_template") or "").strip()
-        if not system_prompt or not user_prompt_template:
-            return None
-        user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
-
         thalamus_scene = str(os.environ.get("HOST_THALAMUS_INTENT_LLM_SCENE") or "THALAMUS_INTENT").strip().upper()
         timeout_ms = int(
             os.environ.get("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS")
             or os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS")
             or "3000"
         )
-        agent_gen_params = {"temperature": 0.1, "top_p": 0.8}
 
-        result = await acomplete_llm_with_pool(
-            request_id=request_id,
-            scene_type=thalamus_scene,
-            cognitive_tier="C",
-            provider_name=None,
-            model_id=None,
-            api_key=None,
-            timeout_ms=timeout_ms,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            gen_params=agent_gen_params,
-            response_format="json_object",
-            base_url_override=None,
+        result = await get_model_attempt_service().complete(
+            ModelAttemptRequest(
+                request_id=request_id or "thalamus-intent",
+                scene_type=thalamus_scene,
+                cognitive_tier="C",
+                prompt=PromptRef(
+                    "thalamus_agent.intent_classification_prompts",
+                    {
+                        "text": str(text or "").strip(),
+                        "tribe_summary": tribe_summary,
+                    },
+                ),
+                deadline_ms=max(500, min(timeout_ms, 30_000)),
+                foreground=True,
+                metadata={"chain": "thalamus_intent", "session_id": session_id},
+            )
         )
-        if result.pool_exhausted:
+        if not result.success:
             return None
         raw_text = str(result.content or "").strip()
         parsed = extract_first_json_object(raw_text)
@@ -3253,7 +3245,10 @@ async def classify_task_intent_by_llm(
             _logger.warning("[%s] thalamus_intent_llm_parse_failed output=%.180s", request_id, raw_text)
             return None
 
-        return _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
+        normalized = _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
+        if normalized is not None:
+            normalized["model_attempt_trace"] = model_attempt_result_trace(result)
+        return normalized
     except Exception as exc:
         _logger.warning("thalamus_intent_llm_failed request_id=%s error=%s", request_id, exc)
         return None
@@ -4010,5 +4005,3 @@ __all__ = [
     "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]
-
-

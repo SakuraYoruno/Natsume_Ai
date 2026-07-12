@@ -268,7 +268,7 @@ class LimbicAgent:
     ) -> dict[str, Any]:
         from host_brain.persona.emotion_reactivity import (  # noqa: PLC0415
             EmotionReactivityProfile,
-            render_reactivity_hint_with_pool,
+            render_reactivity_hint,
         )
 
         modifiers = EmotionReactivityProfile.compute_modifiers(
@@ -284,17 +284,21 @@ class LimbicAgent:
             "effective_echo_weight": float(effective_echo_weight),
             "persona_modifiers": dict(modifiers.as_dict() if hasattr(modifiers, "as_dict") else {}),
         }
+        model_attempt_trace: dict[str, Any] = {}
         try:
-            reactivity_hint = render_reactivity_hint_with_pool(
+            reactivity_hint = render_reactivity_hint(
                 user_emotion_tag=str(user_emotion_tag or ""),
                 bond_stage=str(bond_stage or ""),
                 modifiers=modifiers,
                 render_target_lang=render_target_lang,
+                model_attempt_sink=model_attempt_trace,
             )
         except Exception:
             reactivity_hint = ""
         if reactivity_hint:
             payload["reactivity_hint"] = reactivity_hint
+        if model_attempt_trace:
+            payload["reactivity_model_attempt"] = model_attempt_trace
         self._touch_state(
             key="last_emotion_reactivity_profile",
             value={

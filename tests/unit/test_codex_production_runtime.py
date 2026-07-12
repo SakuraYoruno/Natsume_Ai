@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime import production_executor as production_executor_module
 from host_brain.agent_runtime.browser_researcher import _extract_urls, _parse_html_document
 from host_brain.agent_runtime.production_executor import (
     AgentProductionJob,
@@ -31,7 +34,28 @@ from host_brain.agent_runtime.production_executor import (
 from host_brain.agent_runtime.production_studio import build_production_work_order
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt
 from host_brain.agent_runtime.work_order import AgentWorkOrder
-from host_brain.skills.executor_registry import dispatch_executor_payload
+from host_brain.skills.executor_registry import (
+    bind_validated_skill_authority,
+    dispatch_executor_payload,
+)
+from host_brain.skills import executor_registry as executor_registry_module
+
+
+@pytest.fixture(autouse=True)
+def _durable_governed_authority_fixture(monkeypatch):  # noqa: ANN001, ANN201
+    """The production verifier is covered separately against repository fixtures."""
+
+    monkeypatch.setattr(
+        executor_registry_module,
+        "_GOVERNED_AUTHORITY_VERIFIER_OVERRIDE",
+        lambda _authority: None,
+    )
+    monkeypatch.setattr(
+        production_executor_module,
+        "_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE",
+        lambda _authority, _order: None,
+    )
+    yield
 
 
 def _governed_context() -> dict[str, object]:
@@ -39,7 +63,53 @@ def _governed_context() -> dict[str, object]:
         "execution_mode": "governed_task_runtime",
         "command_id": "host-command://chat/governed-production-test",
         "attempt_id": "attempt-governed-production-test",
+        "request_id": "req-test",
+        "principal_id": "test-principal",
+        "target_id": "codex_production",
+        "work_order_id": "work-order-test",
+        "graph_id": "graph-governed-production-test",
+        "graph_revision": 1,
+        "node_id": "node-governed-production-test",
+        "lease_id": "lease-governed-production-test",
+        "fencing_token": 1,
     }
+
+
+def _bind_governed_worker(order: AgentWorkOrder) -> AgentWorkOrder:
+    governed = dict(_governed_context())
+    governed.update({
+        "request_id": str(order.metadata.get("request_id") or order.work_order_id),
+        "principal_id": "test-principal",
+        "target_id": str(order.metadata.get("skill_id") or "codex_production"),
+        "work_order_id": order.work_order_id,
+    })
+    order.metadata["_capability_authority"] = governed
+    return order
+
+
+def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
+    context = dict(payload.get("_context") or {})
+    governed = dict(context.get("_governed_execution_context") or {})
+    work_order = dict(payload.get("work_order") or {})
+    metadata = dict(work_order.get("metadata") or {})
+    request_id = str(metadata.get("request_id") or work_order.get("work_order_id") or "req-test")
+    skill_id = str(metadata.get("skill_id") or "codex_production")
+    governed.update({
+        "request_id": request_id,
+        "principal_id": "test-principal",
+        "target_id": skill_id,
+        "work_order_id": str(work_order.get("work_order_id") or ""),
+    })
+    authority = bind_validated_skill_authority(
+        payload=payload,
+        request_id=request_id,
+        skill_id=skill_id,
+        principal_id="test-principal",
+        target_id=skill_id,
+        governed_execution_context=governed,
+        validated_by="test.governed_task_fixture",
+    )
+    return dispatch_executor_payload(payload, authority=authority)
 
 
 def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
@@ -77,7 +147,7 @@ def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
         lambda **_kwargs: None,
     )
 
-    result = dispatch_executor_payload(
+    result = _dispatch_governed_executor(
         {
             "tool": "codex_production",
             "work_order": work_order,
@@ -89,7 +159,7 @@ def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
     timeline.append("executor-returned")
 
     assert timeline == ["worker-terminal", "executor-returned"]
-    assert result["status"] == "EXECUTED"
+    assert result["status"] == "EXECUTED", result
     assert result["result_text"] == "terminal governed result"
     assert result["queued"] is False
     assert result["agent_background"] is False
@@ -119,7 +189,7 @@ def test_governed_codex_production_missing_confirmation_fails_closed(
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon started")),
     )
 
-    result = dispatch_executor_payload(
+    result = _dispatch_governed_executor(
         {
             "tool": "codex_production",
             "work_order": work_order,
@@ -318,9 +388,9 @@ def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: 
     )
     run_dir = tmp_path / "browser-research-run"
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
-    assert result["status"] == "EXECUTED"
+    assert result["status"] == "EXECUTED", result
     assert result["metadata"]["native_browser_researcher"] is True
     assert result["metadata"]["readable_source_count"] == 1
     assert run_dir.joinpath("browser_research_report.md").exists()
@@ -1294,7 +1364,7 @@ def test_lightnovel_worker_delegates_to_playwright_recommender(tmp_path: Path, m
         _fake_execute_lightnovel,
     )
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
     assert result["status"] == "EXECUTED"
     assert result["reason_code"] is None
@@ -1385,9 +1455,10 @@ def test_lightnovel_epub_worker_uses_native_builder(tmp_path: Path) -> None:
             skill_id="agent_epub_builder",
         )
     )
+    order.approval_policy["confirmed"] = True
     run_dir = tmp_path / "run-native"
 
-    result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
+    result = _execute_worker(_bind_governed_worker(order), store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
     assert result["status"] == "EXECUTED"
     assert result["metadata"]["native_lightnovel_epub_builder"] is True

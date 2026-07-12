@@ -7,9 +7,60 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.model_runtime import (
+    AGENT_REACT_STEP_PROMPT_ID,
+    AGENT_SUBAGENT_GATEWAY_PROMPT_ID,
+    OutputContract,
+    PromptRef,
+    PromptRegistry,
+    PromptSchemaError,
+)
+
+
+AGENT_REACT_PROMPT_ID = AGENT_REACT_STEP_PROMPT_ID
+SUBAGENT_GATEWAY_PROMPT_ID = AGENT_SUBAGENT_GATEWAY_PROMPT_ID
+AGENT_MODEL_PROMPT_VERSION = "v1.0.0"
+
+
+def _validate_prompt_binding(
+    registry: PromptRegistry,
+    *,
+    prompt_id: str,
+    output_kind: str,
+) -> None:
+    """Fail closed unless the composition root installed the exact binding."""
+
+    info = registry.definition(prompt_id)
+    expected_contract = OutputContract(kind=output_kind)
+    if (
+        info.version != AGENT_MODEL_PROMPT_VERSION
+        or info.required_variables != ("messages",)
+        or info.output_contract != expected_contract
+    ):
+        raise PromptSchemaError(f"incompatible registered agent prompt: {prompt_id}")
+
+
+def build_agent_model_prompt_ref(
+    registry: PromptRegistry,
+    *,
+    prompt_id: str,
+    messages: Sequence[Mapping[str, Any]],
+) -> PromptRef:
+    output_kind = "json_object" if prompt_id == AGENT_REACT_PROMPT_ID else "text"
+    if prompt_id not in {AGENT_REACT_PROMPT_ID, SUBAGENT_GATEWAY_PROMPT_ID}:
+        raise PromptSchemaError(f"unsupported agent model prompt id: {prompt_id}")
+    _validate_prompt_binding(registry, prompt_id=prompt_id, output_kind=output_kind)
+    return PromptRef(
+        prompt_id=prompt_id,
+        version=AGENT_MODEL_PROMPT_VERSION,
+        variables={"messages": tuple(dict(message) for message in messages)},
+        output_contract=OutputContract(kind=output_kind),
+    )
 
 
 def build_agent_system_prompt(
@@ -191,4 +242,10 @@ def _build_production_contract(metadata: dict, input_pack: dict) -> str:
     return "\n".join(parts) if len(parts) > 1 else ""
 
 
-__all__ = ["build_agent_system_prompt"]
+__all__ = [
+    "AGENT_MODEL_PROMPT_VERSION",
+    "AGENT_REACT_PROMPT_ID",
+    "SUBAGENT_GATEWAY_PROMPT_ID",
+    "build_agent_model_prompt_ref",
+    "build_agent_system_prompt",
+]

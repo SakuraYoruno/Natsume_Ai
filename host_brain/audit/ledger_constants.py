@@ -608,6 +608,10 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "llm_pool_call_log": {"attempts_json"},
     "llm_token_usage_log": {"detail_json"},
     "llm_node_call_log": set(),
+    "model_attempt_log": {"metadata"},
+    "capability_execution_claim": set(),
+    "capability_execution_receipt": {"attempt_json", "evidence_json", "receipt_json"},
+    "capability_execution_late_outcome": set(),
     "graph_run_trace": {"nodes_json", "edges_json"},
 }
 
@@ -656,6 +660,10 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "llm_pool_call_log",
     "llm_token_usage_log",
     "llm_node_call_log",
+    "model_attempt_log",
+    "capability_execution_claim",
+    "capability_execution_receipt",
+    "capability_execution_late_outcome",
     "graph_run_trace",
     "supervisor_decision_log",
     # P8-1: 新增聚合表

@@ -20,10 +20,6 @@ class CodexSparkReplyJudgeSettings(BaseSettings):
         alias="HOST_CODEX_SPARK_REPLY_JUDGE_REWRITE_ENABLED",
     )
     mode: str = Field(default="suspicious", alias="HOST_CODEX_SPARK_REPLY_JUDGE_MODE")
-    model_id: str = Field(
-        default="gpt-5.3-codex-spark",
-        alias="HOST_CODEX_SPARK_REPLY_JUDGE_MODEL_ID",
-    )
     timeout_ms: int = Field(
         default=12_000,
         ge=1_000,

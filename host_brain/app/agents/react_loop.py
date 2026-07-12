@@ -348,6 +348,7 @@ def run_react_loop(
         ReactResult（含 final_answer、steps、stopped_reason）
     """
     from host_brain.integrations.graph_governed_tool_node import GovernedToolNode  # noqa: PLC0415
+    from host_brain.app.dependencies import get_capability_execution_journal  # noqa: PLC0415
 
     ctx = dict(context or {})
     steps: list[ReactStep] = []
@@ -362,6 +363,7 @@ def run_react_loop(
         tools=lc_tools,
         governor=governor,
         evidence_plane=evidence_plane,
+        execution_journal=get_capability_execution_journal(),
     )
 
     # 构建 system prompt

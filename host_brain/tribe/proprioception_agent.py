@@ -165,7 +165,7 @@ class ProprioceptionAgent:
         _log = _logging.getLogger("Natsume.tribe.proprioception_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("proprioception_agent.cognitive_load_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -178,21 +178,11 @@ class ProprioceptionAgent:
                 interrupt_rate=round(float(interrupt_rate), 3),
                 continuity_index=round(float(continuity_index), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="proprioception_narrator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="proprioception_load_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.2,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("load_hint") or "").strip()[:40]
             if _hint:
                 _log.debug("ProprioceptionAgent.generate_cognitive_load_hint: %s", _hint)

@@ -390,7 +390,7 @@ class PeripheralAgent:
                 return None
 
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("peripheral_agent.context_analysis") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -406,21 +406,11 @@ class PeripheralAgent:
                 gate_status=str(_gate_state.get("state") or "open"),
                 mute_status=str(_mute_state.get("muted") or False),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="peripheral_analyzer",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                semantic_id="peripheral_context_analysis",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=48,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("context_hint") or "").strip()[:60]
             if _hint:
                 _log.debug("PeripheralAgent.analyze_peripheral_context: %s", _hint)

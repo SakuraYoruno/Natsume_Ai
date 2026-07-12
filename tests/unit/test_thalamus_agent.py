@@ -4,6 +4,16 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from host_brain.app import dependencies
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_model_runtime_composition,
+    build_production_prompt_registry,
+)
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     _resolve_intent_classification_prompt_templates,
@@ -809,55 +819,63 @@ def test_intent_classification_prompt_templates_resolve_canonical_defaults() -> 
     assert "user_prompt_template" in merged
 
 
-def test_classify_task_intent_by_llm_uses_thalamus_pool_scene_without_exec_runtime(monkeypatch) -> None:
+def test_classify_task_intent_by_llm_uses_canonical_attempt_service(monkeypatch) -> None:
     captured: dict = {}
 
-    async def _fake_pool_complete(**kwargs):  # noqa: ANN001
-        captured.update(kwargs)
-        return SimpleNamespace(
-            pool_exhausted=False,
-            content='{"route":"chat","target_id":"","task":"normal chat","reason_code":"LLM_CHAT","confidence":0.91}',
-        )
+    async def _fake_complete(attempt):  # noqa: ANN001
+        captured["attempt"] = attempt
+        return {
+            "content": '{"route":"chat","target_id":"","task":"normal chat","reason_code":"LLM_CHAT","confidence":0.91}'
+        }
 
     monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "true")
     monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_SCENE", "THALAMUS_INTENT")
     monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS", "1200")
 
-    with (
-        patch(
-            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
-            new=AsyncMock(return_value={"available": True}),
-        ) as resolve_runtime_mock,
-        patch(
-            "host_brain.app.graph_config_builder.resolve_executive_router_llm_runtime",
-            return_value={
-                "available": True,
-                "provider_name": "codex",
-                "model_id": "gpt-5.4-mini",
-                "llm_api_key": "",
-                "base_url_override": None,
-                "agent_gen_params": {"temperature": 0.1, "top_p": 0.8},
-            },
-        ) as exec_runtime_mock,
-        patch("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", new=_fake_pool_complete),
-    ):
+    route = RouteDecision(
+        decision_id="test-thalamus-route",
+        targets=(
+            ProviderTarget(
+                adapter_id="test.thalamus",
+                provider="mock",
+                model_id="mock-intent",
+                timeout_ms=1_200,
+            ),
+        ),
+        reason="TEST_THALAMUS_ROUTE",
+        max_attempts=2,
+    )
+    composition = build_model_runtime_composition(
+        prompt_registry=build_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(route),
+        provider_adapters=[
+            CallableProviderAdapter("test.thalamus", complete_fn=_fake_complete)
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    try:
         decision = _run(
             classify_task_intent_by_llm(
-                request_id="req-thalamus-pool-not-codex",
-                session_id="session-thalamus-pool-not-codex",
+                request_id="req-thalamus-canonical-attempt",
+                session_id="session-thalamus-canonical-attempt",
                 text="普通聊天，不要走 Codex",
             )
         )
+    finally:
+        dependencies.reset_model_runtime_composition()
 
     assert decision is not None
     assert decision["route"] == "chat"
-    resolve_runtime_mock.assert_not_called()
-    exec_runtime_mock.assert_not_called()
-    assert captured["scene_type"] == "THALAMUS_INTENT"
-    assert captured["timeout_ms"] == 1200
-    assert captured["provider_name"] is None
-    assert captured["model_id"] is None
-    assert captured["api_key"] is None
+    attempt = captured["attempt"]
+    assert attempt.scene_type == "THALAMUS_INTENT"
+    assert 1_000 <= attempt.timeout_ms <= 1_200
+    assert attempt.prompt.prompt_id == "thalamus_agent.intent_classification_prompts"
+    assert "普通聊天，不要走 Codex" in attempt.prompt.messages[1]["content"]
+    assert "api_key" not in repr(attempt)
+    trace = decision["model_attempt_trace"]
+    assert trace["route_decision_id"] == "test-thalamus-route"
+    assert trace["attempt_ids"]
 
 
 def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_rules_miss() -> None:

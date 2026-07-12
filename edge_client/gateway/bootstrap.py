@@ -16,12 +16,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from natsume_contracts.edge.v1 import GatewayTransportStoreFactory
+
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
 
 # Keep lifecycle threads independent from tests and integrations that replace
 # ``threading.Thread`` for delivery-worker observation.  These two threads own
 # process infrastructure and must always execute their targets.
 _THREAD_CLASS = threading.Thread
+_TRANSPORT_STORE_FACTORY: GatewayTransportStoreFactory | None = None
+
+
+def configure_gateway_transport_store_factory(
+    factory: GatewayTransportStoreFactory | None,
+) -> None:
+    """Install the process composition adapter without importing Host code."""
+
+    global _TRANSPORT_STORE_FACTORY
+    _TRANSPORT_STORE_FACTORY = factory
 
 
 def _configure_windows_event_loop_policy() -> None:
@@ -105,8 +117,8 @@ def _resolve_gateway_transport_db_path() -> str:
     ).strip()
     if raw:
         return str(Path(raw).expanduser().resolve())
-    repo_root = Path(__file__).resolve().parents[2]
-    return str((repo_root / "host_brain" / "data" / "audit.sqlite3").resolve())
+    edge_root = Path(__file__).resolve().parents[1]
+    return str((edge_root / "data" / "gateway_transport.sqlite3").resolve())
 
 
 def _resolve_gateway_reply_hmac_secret() -> str | None:
@@ -641,7 +653,11 @@ def _start_wechat_bridge_process(instance: GatewayInstance) -> bool:
     return True
 
 
-def start_gateway(config: GatewayConfig) -> GatewayInstance:
+def start_gateway(
+    config: GatewayConfig,
+    *,
+    transport_store_factory: GatewayTransportStoreFactory | None = None,
+) -> GatewayInstance:
     """组装并启动 Unified Message Gateway。"""
 
     from edge_client.channels.input_reporter import EdgeInputReporter
@@ -1070,13 +1086,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     if transport_mode is GatewayTransportMode.DURABLE:
         if not str(gateway_host_hmac_secret or "").strip():
             raise RuntimeError("GW_HOST_INGRESS_SECRET_MISSING")
-        # TASK-0584 remove-by: composition currently imports the central Host
-        # implementation; do not copy this store into Edge.
-        from host_brain.persistence.gateway_transport_repository import (  # noqa: PLC0415
-            SQLiteGatewayTransportStore,
-        )
-
-        transport_store = SQLiteGatewayTransportStore(
+        resolved_store_factory = transport_store_factory or _TRANSPORT_STORE_FACTORY
+        if resolved_store_factory is None:
+            raise RuntimeError("GW_TRANSPORT_STORE_FACTORY_MISSING")
+        transport_store = resolved_store_factory(
             _resolve_gateway_transport_db_path(),
             verify_schema=True,
         )

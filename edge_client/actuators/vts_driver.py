@@ -18,7 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     AVATAR_FREE_ACTION_BLOCKED,
     AVATAR_TAG_INVALID,
     VTS_API_ERROR,
@@ -26,8 +26,8 @@ from host_brain.core.errors import (
     VTS_EXPRESSION_TIMEOUT,
     VTS_RECONNECTED,
     VTS_RECONNECT_EXHAUSTED,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 
 logger = logging.getLogger("Natsume.edge.vts")
 

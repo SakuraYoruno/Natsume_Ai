@@ -314,6 +314,16 @@ def get_ledger() -> SQLiteLedger:
     return _ledger
 
 
+def get_capability_execution_journal():
+    """Bind capability admission/receipts to the canonical durable ledger."""
+
+    from host_brain.capability_plane.journal import (  # noqa: PLC0415
+        SQLiteCapabilityExecutionJournal,
+    )
+
+    return SQLiteCapabilityExecutionJournal(get_ledger())
+
+
 def get_model_runtime_composition() -> "ModelRuntimeComposition":
     """Return the sole process model-runtime object graph.
 
@@ -622,6 +632,7 @@ def get_mcp_tool_broker() -> MCPToolBroker:
         _mcp_tool_broker = MCPToolBroker(
             registry=registry,
             ledger=ledger,
+            token_service=get_token_service(),
         )
     return _mcp_tool_broker
 

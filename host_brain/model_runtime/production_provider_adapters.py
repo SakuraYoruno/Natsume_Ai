@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import os
 from typing import Any, Callable, Iterable, Mapping
+from urllib.parse import urlparse
 
 from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
 from host_brain.model_runtime.provider_adapters import (
@@ -134,12 +136,52 @@ def build_production_provider_registry(
 
 
 def _default_credential_resolver(provider: str) -> str | None:
-    # Credential lookup stays behind this adapter boundary.  The compatibility
-    # vault resolver can be replaced without changing requests or route data.
-    from host_brain.integrations.llm_helpers import _load_api_key_from_env  # noqa: PLC0415, SLF001
+    """Resolve a secret behind the adapter without mutating process env."""
 
-    normalized = "openai" if str(provider).strip().lower() == "openai_compatible" else provider
-    return _load_api_key_from_env(normalized)
+    normalized = (
+        "openai"
+        if str(provider).strip().lower() == "openai_compatible"
+        else str(provider or "").strip().lower()
+    )
+    try:
+        from host_brain.app import config as host_config  # noqa: PLC0415
+        from host_brain.core.key_profiles import resolve_secret_from_profiles  # noqa: PLC0415
+
+        profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
+            env=os.environ,
+            key_profiles=None,
+            secret_store=None,
+            node_id=None,
+            current_epoch=None,
+        )
+        resolved = resolve_secret_from_profiles(
+            provider=normalized,
+            node_id=node_id,
+            scope=str(os.environ.get("HOST_LLM_KEY_PROFILE_SCOPE") or "host.llm").strip().lower()
+            or "host.llm",
+            key_profiles=profiles,
+            secret_store=secret_store,
+            current_epoch=current_epoch,
+        )
+        if resolved.success:
+            return str(resolved.secret_value or "").strip() or None
+    except Exception:
+        pass
+
+    env_name = {
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "minimax": "MINIMAX_API_KEY",
+    }.get(normalized)
+    value = str(os.environ.get(env_name or "") or "").strip() if env_name else ""
+    if value:
+        return value
+    if normalized == "openai":
+        parsed = urlparse(str(_default_base_url_resolver(normalized) or ""))
+        if (parsed.hostname or "").strip().lower() in {"localhost", "127.0.0.1", "::1"}:
+            return "host-local-placeholder-key"
+    return None
 
 
 def _default_base_url_resolver(provider: str) -> str | None:
