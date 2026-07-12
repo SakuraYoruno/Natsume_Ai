@@ -45,6 +45,7 @@ def create_host_fastapi_app(
     internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
+    canon_service_provider: Callable[[], Any | None] | None = None,
 ) -> FastAPI:
     wire_route_providers(
         get_ledger=get_ledger,
@@ -52,6 +53,7 @@ def create_host_fastapi_app(
         get_tool_catalog=get_tool_catalog,
         get_bond_engine=get_bond_engine,
         logger=logger,
+        canon_service_provider=canon_service_provider,
     )
     app = FastAPI(
         title="Natsume AI Host Brain",

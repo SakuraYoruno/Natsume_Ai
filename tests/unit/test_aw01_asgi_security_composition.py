@@ -107,6 +107,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     scheduler_container = SchedulerContainer()
 
+    class CanonApplication:
+        def sync_startup(self) -> None:
+            events.append("canon-synced")
+
+    canon_application = CanonApplication()
+    canon_container = SimpleNamespace(application=canon_application)
+
     class TaskRuntimeContainer:
         bound_runtime = None
         canonical_db_path = ledger.canonical_db_path
@@ -155,6 +162,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         }
         events.append("task-runtime-built")
         return task_runtime_container
+
+    def fake_build_canon(**kwargs):
+        assert kwargs["ledger"] is ledger
+        assert kwargs["canonical_db_path"] == ledger.canonical_db_path
+        events.append("canon-built")
+        return canon_container
 
     def fake_build_governed_runtime(**kwargs):
         assert kwargs["task_runtime_container"] is task_runtime_container
@@ -251,6 +264,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "build_process_task_runtime_container",
         fake_build_task_runtime,
     )
+    monkeypatch.setattr(asgi, "build_process_canon_container", fake_build_canon)
     monkeypatch.setattr(
         asgi,
         "build_governed_host_runtime",
@@ -308,6 +322,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.governed_internal_runtime is internal_runtime
             assert application.state.governed_scheduler_runtime is scheduler_runtime
             assert application.state.memory_service_container is memory_container
+            assert application.state.canon_container is canon_container
+            assert captured["canon_service_provider"]() is canon_application
             assert (
                 captured["governed_command_application_provider"]()
                 is governed_runtime
@@ -343,6 +359,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "base-started",
         "container-built",
         "task-runtime-built",
+        "canon-built",
+        "canon-synced",
         "command-ingress-built",
         "memory-built",
         "memory-published",

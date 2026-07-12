@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-01 已完成，AW-02/AW-03 进入并行实施
+当前代码基线：`codex/m48-integration`，AW-00～AW-03 已完成，AW-04 正式实施
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -104,10 +104,10 @@ flowchart TB
 | 非 `app` 模块反向导入 `host_brain.app` | 81 个模块 / 约 210 条边 | 最终为 0；每个结构波单调下降 |
 | `app/dependencies.py` 单例/全局状态 | 约 57 处；AW-01 security slice 已脱离 | 最终删除 service locator |
 | `ServiceCatalogStartupCoordinator` production 调用点 | 1（Mate HTTP/UDP 真实 listener） | 后续波次接管 Host/Edge 其余 listener |
-| Canonical assignment 是否决定真实 executor | 否；仍可落回 legacy executor | AW-02 后为唯一真实调度决定 |
+| Canonical assignment 是否决定真实 executor | 是；Chat/Input/Internal Agent/Scheduler 已共用 governed 主链 | 保持唯一真实调度决定 |
 | Edge 直接导入 `host_brain` 的文件 | 21 | AW-06 后为 0 |
-| Host 直接访问私有 `._conn` 的文件 | 22 | AW-03 后为 0（persistence adapter 内部除外） |
-| Host 含 inline `CREATE TABLE` 的 Python 文件 | 15 | AW-03 后 production runtime 为 0 |
+| Host 直接访问私有 `._conn` 的文件 | 0（audit/persistence adapter 内部除外） | 保持为 0 |
+| Host 含 inline `CREATE TABLE` 的 Python 文件 | 0（migration/audit/persistence 与外部 DSL 除外） | 保持 production runtime 为 0 |
 | Host 直接读取环境变量的 Python 文件 | 208；AW-01 新增点仅在 composition 快照边界 | 最终只允许 composition/settings 与批准的 process adapter |
 | `surface_main_chain_adapter.py` | 4468 行 | 混合职责归零；保留文件仅作薄 facade |
 | `agent_runtime_shared.py` | 3845 行 | 混合职责归零；主链迁出 |
@@ -201,7 +201,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-03：Durable Data、Event、Memory 与 Canon 脊柱
 
-状态：`IN_PROGRESS_PARALLEL_WITH_AW_02`
+状态：`DONE`（0066～0078 migration、Task/Event/Life/Memory/Canon 单写持久脊柱与生产切流完成；业务层 SQLite authority 清零；无 P0/P1）
 
 目标：统一 migration catalog、UoW、repository、journal/outbox/inbox、projection worker、Memory/Knowledge/Canon 写边界。
 
@@ -213,9 +213,13 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：空库/旧库 migration、crash recovery、outbox replay、projection rebuild、backup/restore 在一次波次集成中通过；production runtime inline DDL 和业务层私有连接为 0。
 
+完成事实：Task/Scheduler、Runtime Event、Life、Memory/Preference/Experience、Canon、Secure Ingress、VTS/MCP、Rate Limit、Graph Evidence、Bond、NVD、Response Feedback、Gateway/Supply Chain/Pentest 等真实生产读写已迁入 typed persistence repository；0066～0078 成为中央 migration catalog，0067/0071 由 checksum-bound runner transaction envelope 原子执行，0072 draft 只可经 0075 完整 schema postcondition 修复，且保留已落库 checksum。Runtime Event journal/outbox/inbox/projection、Task projection/lease/fencing、Canon command/apply、Life runtime 与 context memory 具备 replay/rebuild/crash recovery；启动 Canon 强制复用 canonical migration-first ledger，SQLite backup 以 read-only source 完成校验、离线恢复和 catalog digest 绑定。旧 task/review/gateway/supply/pentest/secure-ingress 实现已降为惰性兼容 facade，业务层私有连接、SQLite 执行和内联 DDL 由全仓静态 contract 锁定为 0。
+
+验收事实：AW-03 集成波首轮 278 passed、1 个陈旧静态 import 断言失败；断言按真实 production repository 边界修正后该唯一失败节点通过，未重复运行其余 278 个未变化用例。空库/旧库 migration、atomic failure rollback、0072/0075 repair、scheduler/runtime-event crash recovery、outbox replay、projection rebuild、backup/restore、Host production cutover、Memory/Canon/Life UoW 与全仓 persistence boundary 均已覆盖；编译、`git diff --check`、migration checksum 核验通过。
+
 ### AW-04：Digital Life 单内核
 
-状态：`WAITING_FOR_AW_02_AW_03`
+状态：`IN_PROGRESS`
 
 目标：把 LifeContinuity、LifeOrgans、Tribe、InnerWorld、DigitalLifeSupervisor、Proactive 与 Surface 中的状态推进收敛到一个 event/reducer coordinator 和一个 clock。
 
@@ -428,8 +432,8 @@ AW-08 只有在以下全部成立时才完成：
 | AW-00 | `DONE` | production security composition/routes、Bridge/Service Catalog 单 owner 与认证探针已切流；无 P0/P1 |
 | AW-01 | `DONE` | Host security 显式 container/lifecycle、composition 禁边、Mate 真实 socket-activation 已切流；无 P0/P1 |
 | AW-02 | `DONE` | chat/host input/Internal Agent/Scheduler 共用 governed Task/Agent 主链，canonical assignment 决定真实 executor |
-| AW-03 | `IN_PROGRESS` | 为 AW-02 冻结 UoW/Journal/Outbox 合同，切换首条无 inline DDL/private conn 的真实 slice |
-| AW-04 | `WAITING` | Digital Life 单 clock/writer、Surface 纯读 |
+| AW-03 | `DONE` | migration/UoW/journal/outbox、Memory/Canon 单写脊柱已切流；业务 SQLite authority 为 0；无 P0/P1 |
+| AW-04 | `IN_PROGRESS` | 建立唯一 LifeCoordinator/Clock/Outbox，删除读侧推进、多主动发送与平行 InnerWorld/Tribe writer |
 | AW-05 | `WAITING` | 单 Model/Capability/Governor 路径与首批 Domain Pack |
 | AW-06 | `WAITING` | AW-01 后可建 Edge foundation；AW-02/03/04 后完成 production cutover、设备单 authority |
 | AW-07 | `WAITING` | Query-only projection 与 typed Operator |
@@ -437,4 +441,4 @@ AW-08 只有在以下全部成立时才完成：
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-02/AW-03 的立即执行顺序：先从真实 `/v1/chat` 与 `/v1/host/input` 生产路径提取共用 command/task 合同，同时为该 slice 建立唯一 migration/UoW/journal/outbox 持久边界 → 让 canonical assignment 决定真实 executor → 切断 route 直连 repository/provider 与进程内 attempt 真相 → 删除已迁移的 legacy authority。两波文件、schema 和 route owner 分区并行，每波只在汇合后执行一次 integration wave，无需用户再次确认。
+AW-04 的立即执行顺序：先冻结 `LifeCommandService`、`LifeSnapshotReader`、`LifeOutbox` 三个生产接口并建立单事务 Life event/reducer/outbox coordinator；随后并行切断 `runtime_lifespan`/Tribe 第二时钟、Life/Scheduler 双 proactive transport、Surface/Input/GET 读侧推进与两个未监管 post-process task；最后删除 OfflineInnerWorld/Tribe JSON writer 和 runtime `DigitalLifeSupervisor` authority，只保留 validation harness。整个波只在三条生产切流汇合后执行一次 integration wave，无需用户再次确认。

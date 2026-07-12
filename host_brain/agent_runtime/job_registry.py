@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Literal
 
-from host_brain.agent_runtime.task_store import DurableTaskStore, TaskStoreError
+from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreError
 from host_brain.core.ids import new_request_id, now_ms
 
 

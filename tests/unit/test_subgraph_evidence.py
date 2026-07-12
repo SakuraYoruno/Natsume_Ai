@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import tempfile
 import time
 from typing import Any
 from unittest.mock import MagicMock, call
@@ -51,9 +50,7 @@ def _make_state(**kwargs: Any) -> GraphState:
 
 
 def _make_evidence_plane() -> EvidencePlane:
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    return EvidencePlane(db_path=tmp.name)
+    return EvidencePlane(db_path=":memory:")
 
 
 def _ok_handler(payload, ctx):

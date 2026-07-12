@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Callable
@@ -22,8 +21,10 @@ from host_brain.app.http_hooks_runtime_helpers import (
 # P3-2：导入拆分后的子模块
 from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
 from host_brain.app.http_hooks_outbound import global_exception_handler, startup_status_is_degraded
-from host_brain.app.http_hooks_middleware import (
-    parse_bool_env as _middleware_parse_bool_env,
+from host_brain.app.settings import (
+    get_core_settings,
+    get_persistence_settings,
+    get_scheduler_settings,
 )
 from host_brain.core.ids import new_request_id
 from host_brain.app.legacy_runtime_shutdown_adapter import (
@@ -52,9 +53,22 @@ def _startup_status_is_degraded(value: Any) -> bool:
     return startup_status_is_degraded(value)
 
 
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    # P3-2：委托给 http_hooks_middleware.parse_bool_env
-    return _middleware_parse_bool_env(name, default=default)
+def _build_world_canon_reader(*, ledger: Any) -> Any:
+    """Bind the startup Canon reader to the process canonical ledger."""
+
+    canonical_db_path = str(
+        getattr(ledger, "canonical_db_path", "")
+        or getattr(ledger, "db_path", "")
+    ).strip()
+    if not canonical_db_path:
+        raise RuntimeError("World Canon reader requires the canonical process ledger")
+    from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
+
+    return WorldCanonStore(
+        world_root=get_persistence_settings().world_canon_root,
+        ledger=ledger,
+        create_directories=False,
+    )
 
 
 def _init_edge_command_pusher_status(*, logger: Any) -> str:
@@ -80,22 +94,26 @@ def _sync_world_canon_index_on_startup(
     *,
     ledger: Any,
     logger: Any,
+    service: Any | None = None,
     world_root: str | None = None,
     ts_ms: int | None = None,
 ) -> str:
     resolved_world_root = str(
-        world_root or os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world"
+        world_root or get_persistence_settings().world_canon_root
     ).strip() or "host_brain/canon/world"
     sync_ts = int(ts_ms if ts_ms is not None else time.time() * 1000)
 
     try:
         from host_brain.memory.canon_sync import sync_world_canon_index  # noqa: PLC0415
 
-        records = sync_world_canon_index(
-            world_root=resolved_world_root,
-            ledger=ledger,
-            ts_ms=sync_ts,
-        )
+        if service is not None:
+            records = list(service.sync_startup(ts_ms=sync_ts).records)
+        else:
+            records = sync_world_canon_index(
+                world_root=resolved_world_root,
+                ledger=ledger,
+                ts_ms=sync_ts,
+            )
         changed_count = sum(1 for record in records if bool(getattr(record, "changed", False)))
         logger.info(
             "World canon startup sync completed",
@@ -119,6 +137,7 @@ def runtime_lifespan(
     *,
     get_ledger: Callable[[], Any],
     logger: Any,
+    canon_service_provider: Callable[[], Any | None] | None = None,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
@@ -137,17 +156,15 @@ def runtime_lifespan(
                 get_semantic_recaller,
             )
             new_module_statuses: dict[str, str] = {}
-            _startup_eager_warmup = _parse_bool_env(
-                "HOST_STARTUP_EAGER_WARMUP",
-                default=False,
-            )
+            core_settings = get_core_settings()
+            scheduler_settings = get_scheduler_settings()
+            _startup_eager_warmup = bool(core_settings.startup_eager_warmup)
             # Periodic execution is owned by the governed SchedulerClock,
             # which is composed only after Task Runtime activation in asgi.py.
             # This legacy lifespan may initialize producers, but it must never
             # start either historical scheduler implementation.
-            _background_tasks_enabled = _parse_bool_env(
-                "HOST_BACKGROUND_TASKS_ENABLED",
-                default=True,
+            _background_tasks_enabled = bool(
+                scheduler_settings.background_tasks_enabled
             )
             new_module_statuses["legacy_periodic_schedulers"] = (
                 "RETIRED: governed SchedulerClock owns periodic execution"
@@ -158,10 +175,24 @@ def runtime_lifespan(
             new_module_statuses["codex_immune_monitor"] = (
                 "RETIRED: governed scheduler immune definition"
             )
-            new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
-                ledger=ledger,
-                logger=logger,
-            )
+            if canon_service_provider is not None:
+                canon_service = canon_service_provider()
+                new_module_statuses["world_canon_sync"] = (
+                    _sync_world_canon_index_on_startup(
+                        ledger=ledger,
+                        logger=logger,
+                        service=canon_service,
+                    )
+                    if canon_service is not None
+                    else "DEFERRED: production Canon composition"
+                )
+            else:
+                new_module_statuses["world_canon_sync"] = (
+                    _sync_world_canon_index_on_startup(
+                        ledger=ledger,
+                        logger=logger,
+                    )
+                )
             for name, factory in [
                 ("memory_guard", get_memory_guard),
                 ("state_arbiter", get_state_arbiter),
@@ -233,9 +264,7 @@ def runtime_lifespan(
 
                 # 注册 WorldCanonStore（最高优先级 SSOT）
                 try:
-                    from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
-
-                    _world_store = WorldCanonStore()
+                    _world_store = _build_world_canon_reader(ledger=ledger)
 
                     _world_get_fact = lambda fact_key, _store=_world_store: read_world_canon_fact(
                         _store,
@@ -650,7 +679,7 @@ def runtime_lifespan(
             try:
                 if not _background_tasks_enabled:
                     new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                elif not _parse_bool_env("HOST_RESOURCE_MANAGER_ENABLED", default=False):
+                elif not core_settings.resource_manager_enabled:
                     new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_RESOURCE_MANAGER_ENABLED=false"
                 else:
                     from host_brain.app.dependencies import set_resource_manager  # noqa: PLC0415
@@ -658,10 +687,7 @@ def runtime_lifespan(
 
                     _resource_manager = SystemResourceManager()
                     _resource_manager.start(
-                        run_immediately=_parse_bool_env(
-                            "HOST_RESOURCE_MANAGER_RUN_ON_STARTUP",
-                            default=True,
-                        )
+                        run_immediately=core_settings.resource_manager_run_on_startup
                     )
                     set_resource_manager(_resource_manager)
                     _rm_status = _resource_manager.get_status()

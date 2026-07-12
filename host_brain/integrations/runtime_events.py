@@ -8,16 +8,25 @@ fail-closed redaction gate before anything becomes replayable.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
 import re
-import sqlite3
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from host_brain.core.ids import now_ms
+from host_brain.persistence.runtime_event_repository import (
+    RUNTIME_EVENT_DELIVERY_CLAIM_LOST,
+    RUNTIME_EVENT_DELIVERY_CONFLICT,
+    RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY,
+    RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256,
+    RUNTIME_EVENT_DELIVERY_NOT_FOUND,
+    RUNTIME_EVENT_DURABLE_DATA_INVALID,
+    RuntimeEventRepository,
+    RuntimeEventRepositoryError,
+    TASK_RUNTIME_PROJECTION,
+)
 
 
 RUNTIME_EVENT_SCHEMA_VERSION = "Natsume.runtime.event.v1"
@@ -27,7 +36,14 @@ RUNTIME_EVENT_INVALID = "RUNTIME_EVENT_INVALID"
 RUNTIME_EVENT_FORBIDDEN_FIELD = "RUNTIME_EVENT_FORBIDDEN_FIELD"
 RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED = "RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED"
 
-RUNTIME_EVENT_TABLES = frozenset({"runtime_event_timeline"})
+RUNTIME_EVENT_TABLES = frozenset(
+    {
+        "runtime_event_timeline",
+        "runtime_event_projection_outbox",
+        "runtime_event_projection_inbox",
+        "runtime_event_task_projection",
+    }
+)
 RUNTIME_EVENT_REQUIRED_COLUMNS = {
     "runtime_event_timeline": frozenset(
         {
@@ -385,7 +401,7 @@ class RuntimeEvent:
         )
 
 
-def _runtime_event_record(row: sqlite3.Row) -> dict[str, Any]:
+def _runtime_event_record(row: Mapping[str, Any]) -> dict[str, Any]:
     record = dict(row)
     payload = _loads_object(record.pop("payload_json"), field_name="runtime_event_timeline.payload_json")
     evidence_refs = _loads_list(
@@ -420,7 +436,7 @@ def _runtime_event_record(row: sqlite3.Row) -> dict[str, Any]:
 
 
 class RuntimeEventStore:
-    """SQLite-backed durable event timeline with monotonic cursor replay."""
+    """Validated Runtime Event facade over the sole SQLite repository owner."""
 
     def __init__(
         self,
@@ -429,6 +445,8 @@ class RuntimeEventStore:
         clock: Callable[[], int] = now_ms,
         timeout_ms: int = 5_000,
         verify_schema: bool = True,
+        fault_injector: Callable[[str], None] | None = None,
+        repository: RuntimeEventRepository | None = None,
     ) -> None:
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -436,71 +454,27 @@ class RuntimeEventStore:
                 RUNTIME_EVENT_INVALID,
                 "RuntimeEventStore requires a durable sqlite file path",
             )
-        self.db_path = Path(raw_path)
+        self.db_path = Path(raw_path).expanduser().resolve()
         self._clock = clock
-        self._timeout_ms = max(1, int(timeout_ms))
-        if verify_schema:
-            self.assert_schema_ready()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(
-            str(self.db_path),
-            timeout=self._timeout_ms / 1000.0,
-            isolation_level=None,
-        )
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
-        return conn
-
-    @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
         try:
-            conn.execute("BEGIN IMMEDIATE")
-            yield conn
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+            self._repository = repository or RuntimeEventRepository(
+                self.db_path,
+                clock=clock,
+                timeout_ms=timeout_ms,
+                verify_schema=verify_schema,
+                fault_injector=fault_injector,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
     def _now(self) -> int:
         return int(self._clock())
 
     def assert_schema_ready(self) -> None:
-        if not self.db_path.exists():
-            raise RuntimeEventError(
-                RUNTIME_EVENT_SCHEMA_NOT_READY,
-                f"runtime event database does not exist: {self.db_path}",
-            )
-        conn = self._connect()
         try:
-            rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-            present = {str(row[0]) for row in rows}
-            missing_tables = sorted(RUNTIME_EVENT_TABLES - present)
-            if missing_tables:
-                raise RuntimeEventError(
-                    RUNTIME_EVENT_SCHEMA_NOT_READY,
-                    f"runtime event migration 0056 is not applied; missing tables: {missing_tables}",
-                )
-            missing_columns: dict[str, list[str]] = {}
-            for table, required in RUNTIME_EVENT_REQUIRED_COLUMNS.items():
-                columns = {
-                    str(column[1])
-                    for column in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                }
-                missing = sorted(required - columns)
-                if missing:
-                    missing_columns[table] = missing
-            if missing_columns:
-                raise RuntimeEventError(
-                    RUNTIME_EVENT_SCHEMA_NOT_READY,
-                    f"runtime event schema is stale; missing columns: {missing_columns}",
-                )
-        finally:
-            conn.close()
+            self._repository.assert_schema_ready()
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
     def append_event(self, event: RuntimeEvent | Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(event, RuntimeEvent):
@@ -526,53 +500,31 @@ class RuntimeEventStore:
         payload_digest = f"sha256:{hashlib.sha256(payload_json.encode('utf-8')).hexdigest()}"
         ts_ms = int(item.ts_ms or self._now())
         created_ts_ms = self._now()
-        with self._transaction() as conn:
-            try:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO runtime_event_timeline(
-                        event_id, schema_version, event_type, source_kind,
-                        source_ref, aggregate_type, aggregate_id,
-                        aggregate_version, payload_ref, payload_json,
-                        payload_digest, evidence_refs_json, dedupe_key,
-                        redaction_level, ts_ms, created_ts_ms, published_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item.event_id,
-                        RUNTIME_EVENT_SCHEMA_VERSION,
-                        item.event_type,
-                        item.source_kind,
-                        item.source_ref,
-                        item.aggregate_type,
-                        item.aggregate_id,
-                        int(item.aggregate_version),
-                        item.payload_ref,
-                        payload_json,
-                        payload_digest,
-                        _dumps(list(item.evidence_refs)),
-                        item.dedupe_key,
-                        item.redaction_level,
-                        ts_ms,
-                        created_ts_ms,
-                        created_ts_ms,
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise RuntimeEventError(
-                    RUNTIME_EVENT_INVALID,
-                    f"runtime event identity conflict: {item.event_id}",
-                ) from exc
-            row = conn.execute(
-                "SELECT * FROM runtime_event_timeline WHERE dedupe_key = ?",
-                (item.dedupe_key,),
-            ).fetchone()
-            if row is None:
-                raise RuntimeEventError(
-                    RUNTIME_EVENT_INVALID,
-                    "runtime event insert failed without a retrievable dedupe row",
-                )
-            return _runtime_event_record(row)
+        try:
+            row = self._repository.append_journal(
+                {
+                    "event_id": item.event_id,
+                    "schema_version": RUNTIME_EVENT_SCHEMA_VERSION,
+                    "event_type": item.event_type,
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "aggregate_type": item.aggregate_type,
+                    "aggregate_id": item.aggregate_id,
+                    "aggregate_version": int(item.aggregate_version),
+                    "payload_ref": item.payload_ref,
+                    "payload_json": payload_json,
+                    "payload_digest": payload_digest,
+                    "evidence_refs_json": _dumps(list(item.evidence_refs)),
+                    "dedupe_key": item.dedupe_key,
+                    "redaction_level": item.redaction_level,
+                    "ts_ms": ts_ms,
+                    "created_ts_ms": created_ts_ms,
+                    "published_ts_ms": created_ts_ms,
+                }
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return _runtime_event_record(row)
 
     def list_events(
         self,
@@ -582,31 +534,16 @@ class RuntimeEventStore:
         event_type: str | None = None,
         source_kind: str | None = None,
     ) -> list[dict[str, Any]]:
-        after = max(0, int(after_cursor))
-        size = min(1000, max(1, int(limit)))
-        clauses = ["cursor > ?"]
-        params: list[Any] = [after]
-        if _text(event_type):
-            clauses.append("event_type = ?")
-            params.append(_text(event_type))
-        if _text(source_kind):
-            clauses.append("source_kind = ?")
-            params.append(_normalize_source_kind(source_kind))
-        params.append(size)
-        conn = self._connect()
         try:
-            rows = conn.execute(
-                f"""
-                SELECT * FROM runtime_event_timeline
-                WHERE {' AND '.join(clauses)}
-                ORDER BY cursor ASC
-                LIMIT ?
-                """,
-                tuple(params),
-            ).fetchall()
-            return [_runtime_event_record(row) for row in rows]
-        finally:
-            conn.close()
+            rows = self._repository.list_journal(
+                after_cursor=after_cursor,
+                limit=limit,
+                event_type=_text(event_type) or None,
+                source_kind=_normalize_source_kind(source_kind) if _text(source_kind) else None,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return [_runtime_event_record(row) for row in rows]
 
     def list_events_for_aggregates(
         self,
@@ -638,37 +575,127 @@ class RuntimeEventStore:
                 RUNTIME_EVENT_INVALID,
                 "aggregate replay allowlist exceeds 2000 identities",
             )
-        after = max(0, int(after_cursor))
-        size = min(1000, max(1, int(limit)))
-        conn = self._connect()
         try:
-            records: list[dict[str, Any]] = []
-            # Keep each statement below SQLite's conservative 999-variable
-            # limit while supporting large DAGs.  Taking ``size`` rows from
-            # every chunk is sufficient before the final global top-N merge.
-            for offset in range(0, len(normalized), 400):
-                chunk = normalized[offset : offset + 400]
-                identity_sql = " OR ".join(
-                    "(aggregate_type = ? AND aggregate_id = ?)" for _ in chunk
-                )
-                params: list[Any] = [after]
-                for kind, identifier in chunk:
-                    params.extend((kind, identifier))
-                params.append(size)
-                rows = conn.execute(
-                    f"""
-                    SELECT * FROM runtime_event_timeline
-                    WHERE cursor > ? AND ({identity_sql})
-                    ORDER BY cursor ASC
-                    LIMIT ?
-                    """,
-                    tuple(params),
-                ).fetchall()
-                records.extend(_runtime_event_record(row) for row in rows)
-            records.sort(key=lambda item: (int(item["cursor"]), str(item["event_id"])))
-            return records[:size]
-        finally:
-            conn.close()
+            records = self._repository.list_journal_for_aggregates(
+                aggregate_refs=normalized,
+                after_cursor=after_cursor,
+                limit=limit,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return [_runtime_event_record(row) for row in records]
+
+    # -- Task Runtime projection delivery -----------------------------------
+
+    def claim_projection_delivery(
+        self,
+        *,
+        worker_id: str,
+        lease_ms: int = 30_000,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._repository.claim_projection_delivery(
+                worker_id=worker_id,
+                lease_ms=lease_ms,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def complete_projection_delivery(
+        self,
+        *,
+        delivery_id: str,
+        worker_id: str,
+        claim_token: str,
+    ) -> dict[str, Any]:
+        try:
+            return self._repository.complete_projection_delivery(
+                delivery_id=delivery_id,
+                worker_id=worker_id,
+                claim_token=claim_token,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def release_projection_delivery(
+        self,
+        *,
+        delivery_id: str,
+        worker_id: str,
+        claim_token: str,
+        detail: str,
+        retry_delay_ms: int = 0,
+    ) -> dict[str, Any]:
+        try:
+            return self._repository.release_projection_delivery(
+                delivery_id=delivery_id,
+                worker_id=worker_id,
+                claim_token=claim_token,
+                detail=detail,
+                retry_delay_ms=retry_delay_ms,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def replay_projection_delivery(
+        self,
+        *,
+        delivery_id: str,
+        operator_ref: str,
+    ) -> dict[str, Any]:
+        try:
+            return self._repository.replay_projection_delivery(
+                delivery_id=delivery_id,
+                operator_ref=operator_ref,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def rebuild_task_projection(self, *, operator_ref: str) -> dict[str, Any]:
+        try:
+            return self._repository.rebuild_task_projection(operator_ref=operator_ref)
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def get_projection_delivery(self, *, delivery_id: str) -> dict[str, Any]:
+        try:
+            return self._repository.get_delivery(delivery_id=delivery_id)
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def get_task_projection(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            return self._repository.get_task_projection(
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def list_task_projections(
+        self,
+        *,
+        after_cursor: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        try:
+            return self._repository.list_task_projections(
+                after_cursor=after_cursor,
+                limit=limit,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
+    def projection_health(self) -> dict[str, Any]:
+        try:
+            return self._repository.projection_health()
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
     def append_task_outbox(self, outbox: Mapping[str, Any]) -> dict[str, Any]:
         row = dict(outbox)
@@ -802,7 +829,17 @@ class RuntimeOutboxPublisher:
 
     task_store: Any
     event_store: RuntimeEventStore
-    published: list[dict[str, Any]] = field(default_factory=list)
+    projection_worker: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.projection_worker is None:
+            # Local import keeps eventing dependent on a small store protocol,
+            # not on this integration facade.
+            from host_brain.eventing.runtime_event_projection import (  # noqa: PLC0415
+                RuntimeEventProjectionWorker,
+            )
+
+            self.projection_worker = RuntimeEventProjectionWorker(self.event_store)
 
     def publish_pending(self, *, limit: int = 100) -> dict[str, Any]:
         pending = list(self.task_store.list_pending_outbox(limit=limit))
@@ -829,16 +866,43 @@ class RuntimeOutboxPublisher:
                     "outbox_status_version": int(marked["status_version"]),
                 }
             )
-        self.published.extend(published)
+        projection: dict[str, Any]
+        try:
+            projection = dict(
+                self.projection_worker.drain(limit=max(1, int(limit)))
+            )
+        except Exception as exc:
+            # Journal publication is authoritative and already committed.  A
+            # projection fault remains in the leased durable outbox for crash
+            # recovery; it must not turn the command commit into a false fail.
+            if isinstance(exc, RuntimeEventError):
+                reason_code = exc.reason_code
+                detail = exc.detail
+            else:
+                reason_code = "RUNTIME_EVENT_PROJECTION_FAILED"
+                detail = f"{type(exc).__name__}: projection delivery remains durable"
+            projection = {
+                "status": "DEGRADED",
+                "reason_code": reason_code,
+                "detail": detail,
+                "processed_count": 0,
+            }
         return {
             "status": "OK",
             "pending_scanned": len(pending),
             "published_count": len(published),
             "published": published,
+            "projection": projection,
         }
 
 
 __all__ = [
+    "RUNTIME_EVENT_DELIVERY_CLAIM_LOST",
+    "RUNTIME_EVENT_DELIVERY_CONFLICT",
+    "RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY",
+    "RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256",
+    "RUNTIME_EVENT_DELIVERY_NOT_FOUND",
+    "RUNTIME_EVENT_DURABLE_DATA_INVALID",
     "RUNTIME_EVENT_FORBIDDEN_FIELD",
     "RUNTIME_EVENT_INVALID",
     "RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED",
@@ -850,6 +914,7 @@ __all__ = [
     "RuntimeEventError",
     "RuntimeEventStore",
     "RuntimeOutboxPublisher",
+    "TASK_RUNTIME_PROJECTION",
     "build_runtime_event_dedupe_key",
     "runtime_event_payload_digest",
     "sanitize_runtime_event_payload",

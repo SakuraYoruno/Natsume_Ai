@@ -42,7 +42,6 @@ from .semantic import (  # noqa: PLC0415 — explicit private imports from seman
     _semantic_source_memory_ids,
     _semantic_source_texts,
     _semantic_taxonomy_tags,
-    _sqlite_table_exists,
     _stale_collection_semantic_ids,
 )
 from .utils import (  # noqa: PLC0415 — explicit private imports from utils
@@ -61,19 +60,13 @@ class LifeMemoryConsolidator:
 
     def build_semantic_candidates(self, *, limit: int = 20, verified_only: bool = False) -> list[dict[str, Any]]:
         truth_states = (TRUTH_VERIFIED,) if verified_only else (TRUTH_VERIFIED, TRUTH_NARRATIVE_ONLY)
-        placeholders = ", ".join("?" for _ in truth_states)
-        rows = self.store.ledger._conn.execute(
-            f"""
-            SELECT *
-            FROM life_episode
-            WHERE truth_state IN ({placeholders})
-              AND status = ?
-              AND COALESCE(retention_state, ?) != ?
-            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
-            LIMIT ?
-            """,
-            (*truth_states, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, max(1, int(limit))),
-        ).fetchall()
+        rows = self.store.persistence.list_episode_records(
+            truth_states=truth_states,
+            statuses=(STATUS_ACTIVE,),
+            excluded_retention_states=(RETENTION_GONE,),
+            order="strength",
+            limit=max(1, int(limit)),
+        )
         candidates: list[dict[str, Any]] = []
         for row in rows:
             episode = dict(row)
@@ -109,47 +102,30 @@ class LifeMemoryConsolidator:
         requested_records = max(1, int(max_records))
         general_fetch_limit = min(max(requested_limit * 4, requested_records * 10, 120), 2000)
         priority_fetch_limit = min(max(requested_limit * 12, requested_records * 24, 240), 5000)
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_episode
-            WHERE truth_state = ?
-              AND status = ?
-              AND COALESCE(retention_state, ?) != ?
-            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
-            LIMIT ?
-            """,
-            (TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, general_fetch_limit),
-        ).fetchall()
+        rows = self.store.persistence.list_episode_records(
+            truth_states=(TRUTH_VERIFIED,),
+            statuses=(STATUS_ACTIVE,),
+            excluded_retention_states=(RETENTION_GONE,),
+            order="strength",
+            limit=general_fetch_limit,
+        )
         memory_class_like_patterns = [
             pattern
             for item in _SEMANTIC_PRIORITY_MEMORY_CLASSES
             for pattern in (f'%"memory_class": "{item}"%', f'%"memory_class":"{item}"%')
         ]
-        priority_rows = self.store.ledger._conn.execute(
-            f"""
-            SELECT *
-            FROM life_episode
-            WHERE truth_state = ?
-              AND status = ?
-              AND COALESCE(retention_state, ?) != ?
-              AND (
-                metadata LIKE '%"semantic_candidate": true%'
-                OR metadata LIKE '%"semantic_candidate":true%'
-                OR {" OR ".join("metadata LIKE ?" for _ in memory_class_like_patterns)}
-              )
-            ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
-            LIMIT ?
-            """,
-            (
-                TRUTH_VERIFIED,
-                STATUS_ACTIVE,
-                RETENTION_COLD,
-                RETENTION_GONE,
+        priority_rows = self.store.persistence.list_episode_records(
+            truth_states=(TRUTH_VERIFIED,),
+            statuses=(STATUS_ACTIVE,),
+            excluded_retention_states=(RETENTION_GONE,),
+            metadata_any_patterns=(
+                '%"semantic_candidate": true%',
+                '%"semantic_candidate":true%',
                 *memory_class_like_patterns,
-                priority_fetch_limit,
             ),
-        ).fetchall()
+            order="recent",
+            limit=priority_fetch_limit,
+        )
         proposals_by_key: dict[str, dict[str, Any]] = {}
         merged_rows: list[Any] = []
         seen_episode_ids: set[str] = set()
@@ -303,17 +279,12 @@ class LifeMemoryConsolidator:
     def semantic_growth_diagnostics(self, *, limit: int = 500) -> dict[str, Any]:
         """Explain why trusted episodes did or did not become semantic memories."""
 
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_episode
-            WHERE truth_state = ?
-              AND status = ?
-            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
-            LIMIT ?
-            """,
-            (TRUTH_VERIFIED, STATUS_ACTIVE, max(1, int(limit))),
-        ).fetchall()
+        rows = self.store.persistence.list_episode_records(
+            truth_states=(TRUTH_VERIFIED,),
+            statuses=(STATUS_ACTIVE,),
+            order="strength",
+            limit=max(1, int(limit)),
+        )
         class_counts: dict[str, int] = {}
         synthetic_counts: dict[str, int] = {}
         candidate_counts: dict[str, int] = {}
@@ -389,15 +360,10 @@ class LifeMemoryConsolidator:
 
         fetch_limit = max(1, int(limit))
         max_samples = max(1, int(sample_limit))
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_episode
-            ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
-            LIMIT ?
-            """,
-            (fetch_limit,),
-        ).fetchall()
+        rows = self.store.persistence.list_episode_records(
+            order="recent",
+            limit=fetch_limit,
+        )
 
         def increment(counter: dict[str, int], key: str) -> None:
             counter[key] = counter.get(key, 0) + 1
@@ -539,9 +505,7 @@ class LifeMemoryConsolidator:
                 "inactive_priority_sources_present: corrected, suppressed, cold, or policy-denied priority episodes exist and should remain audit-only unless new evidence verifies them."
             )
 
-        semantic_memory_count = self.store.ledger._conn.execute(
-            "SELECT COUNT(*) FROM semantic_memory WHERE deleted_at IS NULL"
-        ).fetchone()[0]
+        semantic_memory_count = self.store.persistence.count_active_semantic_memories()
         return {
             "status": "OK",
             "scanned_count": len(rows),
@@ -565,17 +529,9 @@ class LifeMemoryConsolidator:
         }
 
     def _build_collection_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_memory_collection
-            WHERE COALESCE(retention_state, ?) != ?
-              AND COALESCE(item_count, 0) > 0
-            ORDER BY memory_strength DESC, updated_ts_ms DESC
-            LIMIT ?
-            """,
-            (RETENTION_WARM, RETENTION_GONE, max(1, int(limit))),
-        ).fetchall()
+        rows = self.store.persistence.list_semantic_collection_records(
+            limit=max(1, int(limit))
+        )
         proposals: list[dict[str, Any]] = []
         for row in rows:
             collection = dict(row)
@@ -585,17 +541,9 @@ class LifeMemoryConsolidator:
         return proposals
 
     def _build_entity_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_memory_entity
-            WHERE COALESCE(retention_state, ?) != ?
-              AND COALESCE(mention_count, 0) > 0
-            ORDER BY memory_strength DESC, last_seen_ts_ms DESC
-            LIMIT ?
-            """,
-            (RETENTION_WARM, RETENTION_GONE, max(1, int(limit))),
-        ).fetchall()
+        rows = self.store.persistence.list_semantic_entity_records(
+            limit=max(1, int(limit))
+        )
         proposals: list[dict[str, Any]] = []
         for row in rows:
             entity = dict(row)
@@ -605,42 +553,9 @@ class LifeMemoryConsolidator:
         return proposals
 
     def _build_correction_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
-        if not _sqlite_table_exists(self.store.ledger._conn, "life_memory_correction"):
-            return []
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT
-                c.correction_id,
-                c.episode_id,
-                c.correction_episode_id,
-                c.correction_kind,
-                c.reason_code,
-                c.detail,
-                c.created_ts_ms,
-                c.metadata,
-                source_ep.summary AS source_summary,
-                source_ep.primary_ref AS source_primary_ref,
-                source_ep.person_id AS source_person_id,
-                source_ep.session_id AS source_session_id,
-                source_ep.truth_state AS source_truth_state,
-                source_ep.status AS source_status,
-                source_ep.metadata AS source_metadata,
-                corr_ep.summary AS correction_summary,
-                corr_ep.primary_ref AS correction_primary_ref,
-                corr_ep.person_id AS correction_person_id,
-                corr_ep.session_id AS correction_session_id,
-                corr_ep.truth_state AS correction_truth_state,
-                corr_ep.status AS correction_status,
-                corr_ep.retention_state AS correction_retention_state,
-                corr_ep.metadata AS correction_metadata
-            FROM life_memory_correction c
-            LEFT JOIN life_episode source_ep ON source_ep.episode_id = c.episode_id
-            LEFT JOIN life_episode corr_ep ON corr_ep.episode_id = c.correction_episode_id
-            ORDER BY c.created_ts_ms DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        ).fetchall()
+        rows = self.store.persistence.list_correction_semantic_rows(
+            limit=max(1, int(limit))
+        )
         proposals: list[dict[str, Any]] = []
         for row in rows:
             data = dict(row)
@@ -666,16 +581,9 @@ class LifeMemoryConsolidator:
         """Soft-delete semantic memories that were distilled from test/e2e sources."""
 
         current = int(ts_ms if ts_ms is not None else now_ts_ms())
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM semantic_memory
-            WHERE deleted_at IS NULL
-            ORDER BY ts_ms DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        ).fetchall()
+        rows = self.store.persistence.list_active_semantic_memory_rows(
+            limit=max(1, int(limit))
+        )
         memories = [self.store.ledger._row_to_semantic_memory(row) for row in rows]
         stale_collection_semantic_ids = _stale_collection_semantic_ids(self.store, memories)
         pruned: list[dict[str, Any]] = []
@@ -696,14 +604,11 @@ class LifeMemoryConsolidator:
             )
         if pruned and not dry_run:
             ids = [_clean_text(item.get("semantic_id")) for item in pruned if _clean_text(item.get("semantic_id"))]
-            placeholders = ", ".join("?" for _ in ids)
             if ids:
-                with self.store.ledger._write_lock:
-                    with self.store.ledger._conn:
-                        self.store.ledger._conn.execute(
-                            f"UPDATE semantic_memory SET deleted_at = ? WHERE semantic_id IN ({placeholders})",
-                            (current, *ids),
-                        )
+                self.store.persistence.soft_delete_semantic_memories(
+                    ids,
+                    deleted_at_ms=current,
+                )
         return {
             "status": "OK",
             "dry_run": bool(dry_run),
@@ -795,30 +700,15 @@ class LifeMemoryConsolidator:
                     or merged_confidence > _clamp_unit(existing.get("confidence"))
                 )
                 if changed:
-                    with self.store.ledger._write_lock:
-                        with self.store.ledger._conn:
-                            self.store.ledger._conn.execute(
-                                """
-                                UPDATE semantic_memory
-                                SET summary = ?,
-                                    source_memory_ids = ?,
-                                    confidence = ?,
-                                    tags = ?,
-                                    ts_ms = ?,
-                                    operator_node_id = ?
-                                WHERE semantic_id = ?
-                                  AND deleted_at IS NULL
-                                """,
-                                (
-                                    _clean_text(merged_summary, limit=900),
-                                    _json_dumps(merged_source_ids) or "[]",
-                                    merged_confidence,
-                                    _json_dumps(merged_tags) or "[]",
-                                    created,
-                                    _clean_text(operator_node_id) or "life_memory_consolidator",
-                                    existing.get("semantic_id"),
-                                ),
-                            )
+                    self.store.persistence.update_semantic_memory(
+                        semantic_id=str(existing.get("semantic_id") or ""),
+                        summary=_clean_text(merged_summary, limit=900),
+                        source_memory_ids_json=_json_dumps(merged_source_ids) or "[]",
+                        confidence=merged_confidence,
+                        tags_json=_json_dumps(merged_tags) or "[]",
+                        ts_ms=created,
+                        operator_node_id=_clean_text(operator_node_id) or "life_memory_consolidator",
+                    )
                     persisted = self.store.ledger.get_semantic_memory_by_source_hash(source_hash) or existing
                     written.append(
                         {
@@ -888,10 +778,7 @@ class LifeMemoryConsolidator:
         if not source_episode_ids:
             return None
         episode_id = source_episode_ids[0]
-        row = self.store.ledger._conn.execute(
-            "SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1",
-            (episode_id,),
-        ).fetchone()
+        row = self.store.persistence.get_episode(episode_id)
         episode = dict(row) if row is not None else {}
         status = _clean_text(proposal.get("open_loop_status")).upper() or _open_loop_status_from_tags(tags)
         summary = _clean_text(proposal.get("summary"), limit=900)
@@ -921,5 +808,3 @@ class LifeMemoryConsolidator:
             "status": status,
             "episode_id": episode_id,
         }
-
-

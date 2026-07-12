@@ -3,12 +3,14 @@
 import hashlib
 import json
 import re
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS
+from host_brain.persistence.response_feedback_repository import (
+    ResponseFeedbackRepository,
+)
 
 
 _NEGATIVE_TOKEN_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -145,21 +147,11 @@ def find_latest_persona_reply_target(
 
     resolved_person_id = str(person_id or "").strip()
     current_ledger = _get_ledger(ledger)
-    conn = getattr(current_ledger, "_conn", None)
-    if conn is None:
+    repository = ResponseFeedbackRepository.from_ledger(current_ledger)
+    if repository is None:
         return None
 
-    rows = conn.execute(
-        """
-        SELECT request_id, session_id, event_type, stage, payload, ts_ms
-        FROM voice_event_log
-        WHERE session_id = ?
-          AND event_type = 'INPUT_COMPLETED'
-        ORDER BY ts_ms DESC
-        LIMIT 64
-        """,
-        (resolved_session_id,),
-    ).fetchall()
+    rows = repository.latest_persona_reply_rows(session_id=resolved_session_id)
     for raw_row in list(rows or []):
         row = dict(raw_row)
         payload = _coerce_payload_dict(row.get("payload"))
@@ -189,41 +181,26 @@ def insert_response_feedback_record(
     ledger: Any | None = None,
 ) -> None:
     current_ledger = _get_ledger(ledger)
-    conn = getattr(current_ledger, "_conn", None)
-    write_lock = getattr(current_ledger, "_write_lock", None)
-    if conn is None or write_lock is None:
+    repository = ResponseFeedbackRepository.from_ledger(current_ledger)
+    if repository is None:
         return
-    payload = (
-        record.target_request_id,
-        record.session_id,
-        record.person_id,
-        record.thread_id,
-        record.target_text_hash,
-        float(record.feedback_score),
-        json.dumps(list(record.feedback_tags or []), ensure_ascii=False),
-        record.feedback_source,
-        int(record.created_at_ms or time.time() * 1000),
-        1 if record.active else 0,
+    repository.insert(
+        {
+            "target_request_id": record.target_request_id,
+            "session_id": record.session_id,
+            "person_id": record.person_id,
+            "thread_id": record.thread_id,
+            "target_text_hash": record.target_text_hash,
+            "feedback_score": float(record.feedback_score),
+            "feedback_tags": json.dumps(
+                list(record.feedback_tags or []),
+                ensure_ascii=False,
+            ),
+            "feedback_source": record.feedback_source,
+            "created_at_ms": int(record.created_at_ms or time.time() * 1000),
+            "active": record.active,
+        }
     )
-    with write_lock:
-        conn.execute(
-            """
-            INSERT INTO response_feedback_log (
-                target_request_id,
-                session_id,
-                person_id,
-                thread_id,
-                target_text_hash,
-                feedback_score,
-                feedback_tags,
-                feedback_source,
-                created_at_ms,
-                active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            payload,
-        )
-        conn.commit()
 
 
 def record_feedback_for_latest_persona_reply(
@@ -283,49 +260,17 @@ def _fetch_feedback_rows(
         return []
 
     current_ledger = _get_ledger(ledger)
-    conn = getattr(current_ledger, "_conn", None)
-    if conn is None:
+    repository = ResponseFeedbackRepository.from_ledger(current_ledger)
+    if repository is None:
         return []
-
-    where_parts = ["active = 1"]
-    params: list[Any] = []
-
     resolved_session_id = str(session_id or "").strip()
-    if resolved_session_id:
-        where_parts.append("session_id = ?")
-        params.append(resolved_session_id)
-
     resolved_person_id = str(person_id or "").strip()
-    if resolved_person_id:
-        where_parts.append("person_id = ?")
-        params.append(resolved_person_id)
-
-    candidate_parts: list[str] = []
-    if cleaned_request_ids:
-        candidate_parts.append(
-            "target_request_id IN (" + ",".join("?" for _ in cleaned_request_ids) + ")"
-        )
-        params.extend(cleaned_request_ids)
-    if cleaned_hashes:
-        candidate_parts.append(
-            "target_text_hash IN (" + ",".join("?" for _ in cleaned_hashes) + ")"
-        )
-        params.extend(cleaned_hashes)
-    where_parts.append("(" + " OR ".join(candidate_parts) + ")")
-
-    rows = conn.execute(
-        """
-        SELECT target_request_id, session_id, person_id, thread_id, target_text_hash,
-               feedback_score, feedback_tags, feedback_source, created_at_ms, active
-        FROM response_feedback_log
-        WHERE """
-        + " AND ".join(where_parts)
-        + """
-        ORDER BY created_at_ms DESC
-        """,
-        params,
-    ).fetchall()
-    return [dict(row) for row in list(rows or [])]
+    return repository.fetch(
+        session_id=resolved_session_id,
+        person_id=resolved_person_id,
+        request_ids=cleaned_request_ids,
+        text_hashes=cleaned_hashes,
+    )
 
 
 def _merge_feedback_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -722,4 +667,3 @@ def filter_badcase_text_lines(
         "recent_reply_feedback_score": recent_score,
         "recent_reply_feedback_tags": list(recent_summary.get("feedback_tags") or []) if recent_summary else [],
     }
-

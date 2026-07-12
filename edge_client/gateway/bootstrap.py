@@ -1072,7 +1072,9 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             raise RuntimeError("GW_HOST_INGRESS_SECRET_MISSING")
         # TASK-0584 remove-by: composition currently imports the central Host
         # implementation; do not copy this store into Edge.
-        from host_brain.eventing.gateway_transport import SQLiteGatewayTransportStore  # noqa: PLC0415
+        from host_brain.persistence.gateway_transport_repository import (  # noqa: PLC0415
+            SQLiteGatewayTransportStore,
+        )
 
         transport_store = SQLiteGatewayTransportStore(
             _resolve_gateway_transport_db_path(),

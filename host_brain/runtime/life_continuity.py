@@ -1,21 +1,17 @@
 ﻿from __future__ import annotations
 
 import asyncio
-import contextlib
 import copy
 import json
 import logging
 import os
 import re
-import sqlite3
-import threading
 import time
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.runtime.life_organs import (
-    ORGAN_SCHEMA_SQL,
     append_life_experience,
     close_pending_proactive_episode_for_user_reply,
     get_recent_life_experience,
@@ -25,6 +21,7 @@ from host_brain.runtime.life_organs import (
     organ_votes_from_runtime,
     synthesize_life_state_from_organs,
 )
+from host_brain.persistence.life_runtime_repository import LifeRuntimeRepository
 from host_brain.runtime.autonomous_self import (
     apply_autonomous_self_cycle,
     apply_proactive_outcome,
@@ -34,9 +31,6 @@ from host_brain.runtime.autonomous_self import (
 
 LOGGER = logging.getLogger("Natsume.life_continuity")
 DEFAULT_PERSON_ID = "default"
-_SCHEMA_READY = False
-_SCHEMA_READY_CONNECTIONS: set[int] = set()
-_LOCK = threading.RLock()
 _LIFE_LOOP_TASK: asyncio.Task[Any] | None = None
 _LIFE_LOOP_STOP: asyncio.Event | None = None
 _LAST_TICK_RESULT: dict[str, Any] = {}
@@ -44,24 +38,9 @@ LIFE_STATE_OCC_CONFLICT = "LIFE_STATE_OCC_CONFLICT"
 LIFE_STATE_SINGLE_WRITER_FALLBACK = "LIFE_STATE_SINGLE_WRITER_FALLBACK"
 LIFE_STATE_COMMAND_INVALID = "LIFE_STATE_COMMAND_INVALID"
 
-SCHEMA_SQL: tuple[str, ...] = (
-    "CREATE TABLE IF NOT EXISTS digital_life_state (person_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 1, state_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS digital_life_state_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, event_type TEXT NOT NULL, delta_json TEXT NOT NULL DEFAULT '{}', state_before_json TEXT NOT NULL DEFAULT '{}', state_after_json TEXT NOT NULL DEFAULT '{}', visible_channels_json TEXT NOT NULL DEFAULT '[]', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS digital_life_state_occ_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, expected_version INTEGER, actual_version INTEGER, attempted_version INTEGER, status TEXT NOT NULL CHECK(status IN ('APPLIED','CONFLICT','FALLBACK_APPLIED')), reason_code TEXT NOT NULL, command_ref TEXT, source_kind TEXT NOT NULL DEFAULT 'life_state_command', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS dialogue_life_influence_log (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, request_id TEXT, person_id TEXT NOT NULL, session_id TEXT, user_message TEXT NOT NULL DEFAULT '', reply_text TEXT NOT NULL DEFAULT '', life_director_json TEXT NOT NULL DEFAULT '{}', life_causality_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS embodiment_dispatch_log (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, target_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'UNKNOWN', reason_code TEXT, result_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS work_environment_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, session_id TEXT, request_id TEXT, event_type TEXT NOT NULL, work_id TEXT, summary TEXT NOT NULL DEFAULT '', urgency TEXT NOT NULL DEFAULT 'medium', emotional_effect_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1)",
-    "CREATE TABLE IF NOT EXISTS proactive_life_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, outbox_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, motive TEXT NOT NULL DEFAULT '', pressure REAL NOT NULL DEFAULT 0.0, target_json TEXT NOT NULL DEFAULT '{}', message_json TEXT NOT NULL DEFAULT '{}', gate_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'UNKNOWN', reason_code TEXT, result_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    *ORGAN_SCHEMA_SQL,
-    "CREATE INDEX IF NOT EXISTS idx_digital_life_state_person_version ON digital_life_state(person_id, version)",
-    "CREATE INDEX IF NOT EXISTS idx_digital_life_state_event_person_ts ON digital_life_state_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_digital_life_state_occ_person_ts ON digital_life_state_occ_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_dialogue_life_influence_request ON dialogue_life_influence_log(request_id)",
-    "CREATE INDEX IF NOT EXISTS idx_dialogue_life_influence_person_ts ON dialogue_life_influence_log(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_embodiment_dispatch_person_ts ON embodiment_dispatch_log(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_work_environment_person_ts ON work_environment_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_proactive_life_outbox_person_ts ON proactive_life_outbox(person_id, created_at_ms DESC)",
-)
+# Compatibility export only. Runtime DDL is forbidden; migrations 0049/0057/0071
+# are the sole schema authority.
+SCHEMA_SQL: tuple[str, ...] = ()
 
 
 def _now_ms() -> int:
@@ -74,17 +53,6 @@ def _event_id(prefix: str) -> str:
 
 def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
-
-
-def _loads(value: Any, default: Any) -> Any:
-    if value is None or value == "":
-        return copy.deepcopy(default)
-    if isinstance(value, (dict, list)):
-        return copy.deepcopy(value)
-    try:
-        return json.loads(str(value))
-    except Exception:
-        return copy.deepcopy(default)
 
 
 def _map(value: Any) -> dict[str, Any]:
@@ -125,37 +93,12 @@ def _int_env(name: str, default: int, minimum: int = 0, maximum: int = 86400) ->
     return max(minimum, min(maximum, value))
 
 
-def _conn(ledger: Any) -> Any:
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
-        raise RuntimeError("ledger sqlite connection unavailable")
-    return conn
+def _repository(ledger: Any) -> LifeRuntimeRepository:
+    return LifeRuntimeRepository.from_ledger(ledger)
 
 
 def ensure_life_schema(ledger: Any) -> None:
-    global _SCHEMA_READY
-    conn = _conn(ledger)
-    conn_id = id(conn)
-    if conn_id in _SCHEMA_READY_CONNECTIONS and _life_schema_tables_exist(conn):
-        return
-    with _LOCK:
-        if conn_id in _SCHEMA_READY_CONNECTIONS and _life_schema_tables_exist(conn):
-            return
-        for sql in SCHEMA_SQL:
-            conn.execute(sql)
-        conn.commit()
-        _SCHEMA_READY_CONNECTIONS.add(conn_id)
-        _SCHEMA_READY = True
-
-
-def _life_schema_tables_exist(conn: Any) -> bool:
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='digital_life_state' LIMIT 1"
-        ).fetchone()
-    except Exception:
-        return False
-    return bool(row)
+    _repository(ledger).assert_schema_ready()
 
 
 def _day_phase(ts_ms: int) -> str:
@@ -215,54 +158,6 @@ class LifeStateOCCConflict(RuntimeError):
         super().__init__(f"{self.reason_code}: person_id={self.result.get('person_id')} expected={self.result.get('expected_version')} actual={self.result.get('actual_version')}")
 
 
-def _write_guard(ledger: Any) -> contextlib.AbstractContextManager[Any]:
-    lock = getattr(ledger, "_write_lock", None)
-    if lock is None:
-        return contextlib.nullcontext()
-    return lock
-
-
-def _life_state_version(conn: Any, person_id: str) -> int | None:
-    row = conn.execute("SELECT version FROM digital_life_state WHERE person_id=?", (person_id,)).fetchone()
-    if not row:
-        return None
-    try:
-        return int(row[0])
-    except Exception:
-        return None
-
-
-def _append_life_state_occ_event(
-    conn: Any,
-    *,
-    person_id: str,
-    expected_version: int | None,
-    actual_version: int | None,
-    attempted_version: int | None,
-    status: str,
-    reason_code: str,
-    command_ref: str = "",
-    source_kind: str = "life_state_command",
-) -> str:
-    event_id = _event_id("lifeocc")
-    conn.execute(
-        "INSERT INTO digital_life_state_occ_event(event_id, person_id, expected_version, actual_version, attempted_version, status, reason_code, command_ref, source_kind, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            event_id,
-            str(person_id or DEFAULT_PERSON_ID),
-            expected_version,
-            actual_version,
-            attempted_version,
-            status,
-            reason_code,
-            str(command_ref or ""),
-            str(source_kind or "life_state_command"),
-            _now_ms(),
-        ),
-    )
-    return event_id
-
-
 def _save_state(
     ledger: Any,
     state: Mapping[str, Any],
@@ -280,164 +175,19 @@ def _save_state(
     """
 
     ensure_life_schema(ledger)
-    payload = dict(state or {})
-    person_id = str(payload.get("person_id") or DEFAULT_PERSON_ID)
-    attempted_version = int(payload.get("version") or 1)
-    payload["person_id"] = person_id
-    payload["version"] = attempted_version
-    conn = _conn(ledger)
-    with _write_guard(ledger):
-        actual_before = _life_state_version(conn, person_id)
-        now = _now_ms()
-        if expected_version is None:
-            if not allow_single_writer_fallback:
-                raise ValueError("expected_version is required when single-writer fallback is disabled")
-            if actual_before is None:
-                try:
-                    conn.execute(
-                        "INSERT INTO digital_life_state(person_id, version, state_json, updated_at_ms) VALUES(?, ?, ?, ?)",
-                        (person_id, attempted_version, _dumps(payload), now),
-                    )
-                except sqlite3.IntegrityError:
-                    actual_before = _life_state_version(conn, person_id)
-                    conn.execute(
-                        "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=?",
-                        (attempted_version, _dumps(payload), now, person_id),
-                    )
-            else:
-                conn.execute(
-                    "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=?",
-                    (attempted_version, _dumps(payload), now, person_id),
-                )
-            occ_event_id = _append_life_state_occ_event(
-                conn,
-                person_id=person_id,
-                expected_version=None,
-                actual_version=actual_before,
-                attempted_version=attempted_version,
-                status="FALLBACK_APPLIED",
-                reason_code=LIFE_STATE_SINGLE_WRITER_FALLBACK,
-                command_ref=command_ref,
-                source_kind=source_kind,
-            )
-            conn.commit()
-            return {
-                "status": "FALLBACK_APPLIED",
-                "reason_code": LIFE_STATE_SINGLE_WRITER_FALLBACK,
-                "person_id": person_id,
-                "expected_version": None,
-                "actual_version": actual_before,
-                "attempted_version": attempted_version,
-                "state_version_after": attempted_version,
-                "occ_event_id": occ_event_id,
-            }
-
-        expected = int(expected_version)
-        if actual_before is None:
-            if expected != 0:
-                occ_event_id = _append_life_state_occ_event(
-                    conn,
-                    person_id=person_id,
-                    expected_version=expected,
-                    actual_version=None,
-                    attempted_version=attempted_version,
-                    status="CONFLICT",
-                    reason_code=LIFE_STATE_OCC_CONFLICT,
-                    command_ref=command_ref,
-                    source_kind=source_kind,
-                )
-                conn.commit()
-                result = {
-                    "status": "CONFLICT",
-                    "reason_code": LIFE_STATE_OCC_CONFLICT,
-                    "person_id": person_id,
-                    "expected_version": expected,
-                    "actual_version": None,
-                    "attempted_version": attempted_version,
-                    "occ_event_id": occ_event_id,
-                }
-                raise LifeStateOCCConflict(result)
-            try:
-                conn.execute(
-                    "INSERT INTO digital_life_state(person_id, version, state_json, updated_at_ms) VALUES(?, ?, ?, ?)",
-                    (person_id, attempted_version, _dumps(payload), now),
-                )
-            except sqlite3.IntegrityError:
-                actual = _life_state_version(conn, person_id)
-                occ_event_id = _append_life_state_occ_event(
-                    conn,
-                    person_id=person_id,
-                    expected_version=expected,
-                    actual_version=actual,
-                    attempted_version=attempted_version,
-                    status="CONFLICT",
-                    reason_code=LIFE_STATE_OCC_CONFLICT,
-                    command_ref=command_ref,
-                    source_kind=source_kind,
-                )
-                conn.commit()
-                result = {
-                    "status": "CONFLICT",
-                    "reason_code": LIFE_STATE_OCC_CONFLICT,
-                    "person_id": person_id,
-                    "expected_version": expected,
-                    "actual_version": actual,
-                    "attempted_version": attempted_version,
-                    "occ_event_id": occ_event_id,
-                }
-                raise LifeStateOCCConflict(result)
-        else:
-            cur = conn.execute(
-                "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=? AND version=?",
-                (attempted_version, _dumps(payload), now, person_id, expected),
-            )
-            if int(getattr(cur, "rowcount", 0) or 0) != 1:
-                actual = _life_state_version(conn, person_id)
-                occ_event_id = _append_life_state_occ_event(
-                    conn,
-                    person_id=person_id,
-                    expected_version=expected,
-                    actual_version=actual,
-                    attempted_version=attempted_version,
-                    status="CONFLICT",
-                    reason_code=LIFE_STATE_OCC_CONFLICT,
-                    command_ref=command_ref,
-                    source_kind=source_kind,
-                )
-                conn.commit()
-                result = {
-                    "status": "CONFLICT",
-                    "reason_code": LIFE_STATE_OCC_CONFLICT,
-                    "person_id": person_id,
-                    "expected_version": expected,
-                    "actual_version": actual,
-                    "attempted_version": attempted_version,
-                    "occ_event_id": occ_event_id,
-                }
-                raise LifeStateOCCConflict(result)
-
-        occ_event_id = _append_life_state_occ_event(
-            conn,
-            person_id=person_id,
-            expected_version=expected,
-            actual_version=actual_before,
-            attempted_version=attempted_version,
-            status="APPLIED",
-            reason_code="",
-            command_ref=command_ref,
-            source_kind=source_kind,
-        )
-        conn.commit()
-        return {
-            "status": "APPLIED",
-            "reason_code": "",
-            "person_id": person_id,
-            "expected_version": expected,
-            "actual_version": actual_before,
-            "attempted_version": attempted_version,
-            "state_version_after": attempted_version,
-            "occ_event_id": occ_event_id,
-        }
+    result = _repository(ledger).save_state(
+        state,
+        expected_version=expected_version,
+        command_ref=str(command_ref or ""),
+        source_kind=str(source_kind or "life_continuity"),
+        allow_single_writer_fallback=allow_single_writer_fallback,
+        now_ms=_now_ms(),
+        conflict_reason=LIFE_STATE_OCC_CONFLICT,
+        fallback_reason=LIFE_STATE_SINGLE_WRITER_FALLBACK,
+    )
+    if result.get("status") == "CONFLICT":
+        raise LifeStateOCCConflict(result)
+    return result
 
 
 def _record_life_state_occ_conflict(
@@ -451,29 +201,16 @@ def _record_life_state_occ_conflict(
     source_kind: str = "life_state_command",
 ) -> dict[str, Any]:
     ensure_life_schema(ledger)
-    conn = _conn(ledger)
-    with _write_guard(ledger):
-        occ_event_id = _append_life_state_occ_event(
-            conn,
-            person_id=person_id,
-            expected_version=int(expected_version),
-            actual_version=actual_version,
-            attempted_version=int(attempted_version),
-            status="CONFLICT",
-            reason_code=LIFE_STATE_OCC_CONFLICT,
-            command_ref=command_ref,
-            source_kind=source_kind,
-        )
-        conn.commit()
-    return {
-        "status": "CONFLICT",
-        "reason_code": LIFE_STATE_OCC_CONFLICT,
-        "person_id": person_id,
-        "expected_version": int(expected_version),
-        "actual_version": actual_version,
-        "attempted_version": int(attempted_version),
-        "occ_event_id": occ_event_id,
-    }
+    return _repository(ledger).record_state_conflict(
+        person_id=person_id,
+        expected_version=int(expected_version),
+        actual_version=actual_version,
+        attempted_version=int(attempted_version),
+        command_ref=command_ref,
+        source_kind=source_kind,
+        reason_code=LIFE_STATE_OCC_CONFLICT,
+        now_ms=_now_ms(),
+    )
 
 
 def _deep_merge_dict(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
@@ -590,32 +327,34 @@ def apply_life_state_command(*, ledger: Any, **kwargs: Any) -> dict[str, Any]:
 
 def _append_state_event(ledger: Any, person_id: str, source_kind: str, event_type: str, before: Mapping[str, Any], after: Mapping[str, Any], delta: Mapping[str, Any], visible: Sequence[str]) -> str:
     event_id = _event_id("lifeevt")
-    _conn(ledger).execute(
-        "INSERT INTO digital_life_state_event(event_id, person_id, source_kind, event_type, delta_json, state_before_json, state_after_json, visible_channels_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (event_id, person_id, source_kind, event_type, _dumps(dict(delta or {})), _dumps(dict(before or {})), _dumps(dict(after or {})), _dumps(list(visible or [])), _now_ms()),
+    _repository(ledger).append_state_event(
+        event_id=event_id,
+        person_id=person_id,
+        source_kind=source_kind,
+        event_type=event_type,
+        delta=dict(delta or {}),
+        state_before=dict(before or {}),
+        state_after=dict(after or {}),
+        visible_channels=list(visible or []),
+        created_at_ms=_now_ms(),
     )
-    _conn(ledger).commit()
     return event_id
 
 
 def get_life_state(ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
     ensure_life_schema(ledger)
     resolved = str(person_id or DEFAULT_PERSON_ID)
-    row = _conn(ledger).execute("SELECT state_json FROM digital_life_state WHERE person_id=?", (resolved,)).fetchone()
-    if row:
-        state = _loads(row[0], {})
-        if isinstance(state, dict) and state:
-            return _normalize_state(state, resolved)
+    state = _repository(ledger).get_state(resolved)
+    if isinstance(state, dict) and state:
+        return _normalize_state(state, resolved)
     state = _default_state(resolved)
     try:
         _save_state(ledger, state, expected_version=0, command_ref="state_initialized", source_kind="init", allow_single_writer_fallback=False)
         _append_state_event(ledger, resolved, "init", "state_initialized", {}, state, {"created": True}, ["status_panel"])
     except LifeStateOCCConflict:
-        row = _conn(ledger).execute("SELECT state_json FROM digital_life_state WHERE person_id=?", (resolved,)).fetchone()
-        if row:
-            existing = _loads(row[0], {})
-            if isinstance(existing, dict) and existing:
-                return _normalize_state(existing, resolved)
+        existing = _repository(ledger).get_state(resolved)
+        if isinstance(existing, dict) and existing:
+            return _normalize_state(existing, resolved)
         raise
     return copy.deepcopy(state)
 
@@ -1368,11 +1107,22 @@ async def _compose_life_proactive_content(*, director_pack: Mapping[str, Any], s
 
 def _append_proactive_outbox(*, ledger: Any, person_id: str, source_kind: str, motive: str, pressure: float, target: Mapping[str, Any], message: Mapping[str, Any], gate: Mapping[str, Any], status: str, reason_code: str = "", result: Mapping[str, Any] | None = None, now_ms: int | None = None) -> str:
     outbox_id = _event_id("lifepro")
-    _conn(ledger).execute(
-        "INSERT INTO proactive_life_outbox(outbox_id, person_id, source_kind, motive, pressure, target_json, message_json, gate_json, status, reason_code, result_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (outbox_id, person_id, source_kind, motive, float(pressure), _dumps(dict(target or {})), _dumps(dict(message or {})), _dumps(dict(gate or {})), status, reason_code or "", _dumps(dict(result or {})), int(now_ms or _now_ms())),
+    _repository(ledger).append_proactive_outbox(
+        {
+            "outbox_id": outbox_id,
+            "person_id": person_id,
+            "source_kind": source_kind,
+            "motive": motive,
+            "pressure": float(pressure),
+            "target": dict(target or {}),
+            "message": dict(message or {}),
+            "gate": dict(gate or {}),
+            "status": status,
+            "reason_code": reason_code or "",
+            "result": dict(result or {}),
+            "created_at_ms": int(now_ms or _now_ms()),
+        }
     )
-    _conn(ledger).commit()
     return outbox_id
 
 
@@ -1880,18 +1630,17 @@ def get_life_runtime_health(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) 
         item = _map(value)
         if _float(item.get("activation")) >= 0.985 and _float(item.get("pressure")) >= 0.985:
             organ_saturation_count += 1
-    rows = _conn(ledger).execute(
-        "SELECT event_kind, content_summary, evidence_json, created_at_ms FROM life_experience_event WHERE person_id=? AND source_kind='inner_world' ORDER BY created_at_ms DESC LIMIT 20",
-        (str(person_id or DEFAULT_PERSON_ID),),
-    ).fetchall()
+    rows = _repository(ledger).list_inner_experiences(
+        str(person_id or DEFAULT_PERSON_ID), limit=20
+    )
     last_monologue_ms = 0
     signatures: list[str] = []
     for row in rows:
-        if str(row[0] or "") == "inner_stream_tick" and not last_monologue_ms:
-            last_monologue_ms = int(row[3] or 0)
-        if str(row[0] or "") == "inner_numeric_tick":
-            evidence = _loads(row[2], {})
-            signatures.append(str(_map(evidence).get("signature") or row[1] or ""))
+        if str(row["event_kind"] or "") == "inner_stream_tick" and not last_monologue_ms:
+            last_monologue_ms = int(row["created_at_ms"] or 0)
+        if str(row["event_kind"] or "") == "inner_numeric_tick":
+            evidence = _map(row.get("evidence"))
+            signatures.append(str(evidence.get("signature") or row["content_summary"] or ""))
     duplicate_inner_numeric_streak = 0
     if signatures:
         first = signatures[0]
@@ -2016,7 +1765,20 @@ async def record_work_environment_event(*, ledger: Any, event_type: str, person_
         memory_event_id = str(memory_event.get("event_id") or "")
     except Exception:
         memory_event_id = ""
-    _conn(ledger).execute("INSERT INTO work_environment_event(event_id, person_id, session_id, request_id, event_type, work_id, summary, urgency, emotional_effect_json, created_at_ms, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)", (workenv_id, resolved, session_id, request_id, event_type, resolved_work_id, _text(summary, 320), urgency, _dumps(effect), now)); _conn(ledger).commit()
+    _repository(ledger).append_work_event(
+        {
+            "event_id": workenv_id,
+            "person_id": resolved,
+            "session_id": session_id,
+            "request_id": request_id,
+            "event_type": event_type,
+            "work_id": resolved_work_id,
+            "summary": _text(summary, 320),
+            "urgency": urgency,
+            "emotional_effect": effect,
+            "created_at_ms": now,
+        }
+    )
     if memory_event_id:
         try:
             from host_brain.app.memory_event_store import MemoryEventStore  # noqa: PLC0415
@@ -2109,7 +1871,19 @@ async def record_dialogue_aftereffect(*, ledger: Any, person_id: str = DEFAULT_P
     director["life_action"] = action
     visible = list(director.get("visible_obligation") or ["status_panel", "dialogue"]); causality = {"state_version_before": int(before.get("version") or 1), "state_version_after": int(after.get("version") or 1), "applied_sources": _dialogue_sources(director, text), "changed_fields": _changed(before, after), "dialogue_effect": str(director.get("dialogue_influence") or "weak"), "embodiment_effect": str(_map(director.get("organ_life_influence")).get("embodiment_effect") or "weak"), "life_visibility": "ok" if visible else "failed", "visible_channels": visible, "life_action": action, "proactive_episode_binding": proactive_episode, "source_experience_event_id": source_experience_event_id, "dialogue_closure": dialogue_closure, "private_leak_blocked": True}
     _append_state_event(ledger, resolved, "dialogue_aftereffect", "foreground_turn", before, after, causality, visible)
-    _conn(ledger).execute("INSERT INTO dialogue_life_influence_log(event_id, request_id, person_id, session_id, user_message, reply_text, life_director_json, life_causality_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", (_event_id("lifedlg"), request_id, resolved, session_id, _text(text, 1000), _text(reply_text, 1000), _dumps(director), _dumps(causality), now)); _conn(ledger).commit()
+    _repository(ledger).append_dialogue_event(
+        {
+            "event_id": _event_id("lifedlg"),
+            "request_id": request_id,
+            "person_id": resolved,
+            "session_id": session_id,
+            "user_message": _text(text, 1000),
+            "reply_text": _text(reply_text, 1000),
+            "life_director": director,
+            "life_causality": causality,
+            "created_at_ms": now,
+        }
+    )
     if _bool_env("HOST_LIFE_DIALOGUE_AFTEREFFECT_EMBODIMENT_ENABLED", True):
         causality["embodiment_dispatch"] = await dispatch_life_embodiment(ledger=ledger, person_id=resolved, director_pack=director, source_kind="dialogue_aftereffect", force=False)
     return causality
@@ -2143,7 +1917,19 @@ async def dispatch_life_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERS
             if status == "APPLIED": status = "DEGRADED"; reason = "MATEENGINE_DISPATCH_FAILED"
             result["mateengine"] = {"status": "DEGRADED", "detail": str(exc)[:240]}
     after = copy.deepcopy(state); emb = _map(after.get("embodiment")); emb.update(target); emb.update({"last_dispatch_ms": now, "last_dispatch_id": req_id}); after["embodiment"] = emb; after["version"] = int(after.get("version") or 1) + 1; _save_state(ledger, after, expected_version=int(state.get("version") or 1), command_ref=req_id, source_kind="embodiment_dispatch", allow_single_writer_fallback=False)
-    dispatch_id = _event_id("lifebody"); _conn(ledger).execute("INSERT INTO embodiment_dispatch_log(dispatch_id, person_id, source_kind, target_json, status, reason_code, result_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (dispatch_id, person_id, source_kind, _dumps(target), status, reason, _dumps(result), now)); _conn(ledger).commit()
+    dispatch_id = _event_id("lifebody")
+    _repository(ledger).append_embodiment_dispatch(
+        {
+            "dispatch_id": dispatch_id,
+            "person_id": person_id,
+            "source_kind": source_kind,
+            "target": target,
+            "status": status,
+            "reason_code": reason,
+            "result": result,
+            "created_at_ms": now,
+        }
+    )
     try:
         experience = append_life_experience(
             ledger=ledger,
@@ -2169,9 +1955,8 @@ async def dispatch_life_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERS
 
 
 def get_current_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
-    state = get_life_state(ledger, person_id); row = _conn(ledger).execute("SELECT target_json, status, reason_code, result_json, created_at_ms FROM embodiment_dispatch_log WHERE person_id=? ORDER BY created_at_ms DESC LIMIT 1", (person_id,)).fetchone(); latest = {}
-    if row:
-        latest = {"target": _loads(row[0], {}), "status": row[1], "reason_code": row[2], "result": _loads(row[3], {}), "created_at_ms": row[4]}
+    state = get_life_state(ledger, person_id)
+    latest = _repository(ledger).latest_embodiment_dispatch(person_id) or {}
     return {"person_id": person_id, "embodiment": _map(state.get("embodiment")), "latest_dispatch": latest}
 
 
@@ -2220,17 +2005,17 @@ def record_life_experience(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, s
 
 def get_recent_proactive_outbox(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, limit: int = 20) -> dict[str, Any]:
     ensure_life_schema(ledger); person_id = str(person_id or DEFAULT_PERSON_ID); limit = max(1, min(int(limit or 20), 100))
-    rows = _conn(ledger).execute("SELECT outbox_id, source_kind, motive, pressure, target_json, message_json, gate_json, status, reason_code, result_json, created_at_ms FROM proactive_life_outbox WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?", (person_id, limit)).fetchall()
-    items = [{"outbox_id": r[0], "source_kind": r[1], "motive": r[2], "pressure": float(r[3] or 0.0), "target": _loads(r[4], {}), "message": _loads(r[5], {}), "gate": _loads(r[6], {}), "status": r[7], "reason_code": r[8], "result": _loads(r[9], {}), "created_at_ms": r[10]} for r in rows]
+    items = _repository(ledger).list_proactive_outbox(person_id, limit=limit)
     return {"person_id": person_id, "items": items}
 
 
 def get_recent_causality(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, limit: int = 20) -> dict[str, Any]:
     ensure_life_schema(ledger); person_id = str(person_id or DEFAULT_PERSON_ID); limit = max(1, min(int(limit or 20), 100))
-    events = [{"event_id": r[0], "source_kind": r[1], "event_type": r[2], "delta": _loads(r[3], {}), "visible_channels": _loads(r[4], []), "created_at_ms": r[5]} for r in _conn(ledger).execute("SELECT event_id, source_kind, event_type, delta_json, visible_channels_json, created_at_ms FROM digital_life_state_event WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?", (person_id, limit)).fetchall()]
-    dialogs = [{"event_id": r[0], "request_id": r[1], "life_director": _loads(r[2], {}), "life_causality": _loads(r[3], {}), "created_at_ms": r[4]} for r in _conn(ledger).execute("SELECT event_id, request_id, life_director_json, life_causality_json, created_at_ms FROM dialogue_life_influence_log WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?", (person_id, limit)).fetchall()]
-    dispatches = [{"dispatch_id": r[0], "source_kind": r[1], "target": _loads(r[2], {}), "status": r[3], "reason_code": r[4], "created_at_ms": r[5]} for r in _conn(ledger).execute("SELECT dispatch_id, source_kind, target_json, status, reason_code, created_at_ms FROM embodiment_dispatch_log WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?", (person_id, limit)).fetchall()]
-    works = [{"event_id": r[0], "event_type": r[1], "work_id": r[2], "summary": r[3], "urgency": r[4], "emotional_effect": _loads(r[5], {}), "created_at_ms": r[6]} for r in _conn(ledger).execute("SELECT event_id, event_type, work_id, summary, urgency, emotional_effect_json, created_at_ms FROM work_environment_event WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?", (person_id, limit)).fetchall()]
+    causality = _repository(ledger).list_causality(person_id, limit=limit)
+    events = causality["state_events"]
+    dialogs = causality["dialogue_influence"]
+    dispatches = causality["embodiment_dispatches"]
+    works = causality["work_events"]
     proactive = list(get_recent_proactive_outbox(ledger=ledger, person_id=person_id, limit=limit).get("items") or [])
     organ_state = get_organ_runtime_state(ledger=ledger, person_id=person_id)
     experience = list(get_recent_life_experience(ledger=ledger, person_id=person_id, limit=limit).get("items") or [])
@@ -2263,11 +2048,10 @@ def recalibrate_inner_life_state(*, ledger: Any, person_id: str = DEFAULT_PERSON
     after["inner_world"] = inner
     after["version"] = int(after.get("version") or 1) + 1
     _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref="inner_life_recalibration", source_kind="inner_life_recalibration", allow_single_writer_fallback=False)
-    conn = _conn(ledger)
     adjusted = 0
-    for row in conn.execute("SELECT organ_id, state_json FROM organ_runtime_state WHERE person_id=?", (resolved,)).fetchall():
-        organ_id = str(row[0] or "")
-        state = _loads(row[1], {})
+    adjusted_states: dict[str, dict[str, Any]] = {}
+    for organ_id, stored_state in _repository(ledger).get_organ_states(resolved).items():
+        state = dict(stored_state)
         if not isinstance(state, dict):
             continue
         changed = False
@@ -2278,9 +2062,15 @@ def recalibrate_inner_life_state(*, ledger: Any, person_id: str = DEFAULT_PERSON
                 changed = True
         if changed:
             state["updated_at_ms"] = now
-            conn.execute("UPDATE organ_runtime_state SET state_json=?, updated_at_ms=? WHERE person_id=? AND organ_id=?", (_dumps(state), now, resolved, organ_id))
+            adjusted_states[organ_id] = state
             adjusted += 1
-    conn.commit()
+    if adjusted_states:
+        _repository(ledger).update_organ_states(
+            person_id=resolved,
+            states=adjusted_states,
+            created_at_ms=now,
+            command_ref="inner_life_recalibration",
+        )
     event = append_life_experience(ledger=ledger, person_id=resolved, session_id="inner_life_recalibration", source_kind="system", event_kind="inner_life_recalibrated", content_summary="inner life state recalibrated", evidence={"cleared_stale_preoccupation": not bool(anchor), "adjusted_organs": adjusted}, salience=0.12, valence=0.0, uncertainty=0.02, now_ms=now, consume=False)
     return {"status": "OK", "person_id": resolved, "adjusted_organs": adjusted, "event_id": event.get("event_id"), "state_version": int(after.get("version") or 1)}
 

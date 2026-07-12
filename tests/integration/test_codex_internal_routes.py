@@ -10,6 +10,7 @@ import pytest
 from host_brain.app.internal_agent_routes import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.app.settings.internal_agent import get_internal_agent_settings
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
 from host_brain.memory.life_memory import LifeMemoryStore
@@ -17,7 +18,13 @@ from host_brain.memory.life_memory import LifeMemoryStore
 
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_STORE_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0055_agent_runtime_review_store.sql"
-RUNTIME_EVENT_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0056_runtime_events.sql"
+
+
+def _migrate_runtime_event_db(db_path: Path) -> None:
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id=f"codex-runtime-event-fixture::{db_path.name}",
+    )
+    assert result.success, result.as_dict()
 
 
 @pytest.fixture(autouse=True)
@@ -219,8 +226,7 @@ def _runtime_route_event(index: int) -> RuntimeEvent:
 
 def test_codex_internal_runtime_events_route_replays_cursor(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "runtime-event-routes.sqlite3"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    _migrate_runtime_event_db(db_path)
     store = RuntimeEventStore(db_path)
     first = store.append_event(_runtime_route_event(1))
     second = store.append_event(_runtime_route_event(2))
@@ -241,8 +247,7 @@ def test_codex_internal_runtime_events_route_replays_cursor(tmp_path, monkeypatc
 
 def test_codex_internal_runtime_events_sse_replays_after_last_event_id(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "runtime-event-sse-routes.sqlite3"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    _migrate_runtime_event_db(db_path)
     store = RuntimeEventStore(db_path)
     first = store.append_event(_runtime_route_event(1))
     second = store.append_event(_runtime_route_event(2))
@@ -266,8 +271,7 @@ def test_codex_internal_runtime_events_sse_replays_after_last_event_id(tmp_path,
 
 def test_codex_internal_runtime_events_route_respects_replay_flag(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "runtime-event-disabled-routes.sqlite3"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    _migrate_runtime_event_db(db_path)
     monkeypatch.setenv("HOST_RUNTIME_EVENT_DB_PATH", str(db_path))
     monkeypatch.delenv("HOST_RUNTIME_EVENT_REPLAY_ENABLED", raising=False)
     get_core_settings.cache_clear()

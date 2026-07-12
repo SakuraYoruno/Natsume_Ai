@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from host_brain.audit.migration_compat import evaluate_catalog_compatibility
+from host_brain.audit.migration_compat import (
+    evaluate_catalog_compatibility,
+    transaction_policy_issues,
+)
 from host_brain.core.errors import MIGRATION_ASSET_MISSING, MIGRATION_SCHEMA_DRIFT
 from host_brain.core.ids import now_ms
 
@@ -194,6 +197,7 @@ class SQLiteMigrationVersionGuard:
         physical_assets = self._discover_physical_assets()
         assets, duplicate_versions = self.discover_assets()
         compatibility = evaluate_catalog_compatibility(physical_assets)
+        transaction_issues = transaction_policy_issues(physical_assets)
         unexpected_duplicates = sorted(
             set(duplicate_versions).difference(
                 compatibility.accepted_duplicate_versions
@@ -201,8 +205,8 @@ class SQLiteMigrationVersionGuard:
         )
 
         # 只有 checksum-bound 的历史 0009 alias 可被接受。
-        if compatibility.issues or unexpected_duplicates:
-            details = list(compatibility.issues)
+        if compatibility.issues or unexpected_duplicates or transaction_issues:
+            details = [*compatibility.issues, *transaction_issues]
             if unexpected_duplicates:
                 details.append(
                     f"duplicate migration version(s) detected: {unexpected_duplicates}"

@@ -41,6 +41,22 @@ class CoreSettings(BaseSettings):
     log_level: LogLevel = Field(default="INFO", alias="HOST_APP_LOG_LEVEL")
     host_app_host: str = Field(default="127.0.0.1", alias="HOST_APP_HOST")
     host_app_port: int = Field(default=18080, ge=1, le=65535, alias="HOST_APP_PORT")
+    uvicorn_access_log_enabled: bool = Field(
+        default=False,
+        alias="HOST_UVICORN_ACCESS_LOG_ENABLED",
+    )
+    startup_eager_warmup: bool = Field(
+        default=False,
+        alias="HOST_STARTUP_EAGER_WARMUP",
+    )
+    resource_manager_enabled: bool = Field(
+        default=False,
+        alias="HOST_RESOURCE_MANAGER_ENABLED",
+    )
+    resource_manager_run_on_startup: bool = Field(
+        default=True,
+        alias="HOST_RESOURCE_MANAGER_RUN_ON_STARTUP",
+    )
 
     # OPT-4 第三批：运行时特性开关 / 调度参数（原散落在各 app 模块里）
     prefrontal_plan_enabled: bool = Field(

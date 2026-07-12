@@ -5,6 +5,9 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.persistence.context_repository import ContextRepository
+from host_brain.persistence.experience_repository import ExperienceRepository
+
 
 def _text(value: Any, *, limit: int = 1000) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
@@ -14,45 +17,19 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, Mapping) else {}
 
 
-def _conn(ledger: Any) -> Any:
-    return getattr(ledger, "_conn", None)
-
-
-def _already_in_life_stream(*, ledger: Any, request_id: str, role: str) -> bool:
-    conn = _conn(ledger)
-    if conn is None or not request_id:
-        return False
+def _already_in_life_stream(
+    *,
+    repository: ExperienceRepository,
+    request_id: str,
+    role: str,
+) -> bool:
     try:
-        row = conn.execute(
-            """
-SELECT 1
-FROM life_experience_event
-WHERE source_kind LIKE 'conversation_turn.%'
-  AND json_extract(evidence_json, '$.request_id') = ?
-  AND json_extract(evidence_json, '$.role') = ?
-LIMIT 1
-""",
-            (request_id, role),
-        ).fetchone()
-        return bool(row)
+        return repository.has_conversation_turn_life_event(
+            request_id=request_id,
+            role=role,
+        )
     except Exception:
-        needle_req = f'"request_id":"{request_id}"'
-        needle_role = f'"role":"{role}"'
-        try:
-            row = conn.execute(
-                """
-SELECT 1
-FROM life_experience_event
-WHERE source_kind LIKE 'conversation_turn.%'
-  AND REPLACE(evidence_json, ' ', '') LIKE ?
-  AND REPLACE(evidence_json, ' ', '') LIKE ?
-LIMIT 1
-""",
-                (f"%{needle_req}%", f"%{needle_role}%"),
-            ).fetchone()
-            return bool(row)
-        except Exception:
-            return False
+        return False
 
 
 def _turn_source_kind(role: str, metadata: Mapping[str, Any]) -> tuple[str, str]:
@@ -115,7 +92,12 @@ def record_conversation_turn_memory_spine(
 
         ledger = get_ledger()
         ensure_life_schema(ledger)
-        if _already_in_life_stream(ledger=ledger, request_id=str(request_id or ""), role=clean_role):
+        experience_repository = ExperienceRepository.from_ledger(ledger)
+        if _already_in_life_stream(
+            repository=experience_repository,
+            request_id=str(request_id or ""),
+            role=clean_role,
+        ):
             return {"status": "SKIPPED", "reason_code": "DUPLICATE_CONVERSATION_TURN"}
         source_kind, event_kind = _turn_source_kind(clean_role, meta)
         salience, valence, uncertainty = _signal_weights(role=clean_role, source_kind=source_kind, content=clean_content, metadata=meta)
@@ -171,34 +153,26 @@ def backfill_conversation_turn_memory_spine(
 
         ledger = get_ledger()
         ensure_life_schema(ledger)
-        conn = _conn(ledger)
-        if conn is None:
-            return {"status": "DEGRADED", "reason_code": "LEDGER_CONNECTION_MISSING"}
+        turn_repository = ContextRepository.from_ledger(ledger)
+        experience_repository = ExperienceRepository.from_ledger(ledger)
         clean_person = _text(person_id or "", limit=120)
         clean_session = _text(session_id, limit=180)
         capped = max(1, min(int(limit or 500), 5000))
-        where = ["role IN ('user', 'assistant')", "COALESCE(content, '') != ''"]
-        params: list[Any] = []
-        if clean_person:
-            where.append("(person_id = ? OR COALESCE(person_id, '') = '')")
-            params.append(clean_person)
-        if clean_session:
-            where.append("session_id = ?")
-            params.append(clean_session)
-        elif not include_asr_sessions:
-            where.append("session_id NOT LIKE 'asr_req_%'")
-            where.append("session_id NOT LIKE 'codex_%'")
-            where.append("session_id NOT LIKE '__codex_%'")
-        rows = conn.execute(
-            f"""
-SELECT turn_id, session_id, person_id, request_id, role, content, ts_ms, lang, metadata, turn_index
-FROM conversation_turn
-WHERE {' AND '.join(where)}
-ORDER BY ts_ms ASC
-LIMIT ?
-""",
-            (*params, capped),
-        ).fetchall()
+        rows = turn_repository.list_memory_spine_turns(
+            person_id=clean_person or None,
+            session_id=clean_session,
+            limit=capped,
+            include_asr_sessions=bool(include_asr_sessions),
+        )
+        existing_keys = experience_repository.existing_conversation_turn_life_keys(
+            tuple(
+                (
+                    str(row.get("request_id") or "").strip(),
+                    str(row.get("role") or "").strip().lower(),
+                )
+                for row in rows
+            )
+        )
         scanned = 0
         eligible = 0
         written = 0
@@ -207,9 +181,9 @@ LIMIT ?
         samples: list[dict[str, Any]] = []
         for row in rows:
             scanned += 1
-            role = str(row["role"] or "").strip().lower()
-            request_id = str(row["request_id"] or "").strip()
-            if _already_in_life_stream(ledger=ledger, request_id=request_id, role=role):
+            role = str(row.get("role") or "").strip().lower()
+            request_id = str(row.get("request_id") or "").strip()
+            if (request_id, role) in existing_keys:
                 skipped_existing += 1
                 continue
             eligible += 1
@@ -217,30 +191,30 @@ LIMIT ?
                 samples.append(
                     {
                         "request_id": request_id,
-                        "session_id": str(row["session_id"] or ""),
+                        "session_id": str(row.get("session_id") or ""),
                         "role": role,
-                        "content": _text(row["content"], limit=80),
+                        "content": _text(row.get("content"), limit=80),
                     }
                 )
             if dry_run:
                 continue
             metadata = {}
             try:
-                loaded = json.loads(str(row["metadata"] or "{}"))
+                loaded = json.loads(str(row.get("metadata") or "{}"))
                 metadata = dict(loaded or {}) if isinstance(loaded, Mapping) else {}
             except Exception:
                 metadata = {}
             result = record_conversation_turn_memory_spine(
                 request_id=request_id,
-                session_id=str(row["session_id"] or ""),
-                person_id=str(row["person_id"] or clean_person or "default"),
+                session_id=str(row.get("session_id") or ""),
+                person_id=str(row.get("person_id") or clean_person or "default"),
                 role=role,
-                content=str(row["content"] or ""),
-                ts_ms=int(row["ts_ms"] or 0),
-                lang=str(row["lang"] or "zh"),
+                content=str(row.get("content") or ""),
+                ts_ms=int(row.get("ts_ms") or 0),
+                lang=str(row.get("lang") or "zh"),
                 metadata=metadata,
-                turn_id=str(row["turn_id"] or ""),
-                turn_index=int(row["turn_index"] or 0),
+                turn_id=str(row.get("turn_id") or ""),
+                turn_index=int(row.get("turn_index") or 0),
             )
             if str(result.get("status") or "") == "OK":
                 written += 1
@@ -273,45 +247,16 @@ def count_conversation_turn_memory_spine_gaps(*, person_id: str | None = "defaul
 
         ledger = get_ledger()
         ensure_life_schema(ledger)
-        conn = _conn(ledger)
-        if conn is None:
-            return 0
+        repository = ExperienceRepository.from_ledger(ledger)
         clean_person = _text(person_id or "", limit=120)
         clean_session = _text(session_id, limit=180)
         capped = max(1, min(int(limit or 2000), 10000))
-        where = ["t.role IN ('user', 'assistant')", "COALESCE(t.content, '') != ''"]
-        params: list[Any] = []
-        if clean_person:
-            where.append("(t.person_id = ? OR COALESCE(t.person_id, '') = '')")
-            params.append(clean_person)
-        if clean_session:
-            where.append("t.session_id = ?")
-            params.append(clean_session)
-        elif not include_asr_sessions:
-            where.append("t.session_id NOT LIKE 'asr_req_%'")
-            where.append("t.session_id NOT LIKE 'codex_%'")
-            where.append("t.session_id NOT LIKE '__codex_%'")
-        row = conn.execute(
-            f"""
-SELECT COUNT(*)
-FROM (
-  SELECT t.request_id, t.role
-  FROM conversation_turn t
-  WHERE {' AND '.join(where)}
-  ORDER BY t.ts_ms DESC
-  LIMIT ?
-) t
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM life_experience_event e
-  WHERE e.source_kind LIKE 'conversation_turn.%'
-    AND json_extract(e.evidence_json, '$.request_id') = t.request_id
-    AND json_extract(e.evidence_json, '$.role') = t.role
-)
-""",
-            (*params, capped),
-        ).fetchone()
-        return int(row[0] or 0)
+        return repository.count_conversation_turn_memory_spine_gaps(
+            person_id=clean_person or None,
+            session_id=clean_session,
+            limit=capped,
+            include_asr_sessions=bool(include_asr_sessions),
+        )
     except Exception:
         return 0
 

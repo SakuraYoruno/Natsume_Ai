@@ -8,21 +8,19 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.integrations.graph_evidence import EvidencePlane
 
 
 def _make_evidence_plane() -> EvidencePlane:
-    """创建使用临时文件的 EvidencePlane 实例（测试专用）。"""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    return EvidencePlane(db_path=tmp.name)
+    """Use the adapter-owned in-memory schema asset for unit tests."""
+    return EvidencePlane(db_path=":memory:")
 
 
 def _make_trace(n: int = 3) -> list[dict[str, Any]]:
@@ -116,11 +114,13 @@ def test_evp_04_write_failure_silent_degradation(monkeypatch: pytest.MonkeyPatch
     """T-EVP-04：写入失败时静默降级（不抛出异常）"""
     ep = _make_evidence_plane()
 
-    # 模拟 _connect 抛出异常，触发写入失败
-    def _bad_connect(self):
+    def _bad_write(**_kwargs):
         raise RuntimeError("模拟数据库连接失败")
 
-    monkeypatch.setattr(EvidencePlane, "_connect", _bad_connect)
+    assert ep._repository is not None
+    monkeypatch.setattr(ep._repository, "append_traces", _bad_write)
+    monkeypatch.setattr(ep._repository, "append_subgraph_summary", _bad_write)
+    monkeypatch.setattr(ep._repository, "append_clock_events", _bad_write)
 
     # 不应抛出异常（静默降级）
     ep.write_trace(request_id="req-fail", graph_id="g", trace=_make_trace(1))
@@ -136,6 +136,11 @@ def test_evp_04_write_failure_silent_degradation(monkeypatch: pytest.MonkeyPatch
 def test_evp_05_db_path_from_env_var(tmp_path: Path):
     """T-EVP-05：数据库路径可通过 EVIDENCE_DB_PATH 环境变量覆盖"""
     custom_db = str(tmp_path / "custom_evidence.db")
+    migrated = SQLiteMigrationRunner(db_path=custom_db).apply_migrations(
+        request_id="evidence-env-test",
+        ts_ms=1_900_000_000_000,
+    )
+    assert migrated.success is True, migrated.as_dict()
     os.environ["EVIDENCE_DB_PATH"] = custom_db
     try:
         ep = EvidencePlane()  # 不传 db_path，从环境变量读取

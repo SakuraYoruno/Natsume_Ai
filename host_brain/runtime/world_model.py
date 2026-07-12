@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import inspect
-import json
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from host_brain.runtime.environment_state import build_environment_snapshot
 from host_brain.runtime.life_continuity import DEFAULT_PERSON_ID
+from host_brain.persistence.world_model_query_repository import (
+    WorldModelPersistenceSnapshot,
+    WorldModelQueryRepository,
+    WorkEnvironmentEventRecord,
+)
 
 WORLD_SNAPSHOT_SCHEMA_VERSION = "Natsume.world_projection.v1"
 WORLD_PROJECTION_DISABLED = "HOST_LIFE_PROJECTION_DISABLED"
@@ -90,42 +94,12 @@ def _state_observed_at(state: Mapping[str, Any], now_ms: int) -> int:
     return int(runtime.get("last_integrated_ms") or clock.get("last_tick_ms") or now_ms)
 
 
-def _loads(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(str(value))
-    except Exception:
-        return default
-
-
-def _read_life_state_row(*, ledger: Any, person_id: str) -> dict[str, Any] | None:
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
-        return None
-    try:
-        row = conn.execute(
-            "SELECT version, state_json, updated_at_ms FROM digital_life_state WHERE person_id=?",
-            (person_id,),
-        ).fetchone()
-    except Exception:
-        return None
-    if not row:
-        return None
-    state = _loads(row[1], {})
-    if not isinstance(state, dict) or not state:
-        return None
-    state = dict(state)
-    state["person_id"] = person_id
-    state["version"] = int(row[0] or state.get("version") or 1)
-    state.setdefault("_row_updated_at_ms", int(row[2] or 0))
-    return state
-
-
-def _life_state_facts(*, ledger: Any, person_id: str, now_ms: int) -> list[dict[str, Any]]:
-    state = _read_life_state_row(ledger=ledger, person_id=person_id)
+def _life_state_facts(
+    *,
+    state: Mapping[str, Any] | None,
+    person_id: str,
+    now_ms: int,
+) -> list[dict[str, Any]]:
     if state is None:
         return [
             _fact(
@@ -277,34 +251,29 @@ def _environment_facts(*, now_ms: int) -> list[dict[str, Any]]:
     ]
 
 
-def _work_event_facts(*, ledger: Any, person_id: str, now_ms: int, limit: int = 3) -> list[dict[str, Any]]:
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
-        return []
-    try:
-        rows = conn.execute(
-            "SELECT event_id, event_type, work_id, summary, urgency, emotional_effect_json, created_at_ms, active FROM work_environment_event WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?",
-            (person_id, max(1, min(int(limit), 10))),
-        ).fetchall()
-    except Exception:
-        return []
+def _work_event_facts(
+    *,
+    events: Sequence[WorkEnvironmentEventRecord],
+    now_ms: int,
+) -> list[dict[str, Any]]:
     facts: list[dict[str, Any]] = []
-    for index, row in enumerate(rows):
-        observed = int(row[6] or now_ms)
-        active = bool(row[7])
+    for index, event in enumerate(events):
+        observed = int(event.created_at_ms or now_ms)
+        active = bool(event.active)
         ttl = WORK_ACTIVE_TTL_MS if active else WORK_HISTORY_TTL_MS
         facts.append(
             _fact(
                 key="work.latest_event" if index == 0 else f"work.recent_event.{index}",
                 value={
-                    "event_type": str(row[1] or ""),
-                    "work_id": str(row[2] or ""),
-                    "summary": _text(row[3], 320),
-                    "urgency": str(row[4] or "medium"),
+                    "event_type": str(event.event_type or ""),
+                    "work_id": str(event.work_id or ""),
+                    "summary": _text(event.summary, 320),
+                    "urgency": str(event.urgency or "medium"),
                     "active": active,
+                    "emotional_effect": dict(event.emotional_effect),
                 },
                 source="work_environment_event",
-                source_ref=f"work_environment_event://{row[0]}",
+                source_ref=f"work_environment_event://{event.event_id}",
                 confidence=0.88 if not _expired(now_ms, observed + ttl) else 0.48,
                 observed_at_ms=observed,
                 ttl_ms=ttl,
@@ -315,8 +284,12 @@ def _work_event_facts(*, ledger: Any, person_id: str, now_ms: int, limit: int = 
     return facts
 
 
-def _health_facts(*, ledger: Any, person_id: str, now_ms: int) -> list[dict[str, Any]]:
-    state = _read_life_state_row(ledger=ledger, person_id=person_id)
+def _health_facts(
+    *,
+    state: Mapping[str, Any] | None,
+    person_id: str,
+    now_ms: int,
+) -> list[dict[str, Any]]:
     if state is None:
         return [
             _fact(
@@ -475,11 +448,35 @@ async def build_world_snapshot(
             "facts": [],
             "source_summary": {},
         }
+    try:
+        persistence = WorldModelQueryRepository.from_ledger(ledger).read_snapshot(
+            person_id=resolved,
+            work_event_limit=3,
+        )
+    except Exception:
+        persistence = WorldModelPersistenceSnapshot(
+            life_state=None,
+            work_events=(),
+            life_state_source_available=False,
+            work_event_source_available=False,
+        )
     facts: list[dict[str, Any]] = []
     facts.extend(_environment_facts(now_ms=now))
-    facts.extend(_life_state_facts(ledger=ledger, person_id=resolved, now_ms=now))
-    facts.extend(_work_event_facts(ledger=ledger, person_id=resolved, now_ms=now))
-    facts.extend(_health_facts(ledger=ledger, person_id=resolved, now_ms=now))
+    facts.extend(
+        _life_state_facts(
+            state=persistence.life_state,
+            person_id=resolved,
+            now_ms=now,
+        )
+    )
+    facts.extend(_work_event_facts(events=persistence.work_events, now_ms=now))
+    facts.extend(
+        _health_facts(
+            state=persistence.life_state,
+            person_id=resolved,
+            now_ms=now,
+        )
+    )
     facts.extend(await _state_arbiter_facts(state_arbiter=state_arbiter, fact_keys=list(fact_keys or []), session_id=session_id, now_ms=now))
     deduped = _dedupe_facts(facts)
     source_summary: dict[str, int] = {}

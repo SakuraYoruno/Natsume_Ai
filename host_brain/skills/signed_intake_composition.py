@@ -20,8 +20,9 @@ from host_brain.secure_ingress import (
     SecureIngressAdapter,
     SecureIngressMode,
     SecureIngressService,
-    SQLiteSecureIngressStore,
 )
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.persistence.supply_chain_repository import SQLiteSkillSupplyChainStore
 
 from .signed_intake_ingress import (
     MAX_SKILL_PROVIDER_INTAKE_BODY_BYTES,
@@ -34,7 +35,6 @@ from .supply_chain import (
 )
 from .supply_chain_quarantine import SkillBundleQuarantine
 from .supply_chain_service import SkillSupplyChainService
-from .supply_chain_store import SQLiteSkillSupplyChainStore
 
 
 HOST_SECURE_INGRESS_MODE_ENV = "HOST_SECURE_INGRESS_MODE"

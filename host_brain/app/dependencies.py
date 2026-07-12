@@ -270,11 +270,40 @@ def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> in
 
 
 def get_ledger() -> SQLiteLedger:
-    """获取 SQLite 账本实例（延迟初始化，支持跨线程访问）。"""
+    """Return the canonical ledger only after the SQL catalog is ready.
+
+    Durable Host processes never rely on SQLiteLedger inline DDL.  The
+    in-memory branch remains solely for isolated tests that intentionally have
+    no durable migration history.
+    """
     global _ledger
     if _ledger is None:
-        db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
-        _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
+        from host_brain.app.settings import get_persistence_settings  # noqa: PLC0415
+
+        db_path = str(
+            get_persistence_settings().canonical_db_path
+            or "host_brain/data/audit.sqlite3"
+        ).strip()
+        if db_path == ":memory:":
+            _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
+        else:
+            from host_brain.audit.migration_runner import (  # noqa: PLC0415
+                SQLiteMigrationRunner,
+            )
+
+            migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+                request_id="host-ledger-startup",
+            )
+            if not migrated.success:
+                raise RuntimeError(
+                    f"{migrated.reason_code or 'MIGRATION_EXEC_FAILED'}: "
+                    f"{migrated.detail}"
+                )
+            _ledger = SQLiteLedger(
+                db_path=db_path,
+                check_same_thread=False,
+                initialize_schema=False,
+            )
     return _ledger
 
 
@@ -370,6 +399,11 @@ def get_life_memory_store() -> LifeMemoryStore:
     ledger = get_ledger()
     if _life_memory_store is None or getattr(_life_memory_store, "ledger", None) is not ledger:
         _life_memory_store = LifeMemoryStore(ledger=ledger)
+    from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+        configure_life_memory_store_provider,
+    )
+
+    configure_life_memory_store_provider(lambda: _life_memory_store)
     return _life_memory_store
 
 
@@ -616,7 +650,7 @@ def get_bond_neo4j_client():
     sqlite_path = str(os.environ.get("HOST_BOND_SQLITE_PATH") or "").strip()
 
     if backend_raw == "sqlite" or (sqlite_path and backend_raw != "neo4j"):
-        return SqliteBondClient(db_path=sqlite_path or None)
+        return _build_migrated_bond_sqlite_client(sqlite_path or None)
     if backend_raw == "memory":
         return InMemoryNeo4jBondClient()
 
@@ -635,8 +669,34 @@ def get_bond_neo4j_client():
                     raise
 
     if sqlite_path:
-        return SqliteBondClient(db_path=sqlite_path or None)
+        return _build_migrated_bond_sqlite_client(sqlite_path or None)
     return InMemoryNeo4jBondClient()
+
+
+def _build_migrated_bond_sqlite_client(
+    db_path: str | os.PathLike[str] | None,
+) -> SqliteBondClient:
+    """Run the central catalog before constructing the Bond fallback."""
+
+    effective_path = str(
+        db_path
+        or os.environ.get("HOST_BOND_SQLITE_PATH")
+        or SqliteBondClient.DEFAULT_DB_PATH
+    ).strip()
+    if effective_path != ":memory:":
+        from host_brain.audit.migration_runner import (  # noqa: PLC0415
+            SQLiteMigrationRunner,
+        )
+
+        migrated = SQLiteMigrationRunner(db_path=effective_path).apply_migrations(
+            request_id="bond-fallback-startup"
+        )
+        if not migrated.success:
+            raise RuntimeError(
+                f"{migrated.reason_code or 'MIGRATION_EXEC_FAILED'}: "
+                f"{migrated.detail}"
+            )
+    return SqliteBondClient(db_path=effective_path)
 
 
 def get_bond_dynamics_writer() -> BondDynamicsWriter:
@@ -1314,7 +1374,7 @@ def get_context_compressor():
 
 
 def get_emotion_timeline():
-    """获取进程级 EmotionTimeline 单例，启动时从 memory_ops_log 预热最近 24h 情绪历史。
+    """获取进程级 EmotionTimeline 单例并预热最近 24h 情绪历史。
 
     返回 EmotionTimeline 实例，供主链路跨请求积累情绪趋势使用。
     若初始化失败则返回 None（降级）。
@@ -1323,59 +1383,52 @@ def get_emotion_timeline():
     if _emotion_timeline is None:
         try:
             from host_brain.core.emotion_timeline import EmotionTimeline  # noqa: PLC0415
-            import sqlite3 as _sqlite3  # noqa: PLC0415
-            import time as _time  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+            from host_brain.persistence.emotion_timeline_query_repository import (  # noqa: PLC0415
+                EmotionTimelineQueryRepository,
+            )
 
             _timeline = EmotionTimeline(max_entries=200)
+            _valence_map = {
+                "HAPPY": 0.60, "EXCITED": 0.80, "CALM": 0.20, "THINKING": 0.0,
+                "NEUTRAL": 0.0, "SAD": -0.60, "ANGRY": -0.70,
+                "ANXIOUS": -0.40, "FRUSTRATED": -0.50,
+                "LOVING": 0.80, "EMBARRASSED": -0.20, "CONFUSED": -0.10,
+                "BORED": -0.30, "PROUD": 0.70, "GRATEFUL": 0.70, "SURPRISED": 0.30,
+            }
+            _arousal_map = {
+                "HAPPY": 0.40, "EXCITED": 0.80, "CALM": -0.40, "THINKING": 0.20,
+                "NEUTRAL": 0.0, "SAD": -0.20, "ANGRY": 0.80,
+                "ANXIOUS": 0.70, "FRUSTRATED": 0.60,
+                "LOVING": 0.30, "EMBARRASSED": 0.50, "CONFUSED": 0.30,
+                "BORED": -0.50, "PROUD": 0.50, "GRATEFUL": 0.20, "SURPRISED": 0.70,
+            }
+            _rows = []
+            try:
+                _canonical_db_path = get_ledger().canonical_db_path
+                if _canonical_db_path != ":memory:":
+                    _rows = EmotionTimelineQueryRepository(
+                        _canonical_db_path
+                    ).recent_actions(
+                        since_ms=now_ms() - 24 * 3600 * 1000,
+                        limit=150,
+                    )
+            except Exception as exc:
+                _logger.warning("EmotionTimeline 日志预热失败（空时间线降级）: %s", exc)
 
-            # 从 avatar_action_log 预热最近 24h 的情绪记录
-            _ledger_inst = get_ledger()
-            _db_path = (
-                getattr(_ledger_inst, "_db_path", None)
-                or getattr(_ledger_inst, "db_path", None)
-            )
-            _rows: list = []
-            if _db_path:
-                # Phase 2: 精细化 16 种标签的 VAD 映射
-                _valence_map = {
-                    "HAPPY": 0.60, "EXCITED": 0.80, "CALM": 0.20, "THINKING": 0.0,
-                    "NEUTRAL": 0.0, "SAD": -0.60, "ANGRY": -0.70,
-                    "ANXIOUS": -0.40, "FRUSTRATED": -0.50,
-                    "LOVING": 0.80, "EMBARRASSED": -0.20, "CONFUSED": -0.10,
-                    "BORED": -0.30, "PROUD": 0.70, "GRATEFUL": 0.70, "SURPRISED": 0.30,
-                }
-                _arousal_map = {
-                    "HAPPY": 0.40, "EXCITED": 0.80, "CALM": -0.40, "THINKING": 0.20,
-                    "NEUTRAL": 0.0, "SAD": -0.20, "ANGRY": 0.80,
-                    "ANXIOUS": 0.70, "FRUSTRATED": 0.60,
-                    "LOVING": 0.30, "EMBARRASSED": 0.50, "CONFUSED": 0.30,
-                    "BORED": -0.50, "PROUD": 0.50, "GRATEFUL": 0.20, "SURPRISED": 0.70,
-                }
-                _since_ms = int(_time.time() * 1000) - 24 * 3600 * 1000
-                _conn = _sqlite3.connect(_db_path)
-                try:
-                    _rows = _conn.execute(
-                        "SELECT emotion_tag, ts_ms FROM avatar_action_log "
-                        "WHERE ts_ms >= ? AND emotion_tag IS NOT NULL "
-                        "AND emotion_tag != '' AND status='OK' "
-                        "ORDER BY ts_ms ASC LIMIT 150",
-                        (_since_ms,),
-                    ).fetchall()
-                    for _etag, _ts in _rows:
-                        _etag_upper = str(_etag or "NEUTRAL").strip().upper()
-                        _timeline.append(
-                            ts_ms=int(_ts),
-                            emotion_tag=_etag_upper,
-                            valence=_valence_map.get(_etag_upper, 0.0),
-                            arousal=_arousal_map.get(_etag_upper, 0.0),
-                            source="restored_from_log",
-                        )
-                finally:
-                    _conn.close()
-                _logger.info(
-                    "EmotionTimeline 已从日志预热 %d 条情绪记录",
-                    len(_rows),
+            for _row in _rows:
+                _etag_upper = str(_row.emotion_tag or "NEUTRAL").strip().upper()
+                _timeline.append(
+                    ts_ms=int(_row.ts_ms),
+                    emotion_tag=_etag_upper,
+                    valence=_valence_map.get(_etag_upper, 0.0),
+                    arousal=_arousal_map.get(_etag_upper, 0.0),
+                    source="restored_from_log",
                 )
+            _logger.info(
+                "EmotionTimeline 已从日志预热 %d 条情绪记录",
+                len(_rows),
+            )
 
             _emotion_timeline = _timeline
         except Exception as exc:

@@ -34,7 +34,7 @@ class TestSkillLoaderEmotionContext:
 
     def _make_loader(self, capture_context: list) -> SkillLoader:
         registry = _make_skill_registry(capture_context)
-        ledger = SQLiteLedger()
+        ledger = SQLiteLedger(":memory:")
         token_service = TokenService()
         return SkillLoader(registry=registry, token_service=token_service, ledger=ledger)
 

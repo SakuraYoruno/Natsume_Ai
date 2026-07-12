@@ -6,7 +6,7 @@ DTO，缺少统一抽象。本模块提供 OPT-9 的**一期骨架**：
 
   * 把常用查询从 route 代码里搬到 `host_brain/observability/queries/*.yaml`；
   * 统一的 ``NamedQueryRegistry`` 负责加载 + 参数类型校验；
-  * 最薄 `ObsQueryBuilder.run_named(...)` 接入任意 sqlite3 Connection。
+  * ``ObsQueryBuilder.run_named(...)`` 将执行交给 typed persistence repository。
 
 一期不追求替换所有 obs_routes（量太大），目标：
 
@@ -20,11 +20,16 @@ DTO，缺少统一抽象。本模块提供 OPT-9 的**一期骨架**：
 
 from __future__ import annotations
 
-import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from host_brain.persistence.observability_named_query_repository import (
+    ObservabilityNamedQueryRepository,
+    ObservabilityNamedReadQuery,
+    SQLiteReadConnection,
+)
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -76,7 +81,7 @@ class NamedQuery:
 
 
 def _coerce_param_value(name: str, type_tag: str, value: Any) -> Any:
-    """把用户传入的参数转成 sqlite3 可接受的类型；类型非法抛 ValueError。"""
+    """把用户传入的参数转成持久化边界可接受的类型。"""
     if type_tag not in _ALLOWED_PARAM_TYPES:
         raise ValueError(
             f"param '{name}' has unsupported type '{type_tag}'; "
@@ -106,18 +111,7 @@ def _coerce_param_value(name: str, type_tag: str, value: Any) -> Any:
 class NamedQueryRegistry:
     """从 YAML 目录加载 named queries，按 name 查询。
 
-    示例 YAML 结构::
-
-        name: session_summary
-        description: 统计指定时间窗内各 session 的事件总数与平均延迟。
-        sql: |
-          SELECT session_id, COUNT(*) AS n, AVG(latency_ms) AS avg_latency
-          FROM chat_events
-          WHERE ts BETWEEN :start AND :end
-          GROUP BY session_id
-        params:
-          start: datetime_ms
-          end: datetime_ms
+    YAML 只提供静态 query identity、文本和参数类型映射；本类不执行查询。
     """
 
     def __init__(self, *, queries_dir: Path | None = None) -> None:
@@ -212,11 +206,9 @@ class ObsQueryBuilder:
     """统一的 observability 查询入口.
 
     设计：
-      * 不持有数据库，**调用方**传入 ``sqlite3.Connection``（或其兼容对象）；
-      * 仅在 :meth:`run_named` 时做参数校验与 ``execute(sql, params)``；
-      * 返回 ``list[dict]``，每行 key 为 SQL 选择列名；
-      * 若调用方传入的 Connection 未设置 ``row_factory = sqlite3.Row``，
-        则自动在执行时 opt-in 行字典化（不污染原 row_factory）。
+      * 不持有数据库，调用方传入最小化的只读连接 port；
+      * 本层只做 named-query 查找与参数校验；
+      * 执行和行解码由 persistence repository 负责。
     """
 
     def __init__(
@@ -232,7 +224,7 @@ class ObsQueryBuilder:
 
     def run_named(
         self,
-        conn: sqlite3.Connection,
+        connection: SQLiteReadConnection,
         name: str,
         **params: Any,
     ) -> list[dict[str, Any]]:
@@ -243,19 +235,13 @@ class ObsQueryBuilder:
             pname: _coerce_param_value(pname, ptype_tag, params[pname])
             for pname, ptype_tag in nq.params.items()
         }
-        cursor = conn.execute(nq.sql, coerced)
-        columns = [c[0] for c in (cursor.description or ())]
-        rows: list[dict[str, Any]] = []
-        for raw in cursor.fetchall():
-            if isinstance(raw, sqlite3.Row):
-                rows.append({k: raw[k] for k in raw.keys()})
-            elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
-                rows.append(dict(zip(columns, raw, strict=False)))
-            elif isinstance(raw, Mapping):
-                rows.append(dict(raw))
-            else:  # pragma: no cover - sqlite 返回形态若扩展再补
-                rows.append({columns[0]: raw})
-        return rows
+        return ObservabilityNamedQueryRepository(connection).fetch_all(
+            ObservabilityNamedReadQuery(
+                name=nq.name,
+                sql=nq.sql,
+                parameters=coerced,
+            )
+        )
 
 
 __all__ = [

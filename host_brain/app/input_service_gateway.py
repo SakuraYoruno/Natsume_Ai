@@ -88,7 +88,9 @@ def complete_host_gateway_ingress(
     if not str(claim_ref or "").strip() or not str(result_ref or "").strip():
         return False
     settings = _resolve_input_settings(env)
-    from host_brain.secure_ingress import SQLiteSecureIngressStore  # noqa: PLC0415
+    from host_brain.persistence.secure_ingress_repository import (  # noqa: PLC0415
+        SQLiteSecureIngressStore,
+    )
 
     resolved_db_path = Path(
         str(
@@ -206,8 +208,10 @@ def evaluate_host_gateway_ingress(
         SecureIngressAdapter,
         SecureIngressMode,
         SecureIngressService,
-        SQLiteSecureIngressStore,
         build_surface_request,
+    )
+    from host_brain.persistence.secure_ingress_repository import (  # noqa: PLC0415
+        SQLiteSecureIngressStore,
     )
 
     try:

@@ -788,10 +788,7 @@ def _collection_item_episode_anchor_is_synthetic(store: LifeMemoryStore, item: M
     episode_id = _clean_text(item.get("episode_id") or metadata.get("source_episode_id"))
     if not episode_id:
         return False
-    row = store.ledger._conn.execute(
-        "SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1",
-        (episode_id,),
-    ).fetchone()
+    row = store.persistence.get_episode(episode_id)
     return bool(row is not None and _is_synthetic_life_record(dict(row)))
 
 
@@ -828,15 +825,12 @@ def _semantic_memory_should_prune_as_synthetic(store: LifeMemoryStore, memory: M
             return True
         if source_id.startswith("life_episode::"):
             episode_id = source_id.split("::", 1)[1]
-            row = store.ledger._conn.execute("SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1", (episode_id,)).fetchone()
+            row = store.persistence.get_episode(episode_id)
             if row is not None and _is_synthetic_life_record(dict(row)):
                 return True
         elif source_id.startswith("life_memory_collection::"):
             collection_id = source_id.split("::", 1)[1]
-            row = store.ledger._conn.execute(
-                "SELECT * FROM life_memory_collection WHERE collection_id = ? LIMIT 1",
-                (collection_id,),
-            ).fetchone()
+            row = store.persistence.get_collection(collection_id)
             if row is not None and _collection_is_synthetic_for_semantic(store, dict(row)):
                 return True
     return False
@@ -861,10 +855,7 @@ def _semantic_memory_prune_reason(
     if _clean_text(memory.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
         return ""
     for collection_id in collection_ids:
-        row = store.ledger._conn.execute(
-            "SELECT * FROM life_memory_collection WHERE collection_id = ? LIMIT 1",
-            (collection_id,),
-        ).fetchone()
+        row = store.persistence.get_collection(collection_id)
         if row is None:
             continue
         collection = dict(row)
@@ -888,15 +879,7 @@ def _semantic_memory_should_prune_as_unscoped_action_pattern(store: LifeMemorySt
     ]
     if not episode_source_ids:
         return True
-    placeholders = ", ".join("?" for _ in episode_source_ids)
-    rows = store.ledger._conn.execute(
-        f"""
-        SELECT episode_id, person_id, session_id, action, metadata
-        FROM life_episode
-        WHERE episode_id IN ({placeholders})
-        """,
-        tuple(episode_source_ids),
-    ).fetchall()
+    rows = store.persistence.get_episodes_by_ids(episode_source_ids)
     by_id = {str(row["episode_id"]): dict(row) for row in rows}
     for episode_id in episode_source_ids:
         row = by_id.get(episode_id)
@@ -959,15 +942,7 @@ def _semantic_memory_collection_identity_keys(store: LifeMemoryStore, memory: Ma
     collection_ids = _semantic_memory_collection_ids(memory)
     if not collection_ids:
         return []
-    placeholders = ", ".join("?" for _ in collection_ids)
-    rows = store.ledger._conn.execute(
-        f"""
-        SELECT collection_id, collection_kind, domain, scope_key, person_id, session_id
-        FROM life_memory_collection
-        WHERE collection_id IN ({placeholders})
-        """,
-        tuple(collection_ids),
-    ).fetchall()
+    rows = store.persistence.get_collections_by_ids(collection_ids)
     by_id = {str(row["collection_id"]): dict(row) for row in rows}
     keys: list[str] = []
     for collection_id in collection_ids:
@@ -1042,26 +1017,8 @@ def _collection_source_episode_ids(store: LifeMemoryStore, *, collection_id: str
     return list(dict.fromkeys(ids))
 
 
-def _semantic_referenced_episode_ids(conn: Any) -> set[str]:
-    try:
-        rows = conn.execute(
-            "SELECT source_memory_ids FROM semantic_memory WHERE deleted_at IS NULL"
-        ).fetchall()
-    except Exception:
-        return set()
-    episode_ids: set[str] = set()
-    for row in rows:
-        raw = row["source_memory_ids"] if isinstance(row, Mapping) else row[0]
-        source_ids = _json_loads(raw, fallback=[])
-        if not isinstance(source_ids, Sequence) or isinstance(source_ids, (str, bytes, bytearray)):
-            continue
-        for source_id in source_ids:
-            value = _clean_text(source_id)
-            if value.startswith("life_episode::"):
-                episode_id = value.split("::", 1)[1]
-                if episode_id:
-                    episode_ids.add(episode_id)
-    return episode_ids
+def _semantic_referenced_episode_ids(repository: Any) -> set[str]:
+    return set(repository.semantic_referenced_episode_ids())
 
 
 def _trusted_active_episode_ids(
@@ -1073,18 +1030,12 @@ def _trusted_active_episode_ids(
     ids = list(dict.fromkeys(_clean_text(item) for item in list(episode_ids or []) if _clean_text(item)))
     if not ids:
         return set()
-    placeholders = ", ".join("?" for _ in ids)
-    rows = store.ledger._conn.execute(
-        f"""
-        SELECT episode_id, person_id, session_id, thread_id, primary_ref, metadata
-        FROM life_episode
-        WHERE episode_id IN ({placeholders})
-          AND truth_state = ?
-          AND status = ?
-          AND COALESCE(retention_state, ?) != ?
-        """,
-        (*ids, TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE),
-    ).fetchall()
+    rows = store.persistence.get_episodes_by_ids(
+        ids,
+        truth_state=TRUTH_VERIFIED,
+        status=STATUS_ACTIVE,
+        excluded_retention_state=RETENTION_GONE,
+    )
     trusted: set[str] = set()
     for row in rows:
         record = dict(row)
@@ -1292,26 +1243,14 @@ def _semantic_proposal_from_entity(store: LifeMemoryStore, entity: Mapping[str, 
 
 
 def _semantic_action_pattern_proposals(store: LifeMemoryStore, *, limit: int = 80) -> list[dict[str, Any]]:
-    rows = store.ledger._conn.execute(
-        """
-        SELECT *
-        FROM life_episode
-        WHERE truth_state = ?
-          AND status = ?
-          AND COALESCE(retention_state, ?) != ?
-          AND action = ?
-        ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
-        LIMIT ?
-        """,
-        (
-            TRUTH_VERIFIED,
-            STATUS_ACTIVE,
-            RETENTION_WARM,
-            RETENTION_GONE,
-            "lightnovel_recommendation_deep_review",
-            max(1, int(limit)),
-        ),
-    ).fetchall()
+    rows = store.persistence.list_episode_records(
+        truth_states=(TRUTH_VERIFIED,),
+        statuses=(STATUS_ACTIVE,),
+        excluded_retention_states=(RETENTION_GONE,),
+        action="lightnovel_recommendation_deep_review",
+        order="recent",
+        limit=max(1, int(limit)),
+    )
     groups: dict[str, dict[str, Any]] = {}
     for row in rows:
         episode = dict(row)
@@ -1940,17 +1879,6 @@ def _semantic_proposals_from_episode(
             }
         )
     return proposals
-
-
-def _sqlite_table_exists(conn: Any, table_name: str) -> bool:
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-            (_clean_text(table_name),),
-        ).fetchone()
-    except Exception:
-        return False
-    return row is not None
 
 
 def _semantic_proposal_from_correction_row(row: Mapping[str, Any]) -> dict[str, Any] | None:

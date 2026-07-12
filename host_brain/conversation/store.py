@@ -1,52 +1,24 @@
 from __future__ import annotations
 
 import json
-import uuid
+import hashlib
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.persistence.context_repository import ContextRepository
 
 from .schema import Turn, TurnRole
 
 
 class TurnStore:
-    """SQL-only storage for conversation turns."""
+    """Compatibility API backed by the canonical ContextRepository writer."""
 
     def __init__(self, ledger: SQLiteLedger) -> None:
         self._ledger = ledger
-        self._conn = ledger._conn
-        self._write_lock = ledger._write_lock
-        self._ledger._ensure_schema()
+        self._repository = ContextRepository.from_ledger(ledger)
 
     def append(self, turn: Turn) -> None:
-        metadata_json = None
-        if turn.metadata:
-            metadata_json = json.dumps(turn.metadata, ensure_ascii=False, sort_keys=True)
-        with self._write_lock:
-            self._conn.execute(
-                """
-                INSERT OR IGNORE INTO conversation_turn (
-                    turn_id, session_id, person_id, request_id, role, content,
-                    ts_ms, turn_index, lang, token_count, corrupted, metadata, created_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    turn.turn_id,
-                    turn.session_id,
-                    turn.person_id,
-                    turn.request_id,
-                    turn.role,
-                    turn.content,
-                    int(turn.ts_ms),
-                    int(turn.turn_index),
-                    str(turn.lang or "zh"),
-                    turn.token_count,
-                    1 if turn.corrupted else 0,
-                    metadata_json,
-                    int(turn.ts_ms),
-                ),
-            )
-            self._conn.commit()
+        self._repository.append_turn(self._turn_record(turn))
 
     def append_generated(
         self,
@@ -62,49 +34,37 @@ class TurnStore:
         corrupted: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> Turn:
-        with self._write_lock:
-            turn = Turn(
-                turn_id=f"turn::{uuid.uuid4().hex}",
-                session_id=str(session_id or "").strip(),
-                person_id=str(person_id or "").strip(),
-                request_id=str(request_id or "").strip(),
-                role=role,
-                content=str(content or ""),
-                ts_ms=int(ts_ms),
-                turn_index=self._next_turn_index_locked(session_id=str(session_id or "").strip()),
-                lang=str(lang or "zh").strip() or "zh",
-                token_count=token_count,
-                corrupted=bool(corrupted),
-                metadata=dict(metadata or {}) or None,
-            )
-            metadata_json = None
-            if turn.metadata:
-                metadata_json = json.dumps(turn.metadata, ensure_ascii=False, sort_keys=True)
-            self._conn.execute(
-                """
-                INSERT OR IGNORE INTO conversation_turn (
-                    turn_id, session_id, person_id, request_id, role, content,
-                    ts_ms, turn_index, lang, token_count, corrupted, metadata, created_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    turn.turn_id,
-                    turn.session_id,
-                    turn.person_id,
-                    turn.request_id,
-                    turn.role,
-                    turn.content,
-                    int(turn.ts_ms),
-                    int(turn.turn_index),
-                    str(turn.lang or "zh"),
-                    turn.token_count,
-                    1 if turn.corrupted else 0,
-                    metadata_json,
-                    int(turn.ts_ms),
+        row = self._repository.append_generated_turn(
+            {
+                "turn_id": self._generated_turn_id(
+                    session_id=session_id,
+                    request_id=request_id,
+                    role=str(role),
                 ),
+                "session_id": str(session_id or "").strip(),
+                "person_id": str(person_id or "").strip(),
+                "request_id": str(request_id or "").strip(),
+                "role": role,
+                "content": str(content or ""),
+                "ts_ms": int(ts_ms),
+                "lang": str(lang or "zh").strip() or "zh",
+                "token_count": token_count,
+                "corrupted": bool(corrupted),
+                "metadata": dict(metadata or {}) or None,
+            }
+        )
+        return self._row_to_turn(row)
+
+    @staticmethod
+    def _generated_turn_id(*, session_id: str, request_id: str, role: str) -> str:
+        material = "\x1f".join(
+            (
+                str(session_id or "").strip(),
+                str(request_id or "").strip(),
+                str(role or "").strip(),
             )
-            self._conn.commit()
-            return turn
+        )
+        return "turn::sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def query_recent(
         self,
@@ -115,33 +75,14 @@ class TurnStore:
         before_ts_ms: int | None = None,
         before_turn_index: int | None = None,
     ) -> list[Turn]:
-        session_id = str(session_id or "").strip()
-        if not session_id:
-            return []
-        clauses = ["session_id = ?"]
-        params: list[Any] = [session_id]
-        if exclude_request_id:
-            clauses.append("request_id != ?")
-            params.append(str(exclude_request_id).strip())
-        if before_ts_ms is not None:
-            clauses.append("ts_ms < ?")
-            params.append(int(before_ts_ms))
-        if before_turn_index is not None:
-            clauses.append("turn_index < ?")
-            params.append(int(before_turn_index))
-        params.append(max(1, int(limit)))
-        rows = self._conn.execute(
-            f"""
-            SELECT turn_id, session_id, person_id, request_id, role, content,
-                   ts_ms, turn_index, lang, token_count, corrupted, metadata
-            FROM conversation_turn
-            WHERE {" AND ".join(clauses)}
-            ORDER BY ts_ms DESC, turn_index DESC
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
-        return [self._row_to_turn(row) for row in reversed(rows)]
+        rows = self._repository.query_recent_turns(
+            session_id=session_id,
+            limit=limit,
+            exclude_request_id=exclude_request_id,
+            before_ts_ms=before_ts_ms,
+            before_turn_index=before_turn_index,
+        )
+        return [self._row_to_turn(row) for row in rows]
 
     def find_by_request(
         self,
@@ -150,26 +91,11 @@ class TurnStore:
         request_id: str,
         role: TurnRole | None = None,
     ) -> Turn | None:
-        session_id = str(session_id or "").strip()
-        request_id = str(request_id or "").strip()
-        if not session_id or not request_id:
-            return None
-        clauses = ["session_id = ?", "request_id = ?"]
-        params: list[Any] = [session_id, request_id]
-        if role:
-            clauses.append("role = ?")
-            params.append(str(role))
-        row = self._conn.execute(
-            f"""
-            SELECT turn_id, session_id, person_id, request_id, role, content,
-                   ts_ms, turn_index, lang, token_count, corrupted, metadata
-            FROM conversation_turn
-            WHERE {" AND ".join(clauses)}
-            ORDER BY turn_index ASC
-            LIMIT 1
-            """,
-            params,
-        ).fetchone()
+        row = self._repository.find_turn(
+            session_id=session_id,
+            request_id=request_id,
+            role=str(role) if role else None,
+        )
         return self._row_to_turn(row) if row is not None else None
 
     def query_before_turn_index(
@@ -180,27 +106,13 @@ class TurnStore:
         limit: int,
         exclude_request_id: str | None = None,
     ) -> list[Turn]:
-        session_id = str(session_id or "").strip()
-        if not session_id:
-            return []
-        clauses = ["session_id = ?", "turn_index < ?"]
-        params: list[Any] = [session_id, int(before_turn_index)]
-        if exclude_request_id:
-            clauses.append("request_id != ?")
-            params.append(str(exclude_request_id).strip())
-        params.append(max(1, int(limit)))
-        rows = self._conn.execute(
-            f"""
-            SELECT turn_id, session_id, person_id, request_id, role, content,
-                   ts_ms, turn_index, lang, token_count, corrupted, metadata
-            FROM conversation_turn
-            WHERE {" AND ".join(clauses)}
-            ORDER BY turn_index DESC
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
-        return [self._row_to_turn(row) for row in reversed(rows)]
+        rows = self._repository.query_turns_before_index(
+            session_id=session_id,
+            before_turn_index=before_turn_index,
+            limit=limit,
+            exclude_request_id=exclude_request_id,
+        )
+        return [self._row_to_turn(row) for row in rows]
 
     def count_before_turn_index(
         self,
@@ -209,30 +121,14 @@ class TurnStore:
         before_turn_index: int,
         exclude_request_id: str | None = None,
     ) -> int:
-        session_id = str(session_id or "").strip()
-        if not session_id:
-            return 0
-        clauses = ["session_id = ?", "turn_index < ?"]
-        params: list[Any] = [session_id, int(before_turn_index)]
-        if exclude_request_id:
-            clauses.append("request_id != ?")
-            params.append(str(exclude_request_id).strip())
-        row = self._conn.execute(
-            f"""
-            SELECT COUNT(1) AS row_count
-            FROM conversation_turn
-            WHERE {" AND ".join(clauses)}
-            """,
-            params,
-        ).fetchone()
-        if row is None:
-            return 0
-        raw_count = row["row_count"] if "row_count" in row.keys() else 0
-        return max(0, int(raw_count or 0))
+        return self._repository.count_turns_before_index(
+            session_id=session_id,
+            before_turn_index=before_turn_index,
+            exclude_request_id=exclude_request_id,
+        )
 
     def next_turn_index(self, *, session_id: str) -> int:
-        with self._write_lock:
-            return self._next_turn_index_locked(session_id=str(session_id or "").strip())
+        return self._repository.next_turn_index(session_id=session_id)
 
     def query_recent_assistant(
         self,
@@ -240,54 +136,39 @@ class TurnStore:
         limit: int,
         lang: str | None = None,
     ) -> list[Turn]:
-        clauses = ["role = ?"]
-        params: list[Any] = ["assistant"]
-        normalized_lang = str(lang or "").strip().lower()
-        if normalized_lang:
-            clauses.append("LOWER(lang) = ?")
-            params.append(normalized_lang)
-        params.append(max(1, int(limit)))
-        rows = self._conn.execute(
-            f"""
-            SELECT turn_id, session_id, person_id, request_id, role, content,
-                   ts_ms, turn_index, lang, token_count, corrupted, metadata
-            FROM conversation_turn
-            WHERE {" AND ".join(clauses)}
-            ORDER BY ts_ms DESC, turn_index DESC
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
+        rows = self._repository.query_recent_assistant_turns(limit=limit, lang=lang)
         return [self._row_to_turn(row) for row in rows]
 
     def delete_by_session(self, *, session_id: str) -> int:
-        with self._write_lock:
-            cursor = self._conn.execute(
-                "DELETE FROM conversation_turn WHERE session_id = ?",
-                (str(session_id or "").strip(),),
-            )
-            self._conn.commit()
-            return int(cursor.rowcount or 0)
+        return self._repository.delete_conversation_session(session_id=session_id)
 
-    def _next_turn_index_locked(self, *, session_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT COALESCE(MAX(turn_index), -1) AS max_turn_index FROM conversation_turn WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        raw_max_index = row["max_turn_index"] if row is not None else -1
-        max_index = int(raw_max_index if raw_max_index is not None else -1)
-        return max_index + 1
+    @staticmethod
+    def _turn_record(turn: Turn) -> dict[str, Any]:
+        return {
+            "turn_id": turn.turn_id,
+            "session_id": turn.session_id,
+            "person_id": turn.person_id,
+            "request_id": turn.request_id,
+            "role": turn.role,
+            "content": turn.content,
+            "ts_ms": int(turn.ts_ms),
+            "turn_index": int(turn.turn_index),
+            "lang": str(turn.lang or "zh"),
+            "token_count": turn.token_count,
+            "corrupted": bool(turn.corrupted),
+            "metadata": turn.metadata,
+        }
 
     @staticmethod
     def _row_to_turn(row: Any) -> Turn:
-        metadata_raw = row["metadata"] if "metadata" in row.keys() else None
+        metadata_raw = row.get("metadata") if isinstance(row, dict) else row["metadata"]
         metadata: dict[str, Any] | None = None
         if metadata_raw:
             try:
                 parsed = json.loads(str(metadata_raw))
                 if isinstance(parsed, dict):
                     metadata = parsed
-            except Exception:
+            except (TypeError, json.JSONDecodeError):
                 metadata = None
         return Turn(
             turn_id=str(row["turn_id"]),

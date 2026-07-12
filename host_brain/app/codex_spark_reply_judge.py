@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
-import sqlite3
 import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from host_brain.app.settings.codex_spark import CodexSparkReplyJudgeSettings
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
 
 
 _DEFAULT_MODEL_ID = "gpt-5.3-codex-spark"
@@ -38,28 +39,23 @@ def _parse_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
 
 
 def _enabled() -> bool:
-    return _parse_bool(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_ENABLED"), default=False)
+    return bool(CodexSparkReplyJudgeSettings().enabled)
 
 
 def _rewrite_enabled() -> bool:
-    return _parse_bool(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_REWRITE_ENABLED"), default=True)
+    return bool(CodexSparkReplyJudgeSettings().rewrite_enabled)
 
 
 def _judge_mode() -> str:
-    return str(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_MODE") or "suspicious").strip().lower()
+    return str(CodexSparkReplyJudgeSettings().mode or "suspicious").strip().lower()
 
 
 def _model_id() -> str:
-    return str(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_MODEL_ID") or _DEFAULT_MODEL_ID).strip() or _DEFAULT_MODEL_ID
+    return str(CodexSparkReplyJudgeSettings().model_id or _DEFAULT_MODEL_ID).strip() or _DEFAULT_MODEL_ID
 
 
 def _timeout_ms() -> int:
-    return _parse_int(
-        os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_TIMEOUT_MS"),
-        default=_DEFAULT_TIMEOUT_MS,
-        minimum=1_000,
-        maximum=60_000,
-    )
+    return int(CodexSparkReplyJudgeSettings().timeout_ms)
 
 
 def _compact_text(value: Any, *, limit: int = _MAX_TEXT_CHARS) -> str:
@@ -85,40 +81,7 @@ def _jsonable(value: Any, *, depth: int = 0) -> Any:
 
 
 def _audit_db_path() -> Path:
-    configured = str(os.environ.get("HOST_AUDIT_DB_PATH") or os.environ.get("AUDIT_DB_PATH") or "").strip()
-    if configured:
-        return Path(configured)
-    return Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
-
-
-def _current_request_boundary_ms(*, person_id: str, session_id: str, request_id: str) -> int:
-    rid = str(request_id or "").strip()
-    if not rid:
-        return 0
-    db_path = _audit_db_path()
-    if not db_path.exists():
-        return 0
-    try:
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT created_at_ms
-                FROM memory_event
-                WHERE active = 1
-                  AND visibility = 'visible'
-                  AND role = 'user'
-                  AND person_id = ?
-                  AND (? = '' OR session_id = ?)
-                  AND json_extract(refs_json, '$.request_id') = ?
-                ORDER BY created_at_ms ASC
-                LIMIT 1
-                """,
-                (person_id, session_id, session_id, rid),
-            ).fetchone()
-            return int(row["created_at_ms"] or 0) if row is not None else 0
-    except Exception:
-        return 0
+    return Path(CodexSparkReplyJudgeSettings().resolved_audit_db_path)
 
 
 def _recent_visible_events(
@@ -131,46 +94,31 @@ def _recent_visible_events(
     db_path = _audit_db_path()
     if not db_path.exists():
         return []
-    boundary_ms = _current_request_boundary_ms(
-        person_id=person_id,
-        session_id=session_id,
-        request_id=request_id,
-    )
     rows: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            boundary_clause = "AND created_at_ms <= ?" if boundary_ms else ""
-            query = f"""
-                SELECT event_id, session_id, source_kind, event_kind, role, content, content_summary, created_at_ms
-                FROM memory_event
-                WHERE active = 1
-                  AND visibility = 'visible'
-                  AND person_id = ?
-                  AND (? = '' OR session_id = ?)
-                  {boundary_clause}
-                ORDER BY created_at_ms DESC
-                LIMIT ?
-            """
-            if boundary_ms:
-                params = (person_id, session_id, session_id, int(boundary_ms), max(1, int(limit)))
-            else:
-                params = (person_id, session_id, session_id, max(1, int(limit)))
-            for row in conn.execute(query, params):
-                rows.append(
-                    {
-                        "event_id": str(row["event_id"] or ""),
-                        "session_id": str(row["session_id"] or ""),
-                        "source_kind": str(row["source_kind"] or ""),
-                        "event_kind": str(row["event_kind"] or ""),
-                        "role": str(row["role"] or ""),
-                        "content": _compact_text(row["content"] or row["content_summary"], limit=260),
-                        "created_at_ms": int(row["created_at_ms"] or 0),
-                    }
-                )
+        persisted = MemoryEventRepository(db_path).list_visible_reply_context(
+            person_id=person_id,
+            session_id=session_id,
+            request_id=request_id,
+            limit=limit,
+        )
+        for row in persisted:
+            rows.append(
+                {
+                    "event_id": str(row.get("event_id") or ""),
+                    "session_id": str(row.get("session_id") or ""),
+                    "source_kind": str(row.get("source_kind") or ""),
+                    "event_kind": str(row.get("event_kind") or ""),
+                    "role": str(row.get("role") or ""),
+                    "content": _compact_text(
+                        row.get("content") or row.get("content_summary"),
+                        limit=260,
+                    ),
+                    "created_at_ms": int(row.get("created_at_ms") or 0),
+                }
+            )
     except Exception:
         return []
-    rows.reverse()
     return rows
 
 

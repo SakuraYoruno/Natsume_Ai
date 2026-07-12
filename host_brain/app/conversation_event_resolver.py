@@ -5,6 +5,9 @@ import re
 import time
 from typing import Any, Mapping
 
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
+from host_brain.persistence.context_preference_repository import PreferenceRepository
+
 
 _CN_NUM = {
     "一": 1,
@@ -76,8 +79,17 @@ def resolve_conversation_event_action(
     if not text:
         return base
 
+    try:
+        memory_repository = MemoryEventRepository.from_ledger(ledger)
+    except Exception:
+        memory_repository = None
+    try:
+        preference_repository = PreferenceRepository.from_ledger(ledger)
+    except Exception:
+        preference_repository = None
+
     recent_visible = _recent_memory_events(
-        ledger=ledger,
+        repository=memory_repository,
         person_id=person_id,
         session_id=session_id,
         visibility="visible",
@@ -90,7 +102,7 @@ def resolve_conversation_event_action(
         if not _looks_like_internal_leak(event.get("content") or event.get("content_summary"))
     ]
     recent_system = _recent_memory_events(
-        ledger=ledger,
+        repository=memory_repository,
         person_id=person_id,
         session_id=session_id,
         visibility="system",
@@ -98,7 +110,7 @@ def resolve_conversation_event_action(
         limit=limit,
     )
     latest_delivery = _latest_recommendation_delivery(
-        ledger=ledger,
+        repository=preference_repository,
         person_id=person_id,
         session_id=session_id,
         before_ms=before_ms,
@@ -628,84 +640,47 @@ def _parse_explicit_index(text: str) -> int | None:
 
 def _recent_memory_events(
     *,
-    ledger: Any,
+    repository: MemoryEventRepository | None,
     person_id: str,
     session_id: str,
     visibility: str,
     before_ms: int | None = None,
     limit: int,
 ) -> list[dict[str, Any]]:
-    if not _table_exists(ledger, "memory_event"):
+    if repository is None:
         return []
-    before_clause = "AND created_at_ms <= ?" if before_ms else ""
-    params: tuple[Any, ...]
-    if before_ms:
-        params = (visibility, person_id, session_id, session_id, int(before_ms), int(limit))
-    else:
-        params = (visibility, person_id, session_id, session_id, int(limit))
-    rows = _execute_all(
-        ledger,
-        f"""
-        SELECT event_id, person_id, session_id, conversation_id, source_kind, event_kind,
-               visibility, role, content, content_summary, causality_json, refs_json,
-               salience, valence, uncertainty, confidence, created_at_ms, active
-        FROM memory_event
-        WHERE COALESCE(active, 1) = 1
-          AND visibility = ?
-          AND (
-            person_id = ?
-            OR session_id = ?
-            OR conversation_id = ?
-          )
-          {before_clause}
-        ORDER BY created_at_ms DESC
-        LIMIT ?
-        """,
-        params,
-    )
-    return [_row_to_dict(row) for row in rows]
+    try:
+        return repository.list_events(
+            person_id=person_id,
+            session_id=session_id,
+            conversation_id=session_id,
+            visibility=visibility,
+            created_before_ms=before_ms,
+            match_any_identity=True,
+            limit=limit,
+        )
+    except Exception:
+        return []
 
 
 def _latest_recommendation_delivery(
     *,
-    ledger: Any,
+    repository: PreferenceRepository | None,
     person_id: str,
     session_id: str,
     before_ms: int | None = None,
 ) -> dict[str, Any] | None:
-    if not _table_exists(ledger, "recommendation_delivery_log"):
+    if repository is None:
         return None
-    before_clause = "AND created_at_ms <= ?" if before_ms else ""
-    params: tuple[Any, ...]
-    if before_ms:
-        params = (person_id, session_id, session_id, int(before_ms))
-    else:
-        params = (person_id, session_id, session_id)
-    rows = _execute_all(
-        ledger,
-        f"""
-        SELECT delivery_id, person_id, session_id, domain, platform, conversation_id,
-               request_id, job_id, recommendations_ref, ranked_recommendations_ref,
-               items_json, message_payload_json, created_at_ms, active
-        FROM recommendation_delivery_log
-        WHERE COALESCE(active, 1) = 1
-          AND (
-            person_id = ?
-            OR session_id = ?
-            OR conversation_id = ?
-          )
-          {before_clause}
-        ORDER BY created_at_ms DESC
-        LIMIT 1
-        """,
-        params,
-    )
-    if not rows:
+    try:
+        return repository.get_latest_delivery(
+            person_id=person_id,
+            session_id=session_id,
+            conversation_id=session_id,
+            created_before_ms=before_ms,
+        )
+    except Exception:
         return None
-    row = _row_to_dict(rows[0])
-    row["items"] = _loads(row.get("items_json"), [])
-    row["message_payload"] = _loads(row.get("message_payload_json"), {})
-    return row
 
 
 def _latest_operational_event(events: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -914,38 +889,6 @@ def _loads(value: Any, default: Any) -> Any:
         return json.loads(value)
     except Exception:
         return default
-
-
-def _table_exists(ledger: Any, table_name: str) -> bool:
-    rows = _execute_all(
-        ledger,
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
-        (table_name,),
-    )
-    return bool(rows)
-
-
-def _execute_all(ledger: Any, sql: str, params: tuple[Any, ...]) -> list[Any]:
-    if hasattr(ledger, "execute"):
-        cursor = ledger.execute(sql, params)
-        return list(cursor.fetchall())
-    if hasattr(ledger, "connect"):
-        with ledger.connect() as conn:
-            cursor = conn.execute(sql, params)
-            return list(cursor.fetchall())
-    if hasattr(ledger, "connection"):
-        cursor = ledger.connection.execute(sql, params)
-        return list(cursor.fetchall())
-    return []
-
-
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    if isinstance(row, Mapping):
-        return dict(row)
-    keys = getattr(row, "keys", None)
-    if callable(keys):
-        return {key: row[key] for key in row.keys()}
-    return {}
 
 
 def _trim(value: Any, limit: int) -> str:

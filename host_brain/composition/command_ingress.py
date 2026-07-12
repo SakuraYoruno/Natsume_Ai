@@ -15,8 +15,8 @@ from host_brain.secure_ingress import (
     SecureIngressAuthorityEvaluator,
     SecureIngressMode,
     SecureIngressService,
-    SQLiteSecureIngressStore,
 )
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 
 
 COMMAND_INGRESS_CONFIGURATION_INVALID = "COMMAND_INGRESS_CONFIGURATION_INVALID"

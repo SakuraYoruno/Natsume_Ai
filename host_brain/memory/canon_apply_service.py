@@ -17,7 +17,6 @@ import json
 import os
 from pathlib import Path
 import re
-import sqlite3
 import time
 from typing import Any, Callable, Iterable, Mapping
 import uuid
@@ -34,7 +33,6 @@ from host_brain.governor.tokens import (
     TOKEN_TYPE_CANON_APPLY,
     TOKEN_TYPE_CANON_ROLLBACK,
     _durable_db_path,
-    _ensure_canon_apply_schema,
     _exact_sqlite_int,
     canon_evidence_digest,
     canon_token_digest,
@@ -52,6 +50,11 @@ from host_brain.memory.canon_world_store import (
 from host_brain.observability.degradation_state import (
     DegradationStateError,
     require_degradation_capability,
+)
+from host_brain.persistence.canon_apply_repository import (
+    CanonApplyRepository,
+    CanonApplyRepositoryError,
+    CanonApplyUnitOfWork,
 )
 
 
@@ -527,6 +530,7 @@ class CanonApplyService:
         recovery_grace_ms: int = 120_000,
         recovery_lease_ms: int = 120_000,
         trusted_approval_keys: Mapping[str, Any] | None = None,
+        repository: CanonApplyRepository | None = None,
     ) -> None:
         selected_db = (
             db_path
@@ -556,21 +560,16 @@ class CanonApplyService:
         self._trusted_approval_keys = _normalize_trusted_approval_keys(
             trusted_approval_keys
         )
+        self.repository = repository or CanonApplyRepository(self.db_path)
+        if self.repository.db_path != self.db_path:
+            raise ValueError("CANON_APPLY_REPOSITORY_DB_MISMATCH")
         self.ledger = ledger or SQLiteLedger(db_path=self.db_path, check_same_thread=False)
         ledger_canonical_path = getattr(self.ledger, "canonical_db_path", self.ledger.db_path)
         if _durable_db_path(ledger_canonical_path) != self.db_path:
             raise ValueError("CANON_APPLY_LEDGER_DB_MISMATCH")
         self.store = WorldCanonStore(world_root=self.world_root, ledger=self.ledger)
         self._fault_injector = fault_injector
-        with self._connect() as conn:
-            _ensure_canon_apply_schema(conn)
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
-        return conn
+        self.repository.assert_ready()
 
     def _clock_ms(self) -> int:
         try:
@@ -627,28 +626,15 @@ class CanonApplyService:
 
     def recover_pending(self, *, limit: int = 100) -> list[CanonApplyResult]:
         now_value = self._clock_ms()
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT apply_id FROM canon_apply_journal
-                WHERE state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                  AND recovery_not_before_ts_ms <= ?
-                  AND lease_expiry_ts_ms <= ?
-                ORDER BY prepared_ts_ms ASC, apply_id ASC
-                LIMIT ?
-                """,
-                (
-                    now_value,
-                    now_value,
-                    max(
-                        1,
-                        min(_required_exact_int(limit, field_name="recovery_limit"), 1000),
-                    ),
-                ),
-            ).fetchall()
+        apply_ids = self.repository.list_recoverable_apply_ids(
+            now_ms=now_value,
+            limit=max(
+                1,
+                min(_required_exact_int(limit, field_name="recovery_limit"), 1000),
+            ),
+        )
         results: list[CanonApplyResult] = []
-        for row in rows:
-            apply_id = str(row["apply_id"])
+        for apply_id in apply_ids:
             prepared = self._claim_recovery(apply_id, now_value)
             if prepared is None:
                 continue
@@ -683,11 +669,7 @@ class CanonApplyService:
         return results
 
     def get_journal(self, apply_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM canon_apply_journal WHERE apply_id = ?", (apply_id,)
-            ).fetchone()
-        return dict(row) if row is not None else None
+        return self.repository.get_journal(apply_id)
 
     def get_promotion_subject_hash(self, candidate_id: str) -> str:
         """Return the exact immutable hash callers must bind before token issue."""
@@ -695,11 +677,7 @@ class CanonApplyService:
         if self.promotion_db_path != self.db_path:
             raise CanonApplyError("CANON_APPLY_CROSS_DB_PROMOTION_UNSUPPORTED")
         normalized_id = validate_canon_binding_text("subject_id", candidate_id)
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM pentest_knowledge_promotion_candidate WHERE candidate_id = ?",
-                (normalized_id,),
-            ).fetchone()
+        row = self.repository.get_promotion_candidate(normalized_id)
         if row is None:
             raise CanonApplyError("CANON_APPLY_SUBJECT_NOT_FOUND")
         if str(row["status"]) != "PENDING_REVIEW":
@@ -728,43 +706,24 @@ class CanonApplyService:
                 "token_digest": token_digest,
             }
         )
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                token = conn.execute(
-                    "SELECT * FROM canon_apply_token WHERE token_digest = ?",
-                    (token_digest,),
-                ).fetchone()
+        try:
+            with self.repository.transaction() as uow:
+                token = uow.get_token(token_digest)
                 self._validate_token(token, command, evidence_digest, now_value)
-                existing = conn.execute(
-                    "SELECT command_hash, state FROM canon_apply_journal WHERE apply_id = ?",
-                    (command.apply_id,),
-                ).fetchone()
+                existing = uow.get_journal(command.apply_id)
                 if existing is not None:
                     raise CanonApplyError("CANON_APPLY_REPLAY")
-                active_target = conn.execute(
-                    """
-                    SELECT apply_id FROM canon_apply_journal
-                    WHERE target_doc_id = ?
-                      AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                    LIMIT 1
-                    """,
-                    (command.target_doc_id,),
-                ).fetchone()
+                active_target = uow.find_active_target(command.target_doc_id)
                 if active_target is not None:
                     raise CanonApplyError("CANON_APPLY_TARGET_BUSY")
-                prepared = self._load_subject(conn, command, now_value)
+                prepared = self._load_subject(uow, command, now_value)
 
-                subject_cursor = conn.execute(
-                    f"UPDATE {prepared['subject_table']} SET status = ? "
-                    f"WHERE {prepared['subject_key']} = ? AND status = ?",
-                    (
-                        prepared["subject_prepared_status"],
-                        command.subject_id,
-                        prepared["subject_previous_status"],
-                    ),
-                )
-                if subject_cursor.rowcount != 1:
+                if not uow.cas_subject_status(
+                    table=prepared["subject_table"],
+                    subject_id=command.subject_id,
+                    expected_status=prepared["subject_previous_status"],
+                    new_status=prepared["subject_prepared_status"],
+                ):
                     raise CanonApplyError("CANON_APPLY_SUBJECT_CAS_FAILED")
 
                 expected_type = (
@@ -772,101 +731,71 @@ class CanonApplyService:
                     if command.operation == CANON_OPERATION_APPLY
                     else TOKEN_TYPE_CANON_ROLLBACK
                 )
-                token_cursor = conn.execute(
-                    """
-                    UPDATE canon_apply_token
-                    SET state = 'BURNED', burned_apply_id = ?, burned_ts_ms = ?
-                    WHERE token_digest = ? AND state = 'AVAILABLE' AND token_type = ?
-                      AND operation = ? AND subject_type = ? AND subject_id = ?
-                      AND subject_version = ? AND subject_hash = ? AND target_doc_id = ?
-                      AND base_version = ? AND actor_id = ? AND session_id = ?
-                      AND trace_id = ? AND evidence_digest = ? AND expiry_ts_ms > ?
-                    """,
-                    (
-                        command.apply_id,
-                        now_value,
-                        token_digest,
-                        expected_type,
-                        command.operation,
-                        command.subject_type,
-                        command.subject_id,
-                        command.subject_version,
-                        command.subject_hash,
-                        command.target_doc_id,
-                        command.base_version,
-                        command.actor_id,
-                        command.session_id,
-                        command.trace_id,
-                        evidence_digest,
-                        now_value,
-                    ),
-                )
-                if token_cursor.rowcount != 1:
+                if not uow.burn_token(
+                    {
+                        "apply_id": command.apply_id,
+                        "burned_ts_ms": now_value,
+                        "token_digest": token_digest,
+                        "token_type": expected_type,
+                        "operation": command.operation,
+                        "subject_type": command.subject_type,
+                        "subject_id": command.subject_id,
+                        "subject_version": command.subject_version,
+                        "subject_hash": command.subject_hash,
+                        "target_doc_id": command.target_doc_id,
+                        "base_version": command.base_version,
+                        "actor_id": command.actor_id,
+                        "session_id": command.session_id,
+                        "trace_id": command.trace_id,
+                        "evidence_digest": evidence_digest,
+                        "now_ts_ms": now_value,
+                    }
+                ):
                     raise CanonApplyError("CANON_APPLY_TOKEN_BURN_CAS_FAILED")
 
-                try:
-                    conn.execute(
-                        """
-                    INSERT INTO canon_apply_journal (
-                        apply_id, command_hash, operation, subject_type, subject_id,
-                        subject_version, subject_hash, target_doc_id, base_version,
-                        token_digest, actor_id, session_id, trace_id,
-                        evidence_refs_json, evidence_digest, authority_key_id,
-                        approval_attestation_digest, state,
-                        subject_previous_status, subject_prepared_status, subject_final_status,
-                        before_payload_json, target_payload_json,
-                        before_version, before_hash, after_version, after_hash,
-                        fence_version, file_replaced, recovery_not_before_ts_ms,
-                        lease_owner, lease_expiry_ts_ms, prepared_ts_ms, updated_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED',
-                              ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                        command.apply_id,
-                        command_hash,
-                        command.operation,
-                        command.subject_type,
-                        command.subject_id,
-                        command.subject_version,
-                        command.subject_hash,
-                        command.target_doc_id,
-                        command.base_version,
-                        token_digest,
-                        command.actor_id,
-                        command.session_id,
-                        command.trace_id,
-                        _canonical_json(list(command.evidence_refs)),
-                        evidence_digest,
-                        token["authority_key_id"],
-                        token["approval_attestation_digest"],
-                        prepared["subject_previous_status"],
-                        prepared["subject_prepared_status"],
-                        prepared["subject_final_status"],
-                        _canonical_json(prepared["before_payload"])
+                uow.insert_journal(
+                    {
+                        "apply_id": command.apply_id,
+                        "command_hash": command_hash,
+                        "operation": command.operation,
+                        "subject_type": command.subject_type,
+                        "subject_id": command.subject_id,
+                        "subject_version": command.subject_version,
+                        "subject_hash": command.subject_hash,
+                        "target_doc_id": command.target_doc_id,
+                        "base_version": command.base_version,
+                        "token_digest": token_digest,
+                        "actor_id": command.actor_id,
+                        "session_id": command.session_id,
+                        "trace_id": command.trace_id,
+                        "evidence_refs_json": _canonical_json(list(command.evidence_refs)),
+                        "evidence_digest": evidence_digest,
+                        "authority_key_id": token["authority_key_id"],
+                        "approval_attestation_digest": token[
+                            "approval_attestation_digest"
+                        ],
+                        "subject_previous_status": prepared["subject_previous_status"],
+                        "subject_prepared_status": prepared["subject_prepared_status"],
+                        "subject_final_status": prepared["subject_final_status"],
+                        "before_payload_json": _canonical_json(prepared["before_payload"])
                         if prepared["before_payload"] is not None
                         else None,
-                        _canonical_json(prepared["target_payload"])
+                        "target_payload_json": _canonical_json(prepared["target_payload"])
                         if prepared["target_payload"] is not None
                         else None,
-                        prepared["before_version"],
-                        prepared["before_hash"],
-                        prepared["after_version"],
-                        prepared["after_hash"],
-                        now_value + self.recovery_grace_ms,
-                        self.instance_id,
-                        now_value + self.recovery_lease_ms,
-                        now_value,
-                        now_value,
-                        ),
-                    )
-                except sqlite3.IntegrityError as exc:
-                    if "canon_apply_journal.target_doc_id" in str(exc):
-                        raise CanonApplyError("CANON_APPLY_TARGET_BUSY") from exc
-                    raise
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+                        "before_version": prepared["before_version"],
+                        "before_hash": prepared["before_hash"],
+                        "after_version": prepared["after_version"],
+                        "after_hash": prepared["after_hash"],
+                        "recovery_not_before_ts_ms": now_value + self.recovery_grace_ms,
+                        "lease_owner": self.instance_id,
+                        "lease_expiry_ts_ms": now_value + self.recovery_lease_ms,
+                        "prepared_ts_ms": now_value,
+                        "updated_ts_ms": now_value,
+                    }
+                )
+        except CanonApplyRepositoryError as exc:
+            raise CanonApplyError(exc.reason_code, exc.detail) from exc
         return {
             **prepared,
             "apply_id": command.apply_id,
@@ -876,7 +805,7 @@ class CanonApplyService:
 
     def _validate_token(
         self,
-        token: sqlite3.Row | None,
+        token: Mapping[str, Any] | None,
         command: CanonApplyCommand,
         evidence_digest: str,
         now_value: int,
@@ -920,7 +849,7 @@ class CanonApplyService:
 
     def _validate_approval_attestation(
         self,
-        token: sqlite3.Row,
+        token: Mapping[str, Any],
         command: CanonApplyCommand,
         now_value: int,
     ) -> None:
@@ -1086,7 +1015,7 @@ class CanonApplyService:
 
     def _load_subject(
         self,
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         command: CanonApplyCommand,
         now_value: int,
     ) -> dict[str, Any]:
@@ -1105,21 +1034,18 @@ class CanonApplyService:
             )
 
         if command.operation == CANON_OPERATION_ROLLBACK:
-            return self._load_rollback(conn, command, before_payload)
+            return self._load_rollback(uow, command, before_payload)
         if command.subject_type == CANON_SUBJECT_PROPOSAL:
-            return self._load_proposal(conn, command, before_payload)
-        return self._load_promotion(conn, command, before_payload, now_value)
+            return self._load_proposal(uow, command, before_payload)
+        return self._load_promotion(uow, command, before_payload, now_value)
 
     def _load_proposal(
         self,
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         command: CanonApplyCommand,
         before_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        row = conn.execute(
-            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
-            (command.subject_id,),
-        ).fetchone()
+        row = uow.get_proposal(command.subject_id)
         if row is None:
             raise CanonApplyError("CANON_APPLY_SUBJECT_NOT_FOUND")
         if str(row["status"]).lower() != "pending":
@@ -1179,15 +1105,12 @@ class CanonApplyService:
 
     def _load_promotion(
         self,
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         command: CanonApplyCommand,
         before_payload: dict[str, Any] | None,
         now_value: int,
     ) -> dict[str, Any]:
-        row = conn.execute(
-            "SELECT * FROM pentest_knowledge_promotion_candidate WHERE candidate_id = ?",
-            (command.subject_id,),
-        ).fetchone()
+        row = uow.get_promotion_candidate(command.subject_id)
         if row is None:
             raise CanonApplyError("CANON_APPLY_SUBJECT_NOT_FOUND")
         if str(row["status"]) != "PENDING_REVIEW":
@@ -1196,7 +1119,7 @@ class CanonApplyService:
         if command.subject_version != 1 or command.subject_hash != authorization_hash:
             raise CanonApplyError("CANON_APPLY_SUBJECT_BINDING_MISMATCH")
         payload, evidence_refs = self._validate_promotion_lineage(
-            conn,
+            uow,
             row,
             reason_code="CANON_APPLY_PROMOTION_SOURCE_DRIFT",
         )
@@ -1234,7 +1157,7 @@ class CanonApplyService:
 
     def _load_rollback(
         self,
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         command: CanonApplyCommand,
         before_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -1245,27 +1168,15 @@ class CanonApplyService:
             or str(before_payload["hash"]) != command.subject_hash
         ):
             raise CanonApplyError("CANON_APPLY_SUBJECT_BINDING_MISMATCH")
-        proposal = conn.execute(
-            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
-            (command.subject_id,),
-        ).fetchone()
+        proposal = uow.get_proposal(command.subject_id)
         if proposal is None:
             raise CanonApplyError("CANON_APPLY_SUBJECT_NOT_FOUND")
         if str(proposal["status"]) != "APPLIED":
             raise CanonApplyError("CANON_APPLY_SUBJECT_STATUS_INVALID", str(proposal["status"]))
-        applied = conn.execute(
-            """
-            SELECT *
-            FROM canon_apply_journal
-            WHERE operation = 'APPLY' AND subject_type = 'CANON_PROPOSAL'
-              AND subject_id = ? AND state = 'APPLIED'
-            ORDER BY completed_ts_ms DESC, prepared_ts_ms DESC LIMIT 1
-            """,
-            (command.subject_id,),
-        ).fetchone()
+        applied = uow.latest_applied_subject(command.subject_id)
         if applied is None:
             raise CanonApplyError("CANON_APPLY_ROLLBACK_SNAPSHOT_MISSING")
-        source_context = self._validated_historical_apply_chain(conn, applied)
+        source_context = self._validated_historical_apply_chain(uow, applied)
         if (
             source_context["after_version"] != before_payload["version"]
             or str(source_context["after_hash"] or "") != str(before_payload["hash"])
@@ -1296,12 +1207,8 @@ class CanonApplyService:
         )
         if fence is None:  # pragma: no cover - required helper rejects None
             raise CanonApplyError("CANON_APPLY_JOURNAL_INTEGRITY_FAILED")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = conn.execute(
-                    "SELECT * FROM canon_apply_journal WHERE apply_id = ?", (apply_id,)
-                ).fetchone()
+        with self.repository.transaction() as uow:
+                row = uow.get_journal(apply_id)
                 row_fence = (
                     _integrity_int(
                         row["fence_version"],
@@ -1318,7 +1225,7 @@ class CanonApplyService:
                     not in {JOURNAL_PREPARED, JOURNAL_RECOVERY_REQUIRED}
                 ):
                     raise CanonApplyError("CANON_APPLY_STALE_FENCE")
-                validated = self._journal_context(row, conn=conn)
+                validated = self._journal_context(row, uow=uow)
                 if not self._same_prepared_context(prepared, validated):
                     raise CanonApplyError(
                         "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "prepared context drift"
@@ -1340,10 +1247,6 @@ class CanonApplyService:
                         apply_id=apply_id,
                         permit=_CANON_APPLY_PERMIT,
                     )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
 
     @staticmethod
     def _same_prepared_context(
@@ -1375,39 +1278,24 @@ class CanonApplyService:
     def _mark_file_replaced(self, apply_id: str, fence: int, now_value: int) -> None:
         fence = _required_exact_int(fence, field_name="fence_version")
         now_value = _required_exact_int(now_value, field_name="updated_ts_ms")
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE canon_apply_journal SET file_replaced = 1, updated_ts_ms = ?
-                WHERE apply_id = ? AND fence_version = ?
-                  AND lease_owner = ?
-                  AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                """,
-                (now_value, apply_id, fence, self.instance_id),
-            )
-        if cursor.rowcount != 1:
+        if not self.repository.mark_file_replaced(
+            apply_id=apply_id,
+            fence=fence,
+            lease_owner=self.instance_id,
+            now_ms=now_value,
+        ):
             raise CanonApplyError("CANON_APPLY_STALE_FENCE")
 
     def _renew_lease(self, apply_id: str, fence: int) -> None:
         fence = _required_exact_int(fence, field_name="fence_version")
         now_value = self._clock_ms()
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE canon_apply_journal
-                SET lease_expiry_ts_ms = ?, updated_ts_ms = ?
-                WHERE apply_id = ? AND fence_version = ? AND lease_owner = ?
-                  AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                """,
-                (
-                    now_value + self.recovery_lease_ms,
-                    now_value,
-                    apply_id,
-                    fence,
-                    self.instance_id,
-                ),
-            )
-        if cursor.rowcount != 1:
+        if not self.repository.renew_lease(
+            apply_id=apply_id,
+            fence=fence,
+            lease_owner=self.instance_id,
+            lease_expiry_ms=now_value + self.recovery_lease_ms,
+            now_ms=now_value,
+        ):
             raise CanonApplyError("CANON_APPLY_STALE_FENCE")
 
     def _finalize(
@@ -1420,12 +1308,8 @@ class CanonApplyService:
     ) -> CanonApplyResult:
         fence = _required_exact_int(fence, field_name="fence_version")
         now_value = _required_exact_int(now_value, field_name="completed_ts_ms")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = conn.execute(
-                    "SELECT * FROM canon_apply_journal WHERE apply_id = ?", (apply_id,)
-                ).fetchone()
+        with self.repository.transaction() as uow:
+                row = uow.get_journal(apply_id)
                 row_fence = (
                     _integrity_int(
                         row["fence_version"],
@@ -1440,97 +1324,50 @@ class CanonApplyService:
                     raise CanonApplyError("CANON_APPLY_STALE_FENCE")
                 if str(row["state"]) not in {JOURNAL_PREPARED, JOURNAL_RECOVERY_REQUIRED}:
                     raise CanonApplyError("CANON_APPLY_FINALIZE_STATE_INVALID", str(row["state"]))
-                prepared = self._journal_context(row, conn=conn)
+                prepared = self._journal_context(row, uow=uow)
                 if self._file_disposition(prepared) != "TARGET":
                     raise CanonApplyError("CANON_APPLY_FINALIZE_FILE_MISMATCH")
-                subject_cursor = conn.execute(
-                    f"UPDATE {prepared['subject_table']} SET status = ? "
-                    f"WHERE {prepared['subject_key']} = ? AND status = ?",
-                    (
-                        row["subject_final_status"],
-                        row["subject_id"],
-                        row["subject_prepared_status"],
-                    ),
-                )
-                if subject_cursor.rowcount != 1:
+                if not uow.cas_subject_status(
+                    table=prepared["subject_table"],
+                    subject_id=str(row["subject_id"]),
+                    expected_status=str(row["subject_prepared_status"]),
+                    new_status=str(row["subject_final_status"]),
+                ):
                     raise CanonApplyError("CANON_APPLY_SUBJECT_FINALIZE_CAS_FAILED")
                 change_id = f"canon_apply::{apply_id}"
-                conn.execute(
-                    """
-                    INSERT INTO canon_change_log (
-                        change_id, proposal_id, canon_kind, target_id,
-                        before_version, after_version, before_hash, after_hash,
-                        before_body, after_body, source_path, ts_ms
-                    ) VALUES (?, ?, 'world', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        change_id,
-                        row["subject_id"],
-                        row["target_doc_id"],
-                        prepared["before_version"] or None,
-                        prepared["after_version"],
-                        row["before_hash"],
-                        row["after_hash"],
-                        prepared["before_payload"].get("body")
+                source_path = str(self.store._doc_path(str(row["target_doc_id"])))
+                uow.insert_change_log(
+                    {
+                        "change_id": change_id,
+                        "proposal_id": row["subject_id"],
+                        "target_id": row["target_doc_id"],
+                        "before_version": prepared["before_version"] or None,
+                        "after_version": prepared["after_version"],
+                        "before_hash": row["before_hash"],
+                        "after_hash": row["after_hash"],
+                        "before_body": prepared["before_payload"].get("body")
                         if prepared["before_payload"]
                         else None,
-                        prepared["target_payload"].get("body")
+                        "after_body": prepared["target_payload"].get("body")
                         if prepared["target_payload"]
                         else None,
-                        str(self.store._doc_path(str(row["target_doc_id"]))),
-                        now_value,
-                    ),
+                        "source_path": source_path,
+                        "ts_ms": now_value,
+                    }
                 )
-                if prepared["target_payload"] is None:
-                    conn.execute(
-                        "DELETE FROM world_canon_doc WHERE doc_id = ?", (row["target_doc_id"],)
-                    )
-                else:
-                    target = prepared["target_payload"]
-                    conn.execute(
-                        """
-                        INSERT INTO world_canon_doc (
-                            doc_id, version, hash, status, source_path, updated_ts
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(doc_id) DO UPDATE SET
-                            version = excluded.version, hash = excluded.hash,
-                            status = excluded.status, source_path = excluded.source_path,
-                            updated_ts = excluded.updated_ts
-                        """,
-                        (
-                            target["doc_id"],
-                            target["version"],
-                            target["hash"],
-                            target["status"],
-                            str(self.store._doc_path(target["doc_id"])),
-                            now_value,
-                        ),
-                    )
-                journal_cursor = conn.execute(
-                    """
-                    UPDATE canon_apply_journal
-                    SET state = 'APPLIED', file_replaced = 1, reason_code = NULL,
-                        detail = NULL, lease_owner = NULL, lease_expiry_ts_ms = ?,
-                        updated_ts_ms = ?, completed_ts_ms = ?
-                    WHERE apply_id = ? AND fence_version = ?
-                      AND lease_owner = ?
-                      AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                    """,
-                    (
-                        now_value,
-                        now_value,
-                        now_value,
-                        apply_id,
-                        fence,
-                        self.instance_id,
-                    ),
+                uow.project_world_document(
+                    prepared["target_payload"],
+                    doc_id=str(row["target_doc_id"]),
+                    source_path=source_path,
+                    now_ms=now_value,
                 )
-                if journal_cursor.rowcount != 1:
+                if not uow.finalize_journal(
+                    apply_id=apply_id,
+                    fence=fence,
+                    lease_owner=self.instance_id,
+                    now_ms=now_value,
+                ):
                     raise CanonApplyError("CANON_APPLY_STALE_FENCE")
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
         return CanonApplyResult(
             apply_id=apply_id,
             operation=str(row["operation"]),
@@ -1558,12 +1395,8 @@ class CanonApplyService:
             raise ValueError("invalid failure state")
         fence = _required_exact_int(fence, field_name="fence_version")
         now_ts_ms = _required_exact_int(now_ts_ms, field_name="updated_ts_ms")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = conn.execute(
-                    "SELECT * FROM canon_apply_journal WHERE apply_id = ?", (apply_id,)
-                ).fetchone()
+        with self.repository.transaction() as uow:
+                row = uow.get_journal(apply_id)
                 row_fence = (
                     _integrity_int(
                         row["fence_version"],
@@ -1573,47 +1406,24 @@ class CanonApplyService:
                     else None
                 )
                 if row is None or row_fence != fence:
-                    conn.execute("ROLLBACK")
                     return
-                cursor = conn.execute(
-                    """
-                    UPDATE canon_apply_journal
-                    SET state = ?, reason_code = ?, detail = ?,
-                        recovery_not_before_ts_ms = CASE
-                            WHEN ? = 'RECOVERY_REQUIRED' THEN ?
-                            ELSE recovery_not_before_ts_ms END,
-                        lease_owner = NULL, lease_expiry_ts_ms = ?, updated_ts_ms = ?
-                    WHERE apply_id = ? AND fence_version = ?
-                      AND lease_owner = ?
-                      AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                    """,
-                    (
-                        state,
-                        str(reason_code)[:120],
-                        str(detail)[:1000],
-                        state,
-                        now_ts_ms,
-                        now_ts_ms,
-                        now_ts_ms,
-                        apply_id,
-                        fence,
-                        self.instance_id,
-                    ),
+                changed = uow.record_failure(
+                    apply_id=apply_id,
+                    fence=fence,
+                    lease_owner=self.instance_id,
+                    state=state,
+                    reason_code=str(reason_code),
+                    detail=str(detail),
+                    now_ms=now_ts_ms,
                 )
-                if cursor.rowcount == 1 and state == JOURNAL_FAILED:
+                if changed and state == JOURNAL_FAILED:
                     subject = self._subject_coordinates(row)
-                    conn.execute(
-                        f"UPDATE {subject[0]} SET status = ? WHERE {subject[1]} = ? AND status = ?",
-                        (
-                            row["subject_previous_status"],
-                            row["subject_id"],
-                            row["subject_prepared_status"],
-                        ),
+                    uow.cas_subject_status(
+                        table=subject[0],
+                        subject_id=str(row["subject_id"]),
+                        expected_status=str(row["subject_prepared_status"]),
+                        new_status=str(row["subject_previous_status"]),
                     )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
 
     def _classify_failure(self, prepared: Mapping[str, Any]) -> str:
         disposition = self._file_disposition(prepared)
@@ -1636,17 +1446,12 @@ class CanonApplyService:
 
     def _claim_recovery(self, apply_id: str, now_value: int) -> dict[str, Any] | None:
         now_value = _required_exact_int(now_value, field_name="recovery_now_ts_ms")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                row = conn.execute(
-                    "SELECT * FROM canon_apply_journal WHERE apply_id = ?", (apply_id,)
-                ).fetchone()
+        with self.repository.transaction() as uow:
+                row = uow.get_journal(apply_id)
                 if row is None or str(row["state"]) not in {
                     JOURNAL_PREPARED,
                     JOURNAL_RECOVERY_REQUIRED,
                 }:
-                    conn.execute("ROLLBACK")
                     return None
                 try:
                     recovery_not_before_ts_ms = _integrity_int(
@@ -1668,91 +1473,45 @@ class CanonApplyService:
                     ):  # pragma: no cover - required helpers reject None
                         raise CanonApplyError("CANON_APPLY_JOURNAL_INTEGRITY_FAILED")
                 except CanonApplyError as exc:
-                    conn.execute(
-                        """
-                        UPDATE canon_apply_journal
-                        SET state = 'RECOVERY_REQUIRED',
-                            reason_code = 'CANON_APPLY_JOURNAL_INTEGRITY_FAILED',
-                            detail = ?, recovery_not_before_ts_ms = ?,
-                            lease_owner = NULL, lease_expiry_ts_ms = ?, updated_ts_ms = ?
-                        WHERE apply_id = ?
-                          AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                        """,
-                        (
-                            str(exc)[:1000],
-                            now_value + self.recovery_grace_ms,
-                            now_value,
-                            now_value,
-                            apply_id,
-                        ),
+                    uow.quarantine_recovery(
+                        apply_id=apply_id,
+                        detail=str(exc),
+                        recovery_not_before_ms=now_value + self.recovery_grace_ms,
+                        now_ms=now_value,
                     )
-                    conn.execute("COMMIT")
                     return None
                 if (
                     recovery_not_before_ts_ms > now_value
                     or lease_expiry_ts_ms > now_value
                 ):
-                    conn.execute("ROLLBACK")
                     return None
                 try:
-                    context = self._journal_context(row, conn=conn)
+                    context = self._journal_context(row, uow=uow)
                 except CanonApplyError as exc:
-                    conn.execute(
-                        """
-                        UPDATE canon_apply_journal
-                        SET state = 'RECOVERY_REQUIRED',
-                            reason_code = 'CANON_APPLY_JOURNAL_INTEGRITY_FAILED',
-                            detail = ?, recovery_not_before_ts_ms = ?,
-                            lease_owner = NULL, lease_expiry_ts_ms = ?, updated_ts_ms = ?
-                        WHERE apply_id = ? AND fence_version = ?
-                          AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                        """,
-                        (
-                            str(exc)[:1000],
-                            now_value + self.recovery_grace_ms,
-                            now_value,
-                            now_value,
-                            apply_id,
-                            old_fence,
-                        ),
+                    uow.quarantine_recovery(
+                        apply_id=apply_id,
+                        detail=str(exc),
+                        recovery_not_before_ms=now_value + self.recovery_grace_ms,
+                        now_ms=now_value,
+                        fence=old_fence,
                     )
-                    conn.execute("COMMIT")
                     return None
-                cursor = conn.execute(
-                    """
-                    UPDATE canon_apply_journal
-                    SET state = 'RECOVERY_REQUIRED', fence_version = fence_version + 1,
-                        reason_code = 'CANON_APPLY_RECOVERY_CLAIMED',
-                        lease_owner = ?, lease_expiry_ts_ms = ?, updated_ts_ms = ?
-                    WHERE apply_id = ? AND fence_version = ?
-                      AND state IN ('PREPARED', 'RECOVERY_REQUIRED')
-                      AND recovery_not_before_ts_ms <= ? AND lease_expiry_ts_ms <= ?
-                    """,
-                    (
-                        self.instance_id,
-                        now_value + self.recovery_lease_ms,
-                        now_value,
-                        apply_id,
-                        old_fence,
-                        now_value,
-                        now_value,
-                    ),
-                )
-                if cursor.rowcount != 1:
-                    conn.execute("ROLLBACK")
+                if not uow.claim_recovery(
+                    apply_id=apply_id,
+                    old_fence=old_fence,
+                    lease_owner=self.instance_id,
+                    lease_expiry_ms=now_value + self.recovery_lease_ms,
+                    now_ms=now_value,
+                ):
                     return None
-                conn.execute("COMMIT")
                 context["fence_version"] = old_fence + 1
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
         return context
 
     def _journal_context(
         self,
-        row: sqlite3.Row,
+        row: Mapping[str, Any],
         *,
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         validate_subject: bool = True,
     ) -> dict[str, Any]:
         try:
@@ -1790,9 +1549,7 @@ class CanonApplyService:
                 raise CanonApplyError(
                     "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "command hash mismatch"
                 )
-            token = conn.execute(
-                "SELECT * FROM canon_apply_token WHERE token_digest = ?", (token_digest,)
-            ).fetchone()
+            token = uow.get_token(token_digest)
             if token is None:
                 raise CanonApplyError(
                     "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "token missing"
@@ -1835,7 +1592,7 @@ class CanonApplyService:
             table, key = self._subject_coordinates(row)
             self._validate_journal_operation_coordinates(row, before, target)
             if validate_subject:
-                self._validate_journal_subject(conn, row, before, target)
+                self._validate_journal_subject(uow, row, before, target)
             return {
                 "apply_id": apply_id,
                 "target_doc_id": target_doc_id,
@@ -1855,7 +1612,7 @@ class CanonApplyService:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", exc.reason_code
             ) from exc
-        except (KeyError, TypeError, ValueError, sqlite3.Error) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", str(exc)
             ) from exc
@@ -1972,25 +1729,25 @@ class CanonApplyService:
 
     def _validate_journal_subject(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         before: dict[str, Any] | None,
         target: dict[str, Any] | None,
     ) -> None:
         operation = str(row["operation"])
         subject_type = str(row["subject_type"])
         if operation == CANON_OPERATION_APPLY and subject_type == CANON_SUBJECT_PROPOSAL:
-            self._validate_prepared_proposal(conn, row, target)
+            self._validate_prepared_proposal(uow, row, target)
             return
         if operation == CANON_OPERATION_APPLY and subject_type == CANON_SUBJECT_PENTEST_PROMOTION:
-            self._validate_prepared_promotion(conn, row, target)
+            self._validate_prepared_promotion(uow, row, target)
             return
-        self._validate_prepared_rollback(conn, row, before, target)
+        self._validate_prepared_rollback(uow, row, before, target)
 
     def _validate_prepared_proposal(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         target: dict[str, Any] | None,
     ) -> None:
         if (
@@ -2001,10 +1758,7 @@ class CanonApplyService:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "proposal status coordinates invalid"
             )
-        proposal = conn.execute(
-            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
-            (row["subject_id"],),
-        ).fetchone()
+        proposal = uow.get_proposal(str(row["subject_id"]))
         if proposal is None or str(proposal["status"]) != "APPLY_PREPARED":
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "prepared proposal missing"
@@ -2071,8 +1825,8 @@ class CanonApplyService:
 
     def _validate_prepared_promotion(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         target: dict[str, Any] | None,
     ) -> None:
         if (
@@ -2083,10 +1837,7 @@ class CanonApplyService:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "promotion status coordinates invalid"
             )
-        candidate = conn.execute(
-            "SELECT * FROM pentest_knowledge_promotion_candidate WHERE candidate_id = ?",
-            (row["subject_id"],),
-        ).fetchone()
+        candidate = uow.get_promotion_candidate(str(row["subject_id"]))
         if candidate is None or str(candidate["status"]) != "APPROVED":
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "prepared promotion missing"
@@ -2098,7 +1849,7 @@ class CanonApplyService:
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "prepared promotion drift"
             )
         self._validate_promotion_lineage(
-            conn,
+            uow,
             candidate,
             reason_code="CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
         )
@@ -2120,7 +1871,7 @@ class CanonApplyService:
 
     @staticmethod
     def _validate_promotion_lineage(
-        conn: sqlite3.Connection,
+        uow: CanonApplyUnitOfWork,
         candidate: Mapping[str, Any],
         *,
         reason_code: str,
@@ -2130,10 +1881,7 @@ class CanonApplyService:
             evidence_refs = json.loads(str(candidate["evidence_refs_json"] or "[]"))
         except json.JSONDecodeError as exc:
             raise CanonApplyError(reason_code, "promotion evidence invalid") from exc
-        entry = conn.execute(
-            "SELECT * FROM pentest_knowledge_entry WHERE entry_id = ?",
-            (candidate["entry_id"],),
-        ).fetchone()
+        entry = uow.get_pentest_entry(str(candidate["entry_id"]))
         if entry is None:
             raise CanonApplyError(reason_code, "promotion source entry missing")
         try:
@@ -2273,8 +2021,8 @@ class CanonApplyService:
 
     def _validated_historical_apply_chain(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         *,
         path: frozenset[str] | None = None,
         depth: int = 0,
@@ -2311,9 +2059,9 @@ class CanonApplyService:
                 "historical apply final state invalid",
             ) from exc
 
-        context = self._journal_context(row, conn=conn, validate_subject=False)
+        context = self._journal_context(row, uow=uow, validate_subject=False)
         self._validate_historical_apply_subject(
-            conn,
+            uow,
             row,
             context["target_payload"],
         )
@@ -2328,32 +2076,21 @@ class CanonApplyService:
             return context
 
         next_path = current_path | {apply_id}
-        predecessors = conn.execute(
-            """
-            SELECT * FROM canon_apply_journal
-            WHERE state = 'APPLIED' AND operation = 'APPLY'
-              AND target_doc_id = ? AND after_version = ? AND after_hash = ?
-              AND apply_id <> ? AND completed_ts_ms IS NOT NULL
-              AND completed_ts_ms <= ?
-            ORDER BY completed_ts_ms DESC, prepared_ts_ms DESC, apply_id DESC
-            LIMIT ?
-            """,
-            (
-                context["target_doc_id"],
-                before_version,
-                context["before_hash"],
-                apply_id,
-                prepared_ts_ms,
-                _MAX_APPLIED_LINEAGE_CANDIDATES,
-            ),
-        ).fetchall()
+        predecessors = uow.list_apply_predecessors(
+            target_doc_id=context["target_doc_id"],
+            after_version=before_version,
+            after_hash=context["before_hash"],
+            exclude_apply_id=apply_id,
+            completed_before_ms=prepared_ts_ms,
+            limit=_MAX_APPLIED_LINEAGE_CANDIDATES,
+        )
         for predecessor in predecessors:
             predecessor_id = str(predecessor["apply_id"] or "")
             if not predecessor_id or predecessor_id in next_path:
                 continue
             try:
                 predecessor_context = self._validated_historical_apply_chain(
-                    conn,
+                    uow,
                     predecessor,
                     path=next_path,
                     depth=depth + 1,
@@ -2369,16 +2106,16 @@ class CanonApplyService:
 
     def _validate_historical_apply_subject(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         target: dict[str, Any] | None,
     ) -> None:
         subject_type = str(row["subject_type"])
         if subject_type == CANON_SUBJECT_PROPOSAL:
-            self._validate_historical_proposal(conn, row, target)
+            self._validate_historical_proposal(uow, row, target)
             return
         if subject_type == CANON_SUBJECT_PENTEST_PROMOTION:
-            self._validate_historical_promotion(conn, row, target)
+            self._validate_historical_promotion(uow, row, target)
             return
         raise CanonApplyError(
             "CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
@@ -2387,8 +2124,8 @@ class CanonApplyService:
 
     def _validate_historical_proposal(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         target: dict[str, Any] | None,
     ) -> None:
         if (
@@ -2400,10 +2137,7 @@ class CanonApplyService:
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
                 "historical proposal status coordinates invalid",
             )
-        proposal = conn.execute(
-            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
-            (row["subject_id"],),
-        ).fetchone()
+        proposal = uow.get_proposal(str(row["subject_id"]))
         if (
             proposal is None
             or str(proposal["status"]) not in {"APPLIED", "ROLLBACK_PREPARED"}
@@ -2450,8 +2184,8 @@ class CanonApplyService:
 
     def _validate_historical_promotion(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         target: dict[str, Any] | None,
     ) -> None:
         if (
@@ -2463,10 +2197,7 @@ class CanonApplyService:
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
                 "historical promotion status coordinates invalid",
             )
-        candidate = conn.execute(
-            "SELECT * FROM pentest_knowledge_promotion_candidate WHERE candidate_id = ?",
-            (row["subject_id"],),
-        ).fetchone()
+        candidate = uow.get_promotion_candidate(str(row["subject_id"]))
         if candidate is None or str(candidate["status"]) != "APPLIED":
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
@@ -2477,7 +2208,7 @@ class CanonApplyService:
         try:
             authorization_hash = compute_promotion_subject_hash(original)
             _payload, evidence_refs = self._validate_promotion_lineage(
-                conn,
+                uow,
                 candidate,
                 reason_code="CANON_APPLY_JOURNAL_INTEGRITY_FAILED",
             )
@@ -2519,8 +2250,8 @@ class CanonApplyService:
 
     def _validate_prepared_rollback(
         self,
-        conn: sqlite3.Connection,
-        row: sqlite3.Row,
+        uow: CanonApplyUnitOfWork,
+        row: Mapping[str, Any],
         before: dict[str, Any] | None,
         target: dict[str, Any] | None,
     ) -> None:
@@ -2532,10 +2263,7 @@ class CanonApplyService:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "rollback status coordinates invalid"
             )
-        proposal = conn.execute(
-            "SELECT * FROM canon_proposal_log WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
-            (row["subject_id"],),
-        ).fetchone()
+        proposal = uow.get_proposal(str(row["subject_id"]))
         if (
             proposal is None
             or str(proposal["status"]) != "ROLLBACK_PREPARED"
@@ -2545,26 +2273,17 @@ class CanonApplyService:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "prepared rollback missing"
             )
-        source = conn.execute(
-            """
-            SELECT * FROM canon_apply_journal
-            WHERE operation = 'APPLY' AND subject_type = 'CANON_PROPOSAL'
-              AND subject_id = ? AND target_doc_id = ? AND state = 'APPLIED'
-              AND after_version = ? AND after_hash = ?
-            ORDER BY completed_ts_ms DESC, prepared_ts_ms DESC LIMIT 1
-            """,
-            (
-                row["subject_id"],
-                row["target_doc_id"],
-                row["before_version"],
-                row["before_hash"],
-            ),
-        ).fetchone()
+        source = uow.applied_rollback_source(
+            subject_id=str(row["subject_id"]),
+            target_doc_id=str(row["target_doc_id"]),
+            after_version=int(row["before_version"]),
+            after_hash=str(row["before_hash"]),
+        )
         if source is None:
             raise CanonApplyError(
                 "CANON_APPLY_JOURNAL_INTEGRITY_FAILED", "rollback lineage missing"
             )
-        source_context = self._validated_historical_apply_chain(conn, source)
+        source_context = self._validated_historical_apply_chain(uow, source)
         if (
             not _same_complete_payload(source_context["target_payload"], before)
             or not _same_complete_payload(source_context["before_payload"], target)

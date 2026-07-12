@@ -20,7 +20,7 @@ from host_brain.skills.supply_chain import (
     SupplyChainActivationMode,
 )
 from host_brain.skills.supply_chain_quarantine import QuarantineDecision
-from host_brain.skills.supply_chain_store import (
+from host_brain.persistence.supply_chain_repository import (
     BundleKind,
     SkillSupplyChainStoreError,
 )

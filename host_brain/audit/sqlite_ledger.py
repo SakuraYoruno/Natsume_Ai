@@ -171,6 +171,7 @@ class SQLiteLedger(
         *,
         check_same_thread: bool = True,
         wal_config: WalConfig | None = None,
+        initialize_schema: bool = True,
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
@@ -194,7 +195,8 @@ class SQLiteLedger(
         self._table_name_cache: set[str] | None = None
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
-        self._ensure_schema()
+        if initialize_schema:
+            self._ensure_schema()
 
     @property
     def canonical_db_path(self) -> str:
@@ -1273,80 +1275,3 @@ class SQLiteLedger(
 
     def _ensure_schema(self) -> None:
         apply_schema(self._conn)
-        self._ensure_life_memory_columns()
-        self._ensure_canon_proposal_content_columns()
-
-    def _ensure_life_memory_columns(self) -> None:
-        additions = {
-            "actor_id": "TEXT",
-            "intent": "TEXT",
-            "action": "TEXT",
-            "result": "TEXT",
-            "base_salience": "REAL NOT NULL DEFAULT 0.0",
-            "memory_strength": "REAL NOT NULL DEFAULT 0.0",
-            "decay_profile_id": "TEXT NOT NULL DEFAULT 'NORMAL'",
-            "retention_state": "TEXT NOT NULL DEFAULT 'COLD'",
-            "last_recalled_ts_ms": "INTEGER",
-            "recall_count": "INTEGER NOT NULL DEFAULT 0",
-            "reinforcement_count": "INTEGER NOT NULL DEFAULT 0",
-            "compressed_into_episode_id": "TEXT",
-            "retention_until_ts_ms": "INTEGER",
-            "forget_reason": "TEXT",
-        }
-        changed = False
-        for column, ddl_type in additions.items():
-            if self._table_has_column("life_episode", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE life_episode ADD COLUMN {column} {ddl_type}"
-                    )
-            changed = True
-            with self._column_cache_lock:
-                self._column_cache.pop("life_episode", None)
-        if changed:
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        """
-                        UPDATE life_episode
-                        SET
-                            base_salience = COALESCE(NULLIF(base_salience, 0.0), COALESCE(salience, 0.0)),
-                            memory_strength = CASE
-                                WHEN COALESCE(memory_strength, 0.0) > 0.0 THEN memory_strength
-                                ELSE COALESCE(salience, 0.0)
-                            END,
-                            retention_state = CASE
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.75 THEN 'HOT'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.35 THEN 'WARM'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.10 THEN 'COLD'
-                                ELSE 'GONE'
-                            END
-                        """
-                    )
-        with self._write_lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_life_episode_retention
-                    ON life_episode(retention_state, memory_strength, last_touched_ts_ms)
-                    """
-                )
-
-    def _ensure_canon_proposal_content_columns(self) -> None:
-        additions = {
-            "proposed_title": "TEXT",
-            "proposed_tags": "TEXT",
-            "proposed_body": "TEXT",
-        }
-        for column, ddl_type in additions.items():
-            if self._table_has_column("canon_proposal_log", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE canon_proposal_log ADD COLUMN {column} {ddl_type}"
-                    )
-            with self._column_cache_lock:
-                self._column_cache.pop("canon_proposal_log", None)

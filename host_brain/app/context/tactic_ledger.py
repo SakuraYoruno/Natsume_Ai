@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persona.reply_tactics import canonical_tactic_signature, tactic_key
 
 
@@ -114,9 +115,7 @@ class SessionTacticLedgerStore:
 
     def __init__(self, ledger: SQLiteLedger) -> None:
         self._ledger = ledger
-        self._conn = ledger._conn
-        self._write_lock = ledger._write_lock
-        self._ledger._ensure_schema()
+        self._repository = ContextRepository.from_ledger(ledger)
 
     def record_reply_plan(
         self,
@@ -137,55 +136,27 @@ class SessionTacticLedgerStore:
         if not normalized_session or not normalized_request or not normalized_topic or not normalized_family:
             return
         created_ts_ms = int(ts_ms or int(time.time() * 1000))
-        with self._write_lock:
-            self._conn.execute(
-                """
-                INSERT INTO session_tactic_ledger (
-                    session_id,
-                    request_id,
-                    topic_key,
-                    interaction_move,
-                    tactic_family,
-                    tactic_variant,
-                    trajectory_stage,
-                    ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    normalized_session,
-                    normalized_request,
-                    normalized_topic,
-                    str(interaction_move or "").strip(),
-                    normalized_family,
-                    str(tactic_variant or "").strip(),
-                    str(trajectory_stage or "").strip(),
-                    created_ts_ms,
-                ),
-            )
-            self._conn.commit()
+        self._repository.append_tactic(
+            {
+                "session_id": normalized_session,
+                "request_id": normalized_request,
+                "topic_key": normalized_topic,
+                "interaction_move": str(interaction_move or "").strip(),
+                "tactic_family": normalized_family,
+                "tactic_variant": str(tactic_variant or "").strip(),
+                "trajectory_stage": str(trajectory_stage or "").strip(),
+                "ts_ms": created_ts_ms,
+            }
+        )
 
     def fetch_block(self, *, session_id: str, limit: int = 24) -> TacticLedgerBlock:
         normalized_session = str(session_id or "").strip()
         if not normalized_session:
             return TacticLedgerBlock()
-        rows = self._conn.execute(
-            """
-            SELECT
-                session_id,
-                request_id,
-                topic_key,
-                interaction_move,
-                tactic_family,
-                tactic_variant,
-                trajectory_stage,
-                ts_ms
-            FROM session_tactic_ledger
-            WHERE session_id = ?
-            ORDER BY ts_ms DESC, id DESC
-            LIMIT ?
-            """,
-            (normalized_session, max(1, int(limit or 24))),
-        ).fetchall()
+        rows = self._repository.fetch_tactics(
+            session_id=normalized_session,
+            limit=max(1, int(limit or 24)),
+        )
         entries = tuple(
             TacticLedgerEntry(
                 session_id=str(row["session_id"] or "").strip(),
@@ -206,13 +177,7 @@ class SessionTacticLedgerStore:
         normalized_session = str(session_id or "").strip()
         if not normalized_session:
             return 0
-        with self._write_lock:
-            cursor = self._conn.execute(
-                "DELETE FROM session_tactic_ledger WHERE session_id = ?",
-                (normalized_session,),
-            )
-            self._conn.commit()
-            return int(cursor.rowcount or 0)
+        return self._repository.delete_tactic_session(session_id=normalized_session)
 
 
 def coerce_tactic_ledger_block(raw: Any) -> TacticLedgerBlock:

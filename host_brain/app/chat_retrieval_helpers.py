@@ -755,9 +755,18 @@ async def _maybe_apply_lightnovel_deep_review(
         from dataclasses import replace  # noqa: PLC0415
 
         from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            configure_life_action_memory_persist,
+            configure_life_memory_store_provider,
             review_lightnovel_selection_from_memory_packet,
             should_deep_review_lightnovel_selection,
         )
+        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+
+        configure_life_memory_store_provider(get_life_memory_store)
+        configure_life_action_memory_persist(persist_life_action_event_memory)
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}

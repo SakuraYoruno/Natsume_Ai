@@ -24,6 +24,7 @@ from host_brain.app.obs_routes_task_runtime import (
     list_task_runtime_executions,
 )
 from host_brain.app.settings.core import get_core_settings
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
 
 
@@ -433,9 +434,10 @@ def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.Mon
 
 def test_t_nle_21_aggregate_cursor_replay_is_exact_and_large_dag_safe(tmp_path: Path) -> None:
     db_path = tmp_path / "operator-events.sqlite3"
-    migration = Path("host_brain/audit/migrations/0056_runtime_events.sql")
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(migration.read_text(encoding="utf-8"))
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="nle-operator-event-fixture",
+    )
+    assert migrated.success, migrated.as_dict()
     store = RuntimeEventStore(db_path, clock=lambda: 1_000)
     for index in range(1, 4):
         store.append_event(

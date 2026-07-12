@@ -1,12 +1,19 @@
+"""Life organ reducers and compatibility API.
+
+Reducers hand semantic UoWs to ``LifeRuntimeRepository``, the sole production
+persistence owner for this slice.
+"""
+
 from __future__ import annotations
 
 import copy
-import json
 import re
 import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
+
+from host_brain.persistence.life_runtime_repository import LifeRuntimeRepository
 
 DEFAULT_PERSON_ID = "default"
 
@@ -62,21 +69,9 @@ ORGAN_PROFILES: dict[str, dict[str, str]] = {
     "cortex": {"drive": "scene_integration", "label": "场景整合"},
 }
 
-ORGAN_SCHEMA_SQL: tuple[str, ...] = (
-    "CREATE TABLE IF NOT EXISTS life_experience_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, session_id TEXT, source_kind TEXT NOT NULL, event_kind TEXT NOT NULL, content_summary TEXT NOT NULL DEFAULT '', evidence_json TEXT NOT NULL DEFAULT '{}', salience REAL NOT NULL DEFAULT 0.0, valence REAL NOT NULL DEFAULT 0.0, uncertainty REAL NOT NULL DEFAULT 0.0, created_at_ms INTEGER NOT NULL, consumed_by_organs INTEGER NOT NULL DEFAULT 0)",
-    "CREATE TABLE IF NOT EXISTS organ_runtime_state (person_id TEXT NOT NULL, organ_id TEXT NOT NULL, state_json TEXT NOT NULL DEFAULT '{}', updated_at_ms INTEGER NOT NULL, PRIMARY KEY(person_id, organ_id))",
-    "CREATE TABLE IF NOT EXISTS organ_runtime_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, experience_event_id TEXT NOT NULL, person_id TEXT NOT NULL, organ_id TEXT NOT NULL, delta_json TEXT NOT NULL DEFAULT '{}', state_before_json TEXT NOT NULL DEFAULT '{}', state_after_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS organ_coupling_event (id INTEGER PRIMARY KEY AUTOINCREMENT, coupling_id TEXT NOT NULL UNIQUE, source_experience_event_id TEXT, person_id TEXT NOT NULL, source_organs_json TEXT NOT NULL DEFAULT '[]', target_organ_id TEXT NOT NULL, effect_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS life_state_synthesis_log (id INTEGER PRIMARY KEY AUTOINCREMENT, synthesis_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_experience_event_id TEXT, organ_summary_json TEXT NOT NULL DEFAULT '{}', state_patch_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS proactive_interaction_episode (id INTEGER PRIMARY KEY AUTOINCREMENT, episode_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_action_id TEXT, source_outbox_id TEXT, motive TEXT NOT NULL DEFAULT '', organ_sources_json TEXT NOT NULL DEFAULT '[]', message_text TEXT NOT NULL DEFAULT '', expected_response_kind TEXT NOT NULL DEFAULT '', sent_at_ms INTEGER NOT NULL DEFAULT 0, user_response_turn_id TEXT, outcome TEXT NOT NULL DEFAULT 'pending', organ_delta_after_json TEXT NOT NULL DEFAULT '{}', closed_at_ms INTEGER NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL DEFAULT '{}')",
-    "CREATE INDEX IF NOT EXISTS idx_life_experience_person_ts ON life_experience_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_life_experience_unconsumed ON life_experience_event(person_id, consumed_by_organs, created_at_ms)",
-    "CREATE INDEX IF NOT EXISTS idx_organ_runtime_event_person_ts ON organ_runtime_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_organ_coupling_person_ts ON organ_coupling_event(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_life_state_synthesis_person_ts ON life_state_synthesis_log(person_id, created_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_proactive_episode_person_ts ON proactive_interaction_episode(person_id, sent_at_ms DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_proactive_episode_pending ON proactive_interaction_episode(person_id, outcome, sent_at_ms DESC)",
-)
+# Compatibility export only. Schema ownership moved to the central migration
+# catalog (0049/0057/0071); runtime modules never carry DDL.
+ORGAN_SCHEMA_SQL: tuple[str, ...] = ()
 
 
 def _now_ms() -> int:
@@ -87,26 +82,8 @@ def _event_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
-def _conn(ledger: Any) -> Any:
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
-        raise RuntimeError("ledger sqlite connection unavailable")
-    return conn
-
-
-def _dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
-
-
-def _loads(value: Any, default: Any) -> Any:
-    if value is None or value == "":
-        return copy.deepcopy(default)
-    if isinstance(value, (dict, list)):
-        return copy.deepcopy(value)
-    try:
-        return json.loads(str(value))
-    except Exception:
-        return copy.deepcopy(default)
+def _repository(ledger: Any) -> LifeRuntimeRepository:
+    return LifeRuntimeRepository.from_ledger(ledger)
 
 
 def _map(value: Any) -> dict[str, Any]:
@@ -129,10 +106,7 @@ def _clamp(value: Any, default: float = 0.0) -> float:
 
 
 def ensure_organ_schema(ledger: Any) -> None:
-    conn = _conn(ledger)
-    for sql in ORGAN_SCHEMA_SQL:
-        conn.execute(sql)
-    conn.commit()
+    _repository(ledger).assert_schema_ready()
 
 
 def _default_organ_state(organ_id: str, now_ms: int | None = None) -> dict[str, Any]:
@@ -154,31 +128,22 @@ def _default_organ_state(organ_id: str, now_ms: int | None = None) -> dict[str, 
     }
 
 
-def _get_organ_state(conn: Any, person_id: str, organ_id: str, now_ms: int) -> dict[str, Any]:
-    row = conn.execute(
-        "SELECT state_json FROM organ_runtime_state WHERE person_id=? AND organ_id=?",
-        (person_id, organ_id),
-    ).fetchone()
-    if row:
-        state = _loads(row[0], {})
+def _get_organ_state(
+    stored_states: Mapping[str, Mapping[str, Any]],
+    person_id: str,
+    organ_id: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    del person_id
+    state = stored_states.get(organ_id)
+    if state:
+        state = dict(state)
         if isinstance(state, dict) and state:
             base = _default_organ_state(organ_id, now_ms)
             base.update(state)
             base["organ_id"] = organ_id
             return base
     return _default_organ_state(organ_id, now_ms)
-
-
-def _save_organ_state(conn: Any, person_id: str, state: Mapping[str, Any], now_ms: int) -> None:
-    organ_id = str(state.get("organ_id") or "")
-    if not organ_id:
-        return
-    payload = dict(state)
-    payload["updated_at_ms"] = now_ms
-    conn.execute(
-        "INSERT INTO organ_runtime_state(person_id, organ_id, state_json, updated_at_ms) VALUES(?, ?, ?, ?) ON CONFLICT(person_id, organ_id) DO UPDATE SET state_json=excluded.state_json, updated_at_ms=excluded.updated_at_ms",
-        (person_id, organ_id, _dumps(payload), now_ms),
-    )
 
 
 def _decay_state(state: Mapping[str, Any], elapsed_min: float) -> dict[str, Any]:
@@ -643,8 +608,14 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
     return deltas
 
 
-def _couple_organs(conn: Any, person_id: str, states: dict[str, dict[str, Any]], event_id: str, now_ms: int) -> list[dict[str, Any]]:
+def _couple_organs(
+    person_id: str,
+    states: dict[str, dict[str, Any]],
+    event_id: str,
+    now_ms: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     effects: list[dict[str, Any]] = []
+    durable_events: list[dict[str, Any]] = []
 
     def strength(organ: str) -> float:
         state = states.get(organ, {})
@@ -686,11 +657,18 @@ def _couple_organs(conn: Any, person_id: str, states: dict[str, dict[str, Any]],
         states[target] = after
         effect = {"source_organs": sources, "delta": delta}
         effects.append({"source_organs": sources, "target_organ_id": target, "effect": effect})
-        conn.execute(
-            "INSERT INTO organ_coupling_event(coupling_id, source_experience_event_id, person_id, source_organs_json, target_organ_id, effect_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?)",
-            (_event_id("orgcpl"), event_id, person_id, _dumps(sources), target, _dumps(effect), now_ms),
+        durable_events.append(
+            {
+                "coupling_id": _event_id("orgcpl"),
+                "source_experience_event_id": event_id,
+                "person_id": person_id,
+                "source_organs": list(sources),
+                "target_organ_id": target,
+                "effect": effect,
+                "created_at_ms": now_ms,
+            }
         )
-    return effects
+    return effects, durable_events
 
 
 def append_life_experience(
@@ -741,11 +719,21 @@ def append_life_experience(
         except Exception:
             memory_event_id = ""
     event_id = _event_id("lifeexp")
-    _conn(ledger).execute(
-        "INSERT INTO life_experience_event(event_id, person_id, session_id, source_kind, event_kind, content_summary, evidence_json, salience, valence, uncertainty, created_at_ms, consumed_by_organs) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-        (event_id, resolved, session_id, source_kind, event_kind, _text(content_summary, 1000), _dumps(evidence_payload), float(salience), float(valence), float(uncertainty), now),
+    _repository(ledger).append_experience(
+        {
+            "event_id": event_id,
+            "person_id": resolved,
+            "session_id": session_id,
+            "source_kind": source_kind,
+            "event_kind": event_kind,
+            "content_summary": _text(content_summary, 1000),
+            "evidence": evidence_payload,
+            "salience": float(salience),
+            "valence": float(valence),
+            "uncertainty": float(uncertainty),
+            "created_at_ms": now,
+        }
     )
-    _conn(ledger).commit()
     if memory_event_id:
         try:
             from host_brain.app.memory_event_store import MemoryEventStore  # noqa: PLC0415
@@ -771,25 +759,26 @@ def append_life_experience(
 
 def process_life_experience_event(*, ledger: Any, event_id: str) -> dict[str, Any]:
     ensure_organ_schema(ledger)
-    conn = _conn(ledger)
-    row = conn.execute(
-        "SELECT event_id, person_id, session_id, source_kind, event_kind, content_summary, evidence_json, salience, valence, uncertainty, created_at_ms FROM life_experience_event WHERE event_id=? LIMIT 1",
-        (event_id,),
-    ).fetchone()
-    if not row:
+    repository = _repository(ledger)
+    row = repository.get_experience(event_id)
+    if row is None:
         return {"status": "NOT_FOUND", "event_id": event_id}
-    person_id = str(row[1] or DEFAULT_PERSON_ID)
-    event_kind = str(row[4] or "")
-    content = str(row[5] or "")
-    evidence = _loads(row[6], {})
-    salience = _float(row[7])
-    valence = _float(row[8])
-    now_ms = int(row[10] or _now_ms())
+    if bool(row.get("consumed_by_organs")):
+        return {"status": "ALREADY_CONSUMED", "event_id": event_id}
+    person_id = str(row["person_id"] or DEFAULT_PERSON_ID)
+    event_kind = str(row["event_kind"] or "")
+    content = str(row["content_summary"] or "")
+    evidence = _map(row.get("evidence"))
+    salience = _float(row["salience"])
+    valence = _float(row["valence"])
+    now_ms = int(row["created_at_ms"] or _now_ms())
     states: dict[str, dict[str, Any]] = {}
     organ_events: list[dict[str, Any]] = []
+    durable_organ_events: list[dict[str, Any]] = []
+    stored_states = repository.get_organ_states(person_id)
     deltas = _base_event_deltas(event_kind, _map(evidence), content, salience, valence, now_ms)
     for organ_id in ORGAN_IDS:
-        current = _get_organ_state(conn, person_id, organ_id, now_ms)
+        current = _get_organ_state(stored_states, person_id, organ_id, now_ms)
         elapsed_min = max(0.0, (now_ms - int(current.get("updated_at_ms") or now_ms)) / 60000.0)
         decayed = _decay_state(current, elapsed_min)
         autonomous_delta = _autonomous_organ_delta(
@@ -807,25 +796,38 @@ def process_life_experience_event(*, ledger: Any, event_id: str) -> dict[str, An
                 trace={
                     "experience_event_id": event_id,
                     "event_kind": event_kind,
-                    "source_kind": str(row[3] or ""),
+                    "source_kind": str(row["source_kind"] or ""),
                     "autonomous_elapsed_min": round(elapsed_min, 3),
                     "has_event_perturbation": bool(deltas.get(organ_id)),
                 },
                 now_ms=now_ms,
             )
-            conn.execute(
-                "INSERT INTO organ_runtime_event(event_id, experience_event_id, person_id, organ_id, delta_json, state_before_json, state_after_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                (_event_id("orgevt"), event_id, person_id, organ_id, _dumps(delta), _dumps(decayed), _dumps(after), now_ms),
+            durable_organ_events.append(
+                {
+                    "event_id": _event_id("orgevt"),
+                    "organ_id": organ_id,
+                    "delta": delta,
+                    "state_before": decayed,
+                    "state_after": after,
+                }
             )
             organ_events.append({"organ_id": organ_id, "delta": delta, "after": _compact_organ(after)})
         else:
             after = decayed
         states[organ_id] = after
-    coupling = _couple_organs(conn, person_id, states, event_id, now_ms)
-    for state in states.values():
-        _save_organ_state(conn, person_id, state, now_ms)
-    conn.execute("UPDATE life_experience_event SET consumed_by_organs=1 WHERE event_id=?", (event_id,))
-    conn.commit()
+    coupling, durable_coupling_events = _couple_organs(
+        person_id, states, event_id, now_ms
+    )
+    committed = repository.commit_organ_processing(
+        experience_event_id=event_id,
+        person_id=person_id,
+        organ_events=durable_organ_events,
+        coupling_events=durable_coupling_events,
+        organ_states=states,
+        created_at_ms=now_ms,
+    )
+    if not committed:
+        return {"status": "ALREADY_CONSUMED", "event_id": event_id}
     return {
         "status": "OK",
         "event_id": event_id,
@@ -852,11 +854,7 @@ def get_organ_runtime_state(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) 
     ensure_organ_schema(ledger)
     resolved = str(person_id or DEFAULT_PERSON_ID)
     now = _now_ms()
-    rows = _conn(ledger).execute(
-        "SELECT organ_id, state_json, updated_at_ms FROM organ_runtime_state WHERE person_id=?",
-        (resolved,),
-    ).fetchall()
-    states = {str(row[0]): _loads(row[1], {}) for row in rows}
+    states = _repository(ledger).get_organ_states(resolved)
     for organ_id in ORGAN_IDS:
         states.setdefault(organ_id, _default_organ_state(organ_id, now))
     compact = [_compact_organ(states[organ_id]) for organ_id in ORGAN_IDS]
@@ -1046,12 +1044,19 @@ def synthesize_life_state_from_organs(
         "synthesis": {"absence": round(absence, 3), "dream": round(dream, 3), "work": round(work_pressure, 3), "fatigue": round(fatigue, 3), "relationship": round(relationship, 3)},
         "updated_at_ms": now,
     }
-    conn = _conn(ledger)
-    conn.execute(
-        "INSERT INTO life_state_synthesis_log(synthesis_id, person_id, source_experience_event_id, organ_summary_json, state_patch_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?)",
-        (_event_id("lifesyn"), resolved, source_experience_event_id, _dumps(after["organ_runtime"]), _dumps({"life_pressure": after["life_pressure"], "affect": after["affect"], "embodiment": after["embodiment"], "motives": after["motives"]}), now),
+    _repository(ledger).append_synthesis(
+        synthesis_id=_event_id("lifesyn"),
+        person_id=resolved,
+        source_experience_event_id=source_experience_event_id,
+        organ_summary=after["organ_runtime"],
+        state_patch={
+            "life_pressure": after["life_pressure"],
+            "affect": after["affect"],
+            "embodiment": after["embodiment"],
+            "motives": after["motives"],
+        },
+        created_at_ms=now,
     )
-    conn.commit()
     return after
 
 
@@ -1072,11 +1077,21 @@ def open_proactive_episode(
     ensure_organ_schema(ledger)
     now = int(sent_at_ms or _now_ms())
     episode_id = _event_id("lifeproep")
-    _conn(ledger).execute(
-        "INSERT INTO proactive_interaction_episode(episode_id, person_id, source_action_id, source_outbox_id, motive, organ_sources_json, message_text, expected_response_kind, sent_at_ms, outcome, metadata_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (episode_id, str(person_id or DEFAULT_PERSON_ID), source_action_id, source_outbox_id, motive, _dumps(list(organ_sources or [])), _text(message_text, 1000), expected_response_kind, now, outcome, _dumps(dict(metadata or {}))),
+    _repository(ledger).open_proactive_episode(
+        {
+            "episode_id": episode_id,
+            "person_id": str(person_id or DEFAULT_PERSON_ID),
+            "source_action_id": source_action_id,
+            "source_outbox_id": source_outbox_id,
+            "motive": motive,
+            "organ_sources": list(organ_sources or []),
+            "message_text": _text(message_text, 1000),
+            "expected_response_kind": expected_response_kind,
+            "sent_at_ms": now,
+            "outcome": outcome,
+            "metadata": dict(metadata or {}),
+        }
     )
-    _conn(ledger).commit()
     return {"episode_id": episode_id, "outcome": outcome, "sent_at_ms": now}
 
 
@@ -1092,13 +1107,10 @@ def close_pending_proactive_episode_for_user_reply(
     ensure_organ_schema(ledger)
     now = int(now_ms or _now_ms())
     resolved = str(person_id or DEFAULT_PERSON_ID)
-    row = _conn(ledger).execute(
-        "SELECT episode_id, motive, message_text, sent_at_ms FROM proactive_interaction_episode WHERE person_id=? AND outcome='pending' ORDER BY sent_at_ms DESC LIMIT 1",
-        (resolved,),
-    ).fetchone()
+    row = _repository(ledger).latest_pending_episode(resolved)
     if not row:
         return {}
-    sent_at = int(row[3] or 0)
+    sent_at = int(row["sent_at_ms"] or 0)
     if sent_at and now - sent_at > 3_600_000:
         return {}
     text = str(user_message or "")
@@ -1112,7 +1124,7 @@ def close_pending_proactive_episode_for_user_reply(
         source_kind="life_proactive_user_response",
         event_kind="life_proactive_user_response",
         content_summary=text,
-        evidence={"episode_id": row[0], "motive": row[1], "outcome": outcome, "asks_context": asks_context},
+        evidence={"episode_id": row["episode_id"], "motive": row["motive"], "outcome": outcome, "asks_context": asks_context},
         salience=0.8,
         valence=-0.6 if annoyed else 0.45,
         uncertainty=0.05,
@@ -1137,17 +1149,20 @@ def close_pending_proactive_episode_for_user_reply(
             )
         except Exception:
             pass
-    _conn(ledger).execute(
-        "UPDATE proactive_interaction_episode SET user_response_turn_id=?, outcome=?, organ_delta_after_json=?, closed_at_ms=? WHERE episode_id=?",
-        (request_id or session_id, outcome, _dumps(delta_after), now, row[0]),
+    _repository(ledger).close_proactive_episode(
+        episode_id=str(row["episode_id"]),
+        person_id=resolved,
+        user_response_turn_id=request_id or session_id,
+        outcome=outcome,
+        organ_delta_after=_map(delta_after),
+        closed_at_ms=now,
     )
-    _conn(ledger).commit()
     return {
-        "episode_id": row[0],
-        "motive": row[1],
+        "episode_id": row["episode_id"],
+        "motive": row["motive"],
         "outcome": outcome,
         "asks_context": asks_context,
-        "source_message": row[2],
+        "source_message": row["message_text"],
         "organ_delta_after": delta_after,
     }
 
@@ -1156,26 +1171,7 @@ def get_recent_life_experience(*, ledger: Any, person_id: str = DEFAULT_PERSON_I
     ensure_organ_schema(ledger)
     resolved = str(person_id or DEFAULT_PERSON_ID)
     capped = max(1, min(int(limit or 50), 200))
-    rows = _conn(ledger).execute(
-        "SELECT event_id, session_id, source_kind, event_kind, content_summary, evidence_json, salience, valence, uncertainty, consumed_by_organs, created_at_ms FROM life_experience_event WHERE person_id=? ORDER BY created_at_ms DESC LIMIT ?",
-        (resolved, capped),
-    ).fetchall()
-    items = [
-        {
-            "event_id": r[0],
-            "session_id": r[1],
-            "source_kind": r[2],
-            "event_kind": r[3],
-            "content_summary": r[4],
-            "evidence": _loads(r[5], {}),
-            "salience": float(r[6] or 0.0),
-            "valence": float(r[7] or 0.0),
-            "uncertainty": float(r[8] or 0.0),
-            "consumed_by_organs": bool(r[9]),
-            "created_at_ms": r[10],
-        }
-        for r in rows
-    ]
+    items = _repository(ledger).list_experiences(resolved, limit=capped)
     return {"person_id": resolved, "items": items}
 
 
@@ -1183,28 +1179,7 @@ def get_recent_proactive_episodes(*, ledger: Any, person_id: str = DEFAULT_PERSO
     ensure_organ_schema(ledger)
     resolved = str(person_id or DEFAULT_PERSON_ID)
     capped = max(1, min(int(limit or 20), 100))
-    rows = _conn(ledger).execute(
-        "SELECT episode_id, source_action_id, source_outbox_id, motive, organ_sources_json, message_text, expected_response_kind, sent_at_ms, user_response_turn_id, outcome, organ_delta_after_json, closed_at_ms, metadata_json FROM proactive_interaction_episode WHERE person_id=? ORDER BY sent_at_ms DESC LIMIT ?",
-        (resolved, capped),
-    ).fetchall()
-    items = [
-        {
-            "episode_id": r[0],
-            "source_action_id": r[1],
-            "source_outbox_id": r[2],
-            "motive": r[3],
-            "organ_sources": _loads(r[4], []),
-            "message_text": r[5],
-            "expected_response_kind": r[6],
-            "sent_at_ms": r[7],
-            "user_response_turn_id": r[8],
-            "outcome": r[9],
-            "organ_delta_after": _loads(r[10], {}),
-            "closed_at_ms": r[11],
-            "metadata": _loads(r[12], {}),
-        }
-        for r in rows
-    ]
+    items = _repository(ledger).list_proactive_episodes(resolved, limit=capped)
     return {"person_id": resolved, "items": items}
 
 

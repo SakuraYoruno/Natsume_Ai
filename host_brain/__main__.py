@@ -64,21 +64,23 @@ _load_dotenv_file()
 
 from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
+from host_brain.app.settings import get_core_settings, get_persistence_settings
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
 
 
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
+    core = get_core_settings()
+    persistence = get_persistence_settings()
     parser = argparse.ArgumentParser(
         description="Natsume AI Host Brain - AI agent orchestration runtime"
     )
-    default_host = str(os.environ.get("HOST_APP_HOST") or "0.0.0.0").strip() or "0.0.0.0"
-    default_port = _env_int(os.environ.get("HOST_APP_PORT"), default=8000, min_value=1, max_value=65535)
-    default_log_level = str(os.environ.get("HOST_APP_LOG_LEVEL") or "INFO").strip().upper() or "INFO"
-    if default_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
-        default_log_level = "INFO"
-    default_db_path = str(os.environ.get("Natsume_AUDIT_DB") or ":memory:").strip() or ":memory:"
+    default_host = str(core.host_app_host).strip() or "127.0.0.1"
+    default_port = int(core.host_app_port)
+    default_log_level = str(core.log_level).strip().upper()
+    default_db_path = str(persistence.canonical_db_path).strip()
 
     parser.add_argument(
         "--host",
@@ -146,10 +148,7 @@ def _configure_dependency_log_levels() -> None:
 
 
 def _resolve_uvicorn_access_log_enabled() -> bool:
-    raw = str(os.environ.get("HOST_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
-    if not raw:
-        return False
-    return raw in {"1", "true", "yes", "on"}
+    return bool(get_core_settings().uvicorn_access_log_enabled)
 
 
 def run_startup_check(db_path: str) -> bool:
@@ -157,8 +156,20 @@ def run_startup_check(db_path: str) -> bool:
     logger = logging.getLogger("Natsume.startup")
     request_id = new_request_id()
 
+    ledger: SQLiteLedger | None = None
     try:
-        ledger = SQLiteLedger(db_path=db_path)
+        if str(db_path).strip() == ":memory:":
+            ledger = SQLiteLedger(db_path=":memory:")
+        else:
+            migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+                request_id=f"{request_id}:migration",
+            )
+            if not migrated.success:
+                raise RuntimeError(
+                    f"{migrated.reason_code or 'MIGRATION_EXEC_FAILED'}: "
+                    f"{migrated.detail}"
+                )
+            ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
         dependency_probes = collect_dependency_probes_sync()
 
         report = build_startup_report(
@@ -191,16 +202,9 @@ def run_startup_check(db_path: str) -> bool:
             extra={"request_id": request_id, "error": str(exc)},
         )
         return False
-
-
-def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> int:
-    if value is None or str(value).strip() == "":
-        return int(default)
-    try:
-        parsed = int(str(value).strip())
-    except ValueError:
-        return int(default)
-    return min(max(parsed, min_value), max_value)
+    finally:
+        if ledger is not None:
+            ledger.close()
 
 
 def main() -> int:

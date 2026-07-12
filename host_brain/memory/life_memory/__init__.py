@@ -10,16 +10,31 @@ from __future__ import annotations
 from .constants import *  # noqa: F401,F403
 from .models import *  # noqa: F401,F403
 from .utils import *  # noqa: F401,F403
-from .semantic import *  # noqa: F401,F403
-from .store import LifeMemoryStore
-from .consolidator import LifeMemoryConsolidator
-from .sleep import MemorySleepReplayTask
 from .contracts import (
     ChatMemoryCandidate,
     MemoryAdmissionDecision,
     MemoryAdmissionKind,
     MemoryWriteReceipt,
 )
+from .semantic import *  # noqa: F401,F403
+
+
+def __getattr__(name: str):
+    """Load runtime-heavy compatibility exports without package import cycles."""
+
+    if name == "LifeMemoryStore":
+        from .store import LifeMemoryStore
+
+        return LifeMemoryStore
+    if name == "LifeMemoryConsolidator":
+        from .consolidator import LifeMemoryConsolidator
+
+        return LifeMemoryConsolidator
+    if name == "MemorySleepReplayTask":
+        from .sleep import MemorySleepReplayTask
+
+        return MemorySleepReplayTask
+    raise AttributeError(name)
 
 __all__ = [
     "LifeMemoryStore",

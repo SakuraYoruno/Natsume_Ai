@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.runtime import life_continuity as lc
 
@@ -22,7 +23,19 @@ def _apply_migration(db_path: Path) -> None:
 
 
 def _close_ledger(ledger: SQLiteLedger) -> None:
-    ledger._conn.close()
+    ledger.close()
+
+
+def _migrated_ledger(db_path: Path) -> SQLiteLedger:
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id=f"nle-life-occ-fixture::{db_path.name}",
+    )
+    assert result.success, result.as_dict()
+    return SQLiteLedger(
+        db_path=str(db_path),
+        check_same_thread=False,
+        initialize_schema=False,
+    )
 
 
 def test_t_nle_14_life_occ_migration_is_idempotent_and_preserves_old_state(tmp_path: Path) -> None:
@@ -58,7 +71,7 @@ def test_t_nle_14_life_occ_migration_is_idempotent_and_preserves_old_state(tmp_p
 
 
 def test_t_nle_14_command_facade_rejects_stale_expected_version_without_overwrite(tmp_path: Path) -> None:
-    ledger = SQLiteLedger(db_path=str(tmp_path / "life_occ_command.sqlite3"), check_same_thread=False)
+    ledger = _migrated_ledger(tmp_path / "life_occ_command.sqlite3")
     try:
         service = lc.LifeStateCommandService(ledger)
         base = service.read_state("default")
@@ -95,7 +108,7 @@ def test_t_nle_14_command_facade_rejects_stale_expected_version_without_overwrit
 
 def test_t_nle_14_twenty_concurrent_expected_version_commands_have_one_winner(tmp_path: Path) -> None:
     db_path = tmp_path / "life_occ_concurrent.sqlite3"
-    seed_ledger = SQLiteLedger(db_path=str(db_path), check_same_thread=False)
+    seed_ledger = _migrated_ledger(db_path)
     try:
         seed_service = lc.LifeStateCommandService(seed_ledger)
         base = seed_service.read_state("default")
@@ -104,7 +117,11 @@ def test_t_nle_14_twenty_concurrent_expected_version_commands_have_one_winner(tm
         _close_ledger(seed_ledger)
 
     def _worker(worker_id: int) -> dict[str, Any]:
-        ledger = SQLiteLedger(db_path=str(db_path), check_same_thread=False)
+        ledger = SQLiteLedger(
+            db_path=str(db_path),
+            check_same_thread=False,
+            initialize_schema=False,
+        )
         try:
             service = lc.LifeStateCommandService(ledger)
             return service.apply_patch(
@@ -123,7 +140,11 @@ def test_t_nle_14_twenty_concurrent_expected_version_commands_have_one_winner(tm
     assert statuses.count("APPLIED") == 1
     assert statuses.count("CONFLICT") == 19
 
-    verify_ledger = SQLiteLedger(db_path=str(db_path), check_same_thread=False)
+    verify_ledger = SQLiteLedger(
+        db_path=str(db_path),
+        check_same_thread=False,
+        initialize_schema=False,
+    )
     try:
         final_state = lc.get_life_state(verify_ledger, "default")
         assert final_state["version"] == base_version + 1
@@ -139,7 +160,7 @@ def test_t_nle_14_twenty_concurrent_expected_version_commands_have_one_winner(tm
 
 
 def test_t_nle_14_single_writer_fallback_is_explicit_and_audited(tmp_path: Path) -> None:
-    ledger = SQLiteLedger(db_path=str(tmp_path / "life_occ_fallback.sqlite3"), check_same_thread=False)
+    ledger = _migrated_ledger(tmp_path / "life_occ_fallback.sqlite3")
     try:
         state = lc.get_life_state(ledger, "default")
         state["legacy_writer"] = {"ok": True}

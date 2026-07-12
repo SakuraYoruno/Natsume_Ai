@@ -7,6 +7,7 @@ from typing import Any
 
 from host_brain.app.digital_life_routes import router as digital_life_router
 from host_brain.app.memory.state_arbiter import StateArbiter, StateSource
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.runtime import life_continuity as lc
 from host_brain.runtime.world_model import (
@@ -33,7 +34,17 @@ REQUIRED_FACT_FIELDS = {
 
 
 def _ledger(tmp_path: Path, name: str = "world.sqlite3") -> SQLiteLedger:
-    return SQLiteLedger(db_path=str(tmp_path / name), check_same_thread=False)
+    db_path = tmp_path / name
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="world-projection-contract",
+        ts_ms=1_900_000_000_000,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    return SQLiteLedger(
+        db_path=str(db_path),
+        check_same_thread=False,
+        initialize_schema=False,
+    )
 
 
 def _close(ledger: SQLiteLedger) -> None:
@@ -45,15 +56,22 @@ def _table_exists(ledger: SQLiteLedger, table: str) -> bool:
     return bool(row)
 
 
+def _life_state_count(ledger: SQLiteLedger) -> int:
+    return int(
+        ledger._conn.execute("SELECT COUNT(*) FROM digital_life_state").fetchone()[0]
+    )
+
+
 def test_t_nle_15_world_projection_is_read_only_and_does_not_initialize_life_state(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path, "readonly.sqlite3")
     try:
-        before = _table_exists(ledger, "digital_life_state")
+        assert _table_exists(ledger, "digital_life_state") is True
+        before = _life_state_count(ledger)
         snapshot = asyncio.run(build_world_snapshot(ledger=ledger, person_id="default"))
-        after = _table_exists(ledger, "digital_life_state")
+        after = _life_state_count(ledger)
 
-        assert before is False
-        assert after is False
+        assert before == 0
+        assert after == 0
         assert snapshot["schema_version"] == WORLD_SNAPSHOT_SCHEMA_VERSION
         assert snapshot["read_only"] is True
         assert snapshot["write_api_available"] is False

@@ -1,39 +1,45 @@
-"""Evidence Plane SQLite 写入（M36-E）。
-
-实现 Evidence Plane 的 SQLite 轻量写入（ModelPlane.md §10 Rule 3）：
-- EvidencePlane：封装 SQLite 连接，提供 write_trace / write_subgraph_summary / write_clock_events
-- 写入失败时静默降级（不抛出异常，记录 logging.warning）
-- 数据库路径可通过 EVIDENCE_DB_PATH 环境变量覆盖
-
-表结构：
-- graph_trace：request_id, graph_id, node_id, status, reason_code, detail, ts_ms
-- subgraph_summary：request_id, subgraph_id, node_count, success_count, fail_count, committed_at_ms, graph_trace_flat_json
-- clock_events：request_id, graph_id, event_type, node_id, elapsed_ms, threshold_ms, ts_ms
-"""
+"""Compatibility facade for the catalog-owned Graph Evidence repository."""
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 import logging
-import os
-import sqlite3
-import threading
-import time
 from pathlib import Path
-from typing import Any
+import threading
+from typing import Any, TypeVar
+
+from host_brain.core.ids import now_ms
+from host_brain.integrations.evidence_settings import (
+    EvidenceSettings,
+    load_evidence_settings,
+)
+from host_brain.persistence.graph_evidence_repository import (
+    GRAPH_EVIDENCE_PERSISTENCE_FAILED,
+    GRAPH_EVIDENCE_SCHEMA_NOT_READY,
+    GraphEvidenceRepository,
+    GraphEvidenceRepositoryError,
+)
+
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = Path("data/evidence/evidence.db")
-_SINGLETON: "EvidencePlane | None" = None
+_SINGLETON: EvidencePlane | None = None
 _SINGLETON_LOCK = threading.Lock()
-
-# 线程本地存储：每个线程缓存一个 SQLite 连接，避免重复创建和文件描述符泄漏
-_thread_local = threading.local()
+_T = TypeVar("_T")
 
 
-def get_evidence_plane() -> "EvidencePlane":
-    """获取 EvidencePlane 单例（懒初始化，线程安全双重检查锁）。"""
+@dataclass(frozen=True, slots=True)
+class EvidencePlaneStatus:
+    available: bool
+    schema_authorized: bool
+    degraded: bool
+    reason_code: str | None = None
+    detail: str | None = None
+
+
+def get_evidence_plane() -> EvidencePlane:
+    """Return the process-wide, lazily configured Evidence Plane facade."""
     global _SINGLETON
     if _SINGLETON is None:
         with _SINGLETON_LOCK:
@@ -43,174 +49,135 @@ def get_evidence_plane() -> "EvidencePlane":
 
 
 class EvidencePlane:
-    """Evidence Plane SQLite 写入器。
+    """Stable integration API with explicit degraded and authority states."""
 
-    写入失败时静默降级（不抛出异常，记录 logging.warning）。
-    数据库路径可通过 EVIDENCE_DB_PATH 环境变量覆盖。
-    """
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        *,
+        settings: EvidenceSettings | None = None,
+        repository: GraphEvidenceRepository | None = None,
+        clock: Callable[[], int] = now_ms,
+        timeout_ms: int = 3_000,
+    ) -> None:
+        if settings is not None and db_path is not None:
+            raise ValueError("pass either db_path or settings, not both")
+        resolved = settings or load_evidence_settings(
+            db_path=db_path,
+            timeout_ms=timeout_ms,
+        )
+        self._db_path = resolved.db_path
+        self._repository: GraphEvidenceRepository | None = repository
+        self._status = EvidencePlaneStatus(
+            available=False,
+            schema_authorized=False,
+            degraded=True,
+            reason_code=GRAPH_EVIDENCE_SCHEMA_NOT_READY,
+            detail="graph evidence repository has not been initialized",
+        )
+        if self._repository is None:
+            try:
+                self._repository = GraphEvidenceRepository(
+                    resolved.db_path,
+                    clock=clock,
+                    timeout_ms=resolved.timeout_ms,
+                )
+            except GraphEvidenceRepositoryError as exc:
+                self._record_initialization_failure(exc)
+                return
+            except Exception as exc:
+                self._record_initialization_failure(
+                    GraphEvidenceRepositoryError(
+                        GRAPH_EVIDENCE_PERSISTENCE_FAILED,
+                        str(exc),
+                    )
+                )
+                return
+        self._status = EvidencePlaneStatus(
+            available=True,
+            schema_authorized=True,
+            degraded=False,
+        )
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
-        env_path = os.environ.get("EVIDENCE_DB_PATH", "").strip()
-        if db_path is not None:
-            self._db_path = Path(db_path)
-        elif env_path:
-            self._db_path = Path(env_path)
+    @property
+    def status(self) -> EvidencePlaneStatus:
+        return self._status
+
+    @property
+    def available(self) -> bool:
+        return self._status.available
+
+    @property
+    def _initialized(self) -> bool:
+        """Read-only compatibility alias for older callers and tests."""
+        return self._repository is not None and self._status.schema_authorized
+
+    def _record_initialization_failure(
+        self,
+        exc: GraphEvidenceRepositoryError,
+    ) -> None:
+        schema_failure = exc.reason_code == GRAPH_EVIDENCE_SCHEMA_NOT_READY
+        self._repository = None
+        self._status = EvidencePlaneStatus(
+            available=False,
+            schema_authorized=False,
+            degraded=True,
+            reason_code=exc.reason_code,
+            detail=exc.detail,
+        )
+        if schema_failure:
+            logger.error(
+                "EvidencePlane schema authority verification failed: %s (%s)",
+                exc.detail,
+                exc.reason_code,
+            )
         else:
-            self._db_path = _DEFAULT_DB_PATH
+            logger.warning(
+                "EvidencePlane persistence initialization degraded: %s (%s)",
+                exc.detail,
+                exc.reason_code,
+            )
 
-        # :memory: 模式下缓存连接，避免每次 connect() 创建独立数据库
-        self._memory_conn: sqlite3.Connection | None = None
-        if str(self._db_path) == ":memory:":
-            self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
+    def _record_operation_failure(self, operation: str, exc: Exception) -> None:
+        reason_code = getattr(exc, "reason_code", GRAPH_EVIDENCE_PERSISTENCE_FAILED)
+        detail = getattr(exc, "detail", str(exc))
+        self._status = EvidencePlaneStatus(
+            available=self._repository is not None,
+            schema_authorized=self._repository is not None,
+            degraded=True,
+            reason_code=str(reason_code),
+            detail=str(detail),
+        )
+        logger.warning(
+            "EvidencePlane.%s degraded: %s (%s)",
+            operation,
+            detail,
+            reason_code,
+        )
 
-        self._initialized = False
-        self._init_db()
-
-    def _init_db(self) -> None:
-        """初始化数据库，创建表结构（若不存在）。"""
+    def _write(self, operation: str, action: Callable[[GraphEvidenceRepository], Any]) -> None:
+        repository = self._repository
+        if repository is None:
+            return
         try:
-            if str(self._db_path) != ":memory:":
-                self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._connect() as conn:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS graph_trace (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        node_id TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        reason_code TEXT,
-                        detail TEXT,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS subgraph_summary (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        subgraph_id TEXT NOT NULL,
-                        node_count INTEGER NOT NULL,
-                        success_count INTEGER NOT NULL,
-                        fail_count INTEGER NOT NULL,
-                        committed_at_ms INTEGER NOT NULL,
-                        graph_trace_flat_json TEXT
-                    );
-                    CREATE TABLE IF NOT EXISTS clock_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        event_type TEXT NOT NULL,
-                        node_id TEXT NOT NULL,
-                        elapsed_ms INTEGER NOT NULL,
-                        threshold_ms INTEGER NOT NULL,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS branch_manifest (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        total_count INTEGER NOT NULL,
-                        success_count INTEGER NOT NULL,
-                        fail_count INTEGER NOT NULL,
-                        committed_at_ms INTEGER NOT NULL,
-                        branches_json TEXT
-                    );
-                    CREATE TABLE IF NOT EXISTS stream_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        phase TEXT NOT NULL,
-                        event_type TEXT NOT NULL,
-                        node_id TEXT,
-                        chunk TEXT,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS checkpoints (
-                        checkpoint_id TEXT PRIMARY KEY,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        interrupt_reason TEXT,
-                        resume_deadline_at INTEGER,
-                        created_at_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS barrier_join_log (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        request_id TEXT NOT NULL,
-                        graph_id TEXT NOT NULL,
-                        passed INTEGER NOT NULL,
-                        failed_branches_json TEXT,
-                        join_policy_ref TEXT,
-                        reason TEXT,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS subgraph_trace (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id TEXT NOT NULL,
-                        parent_path TEXT,
-                        node_id TEXT NOT NULL,
-                        input_digest TEXT,
-                        output_digest TEXT,
-                        latency_ms INTEGER,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS llm_call_log (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id TEXT NOT NULL,
-                        node_id TEXT NOT NULL,
-                        model_id TEXT,
-                        prompt_tokens INTEGER,
-                        completion_tokens INTEGER,
-                        latency_ms INTEGER,
-                        ts_ms INTEGER NOT NULL
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_bjl_run_id ON barrier_join_log(request_id);
-                    CREATE INDEX IF NOT EXISTS idx_bjl_ts ON barrier_join_log(ts_ms);
-                    CREATE INDEX IF NOT EXISTS idx_sgt_run_id ON subgraph_trace(run_id);
-                    CREATE INDEX IF NOT EXISTS idx_sgt_parent_path ON subgraph_trace(parent_path);
-                    CREATE INDEX IF NOT EXISTS idx_lcl_run_id ON llm_call_log(run_id);
-                    CREATE INDEX IF NOT EXISTS idx_lcl_node_id ON llm_call_log(node_id);
-                """)
-            self._initialized = True
+            action(repository)
         except Exception as exc:
-            logger.warning("EvidencePlane 初始化失败（静默降级）: %s", exc)
-            self._initialized = False
+            self._record_operation_failure(operation, exc)
 
-    def _connect(self) -> sqlite3.Connection:
-        """获取当前线程的 SQLite 连接（线程本地缓存，避免重复创建和文件描述符泄漏）。
-
-        :memory: 模式下复用缓存连接，确保所有操作在同一数据库实例上执行。
-        非 :memory: 模式下使用线程本地存储缓存连接，每个线程复用同一连接。
-        """
-        if self._memory_conn is not None:
-            return self._memory_conn
-        # 线程本地缓存：连接必须与当前 db_path 一一对应，避免跨实例串库。
-        db_path_str = str(self._db_path)
-        conn = getattr(_thread_local, "evidence_conn", None)
-        conn_path = getattr(_thread_local, "evidence_conn_path", None)
-
-        if conn is not None and str(conn_path or "") == db_path_str:
-            try:
-                conn.execute("SELECT 1")
-                return conn
-            except Exception:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                _thread_local.evidence_conn = None
-                _thread_local.evidence_conn_path = None
-                conn = None
-
-        if conn is not None and str(conn_path or "") != db_path_str:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            _thread_local.evidence_conn = None
-            _thread_local.evidence_conn_path = None
-
-        conn = sqlite3.connect(db_path_str, check_same_thread=False)
-        _thread_local.evidence_conn = conn
-        _thread_local.evidence_conn_path = db_path_str
-        return conn
+    def _query(
+        self,
+        operation: str,
+        action: Callable[[GraphEvidenceRepository], _T],
+        fallback: _T,
+    ) -> _T:
+        repository = self._repository
+        if repository is None:
+            return fallback
+        try:
+            return action(repository)
+        except Exception as exc:
+            self._record_operation_failure(operation, exc)
+            return fallback
 
     def write_trace(
         self,
@@ -219,38 +186,16 @@ class EvidencePlane:
         graph_id: str,
         trace: list[dict[str, Any]],
     ) -> None:
-        """将 trace 列表写入 graph_trace 表。
-
-        Args:
-            request_id: 请求 ID
-            graph_id: 图 ID
-            trace: GraphState.trace 列表
-        """
-        if not self._initialized or not trace:
+        if not trace:
             return
-        try:
-            ts_ms = int(time.time() * 1000)
-            rows = [
-                (
-                    str(request_id),
-                    str(graph_id),
-                    str(entry.get("node_id") or ""),
-                    str(entry.get("status") or "OK"),
-                    entry.get("reason_code"),
-                    str(entry.get("detail") or ""),
-                    int(entry.get("ts_ms") or ts_ms),
-                )
-                for entry in trace
-                if isinstance(entry, dict)
-            ]
-            with self._connect() as conn:
-                conn.executemany(
-                    "INSERT INTO graph_trace (request_id, graph_id, node_id, status, reason_code, detail, ts_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    rows,
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_trace 失败（静默降级）: %s", exc)
+        self._write(
+            "write_trace",
+            lambda repository: repository.append_traces(
+                request_id=request_id,
+                graph_id=graph_id,
+                trace=trace,
+            ),
+        )
 
     def write_subgraph_summary(
         self,
@@ -258,37 +203,15 @@ class EvidencePlane:
         request_id: str,
         summary: dict[str, Any],
     ) -> None:
-        """将 subgraph_commit_summary 写入 subgraph_summary 表。
-
-        Args:
-            request_id: 请求 ID
-            summary: build_subgraph_commit_summary() 返回的字典
-        """
-        if not self._initialized or not summary:
+        if not summary:
             return
-        try:
-            flat_json = json.dumps(
-                summary.get("graph_trace_flat") or [],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO subgraph_summary "
-                    "(request_id, subgraph_id, node_count, success_count, fail_count, committed_at_ms, graph_trace_flat_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(request_id),
-                        str(summary.get("subgraph_id") or ""),
-                        int(summary.get("node_count") or 0),
-                        int(summary.get("success_count") or 0),
-                        int(summary.get("fail_count") or 0),
-                        int(summary.get("committed_at_ms") or int(time.time() * 1000)),
-                        flat_json,
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_subgraph_summary 失败（静默降级）: %s", exc)
+        self._write(
+            "write_subgraph_summary",
+            lambda repository: repository.append_subgraph_summary(
+                request_id=request_id,
+                summary=summary,
+            ),
+        )
 
     def write_clock_events(
         self,
@@ -297,39 +220,16 @@ class EvidencePlane:
         graph_id: str,
         clock_events: list[dict[str, Any]],
     ) -> None:
-        """将 clock_events 写入 clock_events 表。
-
-        Args:
-            request_id: 请求 ID
-            graph_id: 图 ID
-            clock_events: GraphState.clock_events 列表
-        """
-        if not self._initialized or not clock_events:
+        if not clock_events:
             return
-        try:
-            ts_ms = int(time.time() * 1000)
-            rows = [
-                (
-                    str(request_id),
-                    str(graph_id),
-                    str(event.get("event_type") or ""),
-                    str(event.get("node_id") or ""),
-                    int(event.get("elapsed_ms") or 0),
-                    int(event.get("threshold_ms") or 0),
-                    int(event.get("ts_ms") or ts_ms),
-                )
-                for event in clock_events
-                if isinstance(event, dict)
-            ]
-            with self._connect() as conn:
-                conn.executemany(
-                    "INSERT INTO clock_events "
-                    "(request_id, graph_id, event_type, node_id, elapsed_ms, threshold_ms, ts_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    rows,
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_clock_events 失败（静默降级）: %s", exc)
+        self._write(
+            "write_clock_events",
+            lambda repository: repository.append_clock_events(
+                request_id=request_id,
+                graph_id=graph_id,
+                events=clock_events,
+            ),
+        )
 
     def write_branch_manifest(
         self,
@@ -338,55 +238,23 @@ class EvidencePlane:
         graph_id: str,
         manifest: dict[str, Any],
     ) -> None:
-        """将 branch_manifest 写入 branch_manifest 表（M37-L）。
-
-        Args:
-            request_id: 请求 ID
-            graph_id: 图 ID
-            manifest: build_branch_manifest_dict() 返回的字典
-        """
-        if not self._initialized or not manifest:
+        if not manifest:
             return
-        try:
-            branches_json = json.dumps(
-                manifest.get("branches") or [],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO branch_manifest "
-                    "(request_id, graph_id, total_count, success_count, fail_count, committed_at_ms, branches_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(request_id),
-                        str(graph_id),
-                        int(manifest.get("total_count") or 0),
-                        int(manifest.get("success_count") or 0),
-                        int(manifest.get("fail_count") or 0),
-                        int(manifest.get("committed_at_ms") or int(time.time() * 1000)),
-                        branches_json,
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_branch_manifest 失败（静默降级）: %s", exc)
+        self._write(
+            "write_branch_manifest",
+            lambda repository: repository.append_branch_manifest(
+                request_id=request_id,
+                graph_id=graph_id,
+                manifest=manifest,
+            ),
+        )
 
     def query_branch_manifest(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 branch_manifest 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT request_id, graph_id, total_count, success_count, fail_count, committed_at_ms, branches_json "
-                    "FROM branch_manifest WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                cols = ["request_id", "graph_id", "total_count", "success_count", "fail_count", "committed_at_ms", "branches_json"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_branch_manifest 失败: %s", exc)
-            return []
+        return self._query(
+            "query_branch_manifest",
+            lambda repository: repository.list_branch_manifests(request_id=request_id),
+            [],
+        )
 
     def write_stream_events(
         self,
@@ -395,56 +263,23 @@ class EvidencePlane:
         graph_id: str,
         events: list[dict[str, Any]],
     ) -> None:
-        """将 streaming 事件列表写入 stream_events 表（M38-H）。
-
-        Args:
-            request_id: 请求 ID
-            graph_id: 图 ID
-            events: 流事件列表（PresenceEvent.to_dict() 格式）
-        """
-        if not self._initialized or not events:
+        if not events:
             return
-        try:
-            ts_ms = int(time.time() * 1000)
-            rows = [
-                (
-                    str(request_id),
-                    str(graph_id),
-                    str(event.get("phase") or ""),
-                    str(event.get("event_type") or ""),
-                    str(event.get("node_id") or ""),
-                    str(event.get("chunk") or ""),
-                    int(event.get("ts_ms") or ts_ms),
-                )
-                for event in events
-                if isinstance(event, dict)
-            ]
-            with self._connect() as conn:
-                conn.executemany(
-                    "INSERT INTO stream_events "
-                    "(request_id, graph_id, phase, event_type, node_id, chunk, ts_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    rows,
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_stream_events 失败（静默降级）: %s", exc)
+        self._write(
+            "write_stream_events",
+            lambda repository: repository.append_stream_events(
+                request_id=request_id,
+                graph_id=graph_id,
+                events=events,
+            ),
+        )
 
     def query_stream_events(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 stream_events 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
-                    "FROM stream_events WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                cols = ["request_id", "graph_id", "phase", "event_type", "node_id", "chunk", "ts_ms"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_stream_events 失败: %s", exc)
-            return []
+        return self._query(
+            "query_stream_events",
+            lambda repository: repository.list_stream_events(request_id=request_id),
+            [],
+        )
 
     def query_stream_events_by_time(
         self,
@@ -453,29 +288,15 @@ class EvidencePlane:
         end_ms: int,
         event_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """按时间范围查询 stream_events，供 /obs/metrics agent_metrics 使用。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                if event_types:
-                    placeholders = ",".join("?" * len(event_types))
-                    sql = (
-                        "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
-                        "FROM stream_events WHERE ts_ms >= ? AND ts_ms <= ? AND event_type IN (" + placeholders + ") ORDER BY ts_ms"
-                    )
-                    cursor = conn.execute(sql, (since_ms, end_ms, *event_types))
-                else:
-                    cursor = conn.execute(
-                        "SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms "
-                        "FROM stream_events WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms",
-                        (since_ms, end_ms),
-                    )
-                cols = ["request_id", "graph_id", "phase", "event_type", "node_id", "chunk", "ts_ms"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_stream_events_by_time 失败: %s", exc)
-            return []
+        return self._query(
+            "query_stream_events_by_time",
+            lambda repository: repository.list_stream_events_by_time(
+                since_ms=since_ms,
+                end_ms=end_ms,
+                event_types=event_types,
+            ),
+            [],
+        )
 
     def write_checkpoint(
         self,
@@ -486,54 +307,23 @@ class EvidencePlane:
         interrupt_reason: str = "",
         resume_deadline_at: int = 0,
     ) -> None:
-        """将 checkpoint 信息写入 checkpoints 表（M39-G）。
-
-        Args:
-            checkpoint_id: checkpoint ID
-            request_id: 请求 ID
-            graph_id: 图 ID
-            interrupt_reason: 中断原因
-            resume_deadline_at: 恢复截止时间戳（毫秒）
-        """
-        if not self._initialized:
-            return
-        try:
-            ts_ms = int(time.time() * 1000)
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO checkpoints "
-                    "(checkpoint_id, request_id, graph_id, interrupt_reason, resume_deadline_at, created_at_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        str(checkpoint_id),
-                        str(request_id),
-                        str(graph_id),
-                        str(interrupt_reason),
-                        int(resume_deadline_at),
-                        ts_ms,
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_checkpoint 失败（静默降级）: %s", exc)
+        self._write(
+            "write_checkpoint",
+            lambda repository: repository.save_checkpoint(
+                checkpoint_id=checkpoint_id,
+                request_id=request_id,
+                graph_id=graph_id,
+                interrupt_reason=interrupt_reason,
+                resume_deadline_at=resume_deadline_at,
+            ),
+        )
 
     def query_checkpoint(self, *, checkpoint_id: str) -> dict[str, Any] | None:
-        """查询指定 checkpoint_id 的记录（测试用）。"""
-        if not self._initialized:
-            return None
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT checkpoint_id, request_id, graph_id, interrupt_reason, resume_deadline_at, created_at_ms "
-                    "FROM checkpoints WHERE checkpoint_id = ?",
-                    (str(checkpoint_id),),
-                )
-                row = cursor.fetchone()
-                if row:
-                    cols = ["checkpoint_id", "request_id", "graph_id", "interrupt_reason", "resume_deadline_at", "created_at_ms"]
-                    return dict(zip(cols, row))
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_checkpoint 失败: %s", exc)
-        return None
+        return self._query(
+            "query_checkpoint",
+            lambda repository: repository.get_checkpoint(checkpoint_id=checkpoint_id),
+            None,
+        )
 
     def write_barrier_join(
         self,
@@ -542,116 +332,120 @@ class EvidencePlane:
         graph_id: str,
         barrier_join_result: dict[str, Any],
     ) -> None:
-        """将 barrier_join 结果写入 barrier_join_log 表（M40-H）。
-
-        Args:
-            request_id: 请求 ID
-            graph_id: 图 ID
-            barrier_join_result: BarrierJoinResult.to_dict() 返回的字典
-        """
-        if not self._initialized:
-            return
-        try:
-            import json as _json
-            ts_ms = int(time.time() * 1000)
-            passed = int(bool(barrier_join_result.get("passed")))
-            failed_branches = barrier_join_result.get("failed_branches") or []
-            failed_branches_json = _json.dumps(list(failed_branches), ensure_ascii=False)
-            join_policy_ref = str(barrier_join_result.get("join_policy_ref") or "")
-            reason = str(barrier_join_result.get("reason") or "")
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO barrier_join_log "
-                    "(request_id, graph_id, passed, failed_branches_json, join_policy_ref, reason, ts_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(request_id),
-                        str(graph_id),
-                        passed,
-                        failed_branches_json,
-                        join_policy_ref,
-                        reason,
-                        ts_ms,
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("EvidencePlane.write_barrier_join 失败（静默降级）: %s", exc)
+        self._write(
+            "write_barrier_join",
+            lambda repository: repository.append_barrier_join(
+                request_id=request_id,
+                graph_id=graph_id,
+                result=barrier_join_result,
+            ),
+        )
 
     def query_barrier_join(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 barrier_join 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            import json as _json
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT id, request_id, graph_id, passed, failed_branches_json, join_policy_ref, reason, ts_ms "
-                    "FROM barrier_join_log WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                rows = cursor.fetchall()
-                cols = ["id", "request_id", "graph_id", "passed", "failed_branches_json", "join_policy_ref", "reason", "ts_ms"]
-                result = []
-                for row in rows:
-                    d = dict(zip(cols, row))
-                    d["passed"] = bool(d["passed"])
-                    try:
-                        d["failed_branches"] = _json.loads(d.get("failed_branches_json") or "[]")
-                    except Exception:
-                        d["failed_branches"] = []
-                    result.append(d)
-                return result
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_barrier_join 失败: %s", exc)
-        return []
+        return self._query(
+            "query_barrier_join",
+            lambda repository: repository.list_barrier_joins(request_id=request_id),
+            [],
+        )
+
+    def write_subgraph_trace(
+        self,
+        *,
+        run_id: str,
+        trace: Sequence[Mapping[str, Any]],
+        parent_path: str | None = None,
+    ) -> None:
+        if not trace:
+            return
+        self._write(
+            "write_subgraph_trace",
+            lambda repository: repository.append_subgraph_traces(
+                run_id=run_id,
+                trace=trace,
+                parent_path=parent_path,
+            ),
+        )
+
+    def query_subgraph_trace(self, *, run_id: str) -> list[dict[str, Any]]:
+        return self._query(
+            "query_subgraph_trace",
+            lambda repository: repository.list_subgraph_traces(run_id=run_id),
+            [],
+        )
+
+    def write_llm_call(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        call: Mapping[str, Any] | None = None,
+        model_id: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        latency_ms: int = 0,
+        ts_ms: int | None = None,
+    ) -> None:
+        payload = dict(call or {})
+        if model_id is not None:
+            payload["model_id"] = model_id
+        payload.setdefault("prompt_tokens", prompt_tokens)
+        payload.setdefault("completion_tokens", completion_tokens)
+        payload.setdefault("latency_ms", latency_ms)
+        if ts_ms is not None:
+            payload["ts_ms"] = ts_ms
+        self._write(
+            "write_llm_call",
+            lambda repository: repository.append_llm_call(
+                run_id=run_id,
+                node_id=node_id,
+                call=payload,
+            ),
+        )
+
+    def query_llm_calls(self, *, run_id: str) -> list[dict[str, Any]]:
+        return self._query(
+            "query_llm_calls",
+            lambda repository: repository.list_llm_calls(run_id=run_id),
+            [],
+        )
 
     def query_trace(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 trace 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT request_id, graph_id, node_id, status, reason_code, detail, ts_ms "
-                    "FROM graph_trace WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                cols = ["request_id", "graph_id", "node_id", "status", "reason_code", "detail", "ts_ms"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_trace 失败: %s", exc)
-            return []
+        return self._query(
+            "query_trace",
+            lambda repository: repository.list_traces(request_id=request_id),
+            [],
+        )
 
     def query_subgraph_summary(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 subgraph_summary 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT request_id, subgraph_id, node_count, success_count, fail_count, committed_at_ms, graph_trace_flat_json "
-                    "FROM subgraph_summary WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                cols = ["request_id", "subgraph_id", "node_count", "success_count", "fail_count", "committed_at_ms", "graph_trace_flat_json"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_subgraph_summary 失败: %s", exc)
-            return []
+        return self._query(
+            "query_subgraph_summary",
+            lambda repository: repository.list_subgraph_summaries(request_id=request_id),
+            [],
+        )
 
     def query_clock_events(self, *, request_id: str) -> list[dict[str, Any]]:
-        """查询指定 request_id 的 clock_events 记录（测试用）。"""
-        if not self._initialized:
-            return []
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "SELECT request_id, graph_id, event_type, node_id, elapsed_ms, threshold_ms, ts_ms "
-                    "FROM clock_events WHERE request_id = ? ORDER BY id",
-                    (str(request_id),),
-                )
-                cols = ["request_id", "graph_id", "event_type", "node_id", "elapsed_ms", "threshold_ms", "ts_ms"]
-                return [dict(zip(cols, row)) for row in cursor.fetchall()]
-        except Exception as exc:
-            logger.warning("EvidencePlane.query_clock_events 失败: %s", exc)
-            return []
+        return self._query(
+            "query_clock_events",
+            lambda repository: repository.list_clock_events(request_id=request_id),
+            [],
+        )
+
+    def close(self) -> None:
+        repository = self._repository
+        if repository is not None:
+            repository.close()
+        self._repository = None
+        self._status = EvidencePlaneStatus(
+            available=False,
+            schema_authorized=self._status.schema_authorized,
+            degraded=self._status.degraded,
+            reason_code=self._status.reason_code,
+            detail=self._status.detail,
+        )
+
+
+__all__ = [
+    "EvidencePlane",
+    "EvidencePlaneStatus",
+    "get_evidence_plane",
+]

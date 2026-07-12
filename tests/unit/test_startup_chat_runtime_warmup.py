@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import pytest
+
+from host_brain.app import dependencies
+from host_brain.app.settings import get_persistence_settings
 from host_brain.app.startup import (
     warmup_chat_llm_runtime_profiles,
     warmup_chat_runtime_basics,
     warmup_codex_exec_intent_pool,
     warmup_retrieval_runtime_basics,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_startup_ledger(monkeypatch):
+    monkeypatch.setenv("NATSUME_AUDIT_DB", ":memory:")
+    get_persistence_settings.cache_clear()
+    dependencies._ledger = None
+    yield
+    if dependencies._ledger is not None:
+        dependencies._ledger.close()
+    dependencies._ledger = None
+    get_persistence_settings.cache_clear()
 
 
 def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:

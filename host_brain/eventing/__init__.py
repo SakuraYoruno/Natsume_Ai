@@ -9,6 +9,10 @@ from .gateway_transport import (
     InboxAcceptanceStatus,
     SQLiteGatewayTransportStore,
 )
+from .runtime_event_projection import (
+    RuntimeEventProjectionStore,
+    RuntimeEventProjectionWorker,
+)
 
 __all__ = [
     "GATEWAY_TRANSPORT_MIGRATION_ASSET_KEY",
@@ -17,5 +21,7 @@ __all__ = [
     "GatewayTransportStoreError",
     "InboxAcceptance",
     "InboxAcceptanceStatus",
+    "RuntimeEventProjectionStore",
+    "RuntimeEventProjectionWorker",
     "SQLiteGatewayTransportStore",
 ]

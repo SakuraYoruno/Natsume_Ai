@@ -14,7 +14,11 @@ from host_brain.app.bond_routes import (
     set_bond_engine_provider as _set_bond_engine_provider,
     set_bond_writer_provider as _set_bond_writer_provider,
 )
-from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
+from host_brain.app.canon_routes import (
+    router as canon_router,
+    set_canon_service_provider as _set_canon_service_provider,
+    set_ledger_provider as _set_canon_ledger_provider,
+)
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.input_routes import (
     GovernedCommandApplicationProvider,
@@ -51,8 +55,12 @@ def wire_route_providers(
     get_tool_catalog: Callable[[], Any],
     get_bond_engine: Callable[[], Any],
     logger: logging.Logger,
+    canon_service_provider: Callable[[], Any | None] | None = None,
 ) -> None:
-    _set_canon_ledger_provider(get_ledger)
+    if canon_service_provider is None:
+        _set_canon_ledger_provider(get_ledger)
+    else:
+        _set_canon_service_provider(canon_service_provider)
     _set_tool_providers(
         broker_provider=get_tool_broker,
         catalog_provider=get_tool_catalog,

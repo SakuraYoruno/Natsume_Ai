@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.persistence.context_repository import ContextRepository
 
 
 _DEFAULT_STALE_AFTER_TURNS = 48
@@ -61,9 +62,7 @@ class SessionTopicLedgerStore:
 
     def __init__(self, ledger: SQLiteLedger) -> None:
         self._ledger = ledger
-        self._conn = ledger._conn
-        self._write_lock = ledger._write_lock
-        self._ledger._ensure_schema()
+        self._repository = ContextRepository.from_ledger(ledger)
 
     def record_reply_plan(
         self,
@@ -84,47 +83,22 @@ class SessionTopicLedgerStore:
             return ()
         stale_after_turn_index = int(turn_index) + max(1, int(stale_after_turn_gap or _DEFAULT_STALE_AFTER_TURNS))
         updated_at_ms = int(time.time() * 1000)
-        metadata_payload = json.dumps(dict(metadata or {}), ensure_ascii=False, sort_keys=True) if metadata else None
-        with self._write_lock:
-            self._conn.execute(
-                """
-                INSERT INTO session_topic_state (
-                    session_id,
-                    person_id,
-                    topic_key,
-                    last_answer_turn_index,
-                    last_answer_request_id,
-                    source_assistant_act,
-                    confidence,
-                    stale_after_turn_index,
-                    metadata,
-                    updated_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(session_id, topic_key) DO UPDATE SET
-                    person_id = excluded.person_id,
-                    last_answer_turn_index = excluded.last_answer_turn_index,
-                    last_answer_request_id = excluded.last_answer_request_id,
-                    source_assistant_act = excluded.source_assistant_act,
-                    confidence = excluded.confidence,
-                    stale_after_turn_index = excluded.stale_after_turn_index,
-                    metadata = excluded.metadata,
-                    updated_at_ms = excluded.updated_at_ms
-                """,
-                (
-                    normalized_session,
-                    str(person_id or "").strip() or None,
-                    topic_key,
-                    int(turn_index),
-                    str(request_id or "").strip(),
-                    str(answer_style or "").strip(),
-                    float(confidence or 0.0),
-                    stale_after_turn_index,
-                    metadata_payload,
-                    updated_at_ms,
-                ),
+        return self._repository.upsert_topic_states(
+            (
+                {
+                    "session_id": normalized_session,
+                    "person_id": str(person_id or "").strip() or None,
+                    "topic_key": topic_key,
+                    "last_answer_turn_index": int(turn_index),
+                    "last_answer_request_id": str(request_id or "").strip(),
+                    "source_assistant_act": str(answer_style or "").strip(),
+                    "confidence": float(confidence or 0.0),
+                    "stale_after_turn_index": stale_after_turn_index,
+                    "metadata": dict(metadata or {}) or None,
+                    "updated_at_ms": updated_at_ms,
+                },
             )
-            self._conn.commit()
-        return (topic_key,)
+        )
 
     def fetch_block(
         self,
@@ -135,28 +109,13 @@ class SessionTopicLedgerStore:
         normalized_session = str(session_id or "").strip()
         if not normalized_session:
             return TopicLedgerBlock()
-        rows = self._conn.execute(
-            """
-            SELECT
-                topic_key,
-                last_answer_turn_index,
-                last_answer_request_id,
-                source_assistant_act,
-                confidence,
-                stale_after_turn_index,
-                metadata
-            FROM session_topic_state
-            WHERE session_id = ?
-            ORDER BY last_answer_turn_index DESC, updated_at_ms DESC
-            """,
-            (normalized_session,),
-        ).fetchall()
+        rows = self._repository.fetch_topic_states(session_id=normalized_session)
         entries: list[TopicLedgerEntry] = []
         active_topics: list[str] = []
         recent_topics: list[str] = []
         current_index = int(current_turn_index) if current_turn_index is not None else None
         for row in rows:
-            metadata_raw = row["metadata"] if "metadata" in row.keys() else None
+            metadata_raw = row.get("metadata")
             metadata: dict[str, Any] = {}
             if metadata_raw:
                 try:
@@ -190,13 +149,7 @@ class SessionTopicLedgerStore:
         normalized_session = str(session_id or "").strip()
         if not normalized_session:
             return 0
-        with self._write_lock:
-            cursor = self._conn.execute(
-                "DELETE FROM session_topic_state WHERE session_id = ?",
-                (normalized_session,),
-            )
-            self._conn.commit()
-            return int(cursor.rowcount or 0)
+        return self._repository.delete_topic_session(session_id=normalized_session)
 
 
 def coerce_topic_ledger_block(raw: Any) -> TopicLedgerBlock:

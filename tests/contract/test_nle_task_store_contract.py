@@ -27,7 +27,7 @@ from host_brain.agent_runtime.acceptance_judge import (
     AcceptanceJudgement,
     judge_acceptance_result,
 )
-import host_brain.agent_runtime.task_store as task_store_module
+import host_brain.persistence.task_repository as task_store_module
 from host_brain.agent_runtime.job_registry import AgentJobRegistry
 from host_brain.agent_runtime.task_graph import (
     TaskGraph,
@@ -35,7 +35,7 @@ from host_brain.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.task_store import (
+from host_brain.persistence.task_repository import (
     AttemptStatus,
     DurableTaskStore,
     Ed25519ReconciliationProofVerifier,

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 import re
-import sqlite3
 from typing import Any, Mapping, Sequence
+
+from host_brain.persistence.markdown_kb_repository import MarkdownKbRepository
+from host_brain.retrieval.markdown_kb_settings import MarkdownKbSettings
 
 
 DEFAULT_KB_ROOT = Path("data") / "knowledge_bases"
@@ -54,12 +55,12 @@ def _parse_bool(value: Any, *, default: bool) -> bool:
 
 
 def markdown_kb_enabled(env: Mapping[str, Any] | None = None) -> bool:
-    values = env if env is not None else os.environ
+    values = env if env is not None else MarkdownKbSettings().as_environment()
     return _parse_bool(values.get(ENV_ENABLED), default=True)
 
 
 def discover_markdown_kb_dbs(env: Mapping[str, Any] | None = None) -> list[Path]:
-    values = env if env is not None else os.environ
+    values = env if env is not None else MarkdownKbSettings().as_environment()
     if not markdown_kb_enabled(values):
         return []
 
@@ -109,79 +110,20 @@ def _query_one_db(db_path: Path, query: str, *, top_k: int) -> list[MarkdownKbHi
     fts_query = _fts_query(query)
     if not fts_query:
         return []
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    try:
-        kb_id = _read_kb_id(conn, db_path)
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    chunks_fts.chunk_id AS chunk_id,
-                    bm25(chunks_fts) AS bm25_score,
-                    c.doc_id,
-                    c.chunk_index,
-                    c.title,
-                    c.heading_path,
-                    c.line_start,
-                    c.line_end,
-                    c.text,
-                    c.source_relpath,
-                    c.asset_refs_json,
-                    c.token_estimate
-                FROM chunks_fts
-                JOIN chunks AS c ON c.chunk_id = chunks_fts.chunk_id
-                WHERE chunks_fts MATCH ?
-                ORDER BY bm25_score
-                LIMIT ?
-                """,
-                (fts_query, max(1, int(top_k))),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-
-        if not rows:
-            like = f"%{query}%"
-            rows = conn.execute(
-                """
-                SELECT
-                    chunk_id,
-                    0.0 AS bm25_score,
-                    doc_id,
-                    chunk_index,
-                    title,
-                    heading_path,
-                    line_start,
-                    line_end,
-                    text,
-                    source_relpath,
-                    asset_refs_json,
-                    token_estimate
-                FROM chunks
-                WHERE text LIKE ? OR title LIKE ? OR heading_path LIKE ?
-                ORDER BY chunk_index
-                LIMIT ?
-                """,
-                (like, like, like, max(1, int(top_k))),
-            ).fetchall()
-
-        scores = _normalize_scores(rows)
-        return [_row_to_hit(row, score=score, kb_id=kb_id, db_path=db_path) for row, score in zip(rows, scores)]
-    finally:
-        conn.close()
+    kb_id, rows = MarkdownKbRepository().query(
+        db_path,
+        fts_query=fts_query,
+        literal_query=query,
+        limit=top_k,
+    )
+    scores = _normalize_scores(rows)
+    return [
+        _row_to_hit(row, score=score, kb_id=kb_id, db_path=db_path)
+        for row, score in zip(rows, scores)
+    ]
 
 
-def _read_kb_id(conn: sqlite3.Connection, db_path: Path) -> str:
-    try:
-        row = conn.execute("SELECT value FROM kb_meta WHERE key = 'kb_id'").fetchone()
-        if row:
-            return str(json.loads(row["value"]))
-    except Exception:
-        pass
-    return db_path.parent.name
-
-
-def _row_to_hit(sql_row: sqlite3.Row, *, score: float, kb_id: str, db_path: Path) -> MarkdownKbHit:
+def _row_to_hit(sql_row: Mapping[str, Any], *, score: float, kb_id: str, db_path: Path) -> MarkdownKbHit:
     asset_refs = _load_json_list(str(sql_row["asset_refs_json"] or "[]"))
     metadata = {
         "kb_id": kb_id,
@@ -229,7 +171,7 @@ def _load_json_list(raw: str) -> list[str]:
     return [str(item) for item in parsed]
 
 
-def _normalize_scores(rows: Sequence[sqlite3.Row]) -> list[float]:
+def _normalize_scores(rows: Sequence[Mapping[str, Any]]) -> list[float]:
     if not rows:
         return []
     raw_scores = [float(row["bm25_score"]) for row in rows]

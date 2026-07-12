@@ -314,7 +314,9 @@ def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:
     conn.commit()
     conn.close()
 
-    snippet = _load_recent_dream_snippet(get_ledger=lambda: SimpleNamespace(_db_path=str(db_path)))
+    snippet = _load_recent_dream_snippet(
+        get_ledger=lambda: SimpleNamespace(canonical_db_path=str(db_path))
+    )
 
     assert "梦境余味仅作为低权重语气底色" in snippet
     assert "我梦见自己在一列很慢的夜车上" in snippet

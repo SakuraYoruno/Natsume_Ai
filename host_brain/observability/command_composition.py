@@ -18,8 +18,8 @@ from host_brain.secure_ingress import (
     SecureIngressAdapter,
     SecureIngressMode,
     SecureIngressService,
-    SQLiteSecureIngressStore,
 )
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 
 from .command_ports import ObsCommandPortRegistry
 from .command_outcome_journal import ObsCommandOutcomeJournal

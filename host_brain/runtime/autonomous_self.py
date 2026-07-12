@@ -131,40 +131,42 @@ def _loads(value: Any, default: Any) -> Any:
         return copy.deepcopy(default)
 
 
-def _conn(ledger: Any) -> Any:
-    conn = getattr(ledger, "_conn", None)
-    if conn is None:
-        raise RuntimeError("ledger sqlite connection unavailable")
-    return conn
-
-
 def _phase_label(environment: Mapping[str, Any], state: Mapping[str, Any]) -> str:
     return _text(environment.get("day_phase") or _map(state.get("clock")).get("day_phase") or "unknown", 40)
 
 
 def _recent_memory_events(*, ledger: Any, person_id: str, limit: int = 20) -> list[dict[str, Any]]:
     try:
-        rows = _conn(ledger).execute(
-            "SELECT event_id, source_kind, event_kind, visibility, role, content_summary, causality_json, refs_json, salience, valence, uncertainty, created_at_ms "
-            "FROM memory_event WHERE person_id=? AND active=1 ORDER BY created_at_ms DESC LIMIT ?",
-            (person_id, int(limit)),
-        ).fetchall()
+        rows = list(
+            get_recent_life_experience(
+                ledger=ledger,
+                person_id=person_id,
+                limit=limit,
+            ).get("items")
+            or []
+        )
     except Exception:
         return []
     return [
         {
-            "event_id": r[0],
-            "source_kind": r[1],
-            "event_kind": r[2],
-            "visibility": r[3],
-            "role": r[4],
-            "content_summary": r[5],
-            "causality": _loads(r[6], {}),
-            "refs": _loads(r[7], {}),
-            "salience": float(r[8] or 0.0),
-            "valence": float(r[9] or 0.0),
-            "uncertainty": float(r[10] or 0.0),
-            "created_at_ms": int(r[11] or 0),
+            "event_id": r.get("event_id"),
+            "source_kind": r.get("source_kind"),
+            "event_kind": r.get("event_kind"),
+            "visibility": r.get("visibility"),
+            "role": r.get("role"),
+            "content_summary": r.get("content_summary"),
+            "causality": _loads(r.get("causality_json") or r.get("causality"), {}),
+            "refs": _loads(
+                r.get("refs_json")
+                or r.get("evidence_json")
+                or r.get("evidence")
+                or r.get("refs"),
+                {},
+            ),
+            "salience": float(r.get("salience") or 0.0),
+            "valence": float(r.get("valence") or 0.0),
+            "uncertainty": float(r.get("uncertainty") or 0.0),
+            "created_at_ms": int(r.get("created_at_ms") or 0),
         }
         for r in rows
     ]

@@ -163,7 +163,10 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
             lambda: _surface_life_episode_recall_service(ledger),
         )
         monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: life_store)
+        monkeypatch.setattr(
+            "host_brain.agent_runtime.lightnovel_deep_reviewer._life_memory_store_provider",
+            lambda: life_store,
+        )
         monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: episodic_store)
         monkeypatch.setattr("host_brain.agent_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
 

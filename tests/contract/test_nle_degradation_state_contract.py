@@ -15,6 +15,7 @@ from host_brain.agent_runtime.review_policy import (
     ReviewType,
 )
 from host_brain.agent_runtime.review_store import ReviewStore
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.core.resource_manager import assess_background_task_pressure
 from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.observability.degradation_state import (
@@ -53,10 +54,10 @@ def _enter(machine: DegradationStateMachine, dependency: str = "MODEL", now_ms: 
 
 def _durable_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "degradation.sqlite3"
-    migrations = Path(__file__).resolve().parents[2] / "host_brain" / "audit" / "migrations"
-    with sqlite3.connect(str(db_path)) as conn:
-        for name in ("0055_agent_runtime_review_store.sql", "0056_runtime_events.sql"):
-            conn.executescript((migrations / name).read_text(encoding="utf-8"))
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="nle-degradation-fixture",
+    )
+    assert result.success, result.as_dict()
     return db_path
 
 
@@ -484,9 +485,19 @@ def test_t_nle_19_corrupt_replay_and_unavailable_state_fail_closed(tmp_path: Pat
     machine = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
     _enter(machine)
     with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DROP TRIGGER trg_runtime_event_journal_no_update")
         conn.execute(
             "UPDATE runtime_event_timeline SET aggregate_version = 3 "
             "WHERE aggregate_type = 'DEGRADATION_STATE'"
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER trg_runtime_event_journal_no_update
+            BEFORE UPDATE ON runtime_event_timeline
+            BEGIN
+                SELECT RAISE(ABORT, 'RUNTIME_EVENT_JOURNAL_IMMUTABLE');
+            END
+            """
         )
     corrupted = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
     assert corrupted.snapshot().durability_status == "FAILED"

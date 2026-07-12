@@ -4,6 +4,7 @@ import json
 import hashlib
 import sqlite3
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.life_memory import (
     EVIDENCE_REFLECTION,
@@ -3334,7 +3335,11 @@ def test_existing_life_episode_table_migrates_retention_columns_before_index(tmp
     finally:
         conn.close()
 
-    ledger = SQLiteLedger(db_path=str(db_path))
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="life-memory-old-schema-fixture",
+    )
+    assert migrated.success, migrated.as_dict()
+    ledger = SQLiteLedger(db_path=str(db_path), initialize_schema=False)
     try:
         row = ledger._conn.execute(
             "SELECT memory_strength, retention_state FROM life_episode WHERE episode_id = 'ep_old'"

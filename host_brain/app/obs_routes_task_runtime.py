@@ -9,8 +9,8 @@ from typing import Any, Callable
 from fastapi import Depends, HTTPException, Query
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
-from host_brain.agent_runtime.review_store import ReviewStore, ReviewStoreError
-from host_brain.agent_runtime.task_store import DurableTaskStore, TaskStoreError
+from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
+from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreError
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore

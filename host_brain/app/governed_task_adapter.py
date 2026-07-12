@@ -24,7 +24,7 @@ from host_brain.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.task_store import OutboxMessage
+from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,

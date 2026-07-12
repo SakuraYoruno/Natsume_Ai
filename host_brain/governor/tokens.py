@@ -515,118 +515,27 @@ class ReviewTokenService:
 
 
 def _canon_apply_migration_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "audit" / "migrations" / CANON_APPLY_MIGRATION_ASSET
+    from host_brain.persistence.canon_apply_repository import (  # noqa: PLC0415
+        canon_apply_migration_path,
+    )
+
+    return canon_apply_migration_path()
 
 
 def _ensure_canon_apply_schema(conn: sqlite3.Connection) -> None:
-    asset = _canon_apply_migration_path()
-    if not asset.is_file():
-        raise RuntimeError(f"CANON_APPLY_SCHEMA_MISSING:{asset}")
-    sql = asset.read_text(encoding="utf-8-sig")
-    if "canon_apply_token" not in sql or "canon_apply_journal" not in sql:
-        raise RuntimeError("CANON_APPLY_SCHEMA_INVALID")
-    checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
-    if checksum != CANON_APPLY_MIGRATION_SHA256:
-        raise RuntimeError("CANON_APPLY_SCHEMA_INVALID:asset_checksum")
-    try:
-        migration_table = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
-        ).fetchone()
-        if migration_table is None:
-            raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:central_migration_missing")
-        migrations = conn.execute(
-            "SELECT name, checksum FROM schema_migrations WHERE migration_id = 53"
-        ).fetchall()
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:central_migration_invalid") from exc
-    if (
-        len(migrations) != 1
-        or str(migrations[0][0]) != "canon_apply"
-        or str(migrations[0][1]) != CANON_APPLY_MIGRATION_SHA256
-    ):
-        raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:central_migration_mismatch")
-    if int(conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
-        raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:foreign_keys_disabled")
+    from host_brain.persistence.canon_apply_repository import (  # noqa: PLC0415
+        assert_canon_apply_schema_ready,
+    )
 
-    try:
-        actual_manifest = _canon_apply_schema_manifest(conn)
-        referenced_objects = conn.execute(
-            "SELECT type, name, sql FROM sqlite_master WHERE type IN ('trigger', 'view')"
-        ).fetchall()
-        referenced_objects.extend(
-            conn.execute(
-                "SELECT type, name, sql FROM sqlite_temp_master WHERE type IN ('trigger', 'view')"
-            ).fetchall()
-        )
-    except sqlite3.DatabaseError as exc:
-        raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:schema_introspection") from exc
-    for object_type, name, object_sql in referenced_objects:
-        normalized = str(object_sql or "").lower()
-        if "canon_apply_token" in normalized or "canon_apply_journal" in normalized:
-            raise RuntimeError(
-                "CANON_APPLY_SCHEMA_NOT_READY:unexpected_schema_object:"
-                f"{object_type}:{name}"
-            )
-    manifest_digest = hashlib.sha256(
-        _canonical_json(actual_manifest).encode("utf-8")
-    ).hexdigest()
-    if manifest_digest != CANON_APPLY_SCHEMA_MANIFEST_SHA256:
-        raise RuntimeError("CANON_APPLY_SCHEMA_NOT_READY:schema_fingerprint")
+    assert_canon_apply_schema_ready(conn, migration_path=_canon_apply_migration_path())
 
 
 def _canon_apply_schema_manifest(conn: sqlite3.Connection) -> dict[str, Any]:
-    tables = ("canon_apply_token", "canon_apply_journal")
-    master_rows = conn.execute(
-        """
-        SELECT type, name, tbl_name, sql
-        FROM sqlite_master
-        WHERE tbl_name IN ('canon_apply_token', 'canon_apply_journal')
-          AND type IN ('table', 'index', 'trigger')
-        ORDER BY type, name
-        """
-    ).fetchall()
-    master = [
-        (
-            str(row[0]),
-            str(row[1]),
-            str(row[2]),
-            " ".join(str(row[3] or "").split()),
-        )
-        for row in master_rows
-    ]
-    table_info: dict[str, list[tuple[Any, ...]]] = {}
-    foreign_keys: dict[str, list[tuple[Any, ...]]] = {}
-    indexes: dict[str, list[tuple[Any, ...]]] = {}
-    index_columns: dict[str, list[tuple[Any, ...]]] = {}
-    for table in tables:
-        table_info[table] = [
-            tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})").fetchall()
-        ]
-        foreign_keys[table] = sorted(
-            (tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()),
-            key=repr,
-        )
-        index_rows = conn.execute(f"PRAGMA index_list({table})").fetchall()
-        indexes[table] = sorted(
-            (
-                (str(row[1]), int(row[2]), str(row[3]), int(row[4]))
-                for row in index_rows
-            ),
-            key=repr,
-        )
-        for row in index_rows:
-            name = str(row[1])
-            index_columns[name] = [
-                tuple(value)
-                for value in conn.execute(f"PRAGMA index_xinfo({name})").fetchall()
-            ]
-    return {
-        "master": master,
-        "table_info": table_info,
-        "foreign_keys": foreign_keys,
-        "indexes": indexes,
-        "index_columns": index_columns,
-    }
+    from host_brain.persistence.canon_apply_repository import (  # noqa: PLC0415
+        canon_apply_schema_manifest,
+    )
+
+    return canon_apply_schema_manifest(conn)
 
 
 def _durable_db_path(db_path: str | Path) -> str:
@@ -673,15 +582,17 @@ class CanonApprovalTokenIssuer:
         if not callable(clock):
             raise TypeError("clock must be callable")
         self._clock = clock
-        with self._connect() as conn:
-            _ensure_canon_apply_schema(conn)
+        # Imported only when the offline issuer is constructed.  Importing the
+        # persistence package while governor.tokens itself is initializing
+        # would traverse legacy package exports back into TokenService.
+        from host_brain.persistence.canon_approval_repository import (
+            CanonApprovalTokenRepository,
+        )
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
-        return conn
+        self._repository = CanonApprovalTokenRepository(
+            self.db_path,
+        )
+        self._repository.assert_ready()
 
     @staticmethod
     def migration_asset_path() -> Path:
@@ -791,55 +702,33 @@ class CanonApprovalTokenIssuer:
         signature = base64.b64encode(
             self.__private_key.sign(attestation_json.encode("utf-8"))
         ).decode("ascii")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO canon_apply_token (
-                        token_digest, token_type, operation, subject_type, subject_id,
-                        subject_version, subject_hash, target_doc_id, base_version,
-                        actor_id, session_id, trace_id, evidence_digest,
-                        authority_key_id, approval_attestation_json,
-                        approval_attestation_digest, approval_signature, approval_nonce,
-                        issued_ts_ms, expiry_ts_ms, state
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AVAILABLE')
-                    """,
-                    (
-                        digest,
-                        token_type_value,
-                        operation_value,
-                        subject_type_value,
-                        fields["subject_id"],
-                        subject_version_value,
-                        subject_hash_value,
-                        fields["target_doc_id"],
-                        base_version_value,
-                        fields["actor_id"],
-                        fields["session_id"],
-                        fields["trace_id"],
-                        evidence_digest,
-                        self.authority_key_id,
-                        attestation_json,
-                        attestation_digest,
-                        signature,
-                        approval_nonce,
-                        issued,
-                        expiry,
-                    ),
-                )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+        self._repository.insert_available_token(
+            {
+                "token_digest": digest,
+                "token_type": token_type_value,
+                "operation": operation_value,
+                "subject_type": subject_type_value,
+                "subject_id": fields["subject_id"],
+                "subject_version": subject_version_value,
+                "subject_hash": subject_hash_value,
+                "target_doc_id": fields["target_doc_id"],
+                "base_version": base_version_value,
+                "actor_id": fields["actor_id"],
+                "session_id": fields["session_id"],
+                "trace_id": fields["trace_id"],
+                "evidence_digest": evidence_digest,
+                "authority_key_id": self.authority_key_id,
+                "approval_attestation_json": attestation_json,
+                "approval_attestation_digest": attestation_digest,
+                "approval_signature": signature,
+                "approval_nonce": approval_nonce,
+                "issued_ts_ms": issued,
+                "expiry_ts_ms": expiry,
+            }
+        )
         return token_ref
 
     def get_token_metadata(self, token_ref: str) -> dict[str, Any] | None:
         """Return non-secret metadata; the bearer value is never recoverable."""
 
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM canon_apply_token WHERE token_digest = ?",
-                (canon_token_digest(token_ref),),
-            ).fetchone()
-        return dict(row) if row is not None else None
+        return self._repository.get_token_metadata(canon_token_digest(token_ref))

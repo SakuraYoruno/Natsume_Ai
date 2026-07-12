@@ -8,16 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-import hashlib
 import inspect
 import os
 from pathlib import Path
-import sqlite3
 import threading
-import time
 from typing import Any
 
-from host_brain.agent_runtime.task_store import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.audit.migration_runner import (
     MigrationBatchResult,
     SQLiteMigrationRunner,
@@ -107,43 +104,6 @@ _INFRASTRUCTURE_ORDER = (
     "event_store",
     "outbox_publisher",
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _LegacyLedgerExpansion:
-    migration_id: int
-    name: str
-    filename: str
-    checksum: str
-    table: str
-    columns: frozenset[str]
-
-
-# SQLiteLedger's compatibility schema predates catalog ownership and already
-# contains these two additive changes.  Old ledgers therefore have the proven
-# postcondition but no schema_migrations row.  Nothing else is eligible for an
-# automatic baseline: every entry is pinned to its frozen asset checksum.
-_LEGACY_LEDGER_EXPANSIONS = {
-    "0041_canon_change_log_body": _LegacyLedgerExpansion(
-        migration_id=41,
-        name="canon_change_log_body",
-        filename="0041_canon_change_log_body.sql",
-        checksum="663fc6a8c069e8d7749cc580f347edc18ec89fb685f602f6e614e5c32524b06f",
-        table="canon_change_log",
-        columns=frozenset({"before_body", "after_body"}),
-    ),
-    "0043_canon_proposal_content": _LegacyLedgerExpansion(
-        migration_id=43,
-        name="canon_proposal_content",
-        filename="0043_canon_proposal_content.sql",
-        checksum="cefd91006687803d58817a1965eee369a9334c1f0558d8fd8eb804b105c8487f",
-        table="canon_proposal_log",
-        columns=frozenset(
-            {"proposed_title", "proposed_tags", "proposed_body"}
-        ),
-    ),
-}
-_MAX_LEGACY_RECONCILIATIONS = len(_LEGACY_LEDGER_EXPANSIONS)
 
 
 @dataclass(slots=True)
@@ -464,119 +424,10 @@ def _run_canonical_migrations(
     *,
     canonical_db_path: str,
 ) -> MigrationBatchResult:
-    """Run the catalog, reconciling only proven embedded-schema expansions."""
+    """Delegate all catalog and legacy-schema policy to the migration owner."""
 
-    for reconciliation_no in range(_MAX_LEGACY_RECONCILIATIONS + 1):
-        result = migration_runner.apply_migrations(
-            request_id="startup::task-runtime"
-        )
-        if bool(getattr(result, "success", False)):
-            return result
-        if reconciliation_no >= _MAX_LEGACY_RECONCILIATIONS:
-            return result
-        if not _reconcile_legacy_ledger_expansion(
-            migration_runner=migration_runner,
-            migration_result=result,
-            canonical_db_path=canonical_db_path,
-        ):
-            return result
-    raise AssertionError("unreachable migration reconciliation state")
-
-
-def _reconcile_legacy_ledger_expansion(
-    *,
-    migration_runner: SQLiteMigrationRunner,
-    migration_result: Any,
-    canonical_db_path: str,
-) -> bool:
-    """Backfill one frozen migration only when its full effect already exists."""
-
-    if str(getattr(migration_result, "reason_code", "") or "") != (
-        "MIGRATION_EXEC_FAILED"
-    ):
-        return False
-    records = tuple(getattr(migration_result, "records", ()) or ())
-    if not records:
-        return False
-    failed = records[-1]
-    if str(getattr(failed, "status", "") or "") != "FAILED":
-        return False
-    record_id = str(getattr(failed, "migration_id", "") or "")
-    expansion = _LEGACY_LEDGER_EXPANSIONS.get(record_id)
-    if expansion is None:
-        return False
-    failure_detail = str(getattr(failed, "detail", "") or "").lower()
-    if not any(
-        f"duplicate column name: {column}" in failure_detail
-        for column in expansion.columns
-    ):
-        return False
-
-    migrations_dir = getattr(migration_runner, "migrations_dir", None)
-    if migrations_dir is None:
-        return False
-    asset_path = Path(migrations_dir) / expansion.filename
-    try:
-        asset_text = asset_path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return False
-    checksum = hashlib.sha256(asset_text.encode("utf-8")).hexdigest()
-    if checksum != expansion.checksum:
-        return False
-
-    conn = sqlite3.connect(canonical_db_path, timeout=5.0, isolation_level=None)
-    try:
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("BEGIN IMMEDIATE")
-        columns = {
-            str(row["name"])
-            for row in conn.execute(
-                f'PRAGMA table_info("{expansion.table}")'
-            ).fetchall()
-        }
-        if not expansion.columns.issubset(columns):
-            conn.rollback()
-            return False
-        existing = conn.execute(
-            """
-            SELECT name, checksum
-            FROM schema_migrations
-            WHERE migration_id = ?
-            """,
-            (expansion.migration_id,),
-        ).fetchone()
-        if existing is not None:
-            matches = (
-                str(existing["name"]) == expansion.name
-                and str(existing["checksum"]) == expansion.checksum
-            )
-            conn.rollback()
-            return matches
-        conn.execute(
-            """
-            INSERT INTO schema_migrations(
-                migration_id,
-                name,
-                checksum,
-                applied_ts_ms
-            ) VALUES (?, ?, ?, ?)
-            """,
-            (
-                expansion.migration_id,
-                expansion.name,
-                expansion.checksum,
-                int(time.time() * 1000),
-            ),
-        )
-        conn.commit()
-        return True
-    except sqlite3.Error:
-        conn.rollback()
-        return False
-    finally:
-        conn.close()
+    del canonical_db_path
+    return migration_runner.apply_migrations(request_id="startup::task-runtime")
 
 
 def build_process_task_runtime_container(

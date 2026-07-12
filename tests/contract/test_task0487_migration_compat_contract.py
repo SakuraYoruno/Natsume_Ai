@@ -17,6 +17,11 @@ from host_brain.core.errors import MIGRATION_EXEC_FAILED, MIGRATION_SCHEMA_DRIFT
 
 ROOT = Path(__file__).resolve().parents[2]
 CENTRAL_CATALOG = ROOT / "host_brain" / "audit" / "migrations"
+CENTRAL_ASSETS = tuple(sorted(CENTRAL_CATALOG.glob("*.sql")))
+CENTRAL_VERSIONS = tuple(int(asset.name.split("_", 1)[0]) for asset in CENTRAL_ASSETS)
+EXPECTED_LATEST_VERSION = max(CENTRAL_VERSIONS)
+EXPECTED_ASSET_COUNT = len(CENTRAL_ASSETS)
+EXPECTED_UNIQUE_VERSION_COUNT = len(set(CENTRAL_VERSIONS))
 
 
 def _copy_catalog(tmp_path: Path) -> Path:
@@ -32,8 +37,8 @@ def test_central_catalog_guard_accepts_only_frozen_duplicate_and_gap() -> None:
 
     assert report.status == STATUS_READY, report.as_dict()
     assert report.reason_code is None
-    assert report.asset_count == 46
-    assert report.latest_version == 61
+    assert report.asset_count == EXPECTED_ASSET_COUNT
+    assert report.latest_version == EXPECTED_LATEST_VERSION
     assert report.duplicate_versions == []
     assert report.missing_versions == []
 
@@ -51,17 +56,21 @@ def test_empty_database_replays_all_physical_assets_and_second_run_skips(
     assert first.success, first.as_dict()
     assert first.summary == {
         "scope": "sqlite",
-        "current_version": 61,
-        "latest_version": 61,
-        "applied_count": 46,
+        "current_version": EXPECTED_LATEST_VERSION,
+        "latest_version": EXPECTED_LATEST_VERSION,
+        "applied_count": EXPECTED_ASSET_COUNT,
         "skipped_count": 0,
         "failed_count": 0,
     }
 
     conn = sqlite3.connect(str(db_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (45,)
-        assert conn.execute("SELECT COUNT(*) FROM schema_migration_assets").fetchone() == (46,)
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (
+            EXPECTED_UNIQUE_VERSION_COUNT,
+        )
+        assert conn.execute("SELECT COUNT(*) FROM schema_migration_assets").fetchone() == (
+            EXPECTED_ASSET_COUNT,
+        )
         assert conn.execute(
             "SELECT name FROM schema_migrations WHERE migration_id = 9"
         ).fetchone() == ("agent_loop_log",)
@@ -99,18 +108,18 @@ def test_empty_database_replays_all_physical_assets_and_second_run_skips(
 
     second = runner.apply_migrations(request_id="task0487-empty-2", ts_ms=11)
     assert second.success, second.as_dict()
-    assert second.summary["current_version"] == 61
-    assert second.summary["latest_version"] == 61
+    assert second.summary["current_version"] == EXPECTED_LATEST_VERSION
+    assert second.summary["latest_version"] == EXPECTED_LATEST_VERSION
     assert second.summary["applied_count"] == 0
-    assert second.summary["skipped_count"] == 46
+    assert second.summary["skipped_count"] == EXPECTED_ASSET_COUNT
     assert second.summary["failed_count"] == 0
 
 
-def test_existing_0058_database_upgrades_in_place_through_0061(tmp_path: Path) -> None:
+def test_existing_0058_database_upgrades_in_place_through_latest(tmp_path: Path) -> None:
     pre_0059_catalog = _copy_catalog(tmp_path)
-    (pre_0059_catalog / "0059_gateway_transport.sql").unlink()
-    (pre_0059_catalog / "0060_skill_supply_chain.sql").unlink()
-    (pre_0059_catalog / "0061_pentest_run_store.sql").unlink()
+    for asset in pre_0059_catalog.glob("*.sql"):
+        if int(asset.name.split("_", 1)[0]) >= 59:
+            asset.unlink()
     db_path = tmp_path / "upgrade-from-0058.sqlite3"
 
     before = SQLiteMigrationRunner(
@@ -125,8 +134,8 @@ def test_existing_0058_database_upgrades_in_place_through_0061(tmp_path: Path) -
         migrations_dir=CENTRAL_CATALOG,
     ).apply_migrations(request_id="task0488-upgrade-0059", ts_ms=51)
     assert upgraded.success, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 61
-    assert upgraded.summary["applied_count"] == 3
+    assert upgraded.summary["current_version"] == EXPECTED_LATEST_VERSION
+    assert upgraded.summary["applied_count"] == EXPECTED_LATEST_VERSION - 58
     with sqlite3.connect(str(db_path)) as conn:
         assert conn.execute(
             """

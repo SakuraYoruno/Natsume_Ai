@@ -70,12 +70,18 @@ class WorldCanonStore:
         *,
         world_root: str | Path = "host_brain/canon/world",
         ledger: SQLiteLedger | None = None,
+        create_directories: bool = True,
     ) -> None:
         self.world_root = Path(world_root)
-        self.world_root.mkdir(parents=True, exist_ok=True)
-        self.ledger = ledger or SQLiteLedger()
         self._lock_dir = self.world_root / ".locks"
-        self._lock_dir.mkdir(parents=True, exist_ok=True)
+        if create_directories:
+            self.world_root.mkdir(parents=True, exist_ok=True)
+            self._lock_dir.mkdir(parents=True, exist_ok=True)
+            self.ledger = ledger or SQLiteLedger()
+        else:
+            # Pure readers and preview operations must not create a Canon root,
+            # lock directory, default ledger, or runtime schema as a side effect.
+            self.ledger = ledger
 
     def get(self, doc_id: str) -> WorldCanonDocument | None:
         path = self._doc_path(doc_id)
@@ -243,6 +249,8 @@ class WorldCanonStore:
             "status": "pending",
             "ts_ms": submit_ts,
         }
+        if self.ledger is None:
+            raise RuntimeError("Canon mutation requires an explicit ledger")
         self.ledger.log_canon_proposal(row)
         return row
 
@@ -255,6 +263,8 @@ class WorldCanonStore:
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
         reject_ts = int(now_ms() if ts_ms is None else ts_ms)
+        if self.ledger is None:
+            raise RuntimeError("Canon mutation requires an explicit ledger")
         proposal = self.ledger.get_proposal(proposal_id)
         if proposal is None:
             raise KeyError(f"proposal not found: {proposal_id}")

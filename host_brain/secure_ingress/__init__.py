@@ -37,7 +37,6 @@ from .models import (
     SecureIngressRequest,
 )
 from .service import SecureIngressService
-from .store import SQLiteSecureIngressStore, SecureIngressStoreError
 from .surfaces import (
     IngressSurface,
     IngressSurfacePolicy,
@@ -45,6 +44,22 @@ from .surfaces import (
     SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
+
+
+def __getattr__(name: str):
+    if name in {"SQLiteSecureIngressStore", "SecureIngressStoreError"}:
+        from host_brain.persistence.secure_ingress_repository import (  # noqa: PLC0415
+            SQLiteSecureIngressStore,
+            SecureIngressStoreError,
+        )
+
+        value = {
+            "SQLiteSecureIngressStore": SQLiteSecureIngressStore,
+            "SecureIngressStoreError": SecureIngressStoreError,
+        }[name]
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
 
 __all__ = [
     "ClaimDecision",

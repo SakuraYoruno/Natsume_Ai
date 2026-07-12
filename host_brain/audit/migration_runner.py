@@ -11,11 +11,19 @@ import sqlite3
 from typing import Any
 
 from host_brain.audit.migration_compat import (
+    PLATFORM_REGISTRY_DRAFT_CHECKSUM,
     evaluate_catalog_compatibility,
+    is_exact_legacy_inline_schema_failure,
     is_exact_legacy_fts_failure,
+    is_exact_platform_registry_draft_record,
+    is_exact_platform_registry_repair_asset,
     is_legacy_duplicate_primary,
+    legacy_inline_schema_postcondition_holds,
     legacy_fts_postcondition_holds,
+    platform_registry_schema_postcondition_holds,
     physical_asset_key,
+    transaction_policy_issues,
+    uses_checksum_bound_atomic_envelope,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
@@ -141,6 +149,7 @@ class SQLiteMigrationRunner:
                 )
 
             compatibility = evaluate_catalog_compatibility(assets)
+            transaction_issues = transaction_policy_issues(assets)
             duplicate_versions = _find_duplicate_versions(
                 [asset.migration_id for asset in assets]
             )
@@ -149,8 +158,8 @@ class SQLiteMigrationRunner:
                     compatibility.accepted_duplicate_versions
                 )
             )
-            if compatibility.issues or unexpected_duplicates:
-                details = list(compatibility.issues)
+            if compatibility.issues or unexpected_duplicates or transaction_issues:
+                details = [*compatibility.issues, *transaction_issues]
                 if unexpected_duplicates:
                     details.append(
                         f"duplicate migration versions are not compatible: {unexpected_duplicates}"
@@ -205,6 +214,7 @@ class SQLiteMigrationRunner:
                 )
 
             applied_drift = self._validate_applied_records(
+                conn=conn,
                 assets=assets,
                 applied_records=applied_records,
             )
@@ -311,7 +321,33 @@ class SQLiteMigrationRunner:
                 applied_detail = "migration applied"
                 try:
                     script = asset.path.read_text(encoding="utf-8-sig")
+                    platform_registry_repair = (
+                        is_exact_platform_registry_repair_asset(asset)
+                    )
+                    if platform_registry_repair:
+                        if not platform_registry_schema_postcondition_holds(
+                            conn,
+                            allow_missing_repair_trigger=True,
+                        ):
+                            raise sqlite3.IntegrityError(
+                                "0072 platform registry precondition failed"
+                            )
+                        script = _without_final_commit(script)
+                    elif uses_checksum_bound_atomic_envelope(asset):
+                        script = f"BEGIN IMMEDIATE;\n{script}\nCOMMIT;\n"
                     conn.executescript(script)
+                    if platform_registry_repair:
+                        if not conn.in_transaction:
+                            raise sqlite3.IntegrityError(
+                                "0075 repair transaction closed before postcondition"
+                            )
+                        if not platform_registry_schema_postcondition_holds(
+                            conn,
+                            allow_missing_repair_trigger=False,
+                        ):
+                            raise sqlite3.IntegrityError(
+                                "0072 platform registry strict postcondition failed"
+                            )
                 except Exception as exc:
                     if is_exact_legacy_fts_failure(
                         asset, exc
@@ -319,6 +355,13 @@ class SQLiteMigrationRunner:
                         disposition = ASSET_DISPOSITION_APPLIED_WITH_COMPAT
                         applied_detail = (
                             "migration applied with checksum-bound legacy FTS compatibility"
+                        )
+                    elif is_exact_legacy_inline_schema_failure(
+                        asset, exc
+                    ) and legacy_inline_schema_postcondition_holds(conn, asset):
+                        disposition = ASSET_DISPOSITION_APPLIED_WITH_COMPAT
+                        applied_detail = (
+                            "migration backfilled with checksum-bound legacy inline-schema compatibility"
                         )
                     else:
                         # Scripts such as 0052+ use an explicit transaction.
@@ -557,6 +600,7 @@ class SQLiteMigrationRunner:
     def _validate_applied_records(
         self,
         *,
+        conn: sqlite3.Connection,
         assets: list[MigrationAsset],
         applied_records: dict[int, sqlite3.Row],
     ) -> str | None:
@@ -567,10 +611,35 @@ class SQLiteMigrationRunner:
             candidates = available.get(migration_id, [])
             if not candidates:
                 return f"applied migration {migration_id:04d} is missing from catalog assets"
-            if not any(_record_matches_asset(record, asset) for asset in candidates):
+            if not any(
+                _record_matches_asset(record, asset)
+                or is_exact_platform_registry_draft_record(
+                    record,
+                    asset,
+                    catalog_assets=assets,
+                    repair_applied=75 in applied_records,
+                )
+                for asset in candidates
+            ):
                 return (
                     f"applied migration {migration_id:04d} name/checksum does not match "
                     "any physical catalog asset"
+                )
+        platform_record = applied_records.get(72)
+        if platform_record is not None:
+            checksum = str(platform_record["checksum"])
+            repair_applied = 75 in applied_records
+            allow_missing_repair_trigger = (
+                checksum == PLATFORM_REGISTRY_DRAFT_CHECKSUM
+                and not repair_applied
+            )
+            if not platform_registry_schema_postcondition_holds(
+                conn,
+                allow_missing_repair_trigger=allow_missing_repair_trigger,
+            ):
+                return (
+                    "applied migration 0072 platform registry physical schema "
+                    "does not satisfy its checksum-bound postcondition"
                 )
         return None
 
@@ -592,11 +661,18 @@ class SQLiteMigrationRunner:
             asset = available.get(asset_key)
             if asset is None:
                 return f"applied physical migration asset is missing from catalog: {asset_key}"
-            if (
+            record_mismatch = (
                 int(record["migration_id"]) != asset.migration_id
                 or str(record["name"]) != asset.name
                 or str(record["checksum"]) != asset.checksum
-            ):
+            )
+            draft_compatible = is_exact_platform_registry_draft_record(
+                record,
+                asset,
+                catalog_assets=assets,
+                repair_applied=75 in applied_records,
+            )
+            if record_mismatch and not draft_compatible:
                 return f"physical migration asset checksum drift: {asset_key}"
             if str(record["disposition"]) not in allowed_dispositions:
                 return f"physical migration asset has invalid disposition: {asset_key}"
@@ -607,6 +683,12 @@ class SQLiteMigrationRunner:
             if (
                 asset.migration_id not in accepted_duplicate_versions
                 and not _record_matches_asset(applied_records[asset.migration_id], asset)
+                and not is_exact_platform_registry_draft_record(
+                    applied_records[asset.migration_id],
+                    asset,
+                    catalog_assets=assets,
+                    repair_applied=75 in applied_records,
+                )
             ):
                 return f"physical and legacy migration records disagree: {asset_key}"
         return None
@@ -741,6 +823,13 @@ class SQLiteMigrationRunner:
             "skipped_count": int(skipped_count),
             "failed_count": int(failed_count),
         }
+
+
+def _without_final_commit(script: str) -> str:
+    match = re.search(r"\bCOMMIT\s*;\s*\Z", str(script), flags=re.IGNORECASE)
+    if match is None:
+        raise ValueError("checksum-bound repair asset has no final COMMIT")
+    return str(script)[: match.start()]
 
 
 def _sha256(text: str) -> str:

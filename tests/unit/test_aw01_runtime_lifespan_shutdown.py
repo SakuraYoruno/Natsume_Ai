@@ -19,7 +19,11 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
     async def record_shutdown(**_kwargs) -> None:
         events.append("shutdown")
 
-    monkeypatch.setattr(http_hooks, "_parse_bool_env", stop_startup_after_initialization)
+    monkeypatch.setattr(
+        http_hooks,
+        "get_core_settings",
+        stop_startup_after_initialization,
+    )
     monkeypatch.setattr(http_hooks, "_shutdown_runtime", record_shutdown)
 
     with pytest.raises(RuntimeError, match="lifespan body failed"):

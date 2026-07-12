@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import tempfile
 import time
 from typing import Any
 
@@ -20,9 +19,7 @@ from host_brain.integrations.graph_contract import (
 
 
 def _make_evidence_plane() -> EvidencePlane:
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    return EvidencePlane(db_path=tmp.name)
+    return EvidencePlane(db_path=":memory:")
 
 
 def _make_presence_events(count: int = 2) -> list[dict[str, Any]]:
@@ -80,10 +77,11 @@ def test_evp_14_write_stream_events_silent_degradation(monkeypatch: pytest.Monke
     """T-EVP-14：write_stream_events 写入失败时静默降级（不抛出异常）"""
     ep = _make_evidence_plane()
 
-    def _bad_connect(self):
+    def _bad_write(**_kwargs):
         raise RuntimeError("模拟数据库连接失败")
 
-    monkeypatch.setattr(EvidencePlane, "_connect", _bad_connect)
+    assert ep._repository is not None
+    monkeypatch.setattr(ep._repository, "append_stream_events", _bad_write)
 
     events = _make_presence_events(count=2)
     # 不应抛出异常

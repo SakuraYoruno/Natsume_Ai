@@ -4,12 +4,12 @@ import asyncio
 import json
 import os
 import re
-import sqlite3
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
 
 from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.app.settings import get_persistence_settings
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.response_form_contract import normalize_response_form
 from host_brain.persona.surface_affect_control import (
@@ -22,6 +22,7 @@ from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_
 from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
 from host_brain.persona.body_sense import get_body_sense_model
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
+from host_brain.persistence.runtime_read_repository import RuntimeReadRepository
 
 
 _MEMORY_PACKET_KEYS = (
@@ -3492,9 +3493,6 @@ def _surface_recent_user_fact_texts(agent_input: Any | None, *, limit: int = 80)
         return []
     session_id = str(getattr(agent_input, "session_id", "") or "").strip()
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
-    db_path = str(os.environ.get("HOST_AUDIT_SQLITE_PATH") or os.environ.get("HOST_AUDIT_DB_PATH") or "host_brain/data/audit.sqlite3")
-    if not os.path.exists(db_path):
-        return []
     fact_markers = (
         "测试代号",
         "海边灯塔",
@@ -3510,47 +3508,24 @@ def _surface_recent_user_fact_texts(agent_input: Any | None, *, limit: int = 80)
         "记一下",
     )
     rows: list[str] = []
+    repository: RuntimeReadRepository | None = None
     try:
-        conn = sqlite3.connect(db_path)
-        try:
-            boundary_ts_ms = 0
-            if session_id and request_id:
-                row = conn.execute(
-                    """
-                    SELECT ts_ms
-                    FROM conversation_turn
-                    WHERE session_id = ? AND request_id = ? AND role = 'user'
-                    ORDER BY turn_index ASC
-                    LIMIT 1
-                    """,
-                    (session_id, request_id),
-                ).fetchone()
-                if row:
-                    boundary_ts_ms = int(row[0] or 0)
-            boundary_clause = "AND ts_ms <= ?" if boundary_ts_ms else ""
-            params: list[Any] = [person_id]
-            if boundary_ts_ms:
-                params.append(boundary_ts_ms)
-            params.append(int(limit))
-            cursor = conn.execute(
-                f"""
-                SELECT content
-                FROM conversation_turn
-                WHERE person_id = ? AND role = 'user'
-                  {boundary_clause}
-                ORDER BY ts_ms DESC
-                LIMIT ?
-                """,
-                params,
-            )
-            for (content,) in cursor.fetchall():
-                text = str(content or "").strip()
-                if text and any(marker in text for marker in fact_markers):
-                    rows.append("用户事实：" + text)
-        finally:
-            conn.close()
+        repository = RuntimeReadRepository.from_settings(get_persistence_settings())
+        contents = repository.recent_user_turn_contents(
+            person_id=person_id,
+            session_id=session_id,
+            request_id=request_id,
+            limit=int(limit),
+        )
+        for content in contents:
+            text = str(content or "").strip()
+            if text and any(marker in text for marker in fact_markers):
+                rows.append("用户事实：" + text)
     except Exception:
         return []
+    finally:
+        if repository is not None:
+            repository.close()
     rows.reverse()
     return rows
 
@@ -3813,29 +3788,15 @@ def _compact_surface_dream_text(value: Any, *, limit: int = 260) -> str:
 
 
 def _load_recent_surface_dream_text(*, limit: int = 320) -> str:
+    repository: RuntimeReadRepository | None = None
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
 
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if not db_path:
-            return ""
-        import sqlite3  # noqa: PLC0415
-
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT memory_id, detail FROM memory_ops_log "
-            "WHERE op_kind='WRITE' AND status='SUCCESS' "
-            "AND evidence_refs LIKE '%tag:dream%' "
-            "AND evidence_refs LIKE '%source:dream_generator%' "
-            "AND evidence_refs NOT LIKE '%tag:dream_usage_hint%' "
-            "ORDER BY ts_ms DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        row = repository.recent_dream_memory()
         if not row:
             return ""
-        memory_id = str(row["memory_id"] or "").strip()
+        memory_id = str(row.get("memory_id") or "").strip()
         if memory_id:
             try:
                 from host_brain.memory.chroma_client import build_runtime_chroma_client  # noqa: PLC0415
@@ -3845,9 +3806,12 @@ def _load_recent_surface_dream_text(*, limit: int = 320) -> str:
                     return _compact_surface_dream_text(entry.text, limit=limit)
             except Exception:
                 pass
-        return _compact_surface_dream_text(row["detail"], limit=limit)
+        return _compact_surface_dream_text(row.get("detail"), limit=limit)
     except Exception:
         return ""
+    finally:
+        if repository is not None:
+            repository.close()
 
 
 def _surface_dream_context_task_facts(agent_input: Any | None) -> tuple[str, ...]:
@@ -3880,44 +3844,21 @@ def _surface_recent_conversation_window_facts(agent_input: Any | None, *, limit:
     if not session_id:
         return ()
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    repository: RuntimeReadRepository | None = None
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
 
-        conn = getattr(get_ledger(), "_conn", None)
-        if conn is None:
-            return ()
-        boundary_turn_index = None
-        if request_id:
-            boundary_row = conn.execute(
-                """
-SELECT turn_index
-FROM conversation_turn
-WHERE session_id=? AND request_id=? AND role='user'
-ORDER BY turn_index ASC
-LIMIT 1
-""",
-                (session_id, request_id),
-            ).fetchone()
-            if boundary_row is not None:
-                boundary_turn_index = int(boundary_row["turn_index"] or 0)
-        clauses = ["session_id=?"]
-        params: list[Any] = [session_id]
-        if boundary_turn_index is not None:
-            clauses.append("turn_index < ?")
-            params.append(boundary_turn_index)
-        params.append(max(2, min(int(limit or 5), 8)))
-        rows = conn.execute(
-            f"""
-SELECT role, content, ts_ms, metadata
-FROM conversation_turn
-WHERE {' AND '.join(clauses)}
-ORDER BY ts_ms DESC
-LIMIT ?
-""",
-            params,
-        ).fetchall()
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        rows = repository.recent_conversation_turns_before_request(
+            session_id=session_id,
+            request_id=request_id,
+            limit=max(2, min(int(limit or 5), 8)),
+        )
     except Exception:
         return ()
+    finally:
+        if repository is not None:
+            repository.close()
     turns: list[str] = []
     for row in reversed(rows):
         try:
@@ -3930,7 +3871,11 @@ LIMIT ?
             continue
         source_kind = ""
         try:
-            metadata = json.loads(str(metadata_raw or "{}"))
+            metadata = (
+                dict(metadata_raw)
+                if isinstance(metadata_raw, Mapping)
+                else json.loads(str(metadata_raw or "{}"))
+            )
             if isinstance(metadata, Mapping):
                 source_kind = str(metadata.get("source_kind") or "").strip()
         except Exception:

@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from typing import Any, Mapping
+
+from host_brain.persistence.full_text_repository import (
+    FULL_TEXT_QUERY_FAILED,
+    FullTextRepository,
+    FullTextRepositoryError,
+)
 
 logger = logging.getLogger("Natsume.retrieval.full_text_searcher")
 
@@ -29,25 +34,10 @@ class FullTextSearcher:
             RuntimeError: 如果 FTS5 虚拟表不可用。
         """
         self._db_path = db_path or ":memory:"
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._ensure_fts_table()
-
-    def _ensure_fts_table(self) -> None:
-        """确保 episodic_fts 虚拟表存在（若不存在则创建）。"""
         try:
-            self._conn.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(
-                    memory_id UNINDEXED,
-                    content,
-                    tokenize = "unicode61"
-                )
-                """
-            )
-            self._conn.commit()
-        except sqlite3.OperationalError as exc:
-            raise RuntimeError(f"FTS5 虚拟表创建失败（SQLite 可能不支持 FTS5）: {exc}") from exc
+            self._repository = FullTextRepository(self._db_path)
+        except FullTextRepositoryError as exc:
+            raise RuntimeError(f"FTS5 虚拟表不可用: {exc.detail}") from exc
 
     @staticmethod
     def _split_chinese_query(text: str) -> str:
@@ -128,13 +118,10 @@ class FullTextSearcher:
         """
         # 对中文内容进行字符级分割，与查询时保持一致
         indexed_content = self._prepare_content_for_index(str(content or ""))
-        # 先删除旧记录（幂等写入）
-        self._conn.execute("DELETE FROM episodic_fts WHERE memory_id = ?", (memory_id,))
-        self._conn.execute(
-            "INSERT INTO episodic_fts(memory_id, content) VALUES (?, ?)",
-            (memory_id, indexed_content),
+        self._repository.replace_document(
+            memory_id=memory_id,
+            content=indexed_content,
         )
-        self._conn.commit()
 
     def search(self, query: str, *, top_k: int = 8) -> list[dict[str, Any]]:
         """全文检索，返回匹配的记忆列表。
@@ -157,19 +144,12 @@ class FullTextSearcher:
             return []
         try:
             # FTS5 使用 bm25() 函数计算相关性分数（负值，越小越相关）
-            rows = self._conn.execute(
-                """
-                SELECT memory_id, content, bm25(episodic_fts) AS bm25_score
-                FROM episodic_fts
-                WHERE episodic_fts MATCH ?
-                ORDER BY bm25_score
-                LIMIT ?
-                """,
-                (fts_query, int(top_k)),
-            ).fetchall()
-        except sqlite3.OperationalError:
+            rows = self._repository.search(fts_query, limit=int(top_k))
+        except FullTextRepositoryError as exc:
             # FTS5 查询语法错误或表不存在时降级返回空
-            return []
+            if exc.reason_code == FULL_TEXT_QUERY_FAILED:
+                return []
+            raise
 
         if not rows:
             return []
@@ -200,10 +180,9 @@ class FullTextSearcher:
     def close(self) -> None:
         """关闭数据库连接。"""
         try:
-            self._conn.close()
+            self._repository.close()
         except Exception:
             pass
 
 
 # ── HybridFusionStrategy（TASK-0202）────────────────────────────────────────
-

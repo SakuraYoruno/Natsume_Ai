@@ -33,6 +33,10 @@ from host_brain.app.obs_routes_trace import (
     _get_warmed_trace_feed_snapshot,
     get_trace_feed_warm_status,
 )
+from host_brain.persistence.life_body_query_repository import (
+    LifeBodyQueryRepository,
+    decode_life_body_row,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -567,35 +571,18 @@ def _fetch_recent_ledger_rows(
     limit: int,
 ) -> list[dict[str, Any]]:
     ledger = _get_ledger()
-    resolver = getattr(ledger, "resolve_fetch_table", None)
-    resolved = resolver(table) if callable(resolver) else table
-    if not resolved:
-        return []
-
-    connection = getattr(ledger, "_conn", None)
-    decoder = getattr(ledger, "_decode_row", None)
-    table_has_column = getattr(ledger, "_table_has_column", None)
-    if connection is None or not callable(decoder):
-        return []
-
     now_ms = _now_ms()
     start_ms = now_ms - max(1, int(window_minutes or 0)) * 60 * 1000
-    limit = max(1, int(limit))
     try:
-        has_ts = bool(callable(table_has_column) and table_has_column(resolved, "ts_ms"))
-        if has_ts:
-            rows = connection.execute(
-                f"SELECT * FROM {resolved} WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms DESC LIMIT ?",
-                (start_ms, now_ms, limit),
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                f"SELECT * FROM {resolved} ORDER BY rowid DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [_as_dict(decoder(resolved, row)) for row in rows]
+        rows = LifeBodyQueryRepository.from_ledger(ledger).read_generic_window(
+            table,
+            start_ms=start_ms,
+            end_ms=now_ms,
+            limit=max(1, int(limit)),
+        )
+        return [_as_dict(decode_life_body_row(table, row)) for row in rows]
     except Exception as exc:
-        logger.debug("life-body ledger projection degraded: table=%s err=%s", resolved, exc)
+        logger.debug("life-body ledger projection degraded: table=%s err=%s", table, exc)
         return []
 
 
@@ -606,37 +593,29 @@ def _fetch_recent_immune_rows(
     scan_limit: int,
 ) -> list[dict[str, Any]]:
     ledger = _get_ledger()
-    resolver = getattr(ledger, "resolve_fetch_table", None)
-    resolved = resolver("voice_event_log") if callable(resolver) else "voice_event_log"
-    if not resolved:
-        return []
-
-    connection = getattr(ledger, "_conn", None)
-    decoder = getattr(ledger, "_decode_row", None)
-    if connection is None or not callable(decoder):
-        return []
-
     now_ms = _now_ms()
     start_ms = now_ms - max(1, int(window_minutes or 0)) * 60 * 1000
     desired = max(1, int(limit))
     row_limit = max(desired, int(scan_limit or 0) or desired)
     try:
-        rows = connection.execute(
-            (
-                f"SELECT * FROM {resolved} "
-                "WHERE ts_ms >= ? AND ts_ms <= ? "
-                "AND (event_type = ? OR event_type LIKE ?) "
-                "ORDER BY ts_ms DESC LIMIT ?"
-            ),
-            (start_ms, now_ms, "IMMUNE_CHAT_GATE", "INPUT_%", row_limit),
-        ).fetchall()
+        rows = LifeBodyQueryRepository.from_ledger(ledger).read_event_type_window(
+            "voice_event_log",
+            start_ms=start_ms,
+            end_ms=now_ms,
+            exact_event_type="IMMUNE_CHAT_GATE",
+            like_event_type="INPUT_%",
+            scan_limit=row_limit,
+        )
     except Exception as exc:
-        logger.debug("life-body immune lineage degraded: table=%s err=%s", resolved, exc)
+        logger.debug(
+            "life-body immune lineage degraded: table=voice_event_log err=%s",
+            exc,
+        )
         return []
 
     immune_rows: list[dict[str, Any]] = []
     for row in rows:
-        row_dict = _as_dict(decoder(resolved, row))
+        row_dict = _as_dict(decode_life_body_row("voice_event_log", row))
         if _as_dict(_extract_immune_gate_payload(row_dict)):
             immune_rows.append(row_dict)
         if len(immune_rows) >= desired:

@@ -26,7 +26,7 @@ from host_brain.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.task_store import OutboxMessage
+from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
@@ -168,6 +168,56 @@ class SchedulerDefinitionRepositoryPort(Protocol):
         *,
         source: str | None = None,
     ) -> Mapping[str, Any] | None: ...
+
+    def get_terminal_outcome(
+        self,
+        occurrence_id: str,
+    ) -> Mapping[str, Any] | None: ...
+
+    def append_terminal_outcome(
+        self,
+        *,
+        occurrence_id: str,
+        outcome_kind: str,
+        reason_code: str,
+        outcome: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+    def resolve_admin_operation(
+        self,
+        *,
+        operation_kind: str,
+        task_id: str,
+        operation_request: Mapping[str, Any],
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None: ...
+
+    def publish_definition_operation(
+        self,
+        *,
+        task_id: str,
+        definition: Mapping[str, Any],
+        expected_head_version: int,
+        next_scheduled_at_ms: int | None,
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+    def set_enabled_operation(
+        self,
+        *,
+        task_id: str,
+        enabled: bool,
+        expected_head_version: int,
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+    def delete_definition_operation(
+        self,
+        *,
+        task_id: str,
+        expected_head_version: int,
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
 
 
 class ClaimResultStorePort(Protocol):
@@ -455,10 +505,30 @@ class SchedulerCommandService:
         received_at_ms: int,
     ) -> dict[str, Any]:
         auth = _require_authority(authority)
-        replay = self._admin_replay(auth, task_id=task_id)
-        if replay is not None:
-            return replay
         payload = validate_definition_payload(task_id=task_id, definition=definition)
+        normalized_operation_definition = {
+            **payload,
+            "task_id": str(task_id or "").strip(),
+        }
+        operation_request = {
+            "task_id": str(task_id or "").strip(),
+            "definition": normalized_operation_definition,
+            "expected_head_version": int(expected_head_version),
+            "next_scheduled_at_ms": next_scheduled_at_ms,
+        }
+        replay = self._admin_replay(
+            auth,
+            task_id=task_id,
+            operation_kind="PUBLISH",
+            operation_request=operation_request,
+        )
+        if replay is not None:
+            await self._complete_claim(
+                auth,
+                result_ref=str(replay["receipt_ref"]),
+                received_at_ms=received_at_ms,
+            )
+            return SchedulerDefinitionSnapshot.from_mapping(replay["result"]).to_dict()
         self._require_registered_worker(
             SchedulerDefinitionSnapshot(
                 task_id=str(task_id or "").strip(),
@@ -468,16 +538,17 @@ class SchedulerCommandService:
                 definition=payload,
             )
         )
-        raw = self._definitions.publish_definition(
+        operation = self._definitions.publish_definition_operation(
             task_id=str(task_id),
             definition=payload,
             expected_head_version=int(expected_head_version),
             next_scheduled_at_ms=next_scheduled_at_ms,
+            authority=auth,
         )
-        snapshot = SchedulerDefinitionSnapshot.from_mapping(raw)
+        snapshot = SchedulerDefinitionSnapshot.from_mapping(operation["result"])
         await self._complete_claim(
             auth,
-            result_ref=_definition_ref(snapshot),
+            result_ref=str(operation["receipt_ref"]),
             received_at_ms=received_at_ms,
         )
         return snapshot.to_dict()
@@ -492,23 +563,39 @@ class SchedulerCommandService:
         received_at_ms: int,
     ) -> dict[str, Any]:
         auth = _require_authority(authority)
-        replay = self._admin_replay(auth, task_id=task_id)
-        if replay is not None:
-            return replay
         if type(enabled) is not bool:
             raise GovernedSchedulerRuntimeError(
                 SCHEDULER_RUNTIME_AUTHORITY_INVALID,
                 "enabled must be boolean",
             )
-        raw = self._definitions.set_enabled(
+        operation_request = {
+            "task_id": str(task_id or "").strip(),
+            "enabled": enabled,
+            "expected_head_version": int(expected_head_version),
+        }
+        replay = self._admin_replay(
+            auth,
+            task_id=task_id,
+            operation_kind="SET_ENABLED",
+            operation_request=operation_request,
+        )
+        if replay is not None:
+            await self._complete_claim(
+                auth,
+                result_ref=str(replay["receipt_ref"]),
+                received_at_ms=received_at_ms,
+            )
+            return SchedulerDefinitionSnapshot.from_mapping(replay["result"]).to_dict()
+        operation = self._definitions.set_enabled_operation(
             task_id=str(task_id),
             enabled=enabled,
             expected_head_version=int(expected_head_version),
+            authority=auth,
         )
-        snapshot = SchedulerDefinitionSnapshot.from_mapping(raw)
+        snapshot = SchedulerDefinitionSnapshot.from_mapping(operation["result"])
         await self._complete_claim(
             auth,
-            result_ref=_definition_ref(snapshot),
+            result_ref=str(operation["receipt_ref"]),
             received_at_ms=received_at_ms,
         )
         return snapshot.to_dict()
@@ -522,18 +609,32 @@ class SchedulerCommandService:
         received_at_ms: int,
     ) -> dict[str, Any]:
         auth = _require_authority(authority)
-        replay = self._admin_replay(auth, task_id=task_id)
+        operation_request = {
+            "task_id": str(task_id or "").strip(),
+            "expected_head_version": int(expected_head_version),
+        }
+        replay = self._admin_replay(
+            auth,
+            task_id=task_id,
+            operation_kind="DELETE",
+            operation_request=operation_request,
+        )
         if replay is not None:
-            return replay
-        raw = self._definitions.delete_definition(
+            await self._complete_claim(
+                auth,
+                result_ref=str(replay["receipt_ref"]),
+                received_at_ms=received_at_ms,
+            )
+            return dict(replay["result"])
+        operation = self._definitions.delete_definition_operation(
             task_id=str(task_id),
             expected_head_version=int(expected_head_version),
+            authority=auth,
         )
-        result = dict(raw)
-        revision = int(result.get("definition_revision") or result.get("revision") or 1)
+        result = dict(operation["result"])
         await self._complete_claim(
             auth,
-            result_ref=f"scheduler-definition://{_ref_token(task_id)}/{revision}",
+            result_ref=str(operation["receipt_ref"]),
             received_at_ms=received_at_ms,
         )
         return result
@@ -607,6 +708,17 @@ class SchedulerCommandService:
         _assert_occurrence_authority(durable, auth)
         request_id = str(auth["request_id"])
         async with self._request_lock(request_id):
+            durable_outcome = self._definitions.get_terminal_outcome(
+                durable.occurrence_id
+            )
+            if isinstance(durable_outcome, Mapping):
+                terminal = _terminal_outcome_response(durable, durable_outcome)
+                await self._complete_claim(
+                    auth,
+                    result_ref=str(durable_outcome["receipt_ref"]),
+                    received_at_ms=received_at_ms,
+                )
+                return terminal
             existing = self._runtime.existing_command(request_id=request_id)
             if existing is not None:
                 command = existing.get("command")
@@ -643,10 +755,33 @@ class SchedulerCommandService:
                     or {}
                 )
                 if str(decision.get("decision") or "").strip().upper() != "APPROVE":
-                    raise GovernedSchedulerRuntimeError(
-                        SCHEDULER_RUNTIME_GOVERNOR_REJECTED,
-                        str(decision.get("reason_code") or "Governor rejected scheduler command"),
+                    reason_code = str(
+                        decision.get("reason_code")
+                        or SCHEDULER_RUNTIME_GOVERNOR_REJECTED
+                    ).strip()[:160]
+                    detail = str(
+                        decision.get("detail")
+                        or decision.get("reason")
+                        or "Governor rejected scheduler command"
+                    ).strip()[:2_000]
+                    outcome = self._definitions.append_terminal_outcome(
+                        occurrence_id=durable.occurrence_id,
+                        outcome_kind="GOVERNOR_REJECTED",
+                        reason_code=reason_code,
+                        outcome={
+                            "decision": "REJECT",
+                            "reason_code": reason_code,
+                            "detail": detail,
+                            "task_id": durable.task_id,
+                        },
                     )
+                    terminal = _terminal_outcome_response(durable, outcome)
+                    await self._complete_claim(
+                        auth,
+                        result_ref=str(outcome["receipt_ref"]),
+                        received_at_ms=received_at_ms,
+                    )
+                    return terminal
                 grant = governor_grant_ref(request_id, decision)
 
             terminal: dict[str, Any] | None = None
@@ -743,20 +878,25 @@ class SchedulerCommandService:
         authority: Mapping[str, Any],
         *,
         task_id: str,
+        operation_kind: str,
+        operation_request: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        if not bool(authority.get("duplicate")):
-            return None
-        result_ref = str(authority.get("existing_result_ref") or "").strip()
-        prefix = f"scheduler-definition://{_ref_token(task_id)}/"
-        if not result_ref.startswith(prefix):
+        resolver = getattr(self._definitions, "resolve_admin_operation", None)
+        if callable(resolver):
+            resolved = resolver(
+                operation_kind=operation_kind,
+                task_id=str(task_id or "").strip(),
+                operation_request=operation_request,
+                authority=authority,
+            )
+            if isinstance(resolved, Mapping):
+                return dict(resolved)
+        if bool(authority.get("duplicate")):
             raise GovernedSchedulerRuntimeError(
                 SCHEDULER_COMMAND_REPLAY,
-                "duplicate scheduler admin command has no matching durable result",
+                "duplicate scheduler admin command has no matching immutable operation result",
             )
-        raise GovernedSchedulerRuntimeError(
-            SCHEDULER_COMMAND_REPLAY,
-            f"duplicate scheduler admin command is already bound to {result_ref}",
-        )
+        return None
 
     async def _complete_claim(
         self,
@@ -1048,6 +1188,47 @@ def _assert_occurrence_authority(
             SCHEDULER_RUNTIME_AUTHORITY_INVALID,
             "scheduler command authority differs from durable occurrence authority",
         )
+
+
+def _terminal_outcome_response(
+    occurrence: SchedulerOccurrence,
+    durable_outcome: Mapping[str, Any],
+) -> dict[str, Any]:
+    outcome = dict(durable_outcome.get("outcome") or {})
+    reason_code = str(durable_outcome.get("reason_code") or "").strip()
+    receipt_ref = str(durable_outcome.get("receipt_ref") or "").strip()
+    outcome_kind = str(durable_outcome.get("outcome_kind") or "").strip()
+    if (
+        outcome_kind != "GOVERNOR_REJECTED"
+        or str(outcome.get("decision") or "").strip().upper() != "REJECT"
+        or str(outcome.get("reason_code") or "").strip() != reason_code
+        or str(outcome.get("task_id") or "").strip() != occurrence.task_id
+        or not receipt_ref
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "durable scheduler terminal outcome binding is invalid",
+        )
+    detail = str(outcome.get("detail") or reason_code)
+    return {
+        "done": True,
+        "decision": "REJECT",
+        "reason_code": reason_code,
+        "detail": detail,
+        "occurrence_id": occurrence.occurrence_id,
+        "task_id": occurrence.task_id,
+        "result": {
+            "status": "BLOCKED",
+            "reason_code": reason_code,
+            "detail": detail,
+        },
+        "execution_receipt": {
+            "receipt_ref": receipt_ref,
+            "occurrence_id": occurrence.occurrence_id,
+            "result_status": "BLOCKED",
+            "terminal_kind": outcome_kind,
+        },
+    }
 
 
 def _definition_ref(definition: SchedulerDefinitionSnapshot) -> str:

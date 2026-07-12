@@ -6,12 +6,12 @@ import datetime as _dt
 import glob as _glob
 import json as _json
 import os as _os
-import sqlite3 as _sqlite3
 import time as _time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.persistence.runtime_read_repository import RuntimeReadRepository
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged(template_id)
@@ -1700,63 +1700,21 @@ def _fetch_ledger_rows_by_time(
     limit: int,
     logger: Any,
 ) -> list[dict[str, Any]]:
+    repository: RuntimeReadRepository | None = None
     try:
-        ledger = get_ledger()
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        return repository.read_approved_ledger_rows_by_time(
+            table=table,
+            start_ts=int(start_ts),
+            end_ts=int(end_ts),
+            limit=max(1, int(limit)),
+        )
     except Exception as exc:
-        logger.debug("scheduler ledger unavailable: table=%s err=%s", table, exc)
+        logger.debug("scheduler runtime read unavailable: table=%s err=%s", table, exc)
         return []
-
-    table_name = str(table or "").strip()
-    if table_name.replace("_", "").isalnum():
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if db_path:
-            try:
-                conn = _sqlite3.connect(str(db_path))
-                conn.row_factory = _sqlite3.Row
-                rows = conn.execute(
-                    f"SELECT * FROM {table_name} WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms DESC LIMIT ?",
-                    (int(start_ts), int(end_ts), max(1, int(limit))),
-                ).fetchall()
-                conn.close()
-                return [dict(row) for row in rows]
-            except Exception as exc:
-                logger.debug("scheduler ledger sqlite fetch failed: table=%s err=%s", table, exc)
-
-    fetch = getattr(ledger, "fetch_by_time_range", None)
-    if callable(fetch):
-        try:
-            fetched_rows = list(
-                fetch(
-                    table,
-                    start_ms=int(start_ts),
-                    end_ms=int(end_ts),
-                    limit=int(limit),
-                )
-                or []
-            )
-            return sorted(
-                (dict(row) for row in fetched_rows if isinstance(row, dict)),
-                key=lambda row: int(row.get("ts_ms") or 0),
-                reverse=True,
-            )[: max(1, int(limit))]
-        except Exception as exc:
-            logger.debug("scheduler ledger time fetch failed: table=%s err=%s", table, exc)
-
-    try:
-        rows = list(getattr(ledger, table, []) or [])
-    except Exception:
-        return []
-    filtered: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        try:
-            ts_value = int(row.get("ts_ms") or 0)
-        except (TypeError, ValueError):
-            ts_value = 0
-        if int(start_ts) <= ts_value <= int(end_ts):
-            filtered.append(dict(row))
-    return sorted(filtered, key=lambda row: int(row.get("ts_ms") or 0), reverse=True)[: max(1, int(limit))]
+    finally:
+        if repository is not None:
+            repository.close()
 
 
 def _build_scheduler_audit_reader(
@@ -2296,27 +2254,31 @@ def _run_emotion_decay_tick(
         results["recovery_window"] = {"error": str(exc)[:60]}
 
     return results
-    topics: list[str] = []
+
+
+def _load_recent_memory_write_topics(
+    *,
+    get_ledger: Callable[[], Any],
+    now_ts_ms: int | None = None,
+    limit: int = 5,
+) -> list[str]:
+    repository: RuntimeReadRepository | None = None
     try:
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if db_path:
-            now_ms = int(_time.time() * 1000)
-            since_ms = now_ms - 24 * 3600 * 1000
-            conn = _sqlite3.connect(db_path)
-            rows = conn.execute(
-                "SELECT detail FROM memory_ops_log WHERE ts_ms >= ? AND op_kind='WRITE' "
-                "AND status='SUCCESS' ORDER BY ts_ms DESC LIMIT 5",
-                (since_ms,),
-            ).fetchall()
-            conn.close()
-            for row in rows:
-                detail = str(row[0] or "")[:80]
-                if detail:
-                    topics.append(detail)
+        current_ts = int(now_ts_ms if now_ts_ms is not None else _time.time() * 1000)
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        return [
+            str(detail)[:80]
+            for detail in repository.recent_memory_write_topics(
+                since_ts=current_ts - 24 * 3600 * 1000,
+                limit=limit,
+            )
+            if str(detail or "").strip()
+        ]
     except Exception:
-        pass
-    return topics
+        return []
+    finally:
+        if repository is not None:
+            repository.close()
 
 
 def _load_recent_topics(
@@ -2325,23 +2287,15 @@ def _load_recent_topics(
     limit: int = 5,
 ) -> list[str]:
     """从 intent_log 中加载最近的话题列表。"""
+    repository: RuntimeReadRepository | None = None
     try:
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if not db_path:
-            return []
-        conn = _sqlite3.connect(db_path)
-        try:
-            rows = conn.execute(
-                "SELECT topic FROM intent_log WHERE topic IS NOT NULL AND topic != '' "
-                "ORDER BY ts_ms DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        finally:
-            conn.close()
-        return [str(row[0]) for row in rows if row[0]]
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        return repository.recent_intent_topics(limit=limit)
     except Exception:
         return []
+    finally:
+        if repository is not None:
+            repository.close()
 
 
 def _load_last_interaction_ts(
@@ -2350,26 +2304,17 @@ def _load_last_interaction_ts(
     now_ts_ms: int | None = None,
     max_future_skew_ms: int = 60_000,
 ) -> int | None:
+    repository: RuntimeReadRepository | None = None
     try:
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if not db_path:
-            return None
         current_ts = int(now_ts_ms if now_ts_ms is not None else _time.time() * 1000)
         upper_bound = current_ts + max(0, int(max_future_skew_ms))
-        conn = _sqlite3.connect(db_path)
-        try:
-            row = conn.execute(
-                "SELECT ts_ms FROM intent_log WHERE ts_ms > 0 AND ts_ms <= ? ORDER BY ts_ms DESC LIMIT 1",
-                (upper_bound,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if not row:
-            return None
-        return int(row[0])
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        return repository.last_interaction_ts(upper_bound_ts=upper_bound)
     except Exception:
         return None
+    finally:
+        if repository is not None:
+            repository.close()
 
 
 def _load_recent_diary_snippet() -> str:
@@ -2389,31 +2334,24 @@ def _load_recent_diary_snippet() -> str:
 
 
 def _load_recent_dream_snippet(*, get_ledger: Callable[[], Any]) -> str:
+    repository: RuntimeReadRepository | None = None
     try:
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if db_path:
-            conn = _sqlite3.connect(db_path)
-            dream_rows = conn.execute(
-                "SELECT detail FROM memory_ops_log WHERE op_kind='WRITE' "
-                "AND status='SUCCESS' "
-                "AND evidence_refs LIKE '%tag:dream%' "
-                "AND evidence_refs LIKE '%source:dream_generator%' "
-                "AND evidence_refs NOT LIKE '%tag:dream_usage_hint%' "
-                "ORDER BY ts_ms DESC LIMIT 1"
-            ).fetchall()
-            conn.close()
-            if dream_rows:
-                raw = str(dream_rows[0][0] or "")
-                content = raw.removeprefix("memory written:").strip()
-                snippet = _compact_scheduler_text(content, limit=120)
-                if snippet:
-                    return (
-                        "梦境余味仅作为低权重语气底色；不要固定直说“我昨晚梦见了”。"
-                        f"可吸收的意象：{snippet}"
-                    )[:220]
+        repository = RuntimeReadRepository.from_ledger(get_ledger())
+        dream = repository.recent_dream_memory()
+        if dream:
+            raw = str(dream.get("detail") or "")
+            content = raw.removeprefix("memory written:").strip()
+            snippet = _compact_scheduler_text(content, limit=120)
+            if snippet:
+                return (
+                    "梦境余味仅作为低权重语气底色；不要固定直说“我昨晚梦见了”。"
+                    f"可吸收的意象：{snippet}"
+                )[:220]
     except Exception:
-        pass
+        return ""
+    finally:
+        if repository is not None:
+            repository.close()
     return ""
 
 

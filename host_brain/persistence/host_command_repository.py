@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 from host_brain.agent_runtime.task_graph import TaskGraph
-from host_brain.agent_runtime.task_store import (
+from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
     TaskStoreError,

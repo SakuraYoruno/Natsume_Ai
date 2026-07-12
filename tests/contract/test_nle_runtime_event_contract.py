@@ -17,6 +17,8 @@ from host_brain.agent_runtime.task_store import (
     build_outbox_payload_ref,
 )
 from host_brain.integrations.runtime_events import (
+    RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY,
+    RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256,
     RUNTIME_EVENT_FORBIDDEN_FIELD,
     RUNTIME_EVENT_SCHEMA_NOT_READY,
     RuntimeEvent,
@@ -32,6 +34,7 @@ MIGRATIONS = ROOT / "host_brain" / "audit" / "migrations"
 TASK_RUNTIME_BASE_MIGRATION = MIGRATIONS / "0052_task_runtime.sql"
 TASK_RUNTIME_RECOVERY_MIGRATION = MIGRATIONS / "0054_task_runtime_recovery.sql"
 RUNTIME_EVENT_MIGRATION = MIGRATIONS / "0056_runtime_events.sql"
+RUNTIME_EVENT_DELIVERY_MIGRATION = MIGRATIONS / "0068_runtime_event_delivery.sql"
 
 
 class MutableClock:
@@ -48,6 +51,8 @@ def _migrated_runtime_event_store(tmp_path: Path, *, clock: MutableClock | None 
     db_path = tmp_path / "runtime-events.sqlite3"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+        conn.executescript(RUNTIME_EVENT_DELIVERY_MIGRATION.read_text(encoding="utf-8"))
+        _record_delivery_migration(conn)
     return RuntimeEventStore(db_path, clock=clock or MutableClock())
 
 
@@ -57,8 +62,32 @@ def _migrated_combined_store(tmp_path: Path, *, clock: MutableClock | None = Non
         conn.executescript(TASK_RUNTIME_BASE_MIGRATION.read_text(encoding="utf-8"))
         conn.executescript(TASK_RUNTIME_RECOVERY_MIGRATION.read_text(encoding="utf-8"))
         conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+        conn.executescript(RUNTIME_EVENT_DELIVERY_MIGRATION.read_text(encoding="utf-8"))
+        _record_delivery_migration(conn)
     shared_clock = clock or MutableClock()
     return DurableTaskStore(db_path, clock=shared_clock), RuntimeEventStore(db_path, clock=shared_clock)
+
+
+def _record_delivery_migration(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migration_assets(
+            asset_key TEXT PRIMARY KEY,
+            checksum TEXT NOT NULL,
+            disposition TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO schema_migration_assets(asset_key, checksum, disposition)
+        VALUES (?, ?, 'APPLIED')
+        """,
+        (
+            RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY,
+            RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256,
+        ),
+    )
 
 
 def _graph(graph_id: str = "graph-runtime-event-1") -> TaskGraph:

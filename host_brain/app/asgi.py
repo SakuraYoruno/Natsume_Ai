@@ -47,7 +47,11 @@ from host_brain.app.internal_task_runtime import (
     build_governed_internal_runtime,
 )
 from host_brain.app.memory_policy_adapter import ExistingMemoryGuardAdapter
-from host_brain.app.settings import get_core_settings, get_scheduler_settings
+from host_brain.app.settings import (
+    get_core_settings,
+    get_persistence_settings,
+    get_scheduler_settings,
+)
 from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.composition.security_services import (
@@ -58,6 +62,10 @@ from host_brain.composition.security_services import (
 from host_brain.composition.command_ingress import (
     ProcessCommandIngressContainer,
     build_process_command_ingress_container,
+)
+from host_brain.composition.canon import (
+    ProcessCanonContainer,
+    build_process_canon_container,
 )
 from host_brain.composition.memory import (
     ProcessMemoryContainer,
@@ -306,6 +314,7 @@ def create_app() -> FastAPI:
     internal_agent_command_service: InternalAgentCommandService | None = None
     internal_agent_ingress: InternalAgentIngress | None = None
     scheduler_container: ProcessSchedulerContainer | None = None
+    canon_container: ProcessCanonContainer | None = None
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
@@ -326,6 +335,10 @@ def create_app() -> FastAPI:
     def scheduler_command_service_provider() -> Any | None:
         current = scheduler_container
         return current.command_service if current is not None else None
+
+    def canon_service_provider() -> Any | None:
+        current = canon_container
+        return current.application if current is not None else None
 
     async def handle_chat_with_runtime(
         request_body: ChatRequest,
@@ -388,12 +401,18 @@ def create_app() -> FastAPI:
         nonlocal task_runtime_container, governed_host_runtime
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal internal_agent_ingress, scheduler_container
-        async with runtime_lifespan(get_ledger=get_ledger, logger=logger):
+        nonlocal canon_container
+        async with runtime_lifespan(
+            get_ledger=get_ledger,
+            logger=logger,
+            canon_service_provider=canon_service_provider,
+        ):
             security: ProcessSecurityServiceContainer | None = None
             command_ingress: ProcessCommandIngressContainer | None = None
             memory: ProcessMemoryContainer | None = None
             task_runtime: ProcessTaskRuntimeContainer | None = None
             scheduler: ProcessSchedulerContainer | None = None
+            canon: ProcessCanonContainer | None = None
             try:
                 ledger = get_ledger()
                 security = build_process_security_service_container(
@@ -421,6 +440,16 @@ def create_app() -> FastAPI:
                         getattr(ledger, "canonical_db_path", "") or ""
                     ),
                 )
+                canon = build_process_canon_container(
+                    ledger=ledger,
+                    canonical_db_path=task_runtime.canonical_db_path,
+                    world_root=get_persistence_settings().world_canon_root,
+                )
+                # Startup reconciliation is a production composition action;
+                # the legacy HTTP lifespan no longer constructs this writer.
+                canon.application.sync_startup()
+                canon_container = canon
+                application.state.canon_container = canon
                 runtime_settings = get_core_settings()
                 ingress_settings = get_input_settings()
                 command_ingress = build_process_command_ingress_container(
@@ -721,6 +750,8 @@ def create_app() -> FastAPI:
                         finally:
                             # Security was constructed first, so it is always
                             # released last, including partial startup failure.
+                            canon_container = None
+                            application.state.canon_container = None
                             security_container = None
                             application.state.security_service_container = None
                             if security is not None:
@@ -762,6 +793,7 @@ def create_app() -> FastAPI:
         ),
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
+        canon_service_provider=canon_service_provider,
     )
     application.state.security_service_container = None
     application.state.command_ingress_container = None
@@ -771,6 +803,7 @@ def create_app() -> FastAPI:
     application.state.governed_internal_runtime = None
     application.state.governed_scheduler_runtime = None
     application.state.scheduler_container = None
+    application.state.canon_container = None
     application.state.task_runtime_container_provider = (
         task_runtime_container_provider
     )

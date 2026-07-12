@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import logging
 import json
-import os
 import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.canon.application import CanonApplicationService
+from host_brain.app.settings import get_persistence_settings
 from host_brain.core.errors import (
     CANON_SYNC_FAILED,
     WCANON_DOC_NOT_FOUND,
@@ -43,7 +43,7 @@ from host_brain.memory.canon_apply_service import (
     CanonApplyService,
     resolve_world_canon_root,
 )
-from host_brain.memory.canon_world_store import WorldCanonStore
+from host_brain.persistence.canon_repository import CanonRepository
 
 _logger = logging.getLogger("Natsume.canon_routes")
 
@@ -53,51 +53,60 @@ _logger = logging.getLogger("Natsume.canon_routes")
 router = APIRouter(prefix="/canon", tags=["canon"])
 
 # ---------------------------------------------------------------------------
-# 依赖注入（外部注入 ledger provider，消除循环导入风险 P1-R118-2）
+# Interface adapter dependency injection. The route never owns a repository or
+# domain store; production composition injects one explicit application service.
 # ---------------------------------------------------------------------------
-_canon_store: Optional[WorldCanonStore] = None
-_canon_apply_service: Optional[CanonApplyService] = None
-_canon_apply_service_key: tuple[str, str] | None = None
-_canon_store_lock = threading.Lock()  # F-28 修复：防止多线程竞态
-_ledger_provider: Optional[Any] = None  # Callable[[], SQLiteLedger]，由 router registry 注册时注入
+_canon_service_provider: Optional[Any] = None
+_compat_canon_service: Optional[CanonApplicationService] = None
+_compat_canon_service_key: tuple[str, str] | None = None
+_canon_service_lock = threading.Lock()
+_ledger_provider: Optional[Any] = None
+
+
+def set_canon_service_provider(provider: Any) -> None:
+    """Inject the production Canon application service provider."""
+
+    global _canon_service_provider, _compat_canon_service, _compat_canon_service_key
+    if provider is not None and not callable(provider):
+        raise TypeError("Canon service provider must be callable")
+    _canon_service_provider = provider
+    _compat_canon_service = None
+    _compat_canon_service_key = None
 
 
 def set_ledger_provider(provider: Any) -> None:
-    """由 router registry 在注册路由后调用，注入 ledger 获取回调。
-
-    Args:
-        provider: 无参可调用对象，返回 SQLiteLedger 实例。
-    """
-    global _ledger_provider, _canon_store, _canon_apply_service, _canon_apply_service_key
+    """Compatibility wiring until router registry injects the Canon service."""
+    global _ledger_provider, _compat_canon_service, _compat_canon_service_key
     _ledger_provider = provider
-    # Test/app factories may replace the provider in-process.  Never retain a
-    # mutation service that points at an earlier database or Canon root.
-    _canon_store = None
-    _canon_apply_service = None
-    _canon_apply_service_key = None
+    _compat_canon_service = None
+    _compat_canon_service_key = None
 
 
-def _get_canon_store(ledger: SQLiteLedger) -> WorldCanonStore:
-    """获取 WorldCanonStore 单例（F-28 修复：加锁防止多线程竞态）。"""
-    global _canon_store
-    if _canon_store is None:
-        with _canon_store_lock:
-            if _canon_store is None:  # double-checked locking
-                world_root = resolve_world_canon_root(os.environ.get("Natsume_WORLD_CANON_ROOT"))
-                _canon_store = WorldCanonStore(world_root=world_root, ledger=ledger)
-    return _canon_store
-
-
-def _get_canon_apply_service(ledger: SQLiteLedger) -> CanonApplyService:
-    global _canon_apply_service, _canon_apply_service_key
-    world_root = resolve_world_canon_root(os.environ.get("Natsume_WORLD_CANON_ROOT"))
-    key = (str(world_root), str(ledger.canonical_db_path))
-    if _canon_apply_service is None or _canon_apply_service_key != key:
-        with _canon_store_lock:
-            if _canon_apply_service is None or _canon_apply_service_key != key:
-                _canon_apply_service = CanonApplyService(world_root=world_root, ledger=ledger)
-                _canon_apply_service_key = key
-    return _canon_apply_service
+def _get_canon_service() -> CanonApplicationService:
+    global _compat_canon_service, _compat_canon_service_key
+    if _canon_service_provider is not None:
+        service = _canon_service_provider()
+        if not isinstance(service, CanonApplicationService):
+            raise RuntimeError("Canon service provider returned an invalid service")
+        return service
+    if _ledger_provider is None:
+        raise RuntimeError("Canon application service is not configured")
+    ledger = _ledger_provider()
+    world_root = resolve_world_canon_root(
+        get_persistence_settings().world_canon_root
+    )
+    db_path = str(getattr(ledger, "canonical_db_path", "") or "")
+    key = (str(world_root), db_path)
+    if _compat_canon_service is None or _compat_canon_service_key != key:
+        with _canon_service_lock:
+            if _compat_canon_service is None or _compat_canon_service_key != key:
+                _compat_canon_service = CanonApplicationService(
+                    repository=CanonRepository(db_path),
+                    world_root=world_root,
+                    apply_service=CanonApplyService(world_root=world_root, ledger=ledger),
+                )
+                _compat_canon_service_key = key
+    return _compat_canon_service
 
 
 # ---------------------------------------------------------------------------
@@ -246,15 +255,6 @@ def _coerce_proposed_tags(raw: Any) -> list[str]:
     return []
 
 
-def _get_ledger_from_app() -> SQLiteLedger:
-    """获取共享 ledger 实例（通过外部注入的 provider，避免循环导入）。"""
-    if _ledger_provider is not None:
-        return _ledger_provider()
-    # 降级：直接构造内存 ledger（仅测试场景，生产环境必须注入 provider）
-    _logger.warning("ledger_provider 未注入，降级使用内存 SQLiteLedger（仅测试场景）")
-    return SQLiteLedger(db_path=":memory:")
-
-
 # ---------------------------------------------------------------------------
 # GET /canon/proposals — 列出提案（分页，可按 status 过滤）
 # ---------------------------------------------------------------------------
@@ -279,16 +279,16 @@ async def list_proposals(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     offset = (page - 1) * page_size
+    del after_id  # legacy integer cursors are not stable across projection rebuilds
 
     try:
-        ledger = _get_ledger_from_app()
-        items_raw, total = ledger.list_proposals(
+        service = _get_canon_service()
+        items_raw, total = service.list_proposals(
             status=status,
             canon_kind=canon_kind,
             target_doc_id=target_doc_id,
             limit=page_size,
             offset=offset,
-            after_id=after_id,
         )
         items = [_proposal_row_to_response(row, request_id) for row in items_raw]
         return CanonProposalListResponse(
@@ -315,11 +315,10 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
+        service = _get_canon_service()
 
         # 幂等检查：相同 proposal_id 已存在则返回 409
-        existing = ledger.get_proposal(body.proposal_id)
+        existing = service.get_proposal(body.proposal_id)
         if existing is not None:
             raise HTTPException(
                 status_code=409,
@@ -328,7 +327,7 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
             )
 
         proposer_node_id = body.proposer_node_id or f"api.canon_proposals::{request_id}"
-        row = store.submit_proposal(
+        row = service.submit_proposal(
             proposal_id=body.proposal_id,
             target_doc_id=body.target_doc_id,
             proposed_title=body.proposed_title,
@@ -336,6 +335,7 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
             proposed_body=body.proposed_body,
             proposer_node_id=proposer_node_id,
             summary=(body.summary or "")[:200],
+            trace_id=request_id,
             ts_ms=ts_ms,
         )
         return _proposal_row_to_response(row, request_id)
@@ -373,8 +373,7 @@ async def get_proposal(proposal_id: str) -> CanonProposalResponse:
     request_id = new_request_id()
 
     try:
-        ledger = _get_ledger_from_app()
-        row = ledger.get_proposal(proposal_id)
+        row = _get_canon_service().get_proposal(proposal_id)
         if row is None:
             raise HTTPException(
                 status_code=404,
@@ -400,11 +399,10 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        apply_service = _get_canon_apply_service(ledger)
+        service = _get_canon_service()
 
         # 检查提案是否存在
-        existing = ledger.get_proposal(proposal_id)
+        existing = service.get_proposal(proposal_id)
         if existing is None:
             raise HTTPException(
                 status_code=404,
@@ -412,7 +410,7 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
                 headers={"X-Reason-Code": WCANON_PROPOSAL_NOT_FOUND},
             )
 
-        result = apply_service.apply(
+        result = service.apply(
             CanonApplyCommand(
                 apply_id=body.apply_id,
                 operation=CANON_OPERATION_APPLY,
@@ -431,7 +429,7 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
         )
 
         # 读取更新后的提案记录
-        response_row = ledger.get_proposal(proposal_id) or dict(existing)
+        response_row = service.get_proposal(proposal_id) or dict(existing)
         response_row["target_id"] = result.target_doc_id
         return _proposal_row_to_response(response_row, request_id)
 
@@ -481,33 +479,16 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
+        service = _get_canon_service()
 
         rejector_node_id = body.rejector_node_id or f"api.canon_proposals.reject::{request_id}"
-        row = store.reject_proposal(
-            proposal_id=proposal_id,
+        row = service.reject_proposal(
+            proposal_id,
             reason=body.reason or "",
             rejector_node_id=rejector_node_id,
+            trace_id=request_id,
             ts_ms=ts_ms,
         )
-
-        # 写 system_event_log（审计串联）
-        # F-36 修复：审计写入失败只记录 warning，不阻断主流程（reject 本身已成功）
-        try:
-            ledger.log_system_event({
-                "request_id": request_id,
-                "event_type": "WCANON_PROPOSAL_REJECTED",
-                "source": rejector_node_id,
-                "detail": f"proposal_id={proposal_id} reason={body.reason or ''}",
-                "ts_ms": ts_ms,
-            })
-        except Exception as audit_exc:
-            _logger.warning(
-                "reject_proposal audit write failed (non-fatal): %s",
-                audit_exc,
-                extra={"request_id": request_id},
-            )
 
         return _proposal_row_to_response(row, request_id)
 
@@ -541,10 +522,9 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        apply_service = _get_canon_apply_service(ledger)
+        service = _get_canon_service()
 
-        result = apply_service.apply(
+        result = service.apply(
             CanonApplyCommand(
                 apply_id=body.apply_id,
                 operation=CANON_OPERATION_ROLLBACK,
@@ -561,18 +541,6 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
                 evidence_refs=tuple(body.evidence_refs),
             )
         )
-
-        # 写 system_event_log（审计串联）
-        try:
-            ledger.log_system_event({
-                "request_id": request_id,
-                "event_type": "WCANON_PROPOSAL_ROLLED_BACK",
-                "source": body.actor_id,
-                "detail": f"proposal_id={proposal_id} rolled_back_to_version={result.after_version}",
-                "ts_ms": ts_ms,
-            })
-        except Exception as audit_exc:
-            _logger.warning("rollback 审计写入 system_event_log 失败（非致命）: %s", audit_exc)
 
         return CanonProposalRollbackResponse(
             proposal_id=result.subject_id,
@@ -627,21 +595,19 @@ async def list_documents() -> CanonDocumentListResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
-        docs = store.list_documents()
+        docs = _get_canon_service().list_documents()
         items = [
             CanonDocumentResponse(
-                doc_id=doc.doc_id,
-                version=doc.version,
-                hash=doc.hash,
-                status=doc.status,
-                title=doc.title,
-                tags=list(doc.tags),
-                body=doc.body,
-                updated_by=doc.updated_by,
-                ts_ms=doc.ts_ms,
-                source_path=doc.source_path,
+                doc_id=doc["doc_id"],
+                version=doc["version"],
+                hash=doc["hash"],
+                status=doc["status"],
+                title=doc["title"],
+                tags=list(doc["tags"]),
+                body=doc["body"],
+                updated_by=doc["updated_by"],
+                ts_ms=doc["ts_ms"],
+                source_path=doc["source_path"],
                 request_id=request_id,
                 timestamp=ts_ms,
             )
@@ -669,9 +635,7 @@ async def get_document(doc_id: str) -> CanonDocumentResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
-        doc = store.get(doc_id)
+        doc = _get_canon_service().get_document(doc_id)
         if doc is None:
             raise HTTPException(
                 status_code=404,
@@ -679,16 +643,16 @@ async def get_document(doc_id: str) -> CanonDocumentResponse:
                 headers={"X-Reason-Code": WCANON_DOC_NOT_FOUND},
             )
         return CanonDocumentResponse(
-            doc_id=doc.doc_id,
-            version=doc.version,
-            hash=doc.hash,
-            status=doc.status,
-            title=doc.title,
-            tags=list(doc.tags),
-            body=doc.body,
-            updated_by=doc.updated_by,
-            ts_ms=doc.ts_ms,
-            source_path=doc.source_path,
+            doc_id=doc["doc_id"],
+            version=doc["version"],
+            hash=doc["hash"],
+            status=doc["status"],
+            title=doc["title"],
+            tags=list(doc["tags"]),
+            body=doc["body"],
+            updated_by=doc["updated_by"],
+            ts_ms=doc["ts_ms"],
+            source_path=doc["source_path"],
             request_id=request_id,
             timestamp=ts_ms,
         )
@@ -722,9 +686,7 @@ async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
     max_words = min(max(1, max_words), 500)
 
     try:
-        ledger = _get_ledger_from_app()
-        store = _get_canon_store(ledger)
-        hotwords = store.extract_hotwords(max_words=max_words)
+        hotwords = _get_canon_service().extract_hotwords(max_words=max_words)
         return CanonHotwordsResponse(
             hotwords=hotwords,
             total=len(hotwords),
@@ -771,12 +733,12 @@ async def get_proposal_stats(
     ts_ms = int(time.time() * 1000)
 
     try:
-        ledger = _get_ledger_from_app()
+        service = _get_canon_service()
 
         # 全量统计（不限时间窗口）
-        all_pending, total_pending = ledger.list_proposals(status="pending", limit=1, offset=0)
-        all_applied, total_applied = ledger.list_proposals(status="APPLIED", limit=1, offset=0)
-        all_rejected, total_rejected = ledger.list_proposals(status="rejected", limit=1, offset=0)
+        _all_pending, total_pending = service.list_proposals(status="pending", limit=1, offset=0)
+        _all_applied, total_applied = service.list_proposals(status="APPLIED", limit=1, offset=0)
+        _all_rejected, total_rejected = service.list_proposals(status="rejected", limit=1, offset=0)
 
         total = total_pending + total_applied + total_rejected
         approval_rate = round(
@@ -793,7 +755,7 @@ async def get_proposal_stats(
 
         # 最近 10 条提案（按时间窗口过滤）
         since_ms = ts_ms - window_minutes * 60 * 1000
-        recent_raw, _ = ledger.list_proposals(limit=10, offset=0)
+        recent_raw, _ = service.list_proposals(limit=10, offset=0)
         recent = [
             _proposal_row_to_response(row, request_id)
             for row in recent_raw
