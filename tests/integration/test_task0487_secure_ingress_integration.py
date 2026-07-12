@@ -169,7 +169,7 @@ def _request(
     )
 
 
-def test_task0487_four_surface_fail_closed_restart_and_audit_wave(tmp_path: Path) -> None:
+def test_task0487_all_surface_fail_closed_restart_and_audit_wave(tmp_path: Path) -> None:
     db_path = _migrated_db(tmp_path)
     secrets = _seed_surfaces(db_path)
     service, store = _service(db_path, secrets)
@@ -193,7 +193,7 @@ def test_task0487_four_surface_fail_closed_restart_and_audit_wave(tmp_path: Path
             for decision in duplicates.values()
         )
         rows = restarted_store.read_audit()
-        assert len(rows) == 8
+        assert len(rows) == 2 * len(IngressSurface)
         assert {row["surface"] for row in rows} == {
             policy.surface_id for policy in M48B_P0_SURFACE_POLICIES.values()
         }

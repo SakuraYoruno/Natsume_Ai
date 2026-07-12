@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
-from host_brain.agent_runtime import execute_agent_production_payload, execute_agent_runtime_payload
+from host_brain.agent_runtime import execute_agent_runtime_payload
+from host_brain.agent_runtime.production_executor import (
+    GOVERNED_PRODUCTION_EXECUTION_MODE,
+    execute_agent_production_payload,
+)
 from host_brain.skills.impl.desktop_executor import execute_desktop_skill
 from host_brain.skills.impl.desktop_note import execute_desktop_note
 from host_brain.skills.impl.diary_writer import execute_diary_writer
@@ -83,6 +87,25 @@ def _focus_mode_with_mode_changer(payload: dict[str, Any]) -> Any:
     return execute_focus_mode(payload, ctx)
 
 
+def _execute_agent_production_with_context(payload: dict[str, Any]) -> Any:
+    """Select terminal execution only for an official governed attempt."""
+
+    context = payload.get("_context")
+    governed_context = (
+        context.get("_governed_execution_context")
+        if isinstance(context, dict)
+        else None
+    )
+    if governed_context is None:
+        return execute_agent_production_payload(payload)
+    if not isinstance(governed_context, dict):
+        governed_context = {"execution_mode": GOVERNED_PRODUCTION_EXECUTION_MODE}
+    return execute_agent_production_payload(
+        payload,
+        governed_execution_context=governed_context,
+    )
+
+
 def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
     registry = ToolExecutorRegistry()
     specs = (
@@ -93,7 +116,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("cursor", execute_ide_skill),
         ToolExecutorSpec("pycharm", execute_ide_skill),
         ToolExecutorSpec("codex_runtime", execute_agent_runtime_payload),
-        ToolExecutorSpec("codex_production", execute_agent_production_payload),
+        ToolExecutorSpec("codex_production", _execute_agent_production_with_context),
         ToolExecutorSpec("open_file_in_editor", execute_ide_skill),
         ToolExecutorSpec("diary_writer", _with_context(execute_diary_writer)),
         ToolExecutorSpec("dream_generator", _with_context(execute_dream_generator)),

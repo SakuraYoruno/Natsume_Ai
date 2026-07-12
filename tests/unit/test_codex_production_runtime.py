@@ -31,6 +31,108 @@ from host_brain.agent_runtime.production_executor import (
 from host_brain.agent_runtime.production_studio import build_production_work_order
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt
 from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.skills.executor_registry import dispatch_executor_payload
+
+
+def _governed_context() -> dict[str, object]:
+    return {
+        "execution_mode": "governed_task_runtime",
+        "command_id": "host-command://chat/governed-production-test",
+        "attempt_id": "attempt-governed-production-test",
+    }
+
+
+def test_governed_codex_production_runs_real_worker_to_terminal_without_daemon(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    timeline: list[str] = []
+    work_order = build_production_work_order(
+        {
+            "task": "整理长期记忆候选",
+            "request_id": "req-prod-governed",
+            "artifacts_root": str(tmp_path),
+        },
+        skill_id="agent_memory_curator",
+    )
+
+    def terminal_worker(_order, *, store, run_dir):  # noqa: ANN001, ARG001
+        timeline.append("worker-terminal")
+        return {
+            "status": "EXECUTED",
+            "summary": "Production worker completed.",
+            "result_text": "terminal governed result",
+        }
+
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.production_executor._execute_worker",
+        terminal_worker,
+    )
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.production_executor._start_background_job",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon started")),
+    )
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.production_executor._persist_production_job_memory",
+        lambda **_kwargs: None,
+    )
+
+    result = dispatch_executor_payload(
+        {
+            "tool": "codex_production",
+            "work_order": work_order,
+            "start_background": True,
+            "artifacts_root": str(tmp_path),
+            "_context": {"_governed_execution_context": _governed_context()},
+        }
+    )
+    timeline.append("executor-returned")
+
+    assert timeline == ["worker-terminal", "executor-returned"]
+    assert result["status"] == "EXECUTED"
+    assert result["result_text"] == "terminal governed result"
+    assert result["queued"] is False
+    assert result["agent_background"] is False
+    assert result["start_background"] is False
+    assert get_agent_production_job(result["job_id"])["status"] == "COMPLETED"
+
+
+def test_governed_codex_production_missing_confirmation_fails_closed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    work_order = build_production_work_order(
+        {
+            "task": "登录账号购买轻小说并封装 epub",
+            "urls": ["https://www.lightnovel.fun/cn/detail/1144366"],
+            "max_points": 30,
+            "artifacts_root": str(tmp_path),
+        },
+        skill_id="agent_epub_builder",
+    )
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.production_executor._execute_worker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker ran")),
+    )
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.production_executor._start_background_job",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("daemon started")),
+    )
+
+    result = dispatch_executor_payload(
+        {
+            "tool": "codex_production",
+            "work_order": work_order,
+            "start_background": True,
+            "artifacts_root": str(tmp_path),
+            "_context": {"_governed_execution_context": _governed_context()},
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["reason_code"] == "AGENT_PRODUCTION_CONFIRMATION_REQUIRED"
+    assert result["queued"] is False
+    assert result["blocked_until_confirmation"] is True
 
 
 def test_codex_production_executor_queues_without_blocking(tmp_path: Path) -> None:

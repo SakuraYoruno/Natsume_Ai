@@ -14,11 +14,21 @@ from .semantic import *  # noqa: F401,F403
 from .store import LifeMemoryStore
 from .consolidator import LifeMemoryConsolidator
 from .sleep import MemorySleepReplayTask
+from .contracts import (
+    ChatMemoryCandidate,
+    MemoryAdmissionDecision,
+    MemoryAdmissionKind,
+    MemoryWriteReceipt,
+)
 
 __all__ = [
     "LifeMemoryStore",
     "LifeMemoryConsolidator",
     "MemorySleepReplayTask",
+    "ChatMemoryCandidate",
+    "MemoryAdmissionDecision",
+    "MemoryAdmissionKind",
+    "MemoryWriteReceipt",
     "EpisodeRecallPacket",
     "derive_episode_id",
     "derive_evidence_id",

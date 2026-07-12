@@ -3,31 +3,27 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import threading
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from host_brain.agent_runtime import (
-    AgentRuntimeExecutor,
     AgentWorkOrder,
     ReviewItem,
     ReviewStore,
     ReviewStoreError,
 )
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
-from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
-from host_brain.agent_runtime.runtime_router import (
-    CanonicalRuntimeRouter,
-    RuntimeRouterError,
-    build_legacy_drain_report,
+from host_brain.app.internal_task_runtime import (
+    GovernedInternalRuntimeError,
+    InternalAgentCommandService,
 )
 from host_brain.app.settings.core import get_core_settings
+from host_brain.app.settings.internal_agent import get_internal_agent_settings
 from host_brain.core.ids import now_ms
-from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.integrations.runtime_events import (
     RuntimeEventError,
     RuntimeEventStore,
@@ -71,15 +67,15 @@ def _bool_flag(value: Any, *, default: bool = False) -> bool:
 
 
 def _get_review_store() -> ReviewStore:
-    raw_path = _text(os.environ.get("HOST_AGENT_REVIEW_DB_PATH"))
-    db_path = Path(raw_path).expanduser() if raw_path else Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
-    return ReviewStore(db_path)
+    return ReviewStore(
+        Path(get_internal_agent_settings().review_db_path).expanduser()
+    )
 
 
 def _get_runtime_event_store() -> RuntimeEventStore:
-    raw_path = _text(os.environ.get("HOST_RUNTIME_EVENT_DB_PATH"))
-    db_path = Path(raw_path).expanduser() if raw_path else Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
-    return RuntimeEventStore(db_path)
+    return RuntimeEventStore(
+        Path(get_internal_agent_settings().runtime_event_db_path).expanduser()
+    )
 
 
 def _require_runtime_event_replay_enabled() -> None:
@@ -155,36 +151,29 @@ def _format_runtime_sse_event(event_name: str, data: Mapping[str, Any], *, event
     return "\n".join(lines) + "\n"
 
 
-def _runtime_owner_confirmation(order: AgentWorkOrder) -> str:
-    metadata = _mapping(order.metadata)
-    return (
-        _text(metadata.get("task_runtime_owner_confirmation"))
-        or _text(metadata.get("runtime_owner_confirmation"))
-        or _text(metadata.get("confirmed_owner"))
-    )
+def _internal_command_service(request: Request) -> InternalAgentCommandService:
+    service = getattr(request.state, "internal_agent_command_service", None)
+    if not isinstance(service, InternalAgentCommandService):
+        raise HTTPException(status_code=503, detail="INTERNAL_AGENT_RUNTIME_UNAVAILABLE")
+    return service
 
 
-def _attach_runtime_assignment(order: AgentWorkOrder) -> tuple[AgentWorkOrder, dict[str, Any]]:
-    settings = get_core_settings()
-    metadata = _mapping(order.metadata)
-    router = CanonicalRuntimeRouter(
-        mode=settings.task_runtime_mode,
-        canary_percent=settings.task_runtime_canary_percent,
-        kill_switch=settings.task_runtime_kill_switch,
-        canonical_owner=settings.task_runtime_canonical_owner or settings.task_runtime_shadow_owner,
-        confirmed_owner=_runtime_owner_confirmation(order),
-    )
-    existing = metadata.get("runtime_assignment")
-    assignment = (
-        router.preserve_existing_assignment(existing, work_order_id=order.work_order_id)
-        if isinstance(existing, Mapping)
-        else router.assign_new_task(order.work_order_id)
-    )
-    payload = order.to_dict()
-    next_metadata = _mapping(payload.get("metadata"))
-    next_metadata["runtime_assignment"] = assignment.to_dict()
-    payload["metadata"] = next_metadata
-    return AgentWorkOrder.from_mapping(payload), assignment.to_dict()
+def _internal_command_authority(request: Request) -> Any:
+    authority = getattr(request.state, "internal_agent_authority", None)
+    if authority is None or not bool(getattr(authority, "admissible", False)):
+        raise HTTPException(status_code=403, detail="INTERNAL_AGENT_AUTHORITY_REQUIRED")
+    if not all(
+        str(getattr(authority, field_name, "") or "").strip()
+        for field_name in (
+            "request_id",
+            "principal_id",
+            "claim_ref",
+            "audit_ref",
+            "body_sha256",
+        )
+    ):
+        raise HTTPException(status_code=403, detail="INTERNAL_AGENT_AUTHORITY_INCOMPLETE")
+    return authority
 
 
 def _extract_owner_directive(
@@ -326,32 +315,6 @@ def _persist_owner_directive_from_payload(
     return result
 
 
-def _execute_job(job_id: str, work_order: dict[str, Any]) -> None:
-    GLOBAL_AGENT_JOB_REGISTRY.update(job_id, status="RUNNING")
-    try:
-        result = AgentRuntimeExecutor().execute(AgentWorkOrder.from_mapping(work_order))
-        terminal_status = "COMPLETED" if result.get("status") == "EXECUTED" else "FAILED"
-        GLOBAL_AGENT_JOB_REGISTRY.update(job_id, status=terminal_status, result=result)
-    except Exception as exc:
-        GLOBAL_AGENT_JOB_REGISTRY.update(
-            job_id,
-            status="FAILED",
-            result={"status": "FAILED", "reason_code": "CODEX_JOB_CRASHED", "detail": str(exc)},
-        )
-
-
-def _start_background_job(*, kind: str, work_order: dict[str, Any]) -> dict[str, Any]:
-    job = GLOBAL_AGENT_JOB_REGISTRY.create(kind=kind, work_order=work_order)
-    thread = threading.Thread(
-        target=_execute_job,
-        args=(str(job["job_id"]), dict(work_order)),
-        name=f"codex-runtime-{job['job_id']}",
-        daemon=True,
-    )
-    thread.start()
-    return job
-
-
 @router.post("/work-orders/preview")
 async def preview_work_order(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     order = AgentWorkOrder.from_mapping(payload.get("work_order") if isinstance(payload.get("work_order"), dict) else payload)
@@ -361,39 +324,43 @@ async def preview_work_order(payload: dict[str, Any] = Body(...)) -> dict[str, A
 
 @router.post("/work-orders/execute")
 async def execute_work_order(
+    request: Request,
     payload: dict[str, Any] = Body(...),
     background: bool = Query(False),
 ) -> dict[str, Any]:
     order = AgentWorkOrder.from_mapping(payload.get("work_order") if isinstance(payload.get("work_order"), dict) else payload)
     order.validate()
     try:
-        order, runtime_assignment = _attach_runtime_assignment(order)
-    except RuntimeRouterError as exc:
-        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
-    owner_directive_memory = _persist_owner_directive_from_payload(payload, order=order)
-    if background:
-        job = _start_background_job(kind="codex_work_order", work_order=order.to_dict())
-        response = {
-            "accepted": True,
-            "background": True,
-            "job_id": job["job_id"],
-            "work_order": order.to_dict(),
-            "runtime_assignment": runtime_assignment,
-        }
-        if owner_directive_memory.get("attempted"):
-            response["owner_directive_memory"] = owner_directive_memory
-        return response
-    result = AgentRuntimeExecutor().execute(order)
-    response = {
-        "accepted": True,
+        service = _internal_command_service(request)
+        authority = _internal_command_authority(request)
+        terminal = await service.execute(
+            work_order=order,
+            request_id=str(authority.request_id or ""),
+            session_id=_text(payload.get("session_id")) or "internal-codex",
+            ts_ms=int(getattr(request.state, "request_started_ms", 0) or now_ms()),
+            command_authority={
+                "principal_id": authority.principal_id,
+                "claim_ref": authority.claim_ref,
+                "audit_ref": authority.audit_ref,
+                "body_sha256": authority.body_sha256,
+            },
+        )
+    except GovernedInternalRuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": exc.reason_code, "detail": exc.detail},
+        ) from exc
+    receipt = dict(terminal.get("execution_receipt") or {})
+    result = dict(terminal.get("result") or {})
+    return {
+        "accepted": str(terminal.get("decision") or "").upper() == "APPROVE",
         "background": False,
+        "requested_background": bool(background),
         "job_id": None,
         "result": result,
-        "runtime_assignment": runtime_assignment,
+        "execution_receipt": receipt,
+        "replayed": bool(terminal.get("replayed")),
     }
-    if owner_directive_memory.get("attempted"):
-        response["owner_directive_memory"] = owner_directive_memory
-    return response
 
 
 @router.post("/owner-directives")
@@ -487,20 +454,20 @@ async def resume_review(review_id: str, payload: dict[str, Any] = Body(...)) -> 
 
 @router.get("/jobs/{job_id}")
 async def get_codex_job(job_id: str) -> dict[str, Any]:
-    job = GLOBAL_AGENT_JOB_REGISTRY.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="CODEX_JOB_NOT_FOUND")
-    # Jobs created before the redacted trace schema may still carry legacy
-    # ``thought`` fields in memory.  Read them compatibly but never re-publish
-    # those fields through the API adapter.
-    return dict(sanitize_public_payload(job))
+    del job_id
+    raise HTTPException(status_code=410, detail="LEGACY_AGENT_JOB_REGISTRY_RETIRED")
 
 
 @router.get("/runtime/drain-report")
 async def get_runtime_drain_report() -> dict[str, Any]:
     return {
         "accepted": True,
-        "drain": build_legacy_drain_report(GLOBAL_AGENT_JOB_REGISTRY.list_jobs()),
+        "drain": {
+            "status": "DRAINED",
+            "legacy_registry_retired": True,
+            "active_legacy_jobs": 0,
+            "authority": "durable_task_runtime",
+        },
     }
 
 
@@ -609,6 +576,7 @@ async def build_immune_proposal(
 
 @router.post("/immune/dispatch")
 async def dispatch_immune_work_order(
+    request: Request,
     payload: dict[str, Any] | None = Body(default=None),
     source: str = Query("health"),
     background: bool = Query(True),
@@ -629,47 +597,46 @@ async def dispatch_immune_work_order(
     approval["confirmed"] = bool(confirmed)
     work_order["approval_policy"] = approval
     try:
-        assigned_order, runtime_assignment = _attach_runtime_assignment(AgentWorkOrder.from_mapping(work_order))
-    except RuntimeRouterError as exc:
-        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
-    work_order = assigned_order.to_dict()
-    if background:
-        job = _start_background_job(kind="codex_immune", work_order=work_order)
-        with _immune_auto_state_lock:
-            _immune_auto_state.update(
-                {
-                    "source": source,
-                    "last_cycle_at_ms": now_ms(),
-                    "last_proposal": proposal,
-                    "last_job_id": job["job_id"],
-                    "last_result_status": "QUEUED",
-                }
-            )
-        return {
-            "accepted": True,
-            "background": True,
-            "job_id": job["job_id"],
-            "proposal": proposal,
-            "runtime_assignment": runtime_assignment,
-        }
-    result = AgentRuntimeExecutor().execute(assigned_order)
+        service = _internal_command_service(request)
+        authority = _internal_command_authority(request)
+        terminal = await service.execute(
+            work_order=AgentWorkOrder.from_mapping(work_order),
+            request_id=str(authority.request_id or ""),
+            session_id="internal-immune",
+            ts_ms=int(getattr(request.state, "request_started_ms", 0) or now_ms()),
+            command_authority={
+                "principal_id": authority.principal_id,
+                "claim_ref": authority.claim_ref,
+                "audit_ref": authority.audit_ref,
+                "body_sha256": authority.body_sha256,
+            },
+        )
+    except GovernedInternalRuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": exc.reason_code, "detail": exc.detail},
+        ) from exc
+    result = dict(terminal.get("result") or {})
+    receipt = dict(terminal.get("execution_receipt") or {})
     with _immune_auto_state_lock:
         _immune_auto_state.update(
             {
                 "source": source,
                 "last_cycle_at_ms": now_ms(),
                 "last_proposal": proposal,
-                "last_job_id": None,
+                "last_job_id": receipt.get("command_id"),
                 "last_result_status": result.get("status"),
             }
         )
     return {
-        "accepted": True,
+        "accepted": str(terminal.get("decision") or "").upper() == "APPROVE",
         "background": False,
+        "requested_background": bool(background),
         "job_id": None,
         "proposal": proposal,
         "dispatch": result,
-        "runtime_assignment": runtime_assignment,
+        "execution_receipt": receipt,
+        "replayed": bool(terminal.get("replayed")),
     }
 
 
@@ -680,7 +647,11 @@ async def get_immune_auto_state() -> dict[str, Any]:
 
 
 async def run_scheduled_immune_auto_dispatch_cycle() -> dict[str, Any]:
-    result = await dispatch_immune_work_order({}, source="health", background=True, confirmed=True)
+    result = {
+        "accepted": False,
+        "executed": False,
+        "reason_code": "IMMUNE_SCHEDULER_GOVERNED_AUTHORITY_REQUIRED",
+    }
     with _immune_auto_state_lock:
         _immune_auto_state["last_cycle_at_ms"] = now_ms()
         _immune_auto_state["last_result_status"] = "DISPATCHED" if result.get("accepted") else "SKIPPED"

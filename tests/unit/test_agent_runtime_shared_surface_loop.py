@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 from host_brain.app.agent_runtime_shared import (
@@ -14,22 +13,7 @@ from host_brain.app.agent_runtime_shared import (
     _resolve_selection_followup_retrieval_timeout_seconds,
     _maybe_build_recent_turn_answer,
     _run_surface_persona_session_end_sync,
-    _write_surface_main_chain_memory_sync,
 )
-
-
-class _FakeEpisodicStore:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def write_memory(self, **kwargs: Any) -> SimpleNamespace:
-        self.calls.append(dict(kwargs))
-        return SimpleNamespace(
-            success=True,
-            reason_code=None,
-            detail="ok",
-            memory_id="mem-surface-1",
-        )
 
 
 def test_recent_turn_query_role_handles_where_we_left_off() -> None:
@@ -695,38 +679,6 @@ def test_contextual_session_answer_leaves_stabilize_and_wrapup_to_model() -> Non
     assert wrap is None
 
 
-def test_surface_main_chain_memory_write_uses_surface_turn_summary_and_canonical_user(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "canon-user")
-    store = _FakeEpisodicStore()
-
-    result = _write_surface_main_chain_memory_sync(
-        episodic_store=store,
-        request_id="req-1",
-        person_id="external-user",
-        session_id="sess-1",
-        user_message="刚才那句太生硬了",
-        assistant_reply="哼，知道了。我改顺一点。",
-        emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.8},
-        ts_ms=123,
-        reply_plan={"task_mode": "memory_recall"},
-    )
-
-    assert result["success"] is True
-    assert result["source"] == "surface_main_chain"
-    assert result["person_id"] == "canon-user"
-    assert store.calls
-    call = store.calls[0]
-    assert call["text"] == "当前回合摘要：用户提到「刚才那句太生硬了」；回复「哼，知道了。我改顺一点。」。"
-    assert call["intent_id"] == "memory_recall"
-    assert call["emotion_tag"] == "SAD"
-    assert call["emotion_valence"] < 0
-    assert call["emotion_arousal"] >= 0.8
-    assert "surface://reply/req-1" in call["evidence_refs"]
-    assert "chat://person/canon-user" in call["evidence_refs"]
-
-
 def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     monkeypatch,
 ) -> None:
@@ -761,5 +713,4 @@ def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     assert result["person_id"] == "canon-user"
     assert result["emotion_tag"] == "SAD"
     assert result["inner_world"]["anticipation_topics"] == ["我有点难受"]
-
 

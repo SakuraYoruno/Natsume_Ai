@@ -42,16 +42,40 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     container = Container()
 
     governed_runtime = object()
+    internal_runtime = object()
+    runtime_group = object()
+    internal_ingress = object()
+    scheduler_ingress = object()
+    internal_service = object()
+    command_evaluator = object()
+    command_store = object()
+
+    class CommandIngressContainer:
+        evaluator = command_evaluator
+        store = command_store
+
+        async def aclose(self) -> None:
+            events.append("command-ingress-closed")
+
+    command_ingress_container = CommandIngressContainer()
+
+    class MemoryContainer:
+        def close(self) -> None:
+            events.append("memory-closed")
+
+    memory_container = MemoryContainer()
 
     class TaskRuntimeContainer:
         bound_runtime = None
+        canonical_db_path = ledger.canonical_db_path
+        agent_result_repository = object()
 
         def bind_runtime(self, runtime) -> None:
             self.bound_runtime = runtime
             events.append("governed-runtime-bound")
 
         async def activate_runtime(self) -> None:
-            assert self.bound_runtime is governed_runtime
+            assert self.bound_runtime is runtime_group
             events.append("governed-runtime-activated")
 
         async def aclose(self) -> None:
@@ -98,6 +122,31 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         events.append("governed-runtime-built")
         return governed_runtime
 
+    def fake_build_internal_runtime(**kwargs):
+        assert kwargs["task_runtime_container"] is task_runtime_container
+        assert kwargs["ledger"] is ledger
+        assert kwargs["result_repository"] is task_runtime_container.agent_result_repository
+        events.append("internal-runtime-built")
+        return internal_runtime
+
+    def fake_build_command_ingress(**kwargs):
+        assert kwargs["canonical_db_path"] == ledger.canonical_db_path
+        events.append("command-ingress-built")
+        return command_ingress_container
+
+    def fake_build_memory(**kwargs):
+        assert kwargs["ledger"] is ledger
+        assert kwargs["canonical_db_path"] == ledger.canonical_db_path
+        events.append("memory-built")
+        return memory_container
+
+    def fake_runtime_group(runtimes):
+        assert runtimes == {
+            "host": governed_runtime,
+            "internal_agent": internal_runtime,
+        }
+        return runtime_group
+
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
@@ -107,6 +156,27 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(asgi, "get_skill_registry", lambda: skill_registry)
+    monkeypatch.setattr(asgi, "get_intent_engine", object)
+    monkeypatch.setattr(asgi, "get_episodic_store", object)
+    monkeypatch.setattr(asgi, "get_memory_guard", object)
+    monkeypatch.setattr(asgi, "get_memory_worth_evaluator", object)
+    monkeypatch.setattr(
+        asgi,
+        "set_memory_service_container",
+        lambda value: events.append(
+            "memory-published" if value is memory_container else "memory-unpublished"
+        ),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "get_input_settings",
+        lambda: SimpleNamespace(
+            secure_ingress_mode="ENFORCE",
+            secure_ingress_hmac_secrets_json="{}",
+            edge_gateway_hmac_key_id="",
+            edge_gateway_hmac_secret="",
+        ),
+    )
     monkeypatch.setattr(
         asgi,
         "build_process_security_service_container",
@@ -121,6 +191,39 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         asgi,
         "build_governed_host_runtime",
         fake_build_governed_runtime,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "build_process_command_ingress_container",
+        fake_build_command_ingress,
+    )
+    monkeypatch.setattr(asgi, "build_process_memory_container", fake_build_memory)
+    monkeypatch.setattr(
+        asgi,
+        "build_governed_internal_runtime",
+        fake_build_internal_runtime,
+    )
+    monkeypatch.setattr(asgi, "GovernedRuntimeGroup", fake_runtime_group)
+    monkeypatch.setattr(
+        asgi,
+        "InternalAgentIngress",
+        lambda *, evaluator: internal_ingress
+        if evaluator is command_evaluator
+        else pytest.fail("wrong evaluator"),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "SchedulerCommandIngress",
+        lambda *, evaluator: scheduler_ingress
+        if evaluator is command_evaluator
+        else pytest.fail("wrong evaluator"),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "InternalAgentCommandService",
+        lambda *, runtime, intent_engine, claim_result_store: internal_service
+        if runtime is internal_runtime and claim_result_store is command_store
+        else pytest.fail("wrong internal runtime"),
     )
 
     application = asgi.create_app()
@@ -140,6 +243,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 is task_runtime_container
             )
             assert application.state.governed_host_runtime is governed_runtime
+            assert application.state.governed_internal_runtime is internal_runtime
+            assert application.state.memory_service_container is memory_container
             assert (
                 captured["governed_command_application_provider"]()
                 is governed_runtime
@@ -153,11 +258,18 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 captured["signed_skill_provider_intake_provider"]()
                 is signed_ingress
             )
+            assert captured["internal_agent_ingress_provider"]() is internal_ingress
+            assert (
+                captured["internal_agent_command_service_provider"]()
+                is internal_service
+            )
+            assert captured["scheduler_command_ingress_provider"]() is scheduler_ingress
             events.append("serving")
         assert application.state.security_service_container is None
         assert application.state.task_runtime_container is None
         assert application.state.task_runtime_container_provider() is None
         assert application.state.governed_host_runtime is None
+        assert application.state.governed_internal_runtime is None
         assert captured["governed_command_application_provider"]() is None
 
     asyncio.run(scenario())
@@ -166,11 +278,18 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "base-started",
         "container-built",
         "task-runtime-built",
+        "command-ingress-built",
+        "memory-built",
+        "memory-published",
         "governed-runtime-built",
+        "internal-runtime-built",
         "governed-runtime-bound",
         "governed-runtime-activated",
         "serving",
         "task-runtime-closed",
+        "memory-unpublished",
+        "memory-closed",
+        "command-ingress-closed",
         "container-closed",
         "base-closed",
     ]

@@ -255,7 +255,7 @@ def test_claim_is_restart_safe_for_duplicate_conflict_and_replay(tmp_path: Path)
     db_path = _migrated_db(tmp_path)
     first_store = SQLiteSecureIngressStore(db_path)
     first = _claim(first_store)
-    first_store.commit_with_audit(
+    first_audit_ref = first_store.commit_with_audit(
         claim_ref=first.claim_ref or "",
         event=replace(_audit_event(), claim_ref=first.claim_ref),
     )
@@ -280,6 +280,9 @@ def test_claim_is_restart_safe_for_duplicate_conflict_and_replay(tmp_path: Path)
         assert first.status is ClaimStatus.NEW
         assert duplicate.status is ClaimStatus.DUPLICATE_SAME
         assert duplicate.existing_result_ref == "result://test/1"
+        assert duplicate.canonical_request_id == "request.test.1"
+        assert duplicate.canonical_body_sha256 == "a" * 64
+        assert duplicate.canonical_audit_ref == first_audit_ref
         assert conflict.status is ClaimStatus.IDEMPOTENCY_CONFLICT
         assert replay.status is ClaimStatus.REPLAY
     finally:

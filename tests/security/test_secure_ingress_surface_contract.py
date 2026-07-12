@@ -12,6 +12,7 @@ from natsume_contracts.identity import (
 from host_brain.secure_ingress import (
     IngressSurface,
     M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
 
@@ -41,13 +42,26 @@ def _identity(policy):
     return identity, CredentialProof(metadata=metadata, raw_proof="0" * 64)
 
 
-def test_all_four_write_surfaces_have_unique_server_owned_policy() -> None:
+def test_all_write_surfaces_have_unique_server_owned_policy() -> None:
+    assert M48B_P0_SURFACE_POLICIES is SECURE_INGRESS_SURFACE_POLICIES
     assert set(M48B_P0_SURFACE_POLICIES) == set(IngressSurface)
     policies = tuple(M48B_P0_SURFACE_POLICIES.values())
-    assert len({policy.surface_id for policy in policies}) == 4
-    assert len({policy.action for policy in policies}) == 4
+    assert len({policy.surface_id for policy in policies}) == len(IngressSurface)
+    assert len({policy.action for policy in policies}) == len(IngressSurface)
     assert all(policy.required_scopes for policy in policies)
-    assert all(scope.endswith(":write") for policy in policies for scope in policy.required_scopes)
+    assert all(policy.default_path.startswith("/") for policy in policies)
+    internal = M48B_P0_SURFACE_POLICIES[IngressSurface.INTERNAL_AGENT]
+    scheduler = M48B_P0_SURFACE_POLICIES[IngressSurface.SCHEDULER_ADMIN]
+    assert (internal.audience, internal.action, internal.required_scopes) == (
+        "internal",
+        "internal:agent:execute",
+        ("internal:agent:execute",),
+    )
+    assert (scheduler.audience, scheduler.action, scheduler.required_scopes) == (
+        "scheduler",
+        "scheduler:admin",
+        ("scheduler:admin",),
+    )
 
 
 def test_builder_never_accepts_client_owned_action_or_scope() -> None:

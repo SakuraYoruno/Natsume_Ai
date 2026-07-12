@@ -1,4 +1,4 @@
-"""Server-owned policies for the four TASK-0487 write surfaces."""
+"""Server-owned policies for authenticated write/command surfaces."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ class IngressSurface(str, Enum):
     OBS = "obs"
     GATEWAY = "gateway"
     BRIDGE = "bridge"
+    INTERNAL_AGENT = "internal_agent"
+    SCHEDULER_ADMIN = "scheduler_admin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,15 +28,20 @@ class IngressSurfacePolicy:
     audience: str
     action: str
     required_scopes: tuple[str, ...]
+    default_path: str
 
 
-M48B_P0_SURFACE_POLICIES: Mapping[IngressSurface, IngressSurfacePolicy] = MappingProxyType({
+SECURE_INGRESS_SURFACE_POLICIES: Mapping[
+    IngressSurface,
+    IngressSurfacePolicy,
+] = MappingProxyType({
     IngressSurface.HOST: IngressSurfacePolicy(
         surface=IngressSurface.HOST,
         surface_id="host.input",
         audience="host",
         action="host:input",
         required_scopes=("host:write",),
+        default_path="/v1/host/input",
     ),
     IngressSurface.OBS: IngressSurfacePolicy(
         surface=IngressSurface.OBS,
@@ -42,6 +49,7 @@ M48B_P0_SURFACE_POLICIES: Mapping[IngressSurface, IngressSurfacePolicy] = Mappin
         audience="obs",
         action="obs:command",
         required_scopes=("obs:write",),
+        default_path="/v1/obs/commands",
     ),
     IngressSurface.GATEWAY: IngressSurfacePolicy(
         surface=IngressSurface.GATEWAY,
@@ -49,6 +57,7 @@ M48B_P0_SURFACE_POLICIES: Mapping[IngressSurface, IngressSurfacePolicy] = Mappin
         audience="gateway",
         action="gateway:ingest",
         required_scopes=("gateway:write",),
+        default_path="/v1/gateway/webhook",
     ),
     IngressSurface.BRIDGE: IngressSurfacePolicy(
         surface=IngressSurface.BRIDGE,
@@ -56,8 +65,29 @@ M48B_P0_SURFACE_POLICIES: Mapping[IngressSurface, IngressSurfacePolicy] = Mappin
         audience="bridge",
         action="bridge:command",
         required_scopes=("bridge:write",),
+        default_path="/v1/bridge/command",
+    ),
+    IngressSurface.INTERNAL_AGENT: IngressSurfacePolicy(
+        surface=IngressSurface.INTERNAL_AGENT,
+        surface_id="internal.agent",
+        audience="internal",
+        action="internal:agent:execute",
+        required_scopes=("internal:agent:execute",),
+        default_path="/internal/codex/work-orders/execute",
+    ),
+    IngressSurface.SCHEDULER_ADMIN: IngressSurfacePolicy(
+        surface=IngressSurface.SCHEDULER_ADMIN,
+        surface_id="scheduler.admin",
+        audience="scheduler",
+        action="scheduler:admin",
+        required_scopes=("scheduler:admin",),
+        default_path="/scheduler/commands",
     ),
 })
+
+# Compatibility alias retained for TASK-0487 consumers.  New composition code
+# uses the lifecycle-neutral name above.
+M48B_P0_SURFACE_POLICIES = SECURE_INGRESS_SURFACE_POLICIES
 
 
 def build_surface_request(
@@ -78,7 +108,7 @@ def build_surface_request(
 
     if not isinstance(surface, IngressSurface):
         raise ValueError("SECURE_INGRESS_SURFACE_INVALID")
-    policy = M48B_P0_SURFACE_POLICIES[surface]
+    policy = SECURE_INGRESS_SURFACE_POLICIES[surface]
     if identity is not None and identity.audience != policy.audience:
         raise ValueError("SECURE_INGRESS_AUDIENCE_MISMATCH")
     return SecureIngressRequest(
@@ -102,5 +132,6 @@ __all__ = [
     "IngressSurface",
     "IngressSurfacePolicy",
     "M48B_P0_SURFACE_POLICIES",
+    "SECURE_INGRESS_SURFACE_POLICIES",
     "build_surface_request",
 ]

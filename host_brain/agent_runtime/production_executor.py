@@ -32,6 +32,7 @@ STATUS_QUEUED = "QUEUED"
 STATUS_RUNNING = "RUNNING"
 STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
+GOVERNED_PRODUCTION_EXECUTION_MODE = "governed_task_runtime"
 
 
 @dataclass(slots=True)
@@ -4320,6 +4321,24 @@ def _run_background_job(
             _persist_production_job_memory(job=failed, order=order, error=str(exc))
 
 
+def _start_background_job(
+    *,
+    job_id: str,
+    order: AgentWorkOrder,
+    store: AgentArtifactStore,
+    run_dir: Path,
+) -> None:
+    """Start the legacy asynchronous production owner."""
+
+    thread = threading.Thread(
+        target=_run_background_job,
+        kwargs={"job_id": job_id, "order": order, "store": store, "run_dir": run_dir},
+        name=f"agent-production-{job_id[:16]}",
+        daemon=True,
+    )
+    thread.start()
+
+
 def recover_interrupted_lightnovel_recommendation_jobs(
     *,
     artifacts_root: str | Path | None = None,
@@ -4459,8 +4478,29 @@ def recover_interrupted_lightnovel_recommendation_jobs(
     }
 
 
-def execute_agent_production_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def execute_agent_production_payload(
+    payload: dict[str, Any],
+    *,
+    governed_execution_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     data = dict(payload or {})
+    governed_context = (
+        dict(governed_execution_context)
+        if isinstance(governed_execution_context, Mapping)
+        else None
+    )
+    if governed_execution_context is not None and (
+        governed_context is None
+        or str(governed_context.get("execution_mode") or "").strip()
+        != GOVERNED_PRODUCTION_EXECUTION_MODE
+        or not str(governed_context.get("command_id") or "").strip()
+        or not str(governed_context.get("attempt_id") or "").strip()
+    ):
+        return {
+            "status": "FAILED",
+            "reason_code": "AGENT_PRODUCTION_GOVERNED_CONTEXT_INVALID",
+            "detail": "governed production requires a bound command and attempt context",
+        }
     raw_order = data.get("work_order")
     if not isinstance(raw_order, dict):
         return {
@@ -4498,6 +4538,40 @@ def execute_agent_production_payload(payload: dict[str, Any]) -> dict[str, Any]:
     blocked_until_confirmation = bool(data.get("blocked_until_confirmation")) or _purchase_confirmation_missing(order)
     start_background = bool(data.get("start_background", True)) and not blocked_until_confirmation
     job_id = str(data.get("job_id") or f"agent_job_{new_event_id()}").strip()
+
+    # A governed Task Runtime attempt cannot turn a missing confirmation into
+    # a queued success. It fails closed before any production worker runs.
+    if governed_context is not None and blocked_until_confirmation:
+        reason_code = "AGENT_PRODUCTION_CONFIRMATION_REQUIRED"
+        result_text = _queued_result_text(
+            order=order,
+            blocked_until_confirmation=True,
+            start_background=False,
+        )
+        store.write_json(run_dir / "work_order.json", order.to_dict())
+        store.write_json(
+            run_dir / "result_contract.json",
+            _result_contract(
+                status="FAILED",
+                order=order,
+                run_dir=run_dir,
+                detail=result_text,
+                error=reason_code,
+            ).to_dict(),
+        )
+        return {
+            "status": "FAILED",
+            "reason_code": reason_code,
+            "result_text": result_text,
+            "work_order_id": order.work_order_id,
+            "skill_id": skill_id,
+            "queued": False,
+            "agent_background": False,
+            "start_background": False,
+            "blocked_until_confirmation": True,
+            "artifacts_dir": str(run_dir),
+            "result_contract_ref": str(run_dir / "result_contract.json"),
+        }
     queued_detail = _queued_detail(
         order=order,
         blocked_until_confirmation=blocked_until_confirmation,
@@ -4520,14 +4594,59 @@ def execute_agent_production_payload(payload: dict[str, Any]) -> dict[str, Any]:
     store.write_json(run_dir / "result_contract.json", _result_contract(status="QUEUED", order=order, run_dir=run_dir, detail=job.detail).to_dict())
     _persist_job(store, run_dir, job)
 
-    if start_background:
-        thread = threading.Thread(
-            target=_run_background_job,
-            kwargs={"job_id": job_id, "order": order, "store": store, "run_dir": run_dir},
-            name=f"agent-production-{job_id[:16]}",
-            daemon=True,
+    if governed_context is not None:
+        # Task Runtime owns this attempt. Run the real worker synchronously so
+        # its terminal result precedes verification and the runtime receipt.
+        _run_background_job(job_id=job_id, order=order, store=store, run_dir=run_dir)
+        terminal = get_agent_production_job(job_id)
+        worker_result = (
+            dict(terminal.get("result") or {})
+            if isinstance(terminal, Mapping)
+            else {}
         )
-        thread.start()
+        completed = bool(
+            isinstance(terminal, Mapping)
+            and str(terminal.get("status") or "").strip().upper() == STATUS_COMPLETED
+        )
+        reason_code = str(
+            worker_result.get("reason_code")
+            or (terminal.get("error") if isinstance(terminal, Mapping) else "")
+            or ("" if completed else "AGENT_PRODUCTION_EXECUTION_FAILED")
+        ).strip()
+        result_text = str(
+            worker_result.get("result_text")
+            or worker_result.get("summary")
+            or (terminal.get("detail") if isinstance(terminal, Mapping) else "")
+            or ""
+        ).strip()
+        return {
+            **worker_result,
+            "status": str(worker_result.get("status") or "EXECUTED") if completed else "FAILED",
+            "result_code": str(
+                worker_result.get("result_code")
+                or ("AGENT_PRODUCTION_COMPLETED" if completed else reason_code)
+            ),
+            "reason_code": None if completed else reason_code,
+            "result_text": result_text,
+            "manifest_ref": f"agent_production::{order.work_order_id}",
+            "action": "execute",
+            "job_id": job_id,
+            "work_order_id": order.work_order_id,
+            "skill_id": skill_id,
+            "queued": False,
+            "agent_background": False,
+            "start_background": False,
+            "blocked_until_confirmation": False,
+            "artifacts_dir": str(run_dir),
+            "result_contract_ref": str(run_dir / "result_contract.json"),
+            "governed_execution": {
+                "command_id": str(governed_context.get("command_id") or ""),
+                "attempt_id": str(governed_context.get("attempt_id") or ""),
+            },
+        }
+
+    if start_background:
+        _start_background_job(job_id=job_id, order=order, store=store, run_dir=run_dir)
     result_text = _queued_result_text(
         order=order,
         blocked_until_confirmation=blocked_until_confirmation,
@@ -4559,11 +4678,13 @@ def execute_agent_production_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "AgentProductionJob",
+    "GOVERNED_PRODUCTION_EXECUTION_MODE",
     "_build_browser_research_gateway_message",
     "_build_lightnovel_epub_gateway_notice",
     "_build_lightnovel_gateway_message",
     "_coerce_recommendation_items",
     "_execute_worker",
+    "_start_background_job",
     "_find_lightnovel_epub_file",
     "_find_lightnovel_recommendations_file",
     "_maybe_push_browser_research_to_gateway",
@@ -4579,4 +4700,3 @@ __all__ = [
     "list_agent_production_jobs",
     "recover_interrupted_lightnovel_recommendation_jobs",
 ]
-

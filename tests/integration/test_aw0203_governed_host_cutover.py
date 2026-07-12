@@ -11,7 +11,7 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence import HostCommandRepository
-from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 
 
 @pytest.mark.asyncio
@@ -39,9 +39,13 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             "seq": 1,
             "nonce": "nonce-aw0203-cutover",
             "route": "skill",
-            "target_id": "echo_skill",
-            "task": "echo the admitted text",
-            "args": {"text": "hello durable runtime"},
+            "target_id": "agent_memory_curator",
+            "task": "curate the admitted memory candidates",
+            "args": {
+                "task": "curate the admitted memory candidates",
+                "artifacts_root": str(tmp_path / "production-runs"),
+                "start_background": True,
+            },
         }
         ledger.log_intent(
             {
@@ -75,22 +79,28 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
         ledger.log_governor(governor)
 
         calls: list[str] = []
-        registry = SkillRegistry()
+        registry = build_agent_runtime_skill_registry()
 
-        def echo_handler(args, _context):
-            calls.append(str(args["text"]))
-            return {"result_text": f"echo:{args['text']}"}
+        def governed_worker(_order, *, store, run_dir):  # noqa: ANN001, ARG001
+            calls.append("production-worker-finished")
+            return {
+                "status": "EXECUTED",
+                "summary": "Governed production worker finished.",
+                "result_text": "curated durable memory candidates",
+                "metadata": {"worker_terminal": True},
+            }
 
-        registry.register(
-            SkillMeta(
-                skill_name="echo_skill",
-                clearance="LOW",
-                risk_level=1,
-                scope="host",
-                reversible=True,
-                handler=echo_handler,
-                family="general",
-            )
+        monkeypatch.setattr(
+            "host_brain.agent_runtime.production_executor._execute_worker",
+            governed_worker,
+        )
+        monkeypatch.setattr(
+            "host_brain.agent_runtime.production_executor._start_background_job",
+            lambda **_kwargs: pytest.fail("governed production must not start a daemon"),
+        )
+        monkeypatch.setattr(
+            "host_brain.agent_runtime.production_executor._persist_production_job_memory",
+            lambda **_kwargs: None,
         )
         task_store = DurableTaskStore(db_path)
         event_store = RuntimeEventStore(db_path)
@@ -121,12 +131,16 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             "intent_draft": intent,
             "governor_result": governor,
             "person_id": "person-aw0203",
-            "sanitized_message": "hello durable runtime",
+            "sanitized_message": "curate the admitted memory candidates",
             "emotion_context": {},
             "render_target_lang": "zh",
         }
 
-        first = [event async for event in runtime.execute_stream(**request)]
+        first = []
+        async for event in runtime.execute_stream(**request):
+            if event.get("execution_receipt"):
+                assert calls == ["production-worker-finished"]
+            first.append(event)
         replay_governor = {**governor, "ts_ms": ts_ms + 5_000}
         ledger.log_governor(replay_governor)
         replay_request = {
@@ -137,12 +151,12 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
         replay = [event async for event in runtime.execute_stream(**replay_request)]
 
         assert first[-1]["decision"] == "APPROVE"
-        assert first[-1]["narrative"] == "echo:hello durable runtime"
+        assert first[-1]["narrative"] == "curated durable memory candidates"
         assert first[-1]["execution_receipt"]["executor"] == "canonical"
         assert first[-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert replay[-1]["replayed"] is True
         assert replay[-1]["narrative"] == first[-1]["narrative"]
-        assert calls == ["hello durable runtime"]
+        assert calls == ["production-worker-finished"]
 
         command_id = first[-1]["execution_receipt"]["command_id"]
         admitted = HostCommandRepository(db_path).get(command_id)

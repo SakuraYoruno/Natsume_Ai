@@ -656,6 +656,18 @@ class HostCommandRepository:
             )
         expected_result = str(normalized["command_id"])
         actual_result = str(row["result_ref"] or "").strip()
+        internal_result_matches = True
+        if str(normalized["surface"]) == "internal" and actual_result:
+            internal_result = conn.execute(
+                """
+                SELECT 1
+                FROM agent_execution_result
+                WHERE receipt_ref = ? AND command_id = ?
+                LIMIT 1
+                """,
+                (actual_result, expected_result),
+            ).fetchone()
+            internal_result_matches = internal_result is not None
         claim_body_sha256 = _normalize_external_sha256(
             row["body_sha256"],
             field_name="secure_ingress_idempotency_claim.body_sha256",
@@ -669,7 +681,14 @@ class HostCommandRepository:
             or str(row["surface"]) != _secure_ingress_surface(str(normalized["surface"]))
             or str(row["request_id"]) != str(normalized["request_id"])
             or claim_body_sha256 != str(normalized["input_sha256"])
-            or actual_result not in {"", expected_result}
+            or (
+                str(normalized["surface"]) == "internal"
+                and not internal_result_matches
+            )
+            or (
+                str(normalized["surface"]) != "internal"
+                and actual_result not in {"", expected_result}
+            )
         )
         audit_mismatched = (
             str(audit["request_id"] or "") != str(normalized["request_id"])
@@ -695,6 +714,11 @@ class HostCommandRepository:
         if not claim_ref:
             return
         self._validate_ingress_claim(conn, normalized)
+        if str(normalized["surface"]) == "internal":
+            # Internal-Agent admission is not a terminal result.  Its secure
+            # ingress claim is completed by InternalAgentCommandService only
+            # after the immutable agent execution receipt exists.
+            return
         result_ref = str(normalized["command_id"])
         current = conn.execute(
             "SELECT result_ref FROM secure_ingress_idempotency_claim WHERE claim_ref = ?",
@@ -1071,6 +1095,8 @@ def _secure_ingress_surface(command_surface: str) -> str:
     return {
         "host_input": "host.input",
         "gateway": "gateway.webhook",
+        "internal": "internal.agent",
+        "scheduler": "scheduler.admin",
     }.get(str(command_surface), str(command_surface))
 
 

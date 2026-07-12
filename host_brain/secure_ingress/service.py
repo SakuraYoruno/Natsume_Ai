@@ -491,6 +491,17 @@ class SecureIngressService:
                 audit_status=AuditStatus.PRIMARY_DURABLE,
                 claim_ref=claim.claim_ref,
                 existing_result_ref=claim.existing_result_ref,
+                canonical_request_id=(
+                    request.request_id
+                    if isinstance(request, SecureIngressRequest)
+                    else None
+                ),
+                canonical_body_sha256=(
+                    request.body_sha256
+                    if isinstance(request, SecureIngressRequest)
+                    else None
+                ),
+                canonical_audit_ref=audit_ref,
             )
 
         try:
@@ -514,6 +525,11 @@ class SecureIngressService:
             audit_status=AuditStatus.PRIMARY_DURABLE,
             claim_ref=claim.claim_ref if claim else None,
             existing_result_ref=claim.existing_result_ref if claim else None,
+            canonical_request_id=claim.canonical_request_id if claim else None,
+            canonical_body_sha256=(
+                claim.canonical_body_sha256 if claim else None
+            ),
+            canonical_audit_ref=claim.canonical_audit_ref if claim else None,
         )
 
     def _audit_failure_decision(
@@ -546,6 +562,11 @@ class SecureIngressService:
             audit_status=status,
             claim_ref=claim.claim_ref if claim else None,
             existing_result_ref=claim.existing_result_ref if claim else None,
+            canonical_request_id=claim.canonical_request_id if claim else None,
+            canonical_body_sha256=(
+                claim.canonical_body_sha256 if claim else None
+            ),
+            canonical_audit_ref=claim.canonical_audit_ref if claim else None,
         )
 
     def _audit_event(

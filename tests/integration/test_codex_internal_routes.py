@@ -5,11 +5,12 @@ import sqlite3
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from host_brain.app.internal_agent_routes import router
 from host_brain.app.settings.core import get_core_settings
+from host_brain.app.settings.internal_agent import get_internal_agent_settings
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
 from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
 from host_brain.memory.life_memory import LifeMemoryStore
 
@@ -17,6 +18,15 @@ from host_brain.memory.life_memory import LifeMemoryStore
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_STORE_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0055_agent_runtime_review_store.sql"
 RUNTIME_EVENT_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0056_runtime_events.sql"
+
+
+@pytest.fixture(autouse=True)
+def _clear_route_settings_caches():
+    get_core_settings.cache_clear()
+    get_internal_agent_settings.cache_clear()
+    yield
+    get_core_settings.cache_clear()
+    get_internal_agent_settings.cache_clear()
 
 
 def _client() -> TestClient:
@@ -47,13 +57,11 @@ def test_codex_internal_work_order_preview_route() -> None:
     assert payload["work_order"]["run_mode"] == "inspect"
 
 
-def test_codex_internal_job_route_reads_registry_job() -> None:
-    job = GLOBAL_AGENT_JOB_REGISTRY.create(kind="codex_work_order", work_order=_work_order())
+def test_codex_internal_job_route_reports_legacy_registry_retired() -> None:
+    response = _client().get("/internal/codex/jobs/legacy-job")
 
-    response = _client().get(f"/internal/codex/jobs/{job['job_id']}")
-
-    assert response.status_code == 200
-    assert response.json()["job_id"] == job["job_id"]
+    assert response.status_code == 410
+    assert response.json()["detail"] == "LEGACY_AGENT_JOB_REGISTRY_RETIRED"
 
 
 def test_codex_internal_immune_routes_expose_proposal_and_auto_state() -> None:
@@ -99,89 +107,24 @@ def test_codex_internal_owner_directive_route_persists_life_memory(monkeypatch) 
         ledger.close()
 
 
-def test_codex_internal_work_order_execute_persists_explicit_owner_directive(monkeypatch) -> None:
-    class FakeExecutor:
-        def execute(self, order):
-            return {"status": "EXECUTED", "work_order_id": order.work_order_id}
-
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
-    try:
-        store = LifeMemoryStore(ledger=ledger)
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
-
-        work_order = _work_order()
-        work_order["metadata"] = {
-            "owner_directive": {
-                "request_id": "owner-wo-1",
-                "directive_text": "Thalamus LLM 用模型池，优先 DeepSeek，不要用 Pro。",
-            },
-            "distill_owner_directive": False,
-        }
-        response = _client().post("/internal/codex/work-orders/execute", json={"work_order": work_order})
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["result"]["status"] == "EXECUTED"
-        assert payload["owner_directive_memory"]["status"] == "OK"
-        assert len(ledger.life_episode) == 1
-        assert ledger.life_episode[0]["primary_ref"] == "owner://directive/owner-wo-1"
-    finally:
-        ledger.close()
-
-
-def test_codex_internal_work_order_execute_does_not_persist_unmarked_work_order(monkeypatch) -> None:
-    class FakeExecutor:
-        def execute(self, order):
-            return {"status": "EXECUTED", "work_order_id": order.work_order_id}
-
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
-    try:
-        store = LifeMemoryStore(ledger=ledger)
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
-
-        response = _client().post("/internal/codex/work-orders/execute", json={"work_order": _work_order()})
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["result"]["status"] == "EXECUTED"
-        assert "owner_directive_memory" not in payload
-        assert ledger.life_episode == []
-    finally:
-        ledger.close()
-
-
-def test_codex_internal_work_order_execute_attaches_legacy_runtime_assignment(monkeypatch) -> None:
-    class FakeExecutor:
-        def execute(self, order):
-            return {
-                "status": "EXECUTED",
-                "work_order_id": order.work_order_id,
-                "runtime_assignment": order.metadata["runtime_assignment"],
-            }
-
-    monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
-
+def test_codex_internal_work_order_execute_fails_closed_without_governed_dependencies() -> None:
     response = _client().post("/internal/codex/work-orders/execute", json={"work_order": _work_order()})
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["runtime_assignment"]["executor"] == "legacy"
-    assert payload["result"]["runtime_assignment"]["executor"] == "legacy"
+    assert response.status_code == 503
+    assert response.json()["detail"] == "INTERNAL_AGENT_RUNTIME_UNAVAILABLE"
 
 
-def test_codex_internal_runtime_drain_report_reads_legacy_registry() -> None:
-    GLOBAL_AGENT_JOB_REGISTRY.reset()
-    job = GLOBAL_AGENT_JOB_REGISTRY.create(kind="codex_work_order", work_order=_work_order())
-
+def test_codex_internal_runtime_drain_report_uses_durable_authority() -> None:
     response = _client().get("/internal/codex/runtime/drain-report")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["drain"]["drained"] is False
-    assert job["job_id"] in payload["drain"]["legacy_open_job_ids"]
-    GLOBAL_AGENT_JOB_REGISTRY.reset()
+    assert payload["drain"] == {
+        "status": "DRAINED",
+        "legacy_registry_retired": True,
+        "active_legacy_jobs": 0,
+        "authority": "durable_task_runtime",
+    }
 
 
 def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None:

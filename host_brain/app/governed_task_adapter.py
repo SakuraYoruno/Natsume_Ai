@@ -26,7 +26,12 @@ from host_brain.agent_runtime.task_graph import (
 )
 from host_brain.agent_runtime.task_store import OutboxMessage
 from host_brain.agent_runtime.work_order import AgentWorkOrder
-from host_brain.orchestration import GovernedCommandApplication
+from host_brain.orchestration import (
+    DurableGovernorGrantResolver,
+    GovernedCommandApplication,
+    GovernorGrantError,
+    governor_grant_ref,
+)
 from host_brain.task_runtime import GovernedTaskCoordinator
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
@@ -144,6 +149,7 @@ class _FrozenSkillWorker:
             intent_draft=intent_draft,
             emotion_context=_mapping(pack.get("emotion_context")),
             render_target_lang=str(pack.get("render_target_lang") or "zh"),
+            governed_execution_context=execution_context,
             **kwargs,
         )
         payload = _mapping(getattr(outcome, "payload", None))
@@ -566,7 +572,7 @@ def _build_contracts(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "Secure Ingress claim and audit references must be supplied together",
         )
-    governor_grant_ref = _governor_grant_ref(request_ref, governor_result)
+    grant_ref = governor_grant_ref(request_ref, governor_result)
     safe_intent = _safe_durable_value(dict(intent_draft or {}), path="intent_draft")
     if not isinstance(safe_intent, dict):
         raise GovernedHostAdapterError(
@@ -605,7 +611,7 @@ def _build_contracts(
         forbidden_actions=["reroute", "replan", "cross_executor_resume"],
         acceptance_criteria=[_ACCEPTANCE_CRITERION],
         verification_plan={"required": True, "policy": "durable_worker_projection"},
-        approval_policy={"governor_grant_ref": governor_grant_ref},
+        approval_policy={"governor_grant_ref": grant_ref},
         metadata={
             "surface": surface.value,
             "graph_id": graph_id,
@@ -617,7 +623,7 @@ def _build_contracts(
         node_id=node_id,
         dependencies=(),
         route=GOVERNED_HOST_WORKER_ROUTE,
-        input_refs=(input_ref, governor_grant_ref),
+        input_refs=(input_ref, grant_ref),
         output_contract={
             "type": "host_skill_commit",
             "required": ["decision", "narrative", "receipt_ref"],
@@ -644,7 +650,7 @@ def _build_contracts(
         principal_id=principal_id,
         ingress_claim_ref=ingress_claim_ref,
         ingress_audit_ref=ingress_audit_ref,
-        governor_grant_ref=governor_grant_ref,
+        governor_grant_ref=grant_ref,
         input_ref=input_ref,
         input_sha256=input_sha256,
         root_work_order_id=work_order_id,
@@ -670,39 +676,16 @@ def _load_governor_grant(
             GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
             "HostCommand has no durable Governor grant reference",
         )
-    trace = ledger.trace_request(request_id)
-    rows = list(trace.get("governor_log") or []) if isinstance(trace, Mapping) else []
-    approved = [
-        dict(row)
-        for row in rows
-        if isinstance(row, Mapping)
-        and str(row.get("decision") or "").strip().upper() == "APPROVE"
-    ]
-    if not approved:
+    try:
+        return DurableGovernorGrantResolver(ledger).require(
+            request_id=request_id,
+            expected_ref=expected_ref,
+        )
+    except GovernorGrantError as exc:
         raise GovernedHostAdapterError(
             GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
-            "durable Governor approval is missing",
-        )
-    approved.sort(key=lambda row: int(row.get("ts_ms") or 0))
-    for decision in reversed(approved):
-        if _governor_grant_ref(request_id, decision) == expected_ref:
-            return decision
-    raise GovernedHostAdapterError(
-        GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
-        "HostCommand governor grant does not match any durable approved decision",
-    )
-
-
-def _governor_grant_ref(request_id: str, decision: Mapping[str, Any]) -> str:
-    digest = _sha256_json(
-        {
-            "decision": str(decision.get("decision") or "").strip().upper(),
-            "intent_id": str(decision.get("intent_id") or "").strip(),
-            "request_id": str(request_id or "").strip(),
-            "ts_ms": int(decision.get("ts_ms") or 0),
-        }
-    ).split(":", 1)[1]
-    return f"governor-decision://sha256/{digest}"
+            exc.detail,
+        ) from exc
 
 
 def _assert_stable_command_replay(candidate: HostCommand, durable: HostCommand) -> None:

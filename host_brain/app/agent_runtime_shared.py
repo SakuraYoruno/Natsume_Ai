@@ -2157,60 +2157,6 @@ async def _run_persona_session_end_hooks(
         _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
 
 
-def _write_surface_main_chain_memory_sync(
-    *,
-    episodic_store: Any,
-    request_id: str,
-    person_id: str,
-    session_id: str,
-    user_message: str,
-    assistant_reply: str,
-    emotion_context: Mapping[str, Any],
-    ts_ms: int,
-    reply_plan: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
-    from host_brain.persona.surface_memory_recall import write_surface_turn_memory  # noqa: PLC0415
-
-    payload_emotion = dict(emotion_context or {})
-    resolved_person_id = resolve_bond_user_id(person_id or None, session_id=session_id or None)
-    memory_emotion_tag = str(
-        payload_emotion.get("surface_user_emotion_tag")
-        or payload_emotion.get("user_emotion_tag")
-        or payload_emotion.get("emotion_tag")
-        or "NEUTRAL"
-    ).strip().upper() or "NEUTRAL"
-    valence_context = {**payload_emotion, "emotion_tag": memory_emotion_tag}
-    valence, arousal = _resolve_persona_session_emotion(valence_context)
-    plan = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
-    intent_id = str(
-        plan.get("intent_id")
-        or plan.get("task_mode")
-        or plan.get("primary_topic")
-        or plan.get("response_move")
-        or request_id
-    ).strip() or request_id
-    result = write_surface_turn_memory(
-        episodic_store=episodic_store,
-        request_id=request_id,
-        session_id=session_id,
-        person_id=resolved_person_id,
-        user_message=user_message,
-        assistant_reply=assistant_reply,
-        ts_ms=ts_ms,
-        intent_id=intent_id,
-        evidence_refs=[f"surface://reply/{request_id}"],
-        emotion_tag=memory_emotion_tag,
-        emotion_valence=valence,
-        emotion_arousal=arousal,
-    )
-    payload = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})
-    payload["source"] = "surface_main_chain"
-    payload["intent_id"] = intent_id
-    payload["person_id"] = resolved_person_id
-    return payload
-
-
 def _run_surface_persona_session_end_sync(
     *,
     request_id: str,
@@ -3788,7 +3734,9 @@ async def _async_post_process(
 
     try:
         if not suppress_final_reply:
-            from host_brain.app.observability_persist import persist_life_chat_episode  # noqa: PLC0415
+            from host_brain.app.dependencies import get_life_memory_service  # noqa: PLC0415
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+            from host_brain.memory.life_memory.contracts import ChatMemoryCandidate  # noqa: PLC0415
 
             life_user = user_message
             life_narrative = narrative
@@ -3798,16 +3746,36 @@ async def _async_post_process(
                 if _check_channel("MEMORY"):
                     life_user = pii_scrub_if_enabled(user_message, context="life_memory_write_user")
                     life_narrative = pii_scrub_if_enabled(narrative, context="life_memory_write_ai")
-            life_memory_write = await _run_in_post_process_executor(
-                persist_life_chat_episode,
+            memory_emotion_tag = str(
+                emotion_context.get("surface_user_emotion_tag")
+                or emotion_context.get("user_emotion_tag")
+                or emotion_context.get("emotion_tag")
+                or "NEUTRAL"
+            ).strip().upper() or "NEUTRAL"
+            memory_valence, memory_arousal = _resolve_persona_session_emotion(
+                {**dict(emotion_context or {}), "emotion_tag": memory_emotion_tag}
+            )
+            memory_reply_plan = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
+            memory_intent_id = str(
+                memory_reply_plan.get("intent_id")
+                or memory_reply_plan.get("task_mode")
+                or memory_reply_plan.get("primary_topic")
+                or memory_reply_plan.get("response_move")
+                or request_id
+            ).strip() or request_id
+            memory_candidate = ChatMemoryCandidate(
                 request_id=request_id,
-                intent_id=request_id,
-                person_id=person_id,
+                intent_id=memory_intent_id,
+                person_id=resolve_bond_user_id(person_id or None, session_id=session_id or None),
                 session_id=session_id,
                 user_message=life_user,
                 assistant_reply=life_narrative,
                 ts_ms=ts_ms,
-                attachments=list(attachments or []),
+                emotion_tag=memory_emotion_tag,
+                emotion_valence=memory_valence,
+                emotion_arousal=memory_arousal,
+                turn_count=max(1, _safe_int(emotion_context.get("turn_count"), default=1)),
+                attachments=tuple(attachments or ()),
                 multimodal_observations=dict(multimodal_observations or {}),
                 attachment_summary=str(attachment_summary or "").strip(),
                 metadata={
@@ -3815,72 +3783,34 @@ async def _async_post_process(
                     "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ""),
                     "reply_channel": str(reply_channel or "").strip() or None,
                     "reply_target": str(reply_target or "").strip() or None,
+                    "source": "surface_main_chain" if surface_main_chain_used else "agent_runtime",
                 },
+            )
+            life_memory_receipt = await _run_in_post_process_executor(
+                get_life_memory_service().admit_chat,
+                memory_candidate,
+            )
+            life_memory_write = (
+                life_memory_receipt.as_dict()
+                if hasattr(life_memory_receipt, "as_dict")
+                else dict(life_memory_receipt or {})
+            )
+            life_memory_write["source"] = (
+                "surface_main_chain" if surface_main_chain_used else "agent_runtime"
             )
             normalized_trace_stage_meta = {
                 **normalized_trace_stage_meta,
                 "life_memory_write": life_memory_write,
             }
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
-
-    try:
-        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
-
-        store = None if suppress_final_reply else get_episodic_store()
-        if store is not None:
-            mem_user = user_message
-            mem_narrative = narrative
-            with soft_fail("agent_runtime_shared.pii_scrub_memory_write", fallback=None):
-                from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
-
-                if _check_channel("MEMORY"):
-                    mem_user = pii_scrub_if_enabled(user_message, context="memory_write_user")
-                    mem_narrative = pii_scrub_if_enabled(narrative, context="memory_write_ai")
-
             if surface_main_chain_used:
-                surface_memory_write = await _run_in_post_process_executor(
-                    _write_surface_main_chain_memory_sync,
-                    episodic_store=store,
-                    request_id=request_id,
-                    person_id=person_id,
-                    session_id=session_id,
-                    user_message=mem_user,
-                    assistant_reply=mem_narrative,
-                    emotion_context=emotion_context,
-                    ts_ms=ts_ms,
-                    reply_plan=reply_plan,
-                )
                 normalized_trace_stage_meta = {
                     **normalized_trace_stage_meta,
-                    "surface_memory_write": surface_memory_write,
+                    # Compatibility trace only; this is the same receipt, not a
+                    # second writer invocation.
+                    "surface_memory_write": dict(life_memory_write),
                 }
-            else:
-                from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
-
-                await _run_in_post_process_executor(
-                    persist_chat_episodic_memory,
-                    request_id=request_id,
-                    intent_id=request_id,
-                    person_id=person_id,
-                    session_id=session_id,
-                    user_message=mem_user,
-                    assistant_reply=mem_narrative,
-                    emotion_context=emotion_context,
-                    ts_ms=ts_ms,
-                    episodic_store=store,
-                    attachments=list(attachments or []),
-                    multimodal_observations=dict(multimodal_observations or {}),
-                    attachment_summary=str(attachment_summary or "").strip(),
-                    metadata={
-                        "trace_stage_meta": dict(normalized_trace_stage_meta or {}),
-                        "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ""),
-                        "reply_channel": str(reply_channel or "").strip() or None,
-                        "reply_target": str(reply_target or "").strip() or None,
-                    },
-                )
     except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
 
     if skip_heavy_persona_postprocess and surface_main_chain_used:
         try:

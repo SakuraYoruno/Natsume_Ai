@@ -18,7 +18,7 @@ import threading
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Mapping
 
 from host_brain.app.capability_gap_detector import detect_capability_gap
 from host_brain.app.relational_chat_detector import build_relational_chat_reason_code
@@ -864,6 +864,7 @@ def _execute_skill(
     skill_registry: Any | None = None,
     token_service_override: Any | None = None,
     ledger: Any | None = None,
+    governed_execution_context: Mapping[str, Any] | None = None,
 ) -> _ExecutionOutcome:
     started = time.time()
     if skill_registry is None:
@@ -1057,6 +1058,11 @@ def _execute_skill(
         "emotion_context": dict(emotion_context or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
+    if governed_execution_context is not None:
+        exec_context["_governed_execution_context"] = {
+            "execution_mode": "governed_task_runtime",
+            **dict(governed_execution_context),
+        }
     if action_arbiter_decision is not None:
         exec_context["action_arbiter_decision"] = action_arbiter_decision
     if skill_id.startswith("memory_"):
@@ -1086,7 +1092,10 @@ def _execute_skill(
         handler_payload = skill_meta.handler(args, exec_context)
         if isinstance(handler_payload, dict):
             payload = dict(handler_payload)
-            payload.setdefault("_context", exec_context)
+            if governed_execution_context is not None:
+                payload["_context"] = exec_context
+            else:
+                payload.setdefault("_context", exec_context)
         else:
             payload = handler_payload
         raw_result = dispatch_executor_payload(payload)

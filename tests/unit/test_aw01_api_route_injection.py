@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Callable
+from types import SimpleNamespace
 
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
@@ -41,6 +42,18 @@ def test_router_registry_mounts_secure_routes_with_stable_unavailable_defaults()
             response = client.post(path, content=b"")
             assert response.status_code == 503
             assert response.json()["reason_code"] == reason_code
+        internal = client.post(
+            "/internal/codex/work-orders/preview",
+            json={"work_order": {}},
+        )
+        scheduler = client.get("/scheduler/health")
+        host_scheduler = client.get("/host-scheduler/health")
+        assert internal.status_code == 503
+        assert internal.json()["detail"] == "INTERNAL_AGENT_INGRESS_UNAVAILABLE"
+        assert scheduler.status_code == 503
+        assert scheduler.json()["detail"] == "SCHEDULER_COMMAND_INGRESS_UNAVAILABLE"
+        assert host_scheduler.status_code == 503
+        assert host_scheduler.json()["detail"] == "SCHEDULER_COMMAND_INGRESS_UNAVAILABLE"
 
 
 def test_app_factory_forwards_explicit_secure_route_providers(
@@ -84,6 +97,34 @@ def test_app_factory_forwards_explicit_secure_route_providers(
             assert response.json()["reason_code"] == reason_code
 
     assert calls == {"obs": 1, "pentest": 1, "signed_intake": 1}
+
+
+def test_scheduler_duplicate_stops_before_legacy_handler() -> None:
+    class _DuplicateIngress:
+        def evaluate_http(self, **_kwargs):
+            return SimpleNamespace(
+                admissible=True,
+                duplicate=True,
+                reason_code="SECURE_INGRESS_IDEMPOTENCY_DUPLICATE",
+                request_id="request.scheduler.original",
+                existing_result_ref="scheduler-result://original",
+            )
+
+    app = FastAPI()
+    router_registry.register_host_routers(
+        app,
+        scheduler_command_ingress_provider=lambda: _DuplicateIngress(),
+    )
+
+    with TestClient(app) as client:
+        for path in ("/scheduler/health", "/host-scheduler/health"):
+            response = client.get(path)
+            assert response.status_code == 409
+            assert response.json()["detail"] == {
+                "reason_code": "SCHEDULER_COMMAND_REPLAY",
+                "request_id": "request.scheduler.original",
+                "result_ref": "scheduler-result://original",
+            }
 
 
 def test_router_registry_has_no_platform_runtime_or_app_state_reverse_lookup() -> None:

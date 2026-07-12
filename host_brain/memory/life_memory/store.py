@@ -117,6 +117,9 @@ from .semantic import (  # noqa: E402
 )
 
 
+LIFE_MEMORY_DIRECT_CHAT_WRITE_FORBIDDEN = "LIFE_MEMORY_DIRECT_CHAT_WRITE_FORBIDDEN"
+
+
 def _background_salience(*, source: str, status: str | None, detail: str | None) -> float:
     """Compute a baseline salience score for a background episode.
 
@@ -1739,6 +1742,15 @@ class LifeMemoryStore:
         attachment_summary: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """In-memory fixture compatibility only.
+
+        Durable production chat writes are owned by ``LifeMemoryService`` and
+        ``LifeMemoryRepository``.  Keeping this fail-closed shim lets the large
+        recall/consolidation fixture suite build synthetic in-memory episodes
+        without preserving a second production mutation authority.
+        """
+        if str(getattr(self.ledger, "canonical_db_path", "") or "") != ":memory:":
+            raise PermissionError(LIFE_MEMORY_DIRECT_CHAT_WRITE_FORBIDDEN)
         req = _clean_text(request_id) or f"chat-{uuid.uuid4().hex}"
         created = int(ts_ms if ts_ms is not None else now_ts_ms())
         refs = [
@@ -3271,5 +3283,4 @@ class LifeMemoryStore:
             item["metadata"] = metadata if isinstance(metadata, dict) else {}
             items.append(item)
         return items
-
 

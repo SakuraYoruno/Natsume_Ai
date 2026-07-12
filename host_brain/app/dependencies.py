@@ -108,6 +108,7 @@ _bond_dynamics_writer: Optional[BondDynamicsWriter] = None
 _bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
 _life_memory_store: Optional[LifeMemoryStore] = None
+_memory_service_container: Optional[Any] = None
 _retrieval_pipeline: Optional[Any] = None
 _retrieval_orchestrator: Optional[Any] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
@@ -360,11 +361,38 @@ def get_episodic_store() -> EpisodicStore:
 
 
 def get_life_memory_store() -> LifeMemoryStore:
+    """Legacy read/background-memory compatibility store.
+
+    Production chat admission must use ``get_life_memory_service``.  This
+    provider remains while background/action and recall slices are migrated.
+    """
     global _life_memory_store
     ledger = get_ledger()
     if _life_memory_store is None or getattr(_life_memory_store, "ledger", None) is not ledger:
         _life_memory_store = LifeMemoryStore(ledger=ledger)
     return _life_memory_store
+
+
+def set_memory_service_container(container: Any | None) -> None:
+    """Install the composition-owned process Memory container."""
+
+    global _memory_service_container
+    if container is not None and getattr(container, "service", None) is None:
+        raise TypeError("memory service container must expose .service")
+    _memory_service_container = container
+
+
+def get_memory_service_container() -> Any:
+    container = _memory_service_container
+    if container is None:
+        raise RuntimeError("LIFE_MEMORY_SERVICE_NOT_COMPOSED")
+    return container
+
+
+def get_life_memory_service() -> Any:
+    """Return the sole composition-owned production chat memory writer."""
+
+    return get_memory_service_container().service
 
 
 def get_retrieval_pipeline() -> None:

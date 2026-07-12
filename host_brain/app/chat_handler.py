@@ -47,11 +47,6 @@ from host_brain.app.schemas import ChatRequest
 from host_brain.app.settings.chat import get_chat_settings
 from host_brain.core.ids import new_request_id
 
-from host_brain.app.dependencies import get_episodic_store  # noqa: F401
-from host_brain.app.observability_persist import (  # noqa: F401
-    persist_chat_episodic_memory,
-)
-
 _logger = logging.getLogger("Natsume.chat_handler")
 
 

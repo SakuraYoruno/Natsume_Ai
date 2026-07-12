@@ -31,18 +31,18 @@ from host_brain.airlock.image_filter import (
     filter_image_egress,
 )
 from host_brain.app.dependencies import (
-    get_episodic_store,
+    get_life_memory_service,
     get_ledger,
 )
-from host_brain.app.emotion_context import build_chat_emotion_snapshot
+from host_brain.app.emotion_context import build_chat_emotion_snapshot, map_emotion_tag_to_vad
 from host_brain.app.graph_config_builder import (
     SCENE_VISION_UI,
     resolve_host_llm_runtime_async,
 )
-from host_brain.app.observability_persist import persist_chat_episodic_memory
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
 from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
+from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 
 _logger = logging.getLogger("Natsume.chat_handler_vision")
 
@@ -786,7 +786,7 @@ async def _vision_ui_sse_generator(
             "request_id": request_id,
         })
 
-        # ── 后处理：情节记忆 ───────────────────────────────────────────────
+        # ── 后处理：唯一 LifeMemory admission ─────────────────────────────
         vision_llm_summary = {
             "status": llm_status,
             "reason_code": llm_result.get("reason_code"),
@@ -799,25 +799,78 @@ async def _vision_ui_sse_generator(
         }
 
         try:
-            episodic_summary = persist_chat_episodic_memory(
-                request_id=request_id,
-                intent_id=str(intent_id or request_id),
-                person_id=getattr(request_body, "person_id", None),
-                session_id=session_id,
-                user_message=request_body.message,
-                assistant_reply=narrative,
-                emotion_context=emotion_context,
-                ts_ms=ts_ms,
-                episodic_store=get_episodic_store(),
+            from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+            memory_user = request_body.message
+            memory_reply = narrative
+            if _check_channel("MEMORY"):
+                memory_user = pii_scrub_if_enabled(
+                    memory_user,
+                    context="vision_life_memory_write_user",
+                )
+                memory_reply = pii_scrub_if_enabled(
+                    memory_reply,
+                    context="vision_life_memory_write_ai",
+                )
+            memory_emotion_tag = str(
+                emotion_context.get("user_emotion_tag")
+                or emotion_context.get("emotion_tag")
+                or "NEUTRAL"
+            ).strip().upper() or "NEUTRAL"
+            memory_valence, memory_arousal, _ = map_emotion_tag_to_vad(memory_emotion_tag)
+            safe_observations = {
+                key: value
+                for key, value in dict(vision_context or {}).items()
+                if key not in {"image_base64"}
+            }
+            memory_attachments: tuple[dict[str, Any], ...] = ()
+            image_url = str((vision_context or {}).get("image_url") or "").strip()
+            if has_image:
+                memory_attachments = (
+                    {
+                        "type": str((vision_context or {}).get("image_mime") or "image"),
+                        "source_ref": image_url or f"vision://observation/{request_id}",
+                    },
+                )
+            memory_receipt = get_life_memory_service().admit_chat(
+                ChatMemoryCandidate(
+                    request_id=request_id,
+                    intent_id=str(intent_id or request_id),
+                    person_id=resolve_bond_user_id(
+                        getattr(request_body, "person_id", None),
+                        session_id=session_id,
+                    ),
+                    session_id=session_id,
+                    user_message=memory_user,
+                    assistant_reply=memory_reply,
+                    emotion_tag=memory_emotion_tag,
+                    emotion_valence=memory_valence,
+                    emotion_arousal=memory_arousal,
+                    turn_count=max(1, int(emotion_context.get("turn_count") or 1)),
+                    attachments=memory_attachments,
+                    multimodal_observations=safe_observations,
+                    attachment_summary=str(
+                        (vision_context or {}).get("screen_description") or ""
+                    ).strip(),
+                    metadata={
+                        "source": "vision_ui",
+                        "scene_type": SCENE_VISION_UI,
+                        "input_mode": input_mode,
+                        "has_image": has_image,
+                    },
+                    ts_ms=ts_ms,
+                )
             )
+            episodic_summary = memory_receipt.as_dict()
         except Exception as exc:
             episodic_summary = {
                 "status": "DEGRADED",
-                "reason_code": "EPISODIC_WRITE_FAILED",
+                "reason_code": "LIFE_MEMORY_ADMISSION_FAILED",
                 "memory_id": None,
                 "detail": str(exc),
             }
-            _logger.debug("vision episodic memory write skipped", extra={"request_id": request_id, "error": str(exc)})
+            _logger.debug("vision life memory admission skipped", extra={"request_id": request_id, "error": str(exc)})
 
         # ── COMMIT ──────────────────────────────────────────────────────────────────
         commit_payload: Dict[str, Any] = {

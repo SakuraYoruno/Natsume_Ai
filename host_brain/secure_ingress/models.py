@@ -96,6 +96,9 @@ class ClaimDecision:
     status: ClaimStatus
     claim_ref: str | None = None
     existing_result_ref: str | None = None
+    canonical_request_id: str | None = None
+    canonical_body_sha256: str | None = None
+    canonical_audit_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +198,9 @@ class SecureIngressDecision:
     primary_reason_code: IngressReasonCode
     claim_ref: str | None
     existing_result_ref: str | None
+    canonical_request_id: str | None = None
+    canonical_body_sha256: str | None = None
+    canonical_audit_ref: str | None = None
     side_effects_executed: bool = False
 
     def to_dict(self) -> dict[str, Any]:

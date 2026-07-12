@@ -27,6 +27,9 @@ from host_brain.integrations.runtime_events import (
     RuntimeOutboxPublisher,
 )
 from host_brain.persistence import HostCommandRepository
+from host_brain.persistence.agent_execution_repository import (
+    AgentExecutionResultRepository,
+)
 
 
 TASK_RUNTIME_CANONICAL_DB_PATH_INVALID = "TASK_RUNTIME_CANONICAL_DB_PATH_INVALID"
@@ -83,6 +86,7 @@ class TaskRuntimeContainerConstructionError(TaskRuntimeContainerError):
 MigrationRunnerBuilder = Callable[..., SQLiteMigrationRunner]
 TaskStoreBuilder = Callable[..., DurableTaskStore]
 CommandRepositoryBuilder = Callable[..., HostCommandRepository]
+AgentResultRepositoryBuilder = Callable[..., AgentExecutionResultRepository]
 RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 
@@ -91,6 +95,7 @@ _INFRASTRUCTURE_ORDER = (
     "migration_runner",
     "task_store",
     "command_repository",
+    "agent_result_repository",
     "event_store",
     "outbox_publisher",
 )
@@ -143,6 +148,7 @@ class ProcessTaskRuntimeContainer:
     migration_result: MigrationBatchResult
     task_store: DurableTaskStore
     command_repository: HostCommandRepository
+    agent_result_repository: AgentExecutionResultRepository
     event_store: RuntimeEventStore
     outbox_publisher: RuntimeOutboxPublisher
     startup_publish_result: Mapping[str, Any]
@@ -572,6 +578,9 @@ def build_process_task_runtime_container(
     migration_runner_builder: MigrationRunnerBuilder = SQLiteMigrationRunner,
     task_store_builder: TaskStoreBuilder = DurableTaskStore,
     command_repository_builder: CommandRepositoryBuilder = HostCommandRepository,
+    agent_result_repository_builder: AgentResultRepositoryBuilder = (
+        AgentExecutionResultRepository
+    ),
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
 ) -> ProcessTaskRuntimeContainer:
@@ -613,6 +622,8 @@ def build_process_task_runtime_container(
         constructed.append(("task_store", task_store))
         command_repository = command_repository_builder(canonical)
         constructed.append(("command_repository", command_repository))
+        agent_result_repository = agent_result_repository_builder(canonical)
+        constructed.append(("agent_result_repository", agent_result_repository))
         event_store = event_store_builder(canonical)
         constructed.append(("event_store", event_store))
         outbox_publisher = outbox_publisher_builder(
@@ -645,6 +656,7 @@ def build_process_task_runtime_container(
         migration_result=migration_result,
         task_store=task_store,
         command_repository=command_repository,
+        agent_result_repository=agent_result_repository,
         event_store=event_store,
         outbox_publisher=outbox_publisher,
         startup_publish_result=dict(startup_publish_result),

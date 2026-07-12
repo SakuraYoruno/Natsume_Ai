@@ -28,12 +28,24 @@ from host_brain.composition.task_runtime import (
     TaskRuntimeContainerError,
     build_process_task_runtime_container,
 )
+from host_brain.composition.memory import (
+    ProcessMemoryContainer,
+    build_process_memory_container,
+)
+from host_brain.composition.command_ingress import (
+    ProcessCommandIngressContainer,
+    build_process_command_ingress_container,
+)
+from host_brain.composition.runtime_group import GovernedRuntimeGroup
 
 __all__ = [
     "ActivationResult",
     "PreparedServiceStart",
     "ProcessSecurityServiceContainer",
     "ProcessTaskRuntimeContainer",
+    "ProcessMemoryContainer",
+    "ProcessCommandIngressContainer",
+    "GovernedRuntimeGroup",
     "SecurityServiceCloseFailure",
     "SecurityServiceContainerCloseError",
     "SecurityServiceName",
@@ -46,5 +58,7 @@ __all__ = [
     "activate_candidate",
     "build_process_security_service_container",
     "build_process_task_runtime_container",
+    "build_process_memory_container",
+    "build_process_command_ingress_container",
     "prepare_service_start",
 ]

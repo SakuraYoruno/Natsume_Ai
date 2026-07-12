@@ -478,10 +478,22 @@ class SQLiteSecureIngressStore:
                 )
                 existing = self._conn.execute(
                     """
-                    SELECT action, required_scopes_json, body_sha256, claim_ref,
-                           result_ref, claim_status
-                    FROM secure_ingress_idempotency_claim
-                    WHERE principal_id = ? AND surface = ? AND idempotency_digest = ?
+                    SELECT claim.action, claim.required_scopes_json,
+                           claim.request_id, claim.body_sha256, claim.claim_ref,
+                           claim.result_ref, claim.claim_status,
+                           (
+                               SELECT audit.audit_ref
+                               FROM secure_ingress_audit AS audit
+                               WHERE audit.claim_ref = claim.claim_ref
+                                 AND audit.decision = 'ALLOW'
+                                 AND audit.reason_code = 'SECURE_INGRESS_ALLOWED'
+                               ORDER BY audit.ts_ms, audit.audit_ref
+                               LIMIT 1
+                           ) AS canonical_audit_ref
+                    FROM secure_ingress_idempotency_claim AS claim
+                    WHERE claim.principal_id = ?
+                      AND claim.surface = ?
+                      AND claim.idempotency_digest = ?
                     """,
                     (principal_id, surface, idempotency_digest),
                 ).fetchone()
@@ -503,10 +515,26 @@ class SQLiteSecureIngressStore:
                         and str(existing["body_sha256"]) == body_sha256
                     )
                     self._conn.commit()
+                    duplicate = ClaimStatus.DUPLICATE_SAME if same else ClaimStatus.IDEMPOTENCY_CONFLICT
                     return ClaimDecision(
-                        ClaimStatus.DUPLICATE_SAME if same else ClaimStatus.IDEMPOTENCY_CONFLICT,
+                        duplicate,
                         str(existing["claim_ref"]),
                         str(existing["result_ref"]) if existing["result_ref"] else None,
+                        (
+                            str(existing["request_id"])
+                            if same and existing["request_id"]
+                            else None
+                        ),
+                        (
+                            str(existing["body_sha256"])
+                            if same and existing["body_sha256"]
+                            else None
+                        ),
+                        (
+                            str(existing["canonical_audit_ref"])
+                            if same and existing["canonical_audit_ref"]
+                            else None
+                        ),
                     )
                 replay = self._conn.execute(
                     "SELECT claim_ref FROM secure_ingress_nonce_claim WHERE principal_id = ? AND nonce_digest = ?",

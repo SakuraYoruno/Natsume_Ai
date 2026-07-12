@@ -24,6 +24,9 @@ from host_brain.integrations.runtime_events import (
     RuntimeOutboxPublisher,
 )
 from host_brain.persistence import HostCommandRepository
+from host_brain.persistence.agent_execution_repository import (
+    AgentExecutionResultRepository,
+)
 
 
 class _Ledger:
@@ -105,6 +108,11 @@ def _build_fake_container(
         events.append("repository:build")
         return _Closeable("repository", events)
 
+    def build_agent_result_repository(db_path: str) -> _Closeable:
+        assert db_path == str(path.resolve())
+        events.append("agent-result:build")
+        return _Closeable("agent-result", events)
+
     def build_event_store(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
         events.append("event-store:build")
@@ -121,6 +129,7 @@ def _build_fake_container(
         migration_runner_builder=build_migration,
         task_store_builder=build_store,
         command_repository_builder=build_repository,
+        agent_result_repository_builder=build_agent_result_repository,
         event_store_builder=build_event_store,
         outbox_publisher_builder=build_publisher,
     )
@@ -138,6 +147,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "migration:apply:startup::task-runtime",
         "task-store:build",
         "repository:build",
+        "agent-result:build",
         "event-store:build",
         "publisher:build",
         "publisher:publish:23",
@@ -249,6 +259,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
         "coordinator:close",
         "publisher:close",
         "event-store:close",
+        "agent-result:close",
         "repository:close",
         "task-store:close",
         "migration:close",
@@ -256,7 +267,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
     assert container.closed
     assert not container.activated
     asyncio.run(container.aclose())
-    assert len(events) == 9
+    assert len(events) == 10
 
 
 def test_canonical_authority_mismatch_builds_nothing(tmp_path: Path) -> None:
@@ -305,12 +316,16 @@ def test_real_sqlite_adapters_share_the_migrated_canonical_ledger(
         assert type(container.migration_runner) is SQLiteMigrationRunner
         assert type(container.task_store) is DurableTaskStore
         assert type(container.command_repository) is HostCommandRepository
+        assert type(container.agent_result_repository) is AgentExecutionResultRepository
         assert type(container.event_store) is RuntimeEventStore
         assert type(container.outbox_publisher) is RuntimeOutboxPublisher
         assert str(container.task_store.db_path.resolve()) == (
             ledger.canonical_db_path
         )
         assert str(container.command_repository.db_path.resolve()) == (
+            ledger.canonical_db_path
+        )
+        assert str(container.agent_result_repository.db_path.resolve()) == (
             ledger.canonical_db_path
         )
         assert str(container.event_store.db_path.resolve()) == (

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+import time
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router
@@ -88,10 +89,85 @@ def register_host_routers(
     governed_command_application_provider: (
         GovernedCommandApplicationProvider | None
     ) = None,
+    internal_agent_ingress_provider: Callable[[], Any | None] | None = None,
+    internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
+    scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
 ) -> None:
+    async def require_internal_agent_authority(request: Request) -> Any:
+        ingress = (
+            internal_agent_ingress_provider()
+            if internal_agent_ingress_provider is not None
+            else None
+        )
+        if ingress is None:
+            raise HTTPException(status_code=503, detail="INTERNAL_AGENT_INGRESS_UNAVAILABLE")
+        authority = ingress.evaluate_http(
+            request=request,
+            raw_body=await request.body(),
+            received_at_ms=int(
+                getattr(request.state, "request_started_ms", 0)
+                or time.time() * 1000
+            ),
+        )
+        if not authority.admissible:
+            status_code = 503 if "ENFORCE" in authority.reason_code else 403
+            raise HTTPException(status_code=status_code, detail=authority.reason_code)
+        request.state.internal_agent_authority = authority
+        return authority
+
+    async def bind_internal_agent_service(request: Request) -> Any:
+        service = (
+            internal_agent_command_service_provider()
+            if internal_agent_command_service_provider is not None
+            else None
+        )
+        if service is None:
+            raise HTTPException(status_code=503, detail="INTERNAL_AGENT_RUNTIME_UNAVAILABLE")
+        request.state.internal_agent_command_service = service
+        return service
+
+    async def require_scheduler_authority(request: Request) -> Any:
+        ingress = (
+            scheduler_command_ingress_provider()
+            if scheduler_command_ingress_provider is not None
+            else None
+        )
+        if ingress is None:
+            raise HTTPException(status_code=503, detail="SCHEDULER_COMMAND_INGRESS_UNAVAILABLE")
+        authority = ingress.evaluate_http(
+            request=request,
+            raw_body=await request.body(),
+            received_at_ms=int(
+                getattr(request.state, "request_started_ms", 0)
+                or time.time() * 1000
+            ),
+        )
+        if not authority.admissible:
+            status_code = 503 if "ENFORCE" in authority.reason_code else 403
+            raise HTTPException(status_code=status_code, detail=authority.reason_code)
+        if bool(getattr(authority, "duplicate", False)):
+            # Scheduler handlers still target the legacy scheduler.  Until the
+            # scheduler is a TaskRuntime consumer, a verified duplicate must
+            # stop at ingress instead of re-triggering that side effect.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason_code": "SCHEDULER_COMMAND_REPLAY",
+                    "request_id": getattr(authority, "request_id", None),
+                    "result_ref": getattr(authority, "existing_result_ref", None),
+                },
+            )
+        request.state.scheduler_command_authority = authority
+        return authority
+
     app.include_router(canon_router)
-    app.include_router(scheduler_router)
-    app.include_router(host_scheduler_router, prefix="/host-scheduler")
+    scheduler_dependencies = [Depends(require_scheduler_authority)]
+    app.include_router(scheduler_router, dependencies=scheduler_dependencies)
+    app.include_router(
+        host_scheduler_router,
+        prefix="/host-scheduler",
+        dependencies=scheduler_dependencies,
+    )
     app.include_router(tool_router)
     app.include_router(tool_kits_alias_router)
     app.include_router(prompt_config_router)
@@ -105,7 +181,13 @@ def register_host_routers(
         )
     )
     app.include_router(internal_tribe_router)
-    app.include_router(internal_codex_router)
+    app.include_router(
+        internal_codex_router,
+        dependencies=[
+            Depends(require_internal_agent_authority),
+            Depends(bind_internal_agent_service),
+        ],
+    )
     app.include_router(internal_security_immune_router)
     app.include_router(digital_life_router)
     app.include_router(memory_router)

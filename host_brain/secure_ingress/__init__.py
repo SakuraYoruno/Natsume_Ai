@@ -7,6 +7,13 @@ from .adapter import (
     SecureIngressMode,
     load_secure_ingress_mode,
 )
+from .authority import (
+    SECURE_INGRESS_ENFORCE_REQUIRED,
+    SECURE_INGRESS_HTTP_CONTRACT_INVALID,
+    SecureIngressAuthority,
+    SecureIngressAuthorityEvaluator,
+    SecureIngressHttpAuthorityAdapter,
+)
 from .credential import (
     CredentialVerifierRegistry,
     HMAC_SHA256_ALGORITHM,
@@ -35,6 +42,7 @@ from .surfaces import (
     IngressSurface,
     IngressSurfacePolicy,
     M48B_P0_SURFACE_POLICIES,
+    SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
 
@@ -53,14 +61,20 @@ __all__ = [
     "IngressSurface",
     "IngressSurfacePolicy",
     "M48B_P0_SURFACE_POLICIES",
+    "SECURE_INGRESS_SURFACE_POLICIES",
     "OpaqueBearerCredentialVerifier",
     "OPAQUE_BEARER_ALGORITHM",
     "PrincipalAuthority",
     "RateDecision",
     "SecureIngressDecision",
+    "SECURE_INGRESS_ENFORCE_REQUIRED",
+    "SECURE_INGRESS_HTTP_CONTRACT_INVALID",
     "SECURE_INGRESS_MODE_ENV",
     "SecureIngressAdapter",
     "SecureIngressAdapterOutcome",
+    "SecureIngressAuthority",
+    "SecureIngressAuthorityEvaluator",
+    "SecureIngressHttpAuthorityAdapter",
     "SecureIngressMode",
     "SecureIngressRequest",
     "SecureIngressService",

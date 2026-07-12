@@ -41,6 +41,9 @@ def create_host_fastapi_app(
     governed_command_application_provider: (
         GovernedCommandApplicationProvider | None
     ) = None,
+    internal_agent_ingress_provider: Callable[[], Any | None] | None = None,
+    internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
+    scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
 ) -> FastAPI:
     wire_route_providers(
         get_ledger=get_ledger,
@@ -69,6 +72,11 @@ def create_host_fastapi_app(
         governed_command_application_provider=(
             governed_command_application_provider
         ),
+        internal_agent_ingress_provider=internal_agent_ingress_provider,
+        internal_agent_command_service_provider=(
+            internal_agent_command_service_provider
+        ),
+        scheduler_command_ingress_provider=scheduler_command_ingress_provider,
     )
     configure_http_middleware(app)
 
