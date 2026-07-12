@@ -13,9 +13,17 @@ from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_re
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
-from host_brain.app.dependencies import get_ledger, get_tool_broker, get_tool_catalog
+from host_brain.app.dependencies import (
+    get_ledger,
+    get_token_service,
+    get_tool_broker,
+    get_tool_catalog,
+)
 from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.http_hooks import runtime_lifespan
+from host_brain.app.platform_security_runtime import (
+    platform_security_runtime_lifespan,
+)
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
 
@@ -48,7 +56,15 @@ def schedule_immune_gate_audit(
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     async with runtime_lifespan(get_ledger=get_ledger, logger=logger):
-        yield
+        # ASGI lifespan runs inside the forked worker.  Security stores and
+        # owner leases must never be constructed in the import-time parent.
+        async with platform_security_runtime_lifespan(
+            application,
+            get_ledger=get_ledger,
+            get_token_service=get_token_service,
+            logger=logger,
+        ):
+            yield
 
 
 async def chat_endpoint(request_body: ChatRequest, request: Request) -> StreamingResponse:

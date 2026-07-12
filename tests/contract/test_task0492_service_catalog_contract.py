@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from host_brain.service_catalog import (
     AuthKind,
     CatalogMode,
@@ -81,9 +83,7 @@ def test_default_inventory_has_unique_identity_protocol_and_health_contracts() -
     endpoint_ids = [endpoint.endpoint_id for endpoint in snapshot.endpoints]
 
     assert len(endpoint_ids) == len(set(endpoint_ids))
-    # Real code currently defaults Mate UDP to an unauthenticated wildcard.
-    # Catalog truth must expose, not normalize away, this TASK-0494 handoff.
-    assert _issue_codes(snapshot) == {ISSUE_PUBLIC_AUTH_REQUIRED}
+    assert _issue_codes(snapshot) == set()
     for endpoint in snapshot.endpoints:
         assert endpoint.owner_id
         assert endpoint.protocols
@@ -96,12 +96,6 @@ def test_default_inventory_has_unique_identity_protocol_and_health_contracts() -
 
 def test_18770_has_one_default_owner_and_vrm_collision_is_rejected() -> None:
     default = build_local_catalog({"EDGE_AVATAR_BACKEND": "vts"})
-    collision = build_local_catalog(
-        {
-            "EDGE_AVATAR_BACKEND": "vrm",
-            "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
-        }
-    )
     default_claims = {
         endpoint.endpoint_id
         for endpoint in default.endpoints
@@ -109,18 +103,32 @@ def test_18770_has_one_default_owner_and_vrm_collision_is_rejected() -> None:
         and endpoint.kind is EndpointKind.LISTENER
         and endpoint.port == 18770
     }
-    conflicts = [
-        issue
-        for issue in validate_catalog(collision)
-        if issue.reason_code == ISSUE_LISTENER_CONFLICT
-    ]
+    assert default_claims == set()
 
-    assert default_claims == {"host.mateengine.bridge.http"}
-    assert len(conflicts) == 1
-    assert set(conflicts[0].endpoint_ids) == {
-        "edge.unity.avatar.bridge.http",
-        "host.mateengine.bridge.http",
+    with pytest.raises(ValueError, match="SERVICE_CATALOG_EMBODIMENT_OWNER_REQUIRED"):
+        build_local_catalog(
+            {
+                "EDGE_AVATAR_BACKEND": "vrm",
+                "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
+            }
+        )
+
+    selected = build_local_catalog(
+        {
+            "EDGE_AVATAR_BACKEND": "vrm",
+            "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
+            "NATSUME_EMBODIMENT_BRIDGE_OWNER": "mateengine",
+        }
+    )
+    selected_claims = {
+        endpoint.endpoint_id
+        for endpoint in selected.endpoints
+        if endpoint.enabled
+        and endpoint.kind is EndpointKind.LISTENER
+        and endpoint.port == 18770
     }
+    assert selected_claims == {"host.mateengine.bridge.http"}
+    assert ISSUE_LISTENER_CONFLICT not in _issue_codes(selected)
 
 
 def test_safe_vts_profile_has_no_static_catalog_issues() -> None:
@@ -142,7 +150,14 @@ def test_dependencies_disabled_endpoints_and_protocols_do_not_claim_listeners() 
     assert dependency.enabled is True
     assert dependency.kind is EndpointKind.DEPENDENCY
     assert disabled.enabled is False
-    assert ISSUE_LISTENER_CONFLICT in _issue_codes(snapshot)
+    assert ISSUE_LISTENER_CONFLICT not in _issue_codes(snapshot)
+    assert {
+        endpoint.endpoint_id
+        for endpoint in snapshot.endpoints
+        if endpoint.enabled
+        and endpoint.kind is EndpointKind.LISTENER
+        and endpoint.port == 18770
+    } == {"edge.unity.avatar.bridge.http"}
 
     no_owner_collision = build_local_catalog(
         {

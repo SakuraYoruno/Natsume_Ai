@@ -108,7 +108,7 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
     avatar_backend = _text(source, "EDGE_AVATAR_BACKEND", "vts").lower()
     if avatar_backend not in {"vts", "vrm"}:
         raise ValueError("EDGE_AVATAR_BACKEND must be vts or vrm")
-    mate_enabled = _bool(source, "HOST_MATEENGINE_BRIDGE_ENABLED", True)
+    mate_enabled = _bool(source, "HOST_MATEENGINE_BRIDGE_ENABLED", False)
     edge_insecure = _bool(source, "EDGE_ALLOW_INSECURE_AUTH", True)
     gateway_enabled = _bool(source, "EDGE_GATEWAY_ENABLED", True)
     infra_enabled = _bool(source, "HOST_EXTERNAL_INFRA_MANAGED", False)
@@ -127,11 +127,29 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
         "HOST_MATEENGINE_BRIDGE_HTTP_HOST",
         _text(source, "MATEENGINE_BRIDGE_HTTP_HOST", "127.0.0.1"),
     )
-    # Unlike the HTTP listener, the current Host launcher does not translate a
-    # HOST_* UDP alias.  Reflect the bridge process' real key and unsafe default
-    # so PREFLIGHT rejects it until TASK-0494 completes the loopback cutover.
-    mate_udp_host = _text(source, "MATEENGINE_BRIDGE_UDP_HOST", "0.0.0.0")
+    mate_udp_host = _text(source, "MATEENGINE_BRIDGE_UDP_HOST", "127.0.0.1")
     vrm_host = _text(source, "EDGE_VRM_BRIDGE_HOST", "127.0.0.1")
+    requested_embodiment_owner = _text(
+        source,
+        "NATSUME_EMBODIMENT_BRIDGE_OWNER",
+        "",
+    ).lower()
+    if requested_embodiment_owner and requested_embodiment_owner not in {
+        "mateengine",
+        "vrm",
+    }:
+        raise ValueError("NATSUME_EMBODIMENT_BRIDGE_OWNER must be mateengine or vrm")
+    if mate_enabled and avatar_backend == "vrm" and not requested_embodiment_owner:
+        raise ValueError("SERVICE_CATALOG_EMBODIMENT_OWNER_REQUIRED")
+    embodiment_owner = requested_embodiment_owner or (
+        "mateengine" if mate_enabled else ("vrm" if avatar_backend == "vrm" else "")
+    )
+    if embodiment_owner == "mateengine" and not mate_enabled:
+        raise ValueError("SERVICE_CATALOG_MATEENGINE_OWNER_DISABLED")
+    if embodiment_owner == "vrm" and avatar_backend != "vrm":
+        raise ValueError("SERVICE_CATALOG_VRM_OWNER_DISABLED")
+    mate_active = mate_enabled and embodiment_owner == "mateengine"
+    vrm_active = avatar_backend == "vrm" and embodiment_owner == "vrm"
 
     endpoints = [
         _endpoint(
@@ -215,8 +233,8 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             host=mate_http_host,
             port=_port(source, "HOST_MATEENGINE_BRIDGE_HTTP_PORT", _port(source, "MATEENGINE_BRIDGE_HTTP_PORT", 18770)),
             protocols=(("http", "0.1"),), health_kind="http",
-            health_path="/health", auth_kind=AuthKind.NONE,
-            auth_policy_ref="", enabled=mate_enabled,
+            health_path="/health", auth_kind=AuthKind.HMAC,
+            auth_policy_ref="mateengine.bridge.hmac-v1", enabled=mate_active,
             source_refs=("tools/mateengine_bridge_server.py", "scripts/runtime/start_host_side.ps1"),
         ),
         _endpoint(
@@ -227,7 +245,8 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             port=_port(source, "MATEENGINE_BRIDGE_UDP_PORT", 18771),
             protocols=(("mateengine-udp", "0.1"),), health_kind="indirect",
             health_path="http://127.0.0.1:18770/health#bridge_udp",
-            auth_kind=AuthKind.NONE, auth_policy_ref="", enabled=mate_enabled,
+            auth_kind=AuthKind.HMAC,
+            auth_policy_ref="mateengine.bridge.hmac-v1", enabled=mate_active,
             source_refs=("tools/mateengine_bridge_server.py",),
         ),
         _endpoint(
@@ -237,7 +256,7 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             host=vrm_host, port=_port(source, "EDGE_VRM_BRIDGE_PORT", 18770),
             protocols=(("http", "0.1"),), health_kind="http",
             health_path="/health", auth_kind=AuthKind.NONE,
-            auth_policy_ref="", enabled=avatar_backend == "vrm",
+            auth_policy_ref="", enabled=vrm_active,
             source_refs=("tools/unity_avatar_runtime/Assets/NatsumeAvatarRuntime/Scripts/NatsumeAvatarBridgeServer.cs",),
         ),
         _endpoint(
@@ -292,7 +311,7 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             transport=Transport.TCP, host=vrm_host,
             port=_port(source, "EDGE_VRM_BRIDGE_PORT", 18770),
             protocols=(("http", "0.1"),), health_kind="http", health_path="/health",
-            auth_kind=AuthKind.NONE, auth_policy_ref="", enabled=avatar_backend == "vrm",
+            auth_kind=AuthKind.NONE, auth_policy_ref="", enabled=vrm_active,
             source_refs=("edge_client/actuators/vrm_bridge_driver.py",),
         ),
         _endpoint(

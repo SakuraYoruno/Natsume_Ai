@@ -61,6 +61,12 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Mapping
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from natsume_contracts.bridge_auth import build_hmac_digest
+
 logger = logging.getLogger("Natsume.wxautox4_bridge")
 
 # ---------------------------------------------------------------------------
@@ -575,19 +581,19 @@ def _bridge_command_hmac(
     nonce: str,
     body_sha256: str,
 ) -> str:
-    canonical = "\n".join((
-        version,
-        key_id,
-        transport,
-        method,
-        path,
-        str(timestamp_ms),
-        nonce,
-        principal,
-        scope,
-        body_sha256,
-    )).encode("utf-8")
-    return hmac.new(secret, canonical, hashlib.sha256).hexdigest()
+    return build_hmac_digest(
+        secret,
+        version=version,
+        key_id=key_id,
+        transport=transport,
+        method=method,
+        path=path,
+        timestamp_ms=timestamp_ms,
+        nonce=nonce,
+        principal=principal,
+        scope=scope,
+        body_digest=body_sha256,
+    )
 
 
 def sign_bridge_command_row(

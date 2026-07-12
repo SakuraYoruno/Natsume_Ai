@@ -674,6 +674,9 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     accept_new_intake = load_gateway_accept_new_intake()
     gateway_host_hmac_secret = _resolve_gateway_host_hmac_secret()
     gateway_reply_hmac_secret = _resolve_gateway_reply_hmac_secret()
+    wechat_callback_hmac_secret = str(
+        os.environ.get("NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET") or ""
+    ).strip()
 
     reporter = EdgeInputReporter(
         host_url=config.host_url,
@@ -1013,12 +1016,21 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             corp_id=config.wecom_corp_id,
             verify_only=False,
         ))
-    for internal_platform in (Platform.QQ.value, Platform.WECHAT.value, Platform.TELEGRAM.value):
+    for internal_platform in (Platform.QQ.value, Platform.TELEGRAM.value):
         if internal_platform in adapters:
             webhook_verifiers.register(InternalHmacWebhookVerifier(
                 platform=internal_platform,
                 shared_secret=config.hmac_key,
             ))
+    if Platform.WECHAT.value in adapters:
+        if not wechat_callback_hmac_secret:
+            raise RuntimeError("GW_WECHAT_CALLBACK_SECRET_MISSING")
+        webhook_verifiers.register(InternalHmacWebhookVerifier(
+            platform=Platform.WECHAT.value,
+            shared_secret=wechat_callback_hmac_secret,
+            principal_id="edge.gateway.wechat.bridge",
+            credential_ref="edge.gateway.wechat.callback.hmac.v1",
+        ))
 
     reply_verifiers = VerifierRegistry((
         InternalHmacWebhookVerifier(
@@ -1037,11 +1049,7 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             raise RuntimeError(
                 "GW_VERIFIER_PREFLIGHT_FAILED:" + ",".join(missing_verifiers)
             )
-        internal_platforms = {
-            Platform.QQ.value,
-            Platform.WECHAT.value,
-            Platform.TELEGRAM.value,
-        }
+        internal_platforms = {Platform.QQ.value, Platform.TELEGRAM.value}
         if internal_platforms.intersection(adapters) and not str(config.hmac_key or "").strip():
             raise RuntimeError("GW_INTERNAL_WEBHOOK_SECRET_MISSING")
         if Platform.LINE.value in adapters and not str(config.line_channel_secret or "").strip():

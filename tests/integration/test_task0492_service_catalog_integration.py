@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from host_brain.composition.service_catalog_startup import (
     REASON_RESERVATION_REPLAYED,
     STATUS_BLOCKED,
@@ -101,20 +103,31 @@ def _enabled_listener_ids_at_18770(snapshot: Any) -> tuple[str, ...]:
 def test_catalog_defaults_conflict_gate_and_one_shot_candidate_activation() -> None:
     clock_ms = lambda: 42_000
 
-    # Default avatar backend is VTS.  Its 8001 endpoint is a dependency, so it
-    # must not create a second listener claim on MateEngine's 18770 port.
+    # Bridges are disabled by default, so the catalog must not silently claim
+    # the shared embodiment port.
     default_snapshot = build_local_catalog(
         {
             "EDGE_AVATAR_BACKEND": "vts",
             "MATEENGINE_BRIDGE_UDP_HOST": "127.0.0.1",
         }
     )
-    assert _enabled_listener_ids_at_18770(default_snapshot) == (
+    assert _enabled_listener_ids_at_18770(default_snapshot) == ()
+
+    # Explicit enablement and owner election produce one candidate authority.
+    mate_snapshot = build_local_catalog(
+        {
+            "EDGE_AVATAR_BACKEND": "vts",
+            "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
+            "NATSUME_EMBODIMENT_BRIDGE_OWNER": "mateengine",
+            "MATEENGINE_BRIDGE_UDP_HOST": "127.0.0.1",
+        }
+    )
+    assert _enabled_listener_ids_at_18770(mate_snapshot) == (
         "host.mateengine.bridge.http",
     )
     default_bind = _RecordingReservationProbe()
     default_gate = ServiceCatalogStartupCoordinator(
-        snapshot=default_snapshot,
+        snapshot=mate_snapshot,
         env={
             "HOST_SERVICE_CATALOG_MODE": "PREFLIGHT",
             "HOST_SERVICE_CATALOG_RESERVATION_TTL_MS": "1000",
@@ -129,42 +142,16 @@ def test_catalog_defaults_conflict_gate_and_one_shot_candidate_activation() -> N
     assert default_prepared.start_allowed is True
     assert ISSUE_LISTENER_CONFLICT not in default_prepared.issue_codes
 
-    # Enabling the VRM listener while MateEngine owns the same fixed socket is
-    # a static catalog conflict.  It blocks before any lifecycle callback.
-    conflict_snapshot = build_local_catalog(
-        {
-            "EDGE_AVATAR_BACKEND": "vrm",
-            "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
-            "MATEENGINE_BRIDGE_UDP_HOST": "127.0.0.1",
-        }
-    )
-    assert set(_enabled_listener_ids_at_18770(conflict_snapshot)) == {
-        "edge.unity.avatar.bridge.http",
-        "host.mateengine.bridge.http",
-    }
-    conflict_gate = ServiceCatalogStartupCoordinator(
-        snapshot=conflict_snapshot,
-        env={
-            "HOST_SERVICE_CATALOG_MODE": "PREFLIGHT",
-            "HOST_SERVICE_CATALOG_RESERVATION_TTL_MS": "1000",
-        },
-        bind_probe=_RecordingReservationProbe(),
-        health_probe=_ExactIdentityHealthProbe(),
-        clock_ms=clock_ms,
-    )
-    conflict_prepared = conflict_gate.prepare_service_start(
-        candidate_owner_id="host.mateengine.bridge"
-    )
-    conflict_callbacks: list[str] = []
-    conflict_result = conflict_gate.activate_candidate(
-        conflict_prepared,
-        start_candidate=lambda: conflict_callbacks.append("start"),
-        stop_candidate=lambda _handle: conflict_callbacks.append("stop"),
-    )
-    assert conflict_prepared.start_allowed is False
-    assert ISSUE_LISTENER_CONFLICT in conflict_prepared.issue_codes
-    assert conflict_result.status == STATUS_BLOCKED
-    assert conflict_callbacks == []
+    # Ambiguous dual enablement is rejected while constructing catalog truth,
+    # before reservation or any lifecycle callback can run.
+    with pytest.raises(ValueError, match="SERVICE_CATALOG_EMBODIMENT_OWNER_REQUIRED"):
+        build_local_catalog(
+            {
+                "EDGE_AVATAR_BACKEND": "vrm",
+                "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
+                "MATEENGINE_BRIDGE_UDP_HOST": "127.0.0.1",
+            }
+        )
 
     # A clean ENFORCE path consumes the exact injected reservation, starts only
     # the candidate, validates its declared owner/protocol health and rejects a
@@ -172,7 +159,7 @@ def test_catalog_defaults_conflict_gate_and_one_shot_candidate_activation() -> N
     enforce_bind = _RecordingReservationProbe()
     enforce_health = _ExactIdentityHealthProbe()
     enforce_gate = ServiceCatalogStartupCoordinator(
-        snapshot=default_snapshot,
+        snapshot=mate_snapshot,
         env={
             "HOST_SERVICE_CATALOG_MODE": "ENFORCE",
             "HOST_SERVICE_CATALOG_RESERVATION_TTL_MS": "1000",

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from natsume_contracts.bridge_auth import build_http_auth_headers
 
 
 DEFAULT_MATEENGINE_SIGNAL_HOST = "127.0.0.1"
@@ -327,7 +331,7 @@ class MateEngineActionResult:
 
 
 def _mateengine_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_SIGNAL_ENABLED", "true").strip().lower()
+    raw = os.getenv("HOST_MATEENGINE_SIGNAL_ENABLED", "false").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
@@ -358,7 +362,7 @@ def _mateengine_bridge_port() -> int:
 
 
 def _mateengine_bridge_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_BRIDGE_ENABLED", "true").strip().lower()
+    raw = os.getenv("HOST_MATEENGINE_BRIDGE_ENABLED", "false").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
@@ -696,13 +700,42 @@ def _http_json(
     *,
     method: str,
     url: str,
+    scope: str,
     payload: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any], str | None]:
-    data = None
+    data = b""
     headers = {"Content-Type": "application/json; charset=utf-8"}
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    request = urllib.request.Request(url=url, data=data, headers=headers, method=method.upper())
+    key_id = str(os.getenv("NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID") or "").strip()
+    secret = str(os.getenv("NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET") or "")
+    principal = str(
+        os.getenv("NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL")
+        or "host.mateengine.bridge"
+    ).strip()
+    if not key_id or len(secret.encode("utf-8")) < 32 or not principal or not scope:
+        return False, {}, "HOST_MATEENGINE_BRIDGE_CREDENTIAL_REQUIRED"
+    parsed = urlsplit(url)
+    path = parsed.path or "/"
+    headers.update(
+        build_http_auth_headers(
+            secret=secret.encode("utf-8"),
+            key_id=key_id,
+            method=method,
+            path=path,
+            timestamp_ms=int(time.time() * 1000),
+            nonce=secrets.token_urlsafe(24),
+            principal=principal,
+            scope=scope,
+            raw_body=data,
+        )
+    )
+    request = urllib.request.Request(
+        url=url,
+        data=(data if payload is not None else None),
+        headers=headers,
+        method=method.upper(),
+    )
     try:
         with urllib.request.urlopen(request, timeout=_mateengine_bridge_timeout_s()) as resp:
             raw = resp.read()
@@ -730,7 +763,11 @@ def get_mateengine_bridge_health() -> MateEngineActionResult:
             payload={},
             error="HOST_MATEENGINE_BRIDGE_ENABLED is disabled",
         )
-    ok, response, error = _http_json(method="GET", url=target)
+    ok, response, error = _http_json(
+        method="GET",
+        url=target,
+        scope="bridge:mateengine:read",
+    )
     return MateEngineActionResult(
         ok=ok,
         status="ok" if ok else "failed",
@@ -755,7 +792,12 @@ def send_mateengine_command(command: dict[str, Any]) -> MateEngineActionResult:
             payload=payload,
             error="HOST_MATEENGINE_BRIDGE_ENABLED is disabled",
         )
-    ok, response, error = _http_json(method="POST", url=target, payload=payload)
+    ok, response, error = _http_json(
+        method="POST",
+        url=target,
+        scope="bridge:mateengine:admin",
+        payload=payload,
+    )
     response_ok = bool(response.get("success", ok)) if response else ok
     return MateEngineActionResult(
         ok=bool(ok and response_ok),

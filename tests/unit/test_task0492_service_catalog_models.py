@@ -77,7 +77,7 @@ def test_default_inventory_is_deterministic_complete_and_content_addressed() -> 
     assert disabled["host.monitor.proxy.http"].enabled is False
 
 
-def test_vrm_profile_exposes_the_real_18770_two_owner_conflict() -> None:
+def test_vrm_profile_resolves_18770_to_one_explicit_owner() -> None:
     vts = build_local_catalog({"EDGE_AVATAR_BACKEND": "vts"})
     vts_claims = [
         endpoint
@@ -86,7 +86,7 @@ def test_vrm_profile_exposes_the_real_18770_two_owner_conflict() -> None:
         and endpoint.kind is EndpointKind.LISTENER
         and endpoint.port == 18770
     ]
-    assert [item.owner_id for item in vts_claims] == ["host.mateengine.bridge"]
+    assert vts_claims == []
 
     vrm = build_local_catalog({"EDGE_AVATAR_BACKEND": "vrm"})
     vrm_claims = [
@@ -96,10 +96,7 @@ def test_vrm_profile_exposes_the_real_18770_two_owner_conflict() -> None:
         and endpoint.kind is EndpointKind.LISTENER
         and endpoint.port == 18770
     ]
-    assert {item.owner_id for item in vrm_claims} == {
-        "host.mateengine.bridge",
-        "edge.unity.avatar.bridge",
-    }
+    assert {item.owner_id for item in vrm_claims} == {"edge.unity.avatar.bridge"}
     assert {item.listener_id for item in vrm_claims} == {"embodiment.bridge.http"}
 
     dependency = vrm.by_id()["edge.avatar.vrm.dependency"]
@@ -120,10 +117,12 @@ def test_public_listener_auth_state_reflects_actual_runtime_configuration() -> N
     assert public_insecure_rpc.auth_kind is AuthKind.NONE
     assert public_insecure_rpc.auth_policy_ref == ""
 
-    # The current Mate bridge process still defaults UDP to a wildcard.  The
-    # catalog must expose that unsafe fact until TASK-0494 changes the owner.
+    # Mate ingress is disabled and loopback/HMAC by default even before an
+    # operator elects it as the one embodiment owner.
     mate_udp = default.by_id()["host.mateengine.bridge.udp"]
-    assert mate_udp.bind_host == "0.0.0.0"
+    assert mate_udp.bind_host == "127.0.0.1"
+    assert mate_udp.auth_kind is AuthKind.HMAC
+    assert mate_udp.enabled is False
 
 
 def test_inventory_uses_only_runtime_wired_overrides() -> None:

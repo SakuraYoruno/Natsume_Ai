@@ -170,6 +170,10 @@ def _safe_gateway_env(monkeypatch):  # noqa: ANN001
 def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
+    monkeypatch.setenv(
+        "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET",
+        "dedicated-wechat-callback-secret",
+    )
 
     captured: dict[str, object] = {}
 
@@ -179,11 +183,12 @@ def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> 
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",
-        lambda *, router, normalizer, adapters, outbound, **_kwargs: captured.update({
+        lambda *, router, normalizer, adapters, outbound, **kwargs: captured.update({
             "router": router,
             "normalizer": normalizer,
             "adapters": adapters,
             "outbound": outbound,
+            "webhook_verifiers": kwargs["webhook_verifiers"],
         }) or object(),
     )
     monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
@@ -194,11 +199,15 @@ def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> 
             gateway_port=19000,
             enabled_platforms=("wechat",),
             wx_decrypt_output_dir="",
+            hmac_key="generic-internal-secret",
         )
     )
 
     adapters = captured["adapters"]
     assert "wechat" in adapters
+    wechat_verifier = captured["webhook_verifiers"]._verifiers["wechat"]
+    assert wechat_verifier.shared_secret == "dedicated-wechat-callback-secret"
+    assert wechat_verifier.shared_secret != "generic-internal-secret"
     assert instance.watcher is None
     assert instance.refresher is None
 
@@ -276,6 +285,10 @@ def _patch_durable_bootstrap(monkeypatch, *, app_factory=None) -> None:  # noqa:
     monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "DURABLE")
     monkeypatch.setenv("EDGE_GATEWAY_HOST_HMAC_SECRET", "host-ingress-secret")
     monkeypatch.setenv("EDGE_GATEWAY_REPLY_HMAC_SECRET", "reply-ingress-secret")
+    monkeypatch.setenv(
+        "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET",
+        "dedicated-wechat-callback-secret",
+    )
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)

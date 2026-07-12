@@ -592,12 +592,13 @@ function Start-MateEngineBridgeRuntime {
     [bool]$Breakaway
   )
 
-  $enabled = Parse-BoolValue -Value $(if ($EnvValues.ContainsKey("HOST_MATEENGINE_BRIDGE_ENABLED")) { $EnvValues["HOST_MATEENGINE_BRIDGE_ENABLED"] } else { $env:HOST_MATEENGINE_BRIDGE_ENABLED }) -Default $true
+  $enabled = Parse-BoolValue -Value $(if ($EnvValues.ContainsKey("HOST_MATEENGINE_BRIDGE_ENABLED")) { $EnvValues["HOST_MATEENGINE_BRIDGE_ENABLED"] } else { $env:HOST_MATEENGINE_BRIDGE_ENABLED }) -Default $false
   $hostValue = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_HOST" -DefaultValue "127.0.0.1"
   $portValue = [int](Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_PORT" -DefaultValue "18770")
   $probeHostValue = if ($hostValue -eq "0.0.0.0" -or $hostValue -eq "::") { "127.0.0.1" } else { $hostValue }
   $healthUrlValue = "http://$probeHostValue`:$portValue/health"
   $scriptPath = Join-Path $RepoRoot "tools\mateengine_bridge_server.py"
+  $probeScriptPath = Join-Path $RepoRoot "tools\mateengine_bridge_health_probe.py"
   $bridgeStdoutLog = Join-Path $LogDir "mateengine_bridge.stdout.log"
   $bridgeStderrLog = Join-Path $LogDir "mateengine_bridge.stderr.log"
 
@@ -605,6 +606,42 @@ function Start-MateEngineBridgeRuntime {
     return [ordered]@{
       side = "mateengine_bridge"
       status = "disabled_by_config"
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+  $exposureMode = (Get-EnvSetting -Values $EnvValues -Name "NATSUME_BRIDGE_EXPOSURE_MODE" -DefaultValue "DISABLED").Trim().ToUpperInvariant()
+  $keyId = Get-EnvSetting -Values $EnvValues -Name "NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID" -DefaultValue ""
+  $hmacSecret = Get-EnvSetting -Values $EnvValues -Name "NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET" -DefaultValue ""
+  $allowedPrincipals = Get-EnvSetting -Values $EnvValues -Name "NATSUME_MATEENGINE_BRIDGE_ALLOWED_PRINCIPALS" -DefaultValue ""
+  $allowedScopes = Get-EnvSetting -Values $EnvValues -Name "NATSUME_MATEENGINE_BRIDGE_ALLOWED_SCOPES" -DefaultValue ""
+  $clientPrincipal = Get-EnvSetting -Values $EnvValues -Name "NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL" -DefaultValue "host.mateengine.bridge"
+  $allowedPrincipalItems = @(
+    (($allowedPrincipals -replace '\s+', ',').Split(',')) |
+      ForEach-Object { $_.Trim() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+  )
+  $allowedScopeItems = @(
+    (($allowedScopes -replace '\s+', ',').Split(',')) |
+      ForEach-Object { $_.Trim() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+  )
+  $embodimentOwner = (Get-EnvSetting -Values $EnvValues -Name "NATSUME_EMBODIMENT_BRIDGE_OWNER" -DefaultValue "").Trim().ToLowerInvariant()
+  $configurationValid = `
+    ($exposureMode -eq "LOOPBACK" -or $exposureMode -eq "REMOTE_APPROVED") -and `
+    (-not [string]::IsNullOrWhiteSpace($keyId)) -and `
+    ([System.Text.Encoding]::UTF8.GetByteCount($hmacSecret) -ge 32) -and `
+    (-not [string]::IsNullOrWhiteSpace($clientPrincipal)) -and `
+    ($allowedPrincipalItems -contains $clientPrincipal) -and `
+    ($allowedScopeItems -contains "bridge:mateengine:read") -and `
+    ($allowedScopeItems -contains "bridge:mateengine:admin") -and `
+    ($embodimentOwner -eq "mateengine")
+  if (-not $configurationValid) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "blocked"
+      reason = "secure_catalog_configuration_required"
       host = $hostValue
       port = $portValue
       health_url = $healthUrlValue
@@ -620,28 +657,34 @@ function Start-MateEngineBridgeRuntime {
     }
   }
 
-  if ($ForceRestartBridge) {
-    foreach ($candidatePid in @(Get-MateEngineBridgeProcessIds)) {
-      Stop-ProcessTree -ProcessId ([int]$candidatePid) | Out-Null
+  $existingBridgeProcesses = @(Get-MateEngineBridgeProcessIds)
+  if ($existingBridgeProcesses.Count -gt 0) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "blocked"
+      reason = "existing_bridge_requires_operator_handoff"
+      pids = $existingBridgeProcesses
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+  if (-not (Test-Path -Path $probeScriptPath)) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "degraded"
+      reason = "authenticated_health_probe_not_found"
+      script = $probeScriptPath
+      health_url = $healthUrlValue
     }
   }
 
   $listeningBridgePid = Get-ListeningPid -ProbePort $portValue
   if ($null -ne $listeningBridgePid) {
-    if ((Is-MateEngineBridgeProcess -ProcessId ([int]$listeningBridgePid)) -or (Test-HttpQuick -Url $healthUrlValue -TimeoutSec 3)) {
-      return [ordered]@{
-        side = "mateengine_bridge"
-        status = "already_running"
-        pid = [int]$listeningBridgePid
-        host = $hostValue
-        port = $portValue
-        health_url = $healthUrlValue
-      }
-    }
     return [ordered]@{
       side = "mateengine_bridge"
-      status = "degraded"
-      reason = "port_in_use_by_other_process"
+      status = "blocked"
+      reason = "incumbent_listener_present"
       pid = [int]$listeningBridgePid
       host = $hostValue
       port = $portValue
@@ -673,10 +716,15 @@ function Start-MateEngineBridgeRuntime {
     -ShowWindow:$ShowWindow `
     -Breakaway:$Breakaway
 
-  $healthOk = Wait-Http -Url $healthUrlValue -TimeoutSeconds 10
+  & $PythonExe $probeScriptPath --url $healthUrlValue --timeout-seconds 10
+  $healthOk = ($LASTEXITCODE -eq 0)
+  if (-not $healthOk) {
+    Stop-Process -Id ([int]$proc.Id) -Force -ErrorAction SilentlyContinue
+  }
   return [ordered]@{
     side = "mateengine_bridge"
-    status = if ($healthOk) { "started" } else { "degraded" }
+    status = if ($healthOk) { "started" } else { "blocked" }
+    reason = if ($healthOk) { $null } else { "authenticated_health_check_failed" }
     pid = [int]$proc.Id
     host = $hostValue
     port = $portValue

@@ -161,20 +161,28 @@ class _HealthProbe:
         )
 
 
-def test_default_catalog_detects_the_enabled_18770_multi_owner_conflict() -> None:
+def test_default_catalog_has_one_enabled_18770_owner() -> None:
     default_issues = validate_catalog(build_local_catalog())
     assert ISSUE_LISTENER_CONFLICT not in _codes(default_issues)
 
     vrm_catalog = build_local_catalog({"EDGE_AVATAR_BACKEND": "vrm"})
-    conflicts = [
-        issue for issue in validate_catalog(vrm_catalog)
-        if issue.reason_code == ISSUE_LISTENER_CONFLICT
+    assert ISSUE_LISTENER_CONFLICT not in _codes(validate_catalog(vrm_catalog))
+    claims = [
+        endpoint.endpoint_id
+        for endpoint in vrm_catalog.endpoints
+        if endpoint.enabled
+        and endpoint.kind is EndpointKind.LISTENER
+        and endpoint.port == 18770
     ]
-    assert len(conflicts) == 1
-    assert conflicts[0].endpoint_ids == (
-        "edge.unity.avatar.bridge.http",
-        "host.mateengine.bridge.http",
-    )
+    assert claims == ["edge.unity.avatar.bridge.http"]
+
+    with pytest.raises(ValueError, match="SERVICE_CATALOG_EMBODIMENT_OWNER_REQUIRED"):
+        build_local_catalog(
+            {
+                "EDGE_AVATAR_BACKEND": "vrm",
+                "HOST_MATEENGINE_BRIDGE_ENABLED": "true",
+            }
+        )
 
 
 def test_same_owner_and_listener_can_share_but_other_listener_or_owner_cannot() -> None:

@@ -22,10 +22,24 @@ from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.digital_life_routes import router as digital_life_router
 from host_brain.app.memory_routes import router as memory_router
 from host_brain.app.mateengine_routes import router as mateengine_router
+from host_brain.app.pentest_secure_run_routes import (
+    create_pentest_secure_run_http_router,
+)
 from host_brain.app.pentest_routes import router as pentest_router
+from host_brain.app.platform_security_runtime import (
+    get_app_obs_command_ingress,
+    get_app_pentest_secure_run_composition,
+    get_app_signed_skill_provider_intake,
+)
 from host_brain.app.prompt_config_routes import router as prompt_config_router
 from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
+from host_brain.observability.command_http import (
+    create_obs_command_http_router,
+)
 from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers as _set_scheduler_providers
+from host_brain.skills.signed_intake_http import (
+    create_signed_skill_provider_intake_router,
+)
 
 
 def wire_route_providers(
@@ -76,6 +90,25 @@ def register_host_routers(app: FastAPI) -> None:
     app.include_router(digital_life_router)
     app.include_router(memory_router)
     app.include_router(mateengine_router)
+    app.include_router(
+        create_obs_command_http_router(
+            ingress_provider=lambda: get_app_obs_command_ingress(app),
+        )
+    )
+    app.include_router(
+        create_pentest_secure_run_http_router(
+            composition_provider=(
+                lambda: get_app_pentest_secure_run_composition(app)
+            ),
+        )
+    )
+    app.include_router(
+        create_signed_skill_provider_intake_router(
+            ingress_provider=(
+                lambda: get_app_signed_skill_provider_intake(app)
+            ),
+        )
+    )
     app.include_router(pentest_router)
     app.include_router(health_router)
 

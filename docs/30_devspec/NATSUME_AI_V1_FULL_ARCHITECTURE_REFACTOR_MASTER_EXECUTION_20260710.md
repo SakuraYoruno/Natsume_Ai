@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration@0aa4e9314`，叠加尚未提交的 AW-00 生产接线改动
+当前代码基线：`codex/m48-integration`，AW-00 已完成并提交，AW-01 进行中
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -145,7 +145,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-00：平台安全能力生产接线
 
-状态：`IN_PROGRESS`
+状态：`DONE`（production composition/routes、provider import closure、Bridge HMAC/owner cutover 已提交；定向验证与单次 integration wave 通过，P0/P1 review 清零）
 
 目标：把已经实现但停留在隔离层的 M48-B 安全能力接入真实 Host/Edge/Bridge 生命周期，结束“组件存在、生产绕过”的状态。
 
@@ -169,7 +169,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-01：Contracts、Kernel、Composition 与依赖脊柱
 
-状态：`READY_AFTER_AW_00`
+状态：`IN_PROGRESS`
 
 目标：建立全仓唯一的 contracts、clock/result primitives、typed settings、container、lifecycle、feature flags 和 service catalog，使后续迁移不再向 `app` 添加新真相。
 
@@ -421,8 +421,8 @@ AW-08 只有在以下全部成立时才完成：
 
 | Wave | 状态 | 下一可验证结果 |
 |---|---|---|
-| AW-00 | `IN_PROGRESS` | 安全 routes/composition + Bridge/Service Catalog 真实生产接线，单次集成波，整波提交 |
-| AW-01 | `READY_AFTER_AW_00` | 单 composition root 与第一条无 global dependency 的 production slice |
+| AW-00 | `DONE` | production security composition/routes、Bridge/Service Catalog 单 owner 与认证探针已切流；无 P0/P1 |
+| AW-01 | `IN_PROGRESS` | 单 composition root 与第一条无 global dependency 的 production slice |
 | AW-02 | `WAITING` | chat/host input 进入同一 Task/Agent 主链 |
 | AW-03 | `WAITING` | UoW/Journal/Outbox 与无 inline DDL/private conn 的真实 slice |
 | AW-04 | `WAITING` | Digital Life 单 clock/writer、Surface 纯读 |
@@ -433,4 +433,4 @@ AW-08 只有在以下全部成立时才完成：
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-00 的立即执行顺序：修正 4 个已被安全默认值淘汰的 Service Catalog 旧测试 → 运行定向 unit/contract/static → 运行一次 M48-B integration wave → 只修真实失败 → 一次 P0/P1 review → 提交整波 → 开始 AW-01。无需用户再次确认。
+AW-01 的立即执行顺序：以实际 `asgi.py/app_factory.py/http_hooks.py/dependencies.py` 为基线冻结 composition ownership → 把 Service Catalog 和 AW-00 security runtime 纳入一个显式 Host container/lifecycle → 迁移第一条 production route slice 脱离 global getter → 删除该 slice 的旧 provider setter/global → 定向验证与一次 AW-01 integration wave。无需用户再次确认。

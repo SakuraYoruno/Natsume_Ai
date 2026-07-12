@@ -11,11 +11,24 @@ from pathlib import Path
 import secrets
 import socket
 import sqlite3
+import sys
 import threading
 import time
 import ctypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Mapping, Sequence
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from natsume_contracts.bridge_auth import (
+    BRIDGE_AUTH_VERSION as AUTH_VERSION,
+    HTTP_AUTH_HEADERS,
+    body_sha256,
+    build_hmac_signature,
+    canonical_hmac_payload,
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -56,17 +69,7 @@ EXPOSURE_MODES = frozenset(
     }
 )
 PROTOCOL_VERSION = "1"
-AUTH_VERSION = "natsume.bridge-auth.v1"
 BRIDGE_CONSTRUCTION_FAILED = "BRIDGE_CONSTRUCTION_FAILED"
-HTTP_AUTH_HEADERS = {
-    "version": "X-Natsume-Bridge-Version",
-    "key_id": "X-Natsume-Bridge-Key-Id",
-    "timestamp_ms": "X-Natsume-Bridge-Timestamp",
-    "nonce": "X-Natsume-Bridge-Nonce",
-    "principal": "X-Natsume-Bridge-Principal",
-    "scope": "X-Natsume-Bridge-Scope",
-    "signature": "X-Natsume-Bridge-Signature",
-}
 SCOPE_READ = "bridge:mateengine:read"
 SCOPE_SAY = "bridge:mateengine:say"
 SCOPE_EXPRESSION = "bridge:mateengine:expression"
@@ -438,56 +441,6 @@ def validate_security_config(config: BridgeSecurityConfig) -> tuple[str, ...]:
         if not config.rate_burst_explicit:
             errors.append("REMOTE_APPROVED requires explicit NATSUME_BRIDGE_RATE_BURST")
     return tuple(errors)
-
-
-def body_sha256(raw_body: bytes) -> str:
-    return hashlib.sha256(raw_body).hexdigest()
-
-
-def canonical_hmac_payload(
-    *,
-    version: str,
-    key_id: str,
-    transport: str,
-    method: str,
-    path: str,
-    timestamp_ms: int | str,
-    nonce: str,
-    principal: str,
-    scope: str,
-    body_digest: str,
-) -> bytes:
-    """Return the exact TASK-0494 bridge signature payload.
-
-    There is no trailing newline.  Field order and spelling are protocol data.
-    """
-
-    return "\n".join(
-        (
-            str(version).strip(),
-            str(key_id).strip(),
-            str(transport).strip().lower(),
-            str(method).strip().upper(),
-            str(path).strip(),
-            str(timestamp_ms).strip(),
-            str(nonce).strip(),
-            str(principal).strip(),
-            str(scope).strip(),
-            str(body_digest).strip().lower(),
-        )
-    ).encode("utf-8")
-
-
-def build_hmac_signature(
-    secret: bytes,
-    **canonical_fields: Any,
-) -> str:
-    digest = hmac.new(
-        bytes(secret),
-        canonical_hmac_payload(**canonical_fields),
-        hashlib.sha256,
-    ).hexdigest()
-    return "sha256=" + digest
 
 
 @dataclass(frozen=True, slots=True)

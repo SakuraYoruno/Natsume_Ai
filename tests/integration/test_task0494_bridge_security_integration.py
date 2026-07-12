@@ -11,6 +11,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import threading
+from http.server import ThreadingHTTPServer
 
 from tools import mateengine_bridge_server as mate_bridge
 from tools import wxautox4_bridge as wx_bridge
@@ -117,6 +120,53 @@ def _exercise_mate(tmp_path: Path) -> None:
     assert [effect["type"] for effect in effects] == ["say"]
     assert replay.allowed is False
     assert replay.reason == "replay_detected"
+
+
+def test_launcher_health_probe_authenticates_against_real_bridge(
+    tmp_path: Path,
+) -> None:
+    runtime = _mate_runtime(tmp_path)
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        mate_bridge.MateEngineBridgeHandler,
+    )
+    server.bridge_security_runtime = runtime  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        env = os.environ.copy()
+        env.update(
+            {
+                "NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID": runtime.config.key_id,
+                "NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET": MATE_SECRET,
+                "NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL": "host.integration",
+            }
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools" / "mateengine_bridge_health_probe.py"),
+                "--url",
+                f"http://{host}:{port}/health",
+                "--timeout-seconds",
+                "3",
+            ],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "health_access" in (
+            tmp_path / "mate-audit.jsonl"
+        ).read_text(encoding="utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def _exercise_wechat(tmp_path: Path) -> None:
