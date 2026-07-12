@@ -9,7 +9,12 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
+
+if TYPE_CHECKING:
+    from host_brain.model_runtime.composition import ModelRuntimeComposition
+    from host_brain.model_runtime.model_attempt_service import ModelAttemptService
+    from host_brain.model_runtime.prompt_registry import PromptRegistry
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.async_queue import BondUpdateQueue
@@ -148,6 +153,8 @@ _conversation_history: Optional[ConversationHistory] = None
 _session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
 _session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
 _security_immune_agent: Optional[Any] = None
+_model_runtime_composition: Optional["ModelRuntimeComposition"] = None
+_model_runtime_composition_lock = __import__("threading").RLock()
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -305,6 +312,61 @@ def get_ledger() -> SQLiteLedger:
                 initialize_schema=False,
             )
     return _ledger
+
+
+def get_model_runtime_composition() -> "ModelRuntimeComposition":
+    """Return the sole process model-runtime object graph.
+
+    The default graph uses the production prompt catalog, a server-owned
+    dynamic route resolver and vault-backed one-attempt provider adapters.
+    Tests may replace only the whole composition.
+    """
+
+    global _model_runtime_composition
+    with _model_runtime_composition_lock:
+        if _model_runtime_composition is None:
+            from host_brain.model_runtime.production_composition import (  # noqa: PLC0415
+                build_default_production_model_runtime,
+            )
+
+            _model_runtime_composition = build_default_production_model_runtime(
+                ledger=get_ledger()
+            )
+        return _model_runtime_composition
+
+
+def get_model_attempt_service() -> "ModelAttemptService":
+    """Return the unique model invocation authority."""
+
+    return get_model_runtime_composition().attempt_service
+
+
+def get_prompt_registry() -> "PromptRegistry":
+    """Return the registry owned by the unique model runtime composition."""
+
+    return get_model_runtime_composition().prompt_registry
+
+
+def reset_model_runtime_composition(
+    replacement: "ModelRuntimeComposition | None" = None,
+) -> None:
+    """Reset or explicitly replace the process model runtime.
+
+    This is an explicit lifecycle/test hook; callers cannot mutate individual
+    route, registry or service singletons independently.
+    """
+
+    global _model_runtime_composition
+    if replacement is not None:
+        from host_brain.model_runtime.composition import ModelRuntimeComposition  # noqa: PLC0415
+
+        if not isinstance(replacement, ModelRuntimeComposition):
+            raise TypeError("replacement must be ModelRuntimeComposition or None")
+    with _model_runtime_composition_lock:
+        current = _model_runtime_composition
+        _model_runtime_composition = replacement
+    if current is not None and current is not replacement:
+        current.attempt_service.clear_cache()
 
 
 def get_security_immune_agent():
