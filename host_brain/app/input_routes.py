@@ -25,6 +25,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
+from host_brain.app.life_application_boundary import (
+    project_inner_life_snapshot,
+    read_life_snapshot,
+)
 from host_brain.app.outbound_orchestrator import trigger_reply_performance
 from host_brain.app.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
 from host_brain.app.reply_performance import coerce_reply_performance
@@ -1235,23 +1239,10 @@ async def receive_input(
         pass
 
     try:
-        from host_brain.runtime.life_continuity import advance_inner_life_to_now  # noqa: PLC0415
-
-        inner_life_result = advance_inner_life_to_now(
-            ledger=_get_ledger_safe(),
-            person_id=str(payload.get("person_id") or "").strip() or "default",
-            reason="foreground_user_message",
-            incoming_event={
-                "request_id": request_id,
-                "session_id": session_id,
-                "source": source,
-                "platform": str(payload.get("platform") or "").strip(),
-                "conversation_id": str(payload.get("conversation_id") or session_id or "").strip(),
-                "user_message": text[:240],
-            },
-            force=False,
+        life_snapshot = read_life_snapshot(
+            str(payload.get("person_id") or "").strip() or "default"
         )
-        snapshot = dict(inner_life_result.get("inner_life_snapshot") or {})
+        snapshot = project_inner_life_snapshot(life_snapshot)
         payload["inner_life_snapshot"] = {
             "being": dict(snapshot.get("being") or {}),
             "drive": dict(snapshot.get("drive") or {}),
@@ -1259,8 +1250,17 @@ async def receive_input(
             "preoccupation": dict(snapshot.get("preoccupation") or {}),
             "expression_bias": dict(snapshot.get("expression_bias") or {}),
         }
+        payload["life_snapshot_ref"] = {
+            "person_id": life_snapshot["person_id"],
+            "version": life_snapshot["version"],
+            "state_digest": life_snapshot["state_digest"],
+        }
     except Exception as life_exc:
-        _logger.debug("input_routes: foreground inner life catchup degraded request_id=%s: %s", request_id, life_exc)
+        _logger.debug(
+            "input_routes: stable inner life snapshot degraded request_id=%s: %s",
+            request_id,
+            life_exc,
+        )
 
     feedback_record = None
     try:

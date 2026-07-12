@@ -381,7 +381,7 @@ def test_t_nle_22_actual_supervisor_appraisal_producer_reaches_default_snapshot_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from host_brain.persona.life_evolution_observer import reset_life_evolution_observations
-    from host_brain.runtime.digital_life_supervisor import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
+    from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
 
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
     monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")

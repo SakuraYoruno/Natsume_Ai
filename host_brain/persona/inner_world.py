@@ -563,9 +563,16 @@ class OfflineInnerWorld:
         )
     """
 
-    def __init__(self, *, state_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        state_dir: str | None = None,
+        persistence_enabled: bool = False,
+    ) -> None:
         self._state_dir = Path(state_dir or _DEFAULT_STATE_DIR)
-        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._persistence_enabled = bool(persistence_enabled)
+        if self._persistence_enabled:
+            self._state_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         # user_id → InnerWorldState（内存缓存）
         self._states: dict[str, InnerWorldState] = {}
@@ -929,7 +936,7 @@ class OfflineInnerWorld:
         if uid in self._states:
             return self._states[uid]
         fp = self._state_file(uid)
-        if fp.exists():
+        if self._persistence_enabled and fp.exists():
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
                 state = InnerWorldState.from_dict(data)
@@ -957,8 +964,10 @@ class OfflineInnerWorld:
         return state
 
     def _save_state(self, state: InnerWorldState) -> None:
-        """持久化状态到文件（调用前需持有锁）。"""
+        """Update transient state; validation harnesses may explicitly persist."""
         self._states[state.user_id] = state
+        if not self._persistence_enabled:
+            return
         fp = self._state_file(state.user_id)
         try:
             fp.write_text(
@@ -2203,7 +2212,9 @@ def _maybe_record_inner_numeric_tick(
     )
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.runtime.life_continuity import record_life_experience  # noqa: PLC0415
+        from host_brain.digital_life.experience_ingress import (  # noqa: PLC0415
+            record_life_experience,
+        )
 
         record_life_experience(
             ledger=get_ledger(),
@@ -2219,6 +2230,7 @@ def _maybe_record_inner_numeric_tick(
                 "offline_hours": round(max(0.0, float(offline_hours or 0.0)), 3),
                 "absence_band": str(absence_band or "recent"),
                 "signature": signature,
+                "ts_ms": int(now_ms),
             },
             salience=max(0.05, salience),
             valence=0.0,
@@ -2362,7 +2374,9 @@ def _append_inner_stream_event(
     state.spontaneous_event_count = int(state.spontaneous_event_count or 0) + 1
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.runtime.life_continuity import record_life_experience  # noqa: PLC0415
+        from host_brain.digital_life.experience_ingress import (  # noqa: PLC0415
+            record_life_experience,
+        )
 
         metadata = _project_inner_stream_event_metadata(event)
         record_life_experience(
@@ -2380,6 +2394,7 @@ def _append_inner_stream_event(
                 "inhibition": 0.08 if str(event.get("next_tendency") or "") in {"hold_boundary", "stay_quiet", "care_with_restraint"} else 0.02,
                 "offline_hours": round(max(0.0, offline_hours), 3),
                 "absence_band": absence_band,
+                "ts_ms": int(now_ms),
             },
             salience=float(event.get("salience") or event.get("salience_hint") or 0.24),
             valence=float(event.get("valence") or 0.0) if isinstance(event.get("valence"), (int, float)) else 0.0,

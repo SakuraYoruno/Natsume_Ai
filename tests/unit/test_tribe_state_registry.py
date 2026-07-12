@@ -37,6 +37,7 @@ def test_tribe_state_registry_inline_persist_has_min_interval(tmp_path, monkeypa
         state_path=path,
         persist_throttle=2,
         persist_min_interval_s=30.0,
+        persistence_enabled=True,
     )
 
     registry.set_state("limbic", {"tick": 1})
@@ -58,3 +59,18 @@ def test_tribe_state_registry_inline_persist_has_min_interval(tmp_path, monkeypa
 
     assert third["saved_at_ms"] >= first_saved_at
     assert third["namespaces"]["limbic"]["state"]["tick"] == 6
+
+
+def test_default_registry_is_transient_and_never_writes_snapshot(tmp_path) -> None:
+    path = tmp_path / "tribe_state_snapshot.json"
+    registry = TribeStateRegistry(
+        state_path=path,
+        persist_throttle=1,
+        persist_min_interval_s=0.0,
+    )
+
+    registry.set_state("limbic", {"tick": 1})
+
+    assert registry.save_snapshot() is False
+    assert registry.load_snapshot() is False
+    assert path.exists() is False

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
@@ -54,6 +54,7 @@ from host_brain.app.settings import (
 )
 from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.core.ids import now_ms
 from host_brain.composition.security_services import (
     ProcessSecurityServiceContainer,
     SecurityServiceContainerCloseError,
@@ -91,6 +92,156 @@ from host_brain.scheduler.task_registry import (
 
 logger = logging.getLogger("Natsume.asgi")
 runtime_metrics = RuntimeMetrics()
+
+
+class _LifeCommandServicePort(Protocol):
+    def submit(self, command: Any) -> Any: ...
+
+    def submit_next(self, person_id: str, command_factory: Any) -> Any: ...
+
+    def adopt_all_legacy_projections(self, *, adopted_at_ms: int) -> Any: ...
+
+
+class _LifeSnapshotReaderPort(Protocol):
+    def get_snapshot(self, person_id: str) -> Any: ...
+
+    def get_receipt(self, command_id: str) -> Any | None: ...
+
+
+def _compose_life_command_authority(
+    ledger: Any,
+) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
+    """Resolve the frozen Digital Life command boundary at process startup."""
+
+    from host_brain.digital_life.reader import LifeSnapshotReader  # noqa: PLC0415
+    from host_brain.digital_life.service import LifeCommandService  # noqa: PLC0415
+    from host_brain.app import life_application_boundary  # noqa: PLC0415
+    from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
+        LifeCommandRepository,
+    )
+
+    repository = LifeCommandRepository.from_ledger(ledger)
+    service = LifeCommandService(repository)
+    service.adopt_all_legacy_projections(adopted_at_ms=now_ms())
+    reader = LifeSnapshotReader(repository)
+    life_application_boundary.set_life_application_providers(
+        command_service_provider=lambda: service,
+        snapshot_reader_provider=lambda: reader,
+    )
+    return service, reader
+
+
+def _compose_life_dispatchers(ledger: Any) -> tuple[Any, Any]:
+    """Bind projection and delivery workers to the canonical Life repository."""
+
+    from host_brain.app.life_projection_handlers import (  # noqa: PLC0415
+        handle_life_projection,
+    )
+    from host_brain.channels.life_delivery_transport import (  # noqa: PLC0415
+        LifeDeliveryTransport,
+    )
+    from host_brain.digital_life.outbox import LifeOutboxDispatcher  # noqa: PLC0415
+    from host_brain.digital_life.projection import (  # noqa: PLC0415
+        LifeProjectionDispatcher,
+    )
+    from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
+        LifeCommandRepository,
+    )
+
+    repository = LifeCommandRepository.from_ledger(ledger)
+    return (
+        LifeProjectionDispatcher(repository, handle_life_projection),
+        LifeOutboxDispatcher(repository, LifeDeliveryTransport(ledger=ledger)),
+    )
+
+
+def _reset_life_command_authority() -> None:
+    from host_brain.app import life_application_boundary  # noqa: PLC0415
+
+    life_application_boundary.set_life_application_providers(
+        command_service_provider=None,
+        snapshot_reader_provider=None,
+    )
+    life_application_boundary.reset_life_application_cache()
+
+
+def _submit_life_tick_command(
+    *,
+    occurrence: Any,
+    definition: Any,
+    command: Any,
+    life_command_service: _LifeCommandServicePort,
+    life_snapshot_reader: _LifeSnapshotReaderPort,
+) -> dict[str, Any]:
+    """Translate one governed scheduler occurrence into one Life command."""
+
+    from host_brain.digital_life.contracts import LifeCommand  # noqa: PLC0415
+
+    intent = dict(definition.intent_template)
+    args = dict(intent.get("args") or {})
+    args.update(dict(occurrence.payload or {}))
+    person_id = str(args.get("person_id") or "default").strip() or "default"
+    life_command_id = f"life_tick::{occurrence.occurrence_id}"
+    existing_receipt = life_snapshot_reader.get_receipt(life_command_id)
+    if existing_receipt is not None:
+        as_replayed = getattr(existing_receipt, "as_replayed", None)
+        replayed_receipt = as_replayed() if callable(as_replayed) else existing_receipt
+        result = _scheduler_handler_result(replayed_receipt)
+        result["status"] = "SUCCEEDED"
+        result["replayed"] = True
+        return result
+    from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
+
+    occurrence_context = {**args, **dict(occurrence.payload or {})}
+    grant_request_id = str(getattr(command, "request_id", "") or "").strip()
+    governor_grant = str(
+        getattr(command, "governor_grant_ref", "") or ""
+    ).strip()
+    authority_principal_id = str(
+        getattr(command, "principal_id", "")
+        or getattr(occurrence, "principal_id", "")
+        or ""
+    ).strip()
+    if grant_request_id and governor_grant and authority_principal_id:
+        occurrence_context["delivery_authorization"] = {
+            "request_id": grant_request_id,
+            "governor_grant_ref": governor_grant,
+            "authority_kind": "scheduler_host_command",
+            "authority_principal_id": authority_principal_id,
+        }
+
+    def _command_factory(snapshot: Any) -> LifeCommand:
+        applied_at_ms = max(
+            int(now_ms()),
+            int(getattr(snapshot, "updated_at_ms", 0) or 0),
+        )
+        return LifeCommand(
+            command_id=life_command_id,
+            person_id=person_id,
+            command_type="tick",
+            payload=build_life_tick_payload(
+                snapshot,
+                scheduled_at_ms=int(occurrence.scheduled_at_ms),
+                occurrence_payload=occurrence_context,
+                task_id=str(occurrence.task_id),
+                definition_revision=int(occurrence.definition_revision),
+            ),
+            expected_version=int(snapshot.version),
+            created_at_ms=applied_at_ms,
+            correlation_id=str(command.request_id),
+            causation_id=str(occurrence.occurrence_id),
+            metadata={
+                "producer": "scheduler_clock",
+                "scheduler_command_id": str(command.command_id),
+                "scheduler_principal_id": str(occurrence.principal_id),
+                "scheduled_at_ms": int(occurrence.scheduled_at_ms),
+                "governor_grant_request_id": grant_request_id or None,
+                "governor_grant_ref": governor_grant or None,
+            },
+        )
+
+    receipt = life_command_service.submit_next(person_id, _command_factory)
+    return _scheduler_handler_result(receipt)
 
 
 def resolve_bond_engine():
@@ -157,7 +308,38 @@ def _command_ingress_hmac_secrets() -> dict[str, str]:
 
 def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
     settings = get_scheduler_settings()
-    configs: list[SchedulerTaskConfig] = []
+    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+        build_life_tick_task_config,
+    )
+
+    # The definition is always seeded so the catalog has one explicit Life
+    # periodic authority. Its enabled flag is still governed by Host settings.
+    configs: list[SchedulerTaskConfig] = [
+        build_life_tick_task_config(),
+        SchedulerTaskConfig(
+            task_id="life_io_dispatch_periodic",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 5},
+            intent_template={
+                "skill_name": "life_io_dispatch",
+                "args": {"limit": 100},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.HIGH,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            max_consecutive_failures=3,
+            description=(
+                "Dispatch committed Life projection/outbox work; SchedulerClock "
+                "remains the sole timer"
+            ),
+            resource_profile={
+                "resource_class": "life_io",
+                "uses_llm": False,
+                "uses_gpu": False,
+            },
+        ),
+    ]
     if settings.seed_builtin_definitions:
         from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
             build_personality_scheduler_seed_task_configs,
@@ -284,8 +466,13 @@ def _scheduler_handler_result(value: Any) -> dict[str, Any]:
         "OK": "SUCCEEDED",
         "SUCCESS": "SUCCEEDED",
         "DONE": "SUCCEEDED",
+        "ACCEPTED": "SUCCEEDED",
+        "APPLIED": "SUCCEEDED",
+        "COMMITTED": "SUCCEEDED",
+        "REPLAYED": "SUCCEEDED",
         "ERROR": "FAILED",
         "REJECTED": "BLOCKED",
+        "CONFLICT": "BLOCKED",
         "DEFERRED": "DEGRADED",
     }.get(raw, raw)
     if result["status"] not in {
@@ -315,6 +502,10 @@ def create_app() -> FastAPI:
     internal_agent_ingress: InternalAgentIngress | None = None
     scheduler_container: ProcessSchedulerContainer | None = None
     canon_container: ProcessCanonContainer | None = None
+    life_command_authority: (
+        tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort] | None
+    ) = None
+    life_dispatchers: tuple[Any, Any] | None = None
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
@@ -339,6 +530,14 @@ def create_app() -> FastAPI:
     def canon_service_provider() -> Any | None:
         current = canon_container
         return current.application if current is not None else None
+
+    def life_command_authority_provider(
+        ledger: Any,
+    ) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
+        nonlocal life_command_authority
+        if life_command_authority is None:
+            life_command_authority = _compose_life_command_authority(ledger)
+        return life_command_authority
 
     async def handle_chat_with_runtime(
         request_body: ChatRequest,
@@ -402,6 +601,7 @@ def create_app() -> FastAPI:
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal internal_agent_ingress, scheduler_container
         nonlocal canon_container
+        nonlocal life_command_authority, life_dispatchers
         async with runtime_lifespan(
             get_ledger=get_ledger,
             logger=logger,
@@ -434,6 +634,8 @@ def create_app() -> FastAPI:
                 # migrations and process-owned stores must be ready before the
                 # ASGI lifespan yields and routes become available.
                 ledger = get_ledger()
+                life_command_authority = _compose_life_command_authority(ledger)
+                life_dispatchers = _compose_life_dispatchers(ledger)
                 task_runtime = build_process_task_runtime_container(
                     ledger=ledger,
                     canonical_db_path=str(
@@ -594,6 +796,47 @@ def create_app() -> FastAPI:
                         "proposal": proposal,
                     }
 
+                async def life_tick_scheduler_handler(
+                    *,
+                    occurrence: Any,
+                    definition: Any,
+                    command: Any,
+                    execution_context: Any,
+                ) -> dict[str, Any]:
+                    del execution_context
+                    life_command_service, life_snapshot_reader = (
+                        life_command_authority_provider(ledger)
+                    )
+                    return await asyncio.to_thread(
+                        _submit_life_tick_command,
+                        occurrence=occurrence,
+                        definition=definition,
+                        command=command,
+                        life_command_service=life_command_service,
+                        life_snapshot_reader=life_snapshot_reader,
+                    )
+
+                async def life_io_scheduler_handler(**_: Any) -> dict[str, Any]:
+                    if life_dispatchers is None:
+                        return {
+                            "status": "FAILED",
+                            "reason_code": "LIFE_DISPATCHERS_UNAVAILABLE",
+                        }
+                    projection_dispatcher, outbox_dispatcher = life_dispatchers
+                    projection = await projection_dispatcher.dispatch_pending_async(
+                        limit=100
+                    )
+                    delivery = await outbox_dispatcher.dispatch_pending_async(limit=100)
+                    failed = int(projection.failed) + int(delivery.failed)
+                    return {
+                        "status": "SUCCEEDED" if failed == 0 else "DEGRADED",
+                        "reason_code": (
+                            None if failed == 0 else "LIFE_IO_DISPATCH_PARTIAL_FAILURE"
+                        ),
+                        "projection": projection.as_dict(),
+                        "delivery": delivery.as_dict(),
+                    }
+
                 def scheduler_current_mode() -> str:
                     return str(get_hard_state().sys_mode or "normal")
 
@@ -654,12 +897,16 @@ def create_app() -> FastAPI:
                     resource_gate=scheduler_resource_gate,
                     default_handler=scheduler_production_handler,
                     task_handlers={
+                        "life_command": life_tick_scheduler_handler,
+                        "life_io": life_io_scheduler_handler,
                         "distillation_engine": distillation_scheduler_handler,
                         "security_immune": security_immune_scheduler_handler,
                         "agent_immune": agent_immune_scheduler_handler,
                     },
                     seed_definitions=_scheduler_seed_configs(),
                     seed_worker_keys={
+                        "life_tick": "life_command",
+                        "life_io_dispatch_periodic": "life_io",
                         "distillation_engine_periodic": "distillation_engine",
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
@@ -740,6 +987,9 @@ def create_app() -> FastAPI:
                             )
                 finally:
                     try:
+                        _reset_life_command_authority()
+                        life_command_authority = None
+                        life_dispatchers = None
                         set_memory_service_container(None)
                         if memory is not None:
                             memory.close()

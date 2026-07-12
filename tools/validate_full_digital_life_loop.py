@@ -107,7 +107,10 @@ async def _run_loop(
     session_id = components.session_id
     base_ts_ms = int(components.base_ts_ms or int(time.time() * 1000))
     turns = _selected_turns(args)
-    world = OfflineInnerWorld(state_dir=str(out_dir / "inner_world_state"))
+    world = OfflineInnerWorld(
+        state_dir=str(out_dir / "inner_world_state"),
+        persistence_enabled=True,
+    )
     default_agent = DefaultModeAgent(state_registry=TribeStateRegistry())
     soul_md = _load_soul_text()
     close_result: dict[str, Any] = {}

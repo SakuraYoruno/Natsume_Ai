@@ -30,26 +30,22 @@ def _dependencies() -> LegacyRuntimeShutdownDependencies:
 
         return get_bus()
 
-    def stop_tribe_periodic_save() -> None:
-        from host_brain.tribe.tribe_state import (  # noqa: PLC0415
-            get_global_registry,
-        )
+    def no_tribe_periodic_owner() -> None:
+        # Kept only to satisfy the frozen legacy shutdown composition contract.
+        # Production no longer starts a Tribe-owned periodic thread.
+        return None
 
-        get_global_registry().stop_periodic_save()
-
-    async def stop_life_continuity() -> None:
-        from host_brain.runtime.life_continuity import (  # noqa: PLC0415
-            stop_life_continuity_loop,
-        )
-
-        await stop_life_continuity_loop()
+    async def no_private_life_loop() -> None:
+        # Kept only to satisfy the frozen legacy shutdown composition contract.
+        # SchedulerClock is the only production Life periodic producer.
+        return None
 
     return LegacyRuntimeShutdownDependencies(
         stop_bond_queue=stop_bond_queue,
         stop_heartbeat=stop_heartbeat,
         get_tribe_event_bus=get_tribe_event_bus,
-        stop_tribe_periodic_save=stop_tribe_periodic_save,
-        stop_life_continuity=stop_life_continuity,
+        stop_tribe_periodic_save=no_tribe_periodic_owner,
+        stop_life_continuity=no_private_life_loop,
     )
 
 
@@ -57,13 +53,12 @@ async def shutdown_runtime(
     *,
     activity_monitor: Any | None,
     resource_manager: Any | None,
-    life_continuity_started: bool,
     logger: Any,
 ) -> None:
     await shutdown_legacy_runtime(
         activity_monitor=activity_monitor,
         resource_manager=resource_manager,
-        life_continuity_started=life_continuity_started,
+        life_continuity_started=False,
         logger=logger,
         dependencies=_dependencies(),
     )

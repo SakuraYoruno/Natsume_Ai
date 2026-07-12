@@ -43,8 +43,7 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
 ) -> None:
     from host_brain.app import internal_tribe_routes
     from host_brain.observability import service_health_heartbeat
-    from host_brain.runtime import life_continuity
-    from host_brain.tribe import cortex_agent, tribe_state
+    from host_brain.tribe import cortex_agent
 
     events: list[str] = []
 
@@ -68,15 +67,8 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         async def stop(self) -> None:
             events.append("tribe-bus")
 
-    class Registry:
-        def stop_periodic_save(self) -> None:
-            events.append("tribe-state")
-
     async def stop_heartbeat() -> None:
         events.append("heartbeat")
-
-    async def stop_life_continuity() -> None:
-        events.append("life-continuity")
 
     test_logger = logging.getLogger("test.aw01.runtime-shutdown")
     monkeypatch.setattr(cortex_agent, "get_cortex_agent", Cortex)
@@ -86,17 +78,10 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         stop_heartbeat,
     )
     monkeypatch.setattr(internal_tribe_routes, "get_tribe_event_bus", Bus)
-    monkeypatch.setattr(tribe_state, "get_global_registry", Registry)
-    monkeypatch.setattr(
-        life_continuity,
-        "stop_life_continuity_loop",
-        stop_life_continuity,
-    )
 
     await http_hooks._shutdown_runtime(
         activity_monitor=SyncStop("activity", fail=True),
         resource_manager=SyncStop("resource"),
-        life_continuity_started=True,
         logger=test_logger,
     )
 
@@ -106,6 +91,4 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         "bond-queue",
         "heartbeat",
         "tribe-bus",
-        "tribe-state",
-        "life-continuity",
     ]

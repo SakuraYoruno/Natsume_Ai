@@ -204,10 +204,10 @@ def filter_retrieval_evidence_items_for_prompt(
 def _surface_memory_distortion_bias(person_id: str | None) -> float:
     """B1 记忆变糊：从 life-state 内在天气读 memory_distortion_bias（app 层读，作 float 传给召回；失败=0.0）。"""
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.runtime.life_continuity import get_life_state  # noqa: PLC0415
+        from host_brain.app.life_application_boundary import read_life_snapshot  # noqa: PLC0415
 
-        weather = get_life_state(get_ledger(), str(person_id or "default")).get("inner_weather")
+        snapshot = read_life_snapshot(str(person_id or "default"))
+        weather = dict(snapshot.get("state") or {}).get("inner_weather")
         if isinstance(weather, dict):
             return max(0.0, min(1.0, float(weather.get("memory_distortion_bias") or 0.0)))
     except Exception:

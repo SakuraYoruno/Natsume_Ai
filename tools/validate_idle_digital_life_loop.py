@@ -75,7 +75,10 @@ def _run_loop(
     tick_minutes = max(5, int(getattr(args, "tick_minutes", 180) or 180))
     min_hours = max(0.0, float(getattr(args, "min_hours", 24.0) or 24.0))
     persona_self_id = get_canonical_persona_self_id()
-    world = OfflineInnerWorld(state_dir=str(out_dir / "inner_world_state"))
+    world = OfflineInnerWorld(
+        state_dir=str(out_dir / "inner_world_state"),
+        persistence_enabled=True,
+    )
     default_agent = DefaultModeAgent(state_registry=TribeStateRegistry())
     base_ts_ms = int(time.time() * 1000)
 

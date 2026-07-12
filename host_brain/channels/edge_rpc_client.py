@@ -1481,6 +1481,22 @@ async def post_fallback_presence(
     return result
 
 
+async def post_proactive_push(
+    *,
+    message: Mapping[str, Any],
+    request_id: str,
+    timeout_ms: int = 5_000,
+) -> EdgeRpcCallResult:
+    """Send one idempotency-bound proactive outbox message to Edge."""
+
+    return await _post_to_edge(
+        path="/v1/edge/proactive_push",
+        payload=dict(message),
+        request_id=str(request_id),
+        request_timeout_ms=max(1_000, int(timeout_ms)),
+    )
+
+
 async def post_gateway_reply(
     *,
     platform: str | None,

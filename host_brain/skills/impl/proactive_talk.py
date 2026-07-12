@@ -275,9 +275,8 @@ DEFAULT_IDLE_THRESHOLD_MS = 4 * 60 * 60 * 1000
 # 允许主动对话的 sys_mode
 ALLOWED_MODES = {"normal", "sleep"}
 
-# 回调类型
+# Policy callback type. Delivery is owned by the Digital Life outbox.
 LLMGenerator = Callable[[dict[str, Any]], dict[str, Any]]
-UIPusher = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _build_template_greeting(
@@ -340,14 +339,15 @@ def execute_proactive_talk(
         last_interaction_ts: 上次对话时间戳（ms）
         request_id / intent_id
         llm_generator: LLM 生成回调
-        ui_pusher: UI 推送回调
+        Delivery callbacks are intentionally ignored. The skill is a pure
+        policy/content planner and returns a durable delivery intent.
         bond_summary: Bond 摘要（可选）
         user_name: 用户昵称
         time_period: 时段（覆盖自动检测）
         emotion_context: 方向B 情感上下文（可选，含 emotion_tag/user_emotion_profile/triggered_emotions）
     """
     ctx = context or {}
-    ts = now_ms()
+    ts = int(ctx.get("ts_ms") or now_ms())
     event_id = new_event_id()
     request_id = ctx.get("request_id")
     intent_id = ctx.get("intent_id")
@@ -474,7 +474,11 @@ def execute_proactive_talk(
 
         active_silence = evaluate_active_silence(
             {
-                "current_hour": int(ctx.get("current_hour") or datetime.datetime.now().hour),
+                "current_hour": int(
+                    ctx.get("current_hour")
+                    if ctx.get("current_hour") is not None
+                    else datetime.datetime.fromtimestamp(ts / 1000.0).hour
+                ),
                 "user_stress": str(ctx.get("user_stress") or (emotion_context or {}).get("stress_level") or "").strip(),
                 "explicit_help_request": bool(ctx.get("explicit_help_request")),
             }
@@ -586,7 +590,8 @@ def execute_proactive_talk(
             "ts_ms": ts,
         }
 
-    # 推送到 UI
+    # Build a delivery intent only.  External transport is owned by the
+    # Digital Life outbox dispatcher after the enclosing Life command commits.
     message = {
         "type": "proactive_talk",
         "content": greeting,
@@ -601,22 +606,20 @@ def execute_proactive_talk(
         "scene_activity": scene_awareness.get("current_activity"),
     }
 
-    ui_pusher: UIPusher | None = ctx.get("ui_pusher")
-    push_result: dict[str, Any] | None = None
-    if ui_pusher:
-        try:
-            push_result = ui_pusher(message)
-        except Exception as exc:
-            logger.warning("UI push failed for proactive talk: %s", exc)
-            push_result = {"error": str(exc)}
+    delivery_intent = {
+        "destination": "edge.proactive",
+        "payload": message,
+    }
 
     return {
         "status": STATUS_EXECUTED,
         "event_id": event_id,
         "reason_code": None,
-        "detail": f"proactive talk sent: {time_period}",
+        "detail": f"proactive talk planned: {time_period}",
         "message": message,
-        "push_result": push_result,
+        "delivery_intent": delivery_intent,
+        # Kept as a read-only compatibility field; transport never runs here.
+        "push_result": None,
         "request_id": request_id,
         "intent_id": intent_id,
         "ts_ms": ts,

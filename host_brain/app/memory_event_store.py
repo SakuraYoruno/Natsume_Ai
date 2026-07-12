@@ -396,12 +396,36 @@ class MemoryEventStore:
         if row is None:
             return {"status": "NOT_FOUND"}
         refs = mapping(loads(row["refs_json"], {}))
-        if refs.get("life_experience_event_id"):
-            return {"status": "EXISTS", "event_id": refs["life_experience_event_id"]}
+        canonical_command_id = f"life::memory_event::{memory_event_id}"
+        if len(canonical_command_id) > 240:
+            canonical_command_id = (
+                "life::memory_event::"
+                + hashlib.sha256(memory_event_id.encode("utf-8")).hexdigest()
+            )
         try:
-            from host_brain.runtime.life_organs import append_life_experience  # noqa: PLC0415
+            from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
+                LifeCommandRepository,
+            )
+            from host_brain.digital_life.experience_ingress import (  # noqa: PLC0415
+                record_life_experience,
+            )
 
-            result = append_life_experience(
+            receipt = LifeCommandRepository.from_ledger(self.ledger).get_receipt(
+                canonical_command_id
+            )
+            if (
+                receipt is not None
+                and str(receipt.status.value) == "APPLIED"
+                and receipt.event_id
+            ):
+                return {
+                    "status": "EXISTS",
+                    "event_id": receipt.event_id,
+                    "state_event_id": receipt.event_id,
+                    "command_id": receipt.command_id,
+                    "replayed": True,
+                }
+            result = record_life_experience(
                 ledger=self.ledger,
                 person_id=row["person_id"],
                 session_id=row["session_id"] or "",
@@ -409,20 +433,25 @@ class MemoryEventStore:
                 event_kind=row["event_kind"],
                 content_summary=row["content_summary"] or row["content"],
                 evidence={
+                    **refs,
+                    "command_id": canonical_command_id,
+                    "canonical_life_command_id": canonical_command_id,
                     "memory_event_id": memory_event_id,
                     "memory_event_kind": row["event_kind"],
                     "memory_event_visibility": row["visibility"],
-                    **refs,
+                    "memory_event_created_at_ms": int(row["created_at_ms"] or 0),
                 },
                 salience=float(row["salience"] or 0.0),
                 valence=float(row["valence"] or 0.0),
                 uncertainty=float(row["uncertainty"] or 0.0),
-                now_ms=int(row["created_at_ms"] or now_ms()),
                 consume=consume,
             )
             return {
                 "status": "OK",
                 "event_id": result.get("event_id"),
+                "state_event_id": result.get("state_event_id"),
+                "command_id": mapping(result.get("experience")).get("command_id"),
+                "replayed": bool(mapping(result.get("experience")).get("replayed")),
                 "organ_processing": result.get("organ_processing", {}),
             }
         except Exception as exc:

@@ -8,10 +8,24 @@ import pytest
 import host_brain.app.input_routes as input_routes_module
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.app.input_routes import InputPayload, receive_input
+from host_brain.app.settings.input import input_settings_from_mapping
 
 
 @pytest.fixture(autouse=True)
 def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        input_routes_module,
+        "read_life_snapshot",
+        lambda person_id: {
+            "person_id": person_id,
+            "version": 0,
+            "state": {"person_id": person_id, "version": 0},
+            "state_digest": "empty",
+            "last_event_id": None,
+            "last_event_digest": None,
+            "updated_at_ms": 0,
+        },
+    )
     monkeypatch.setattr(
         input_routes_module,
         "_evaluate_host_gateway_ingress",
@@ -24,6 +38,7 @@ def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
             principal_id="service.edge.input.unit",
             idempotency_key="unit-smoke",
             body_sha256="0" * 64,
+            request_id="request.unit.smoke",
         ),
     )
     monkeypatch.setattr(
@@ -114,10 +129,14 @@ def test_receive_input_smoke_asr_non_final_is_ignored():
 
 def test_receive_input_smoke_asr_low_confidence_is_ignored():
     dispatch_mock = AsyncMock(return_value=None)
+    settings = input_settings_from_mapping({"HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95"})
 
     with patch.dict("os.environ", {"HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95"}), patch(
         "host_brain.app.input_routes._dispatch_to_graph",
         dispatch_mock,
+    ), patch(
+        "host_brain.app.input_routes.get_input_settings",
+        return_value=settings,
     ):
         response = asyncio.run(
             receive_input(

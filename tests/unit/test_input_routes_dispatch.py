@@ -28,6 +28,19 @@ def _run(coro):
 def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         input_routes_module,
+        "read_life_snapshot",
+        lambda person_id: {
+            "person_id": person_id,
+            "version": 0,
+            "state": {"person_id": person_id, "version": 0},
+            "state_digest": "empty",
+            "last_event_id": None,
+            "last_event_digest": None,
+            "updated_at_ms": 0,
+        },
+    )
+    monkeypatch.setattr(
+        input_routes_module,
         "_evaluate_host_gateway_ingress",
         lambda **_kwargs: HostGatewayIngressOutcome(
             allowed=True,
@@ -38,6 +51,7 @@ def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
             principal_id="service.edge.input.unit",
             idempotency_key="unit-dispatch",
             body_sha256="0" * 64,
+            request_id="request.unit.dispatch",
         ),
     )
     monkeypatch.setattr(
@@ -104,14 +118,17 @@ def test_receive_input_rejects_when_immune_gate_blocks() -> None:
 
 def test_dispatch_to_graph_ignores_low_confidence_asr() -> None:
     worker_mock = AsyncMock(return_value=None)
+    settings = SimpleNamespace(
+        asr_min_text_len=2,
+        asr_require_speech_chars=True,
+        asr_min_confidence=0.95,
+        asr_require_confidence=False,
+    )
 
-    with patch.dict(
-        "os.environ",
-        {
-            "HOST_INPUT_DISPATCH_IN_THREAD": "false",
-            "HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95",
-        },
-    ), patch("host_brain.app.input_routes._dispatch_to_graph_worker", new=worker_mock):
+    with patch("host_brain.app.input_routes.get_input_settings", return_value=settings), patch(
+        "host_brain.app.input_routes._dispatch_to_graph_worker",
+        new=worker_mock,
+    ):
         _run(
             _dispatch_to_graph(
                 request_id="req-asr-noise-gate",
@@ -162,7 +179,7 @@ def test_log_input_event_persists_gateway_platform_metadata() -> None:
         ledger.close()
 
 
-def test_receive_input_gateway_progress_fastpath_short_circuits_dispatch() -> None:
+def test_receive_input_gateway_progress_fastpath_is_retired() -> None:
     body = InputPayload(
         source="GATEWAY",
         platform="qq",
@@ -177,9 +194,9 @@ def test_receive_input_gateway_progress_fastpath_short_circuits_dispatch() -> No
     ):
         response = _run(receive_input(body, SimpleNamespace()))
 
-    assert response.status == "COMPLETED"
-    assert "progress fastpath" in response.detail
-    assert dispatch_mock.await_count == 0
+    assert response.status == "ACCEPTED"
+    assert response.detail == "input accepted for processing"
+    assert dispatch_mock.await_count == 1
 
 
 def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None:
@@ -222,6 +239,7 @@ def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
             principal_id="service.edge.input.unit",
             idempotency_key="unit-dispatch-duplicate",
             body_sha256="1" * 64,
+            request_id="request.unit.duplicate",
         ),
         HostGatewayIngressOutcome(
             allowed=False,
@@ -232,6 +250,7 @@ def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
             principal_id="service.edge.input.unit",
             idempotency_key="unit-dispatch-duplicate",
             body_sha256="1" * 64,
+            request_id="request.unit.duplicate",
         ),
     ]
 
@@ -431,8 +450,9 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
                 ledger=SimpleNamespace(),
             )
         )
-        assert should_continue is False
-        assert schedule_mock.call_count == 1
+        assert should_continue is True
+        assert dispatched_payload["attachment_processing_mode"] == "governed_waited"
+        assert schedule_mock.call_count == 0
 
 
 def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> None:

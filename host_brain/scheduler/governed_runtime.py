@@ -1103,6 +1103,14 @@ def _build_governor_intent(
     mode: str,
 ) -> dict[str, Any]:
     request_digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
+    template = definition.intent_template
+    template_args = (
+        dict(template.get("args") or {})
+        if isinstance(template.get("args"), Mapping)
+        else {}
+    )
+    life_context = {**template_args, **dict(occurrence.payload or {})}
+    person_id = str(life_context.get("person_id") or "default").strip() or "default"
     return {
         "schema_version": "Natsume.intent.v1",
         "id": f"intent-scheduler-{request_digest[:40]}",
@@ -1122,6 +1130,8 @@ def _build_governor_intent(
         "nonce": hashlib.sha256(
             f"scheduler-governor\n{request_id}".encode("utf-8")
         ).hexdigest(),
+        "person_id": person_id,
+        "principal_id": occurrence.principal_id,
         "route": "delegate",
         "target_id": definition.worker_key,
     }

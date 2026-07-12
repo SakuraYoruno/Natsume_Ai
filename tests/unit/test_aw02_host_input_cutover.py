@@ -42,6 +42,19 @@ def _gateway_body() -> InputPayload:
 def _prepare_receive_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         input_routes,
+        "read_life_snapshot",
+        lambda person_id: {
+            "person_id": person_id,
+            "version": 0,
+            "state": {"person_id": person_id, "version": 0},
+            "state_digest": "empty",
+            "last_event_id": None,
+            "last_event_digest": None,
+            "updated_at_ms": 0,
+        },
+    )
+    monkeypatch.setattr(
+        input_routes,
         "_evaluate_host_gateway_ingress",
         lambda **_kwargs: _secure_outcome(),
     )

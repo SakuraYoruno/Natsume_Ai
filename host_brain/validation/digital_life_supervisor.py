@@ -475,7 +475,10 @@ class DigitalLifeSupervisor:
                 inner_dir = str(self.out_dir / "inner_world_state")
                 self_dir = str(self.out_dir / "self_model_state")
                 inner_world._DEFAULT_STATE_DIR = inner_dir
-                inner_world._global_inner_world = OfflineInnerWorld(state_dir=inner_dir)
+                inner_world._global_inner_world = OfflineInnerWorld(
+                    state_dir=inner_dir,
+                    persistence_enabled=True,
+                )
                 self_model._DEFAULT_PERSISTENT_SELF_DIR = self_dir
                 self_model._PERSISTENT_SELF_CACHE.clear()
 

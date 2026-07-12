@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import asyncio
 import json
 from types import SimpleNamespace
 
@@ -26,6 +25,38 @@ SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬
 @pytest.fixture(autouse=True)
 def _disable_surface_quote_guidance(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr("host_brain.persona.surface_runtime.render_surface_original_quote_guidance", lambda *_args, **_kwargs: "")
+    empty_snapshot = {
+        "person_id": "user-1",
+        "version": 0,
+        "state": {"person_id": "user-1", "version": 0},
+        "state_digest": "empty",
+        "last_event_id": None,
+        "last_event_digest": None,
+        "updated_at_ms": 0,
+    }
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.read_life_snapshot",
+        lambda _person_id: dict(empty_snapshot),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.read_life_snapshot",
+        lambda _person_id: dict(empty_snapshot),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.submit_life_command",
+        lambda **kwargs: {
+            "command_id": kwargs.get("command_id") or "life::foreground_completed::test",
+            "person_id": kwargs.get("person_id") or "user-1",
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_test",
+            "state_version": 1,
+            "state_digest": "digest-test",
+            "outbox_count": len(list(dict(kwargs.get("payload") or {}).get("deliveries") or [])),
+            "created_at_ms": int(kwargs.get("created_at_ms") or 1),
+            "replayed": False,
+        },
+    )
 
 
 def _parse_sse(raw: str) -> dict:
@@ -581,7 +612,7 @@ async def test_surface_main_chain_blocks_visual_claims_without_evidence(monkeypa
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypatch) -> None:
     calls: list[dict] = []
-    post_process_calls: list[dict] = []
+    foreground_commands: list[dict] = []
 
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
@@ -609,11 +640,23 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
             final_model="mock-chat",
         )
 
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        post_process_calls.append(kwargs)
+    def _fake_submit(**kwargs):  # noqa: ANN003
+        foreground_commands.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_surface",
+            "state_version": 7,
+            "state_digest": "surface-digest",
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.app.surface_main_chain_adapter.submit_life_command", _fake_submit)
 
     events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
@@ -627,13 +670,49 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     assert commit["reply_envelope"]["audit"]["natsume_emotion_tag"] == "THINKING"
     assert commit["reply_envelope"]["audit"]["vts_expression_id"]
     assert commit["audit_refs"]["surface_main_chain"]["user_emotion_tag"] == "ANXIOUS"
-    await asyncio.sleep(0)
-    assert post_process_calls
-    assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert post_process_calls[0]["reply_plan"]["task_mode"] == "technical_help"
-    assert post_process_calls[0]["emotion_context"]["emotion_tag"] == "THINKING"
-    assert post_process_calls[0]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
-    assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
+    assert foreground_commands
+    command = foreground_commands[0]
+    assert command["command_type"] == "foreground_completed"
+    assert command["payload"]["reply_plan"]["task_mode"] == "technical_help"
+    assert command["payload"]["emotion_context"]["emotion_tag"] == "THINKING"
+    assert command["payload"]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
+    assert command["payload"]["emotion_context"]["surface_vts_expression_id"]
+    assert len(command["payload"]["projection_intents"]) == 1
+    post_process = command["payload"]["projection_intents"][0]
+    assert post_process["target"] == "surface.post_process"
+    assert post_process["payload"]["reply_plan"]["task_mode"] == "technical_help"
+    assert post_process["payload"]["emotion_context"]["emotion_tag"] == "THINKING"
+    assert post_process["payload"]["reply_envelope"]["kind"] == "final_reply"
+    assert post_process["payload"]["model_audit"]["model_id"] == "mock-chat"
+    assert commit["audit_refs"]["trace_stage_meta"]["life_causality"]["status"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_surface_durability_failure_is_controlled_fail_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("这条回复不能在未落盘时发送。")
+
+    def _fail_submit(**_kwargs):  # noqa: ANN003
+        raise RuntimeError("durable command store unavailable")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    monkeypatch.setattr("host_brain.app.surface_main_chain_adapter.submit_life_command", _fail_submit)
+
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
+
+    assert [event["phase"] for event in events] == ["COMMIT"]
+    commit = events[0]
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "LIFE_FOREGROUND_COMMIT_FAILED"
+    assert commit["narrative"] == ""
+    assert commit["reply_envelope"]["kind"] == "no_reply"
+    assert commit["audit_refs"]["durability"] == "fail_closed_before_render"
+    assert commit["audit_refs"]["trace_stage_meta"]["life_causality"]["error_type"] == "RuntimeError"
 
 
 @pytest.mark.asyncio
@@ -661,11 +740,7 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
             final_model="mock-chat",
         )
 
-    async def _fake_post_process(**_kwargs):  # noqa: ANN003
-        return None
-
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
 
     events = [
         _parse_sse(chunk)
@@ -1243,7 +1318,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
-    post_process_calls: list[dict] = []
+    foreground_commands: list[dict] = []
 
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
@@ -1255,11 +1330,23 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
             "老哥，先查占用 PID：netstat -ano | findstr :18080。看到 PID 后再决定关进程还是改端口。"
         )
 
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        post_process_calls.append(kwargs)
+    def _fake_submit(**kwargs):  # noqa: ANN003
+        foreground_commands.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_audit",
+            "state_version": 3,
+            "state_digest": "audit-digest",
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.app.surface_main_chain_adapter.submit_life_command", _fake_submit)
 
     events = [
         _parse_sse(chunk)
@@ -1273,8 +1360,8 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
     assert commit["audit_refs"]["provider_name"] == "mock"
     assert "surface_quick_reply" not in commit["audit_refs"]["trace_stage_meta"]
     assert "surface_llm_pool" in commit["audit_refs"]["trace_stage_meta"]
-    await asyncio.sleep(0)
-    assert post_process_calls
+    assert foreground_commands
+    assert foreground_commands[0]["command_type"] == "foreground_completed"
 
 
 @pytest.mark.asyncio
@@ -1332,4 +1419,3 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
         _agent_input(),
         sub_agent_ctx=SimpleNamespace(agent_id="agent_lightnovel_recommender"),
     ) is True
-

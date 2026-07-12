@@ -1553,11 +1553,12 @@ def run_proactive_intent_dispatch(
     proactive_reach_out_bias = 0.0
     proactive_calibration: float | None = None
     try:
-        _life_ledger = get_ledger() if callable(get_ledger) else None
-        if _life_ledger is not None:
-            from host_brain.runtime.life_continuity import get_life_state  # noqa: PLC0415
+        if callable(get_ledger):
+            from host_brain.app.life_application_boundary import read_life_snapshot  # noqa: PLC0415
 
-            _life = get_life_state(_life_ledger, persona_user_id or "default")
+            _life = dict(
+                read_life_snapshot(persona_user_id or "default").get("state") or {}
+            )
             _weather = _as_plain_dict(_life.get("inner_weather"))
             proactive_inner_weather_label = str(_weather.get("label") or "")
             proactive_reach_out_bias = float(_weather.get("reach_out_bias") or 0.0)

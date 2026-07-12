@@ -5,6 +5,9 @@ from pathlib import Path
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.digital_life.contracts import LifeCommand, LifeCommandStatus
+from host_brain.digital_life.service import LifeCommandService
+from host_brain.persistence.life_command_repository import LifeCommandRepository
 from host_brain.runtime import life_continuity, life_organs
 
 
@@ -25,23 +28,34 @@ def test_compatibility_api_uses_single_repository_owner(tmp_path: Path) -> None:
     ledger = _ledger(tmp_path)
     try:
         initial = life_continuity.get_life_state(ledger, "person-1")
-        assert initial["version"] == 1
-        applied = life_continuity.LifeStateCommandService(ledger).apply_state_command(
-            person_id="person-1",
-            expected_version=1,
-            patch={"affect": {"mood": "warm"}},
-            command_ref="command-1",
+        assert initial["version"] == 0
+        repository = LifeCommandRepository.from_ledger(ledger)
+        service = LifeCommandService(repository)
+        applied = service.submit_next(
+            "person-1",
+            lambda snapshot: LifeCommand(
+                command_id="command-1",
+                person_id="person-1",
+                command_type="state_patch",
+                payload={"state_patch": {"affect": {"mood": "warm"}}},
+                expected_version=snapshot.version,
+                created_at_ms=NOW,
+            ),
         )
-        assert applied["status"] == "APPLIED"
-        assert applied["state"]["affect"]["mood"] == "warm"
-        conflict = life_continuity.LifeStateCommandService(ledger).apply_state_command(
-            person_id="person-1",
-            expected_version=1,
-            patch={"affect": {"mood": "stale"}},
-            command_ref="command-stale",
+        assert applied.status is LifeCommandStatus.APPLIED
+        assert repository.get_snapshot("person-1").state["affect"]["mood"] == "warm"
+        conflict = service.submit(
+            LifeCommand(
+                command_id="command-stale",
+                person_id="person-1",
+                command_type="state_patch",
+                payload={"state_patch": {"affect": {"mood": "stale"}}},
+                expected_version=0,
+                created_at_ms=NOW + 1,
+            )
         )
-        assert conflict["status"] == "CONFLICT"
-        assert life_continuity.get_life_state(ledger, "person-1")["version"] == 2
+        assert conflict.status is LifeCommandStatus.CONFLICT
+        assert life_continuity.get_life_state(ledger, "person-1")["version"] == 1
     finally:
         ledger.close()
 

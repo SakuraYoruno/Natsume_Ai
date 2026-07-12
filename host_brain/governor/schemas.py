@@ -69,6 +69,8 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "route": str,
             "target_id": str,
             "target": str,
+            "occurrence_ref": str,
+            "sys_mode": str,
             "pragmatic_frame": dict,
             "conversation_understanding": dict,
         },
@@ -94,6 +96,7 @@ class IntentEnvelope:
     args: dict[str, Any]
     nonce: str
     person_id: str | None = None
+    principal_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +217,15 @@ def strict_validate_intent(
     if lint["schema"]:
         return None, INTENT_SCHEMA_INVALID, lint
 
+    for identity_field in ("person_id", "principal_id"):
+        if identity_field in normalized_json and (
+            not isinstance(normalized_json[identity_field], str)
+            or not normalized_json[identity_field].strip()
+        ):
+            lint["schema"].append(f"invalid trusted identity field: {identity_field}")
+    if lint["schema"]:
+        return None, INTENT_SCHEMA_INVALID, lint
+
     # M42：合并静态白名单和动态 Skill 白名单
     effective_action_allowlist = ACTION_ALLOWLIST | (extra_action_allowlist or set())
 
@@ -252,6 +264,8 @@ def strict_validate_intent(
     }
     if "person_id" in normalized_json:
         envelope_payload["person_id"] = normalized_json.get("person_id")
+    if "principal_id" in normalized_json:
+        envelope_payload["principal_id"] = normalized_json.get("principal_id")
     return IntentEnvelope(**envelope_payload), None, lint
 
 

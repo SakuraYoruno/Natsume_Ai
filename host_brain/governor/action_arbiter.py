@@ -88,6 +88,7 @@ def _canonical_intent(intent_envelope: Any) -> dict[str, Any]:
         "args": dict(intent.get("args") or {}) if isinstance(intent.get("args"), Mapping) else {},
         "nonce": str(intent.get("nonce") or "").strip(),
         "person_id": str(intent.get("person_id") or "").strip() or None,
+        "principal_id": str(intent.get("principal_id") or "").strip() or None,
     }
 
 
@@ -112,6 +113,11 @@ def build_governed_action_binding(
         raise ValueError("governed action binding expiry must be after issuance")
     intent_digest = f"sha256:{_digest(intent)}"
     token_digest = _token_digest(token_ref)
+    person_id = str(intent.get("person_id") or "").strip()
+    # HTTP/client args are untrusted and must never nominate their own
+    # authority principal.  Until a separate authenticated identity is wired,
+    # the canonical Governor person is the sole principal authority.
+    principal_id = str(intent.get("principal_id") or person_id).strip()
     binding_digest = _digest(
         {
             "intent_digest": intent_digest,
@@ -129,6 +135,8 @@ def build_governed_action_binding(
         "seq": intent["seq"],
         "action_kind": intent["action"],
         "scope": intent["target"],
+        "person_id": person_id or None,
+        "principal_id": principal_id or None,
         "risk_level": _risk(risk_level),
         "intent_digest": intent_digest,
         "intent_args_digest": f"sha256:{_digest(intent['args'])}",

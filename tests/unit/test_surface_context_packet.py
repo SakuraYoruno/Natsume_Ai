@@ -2,10 +2,28 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.app.surface_context_packet import (
     SURFACE_CONTEXT_NODE_ID,
     build_surface_context_packet,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stable_empty_life_snapshot(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.read_life_snapshot",
+        lambda person_id: {
+            "person_id": str(person_id or "default"),
+            "version": 0,
+            "state": {"person_id": str(person_id or "default"), "version": 0},
+            "state_digest": "empty",
+            "last_event_id": None,
+            "last_event_digest": None,
+            "updated_at_ms": 0,
+        },
+    )
 
 
 def _state(payload: dict) -> SimpleNamespace:
@@ -189,30 +207,35 @@ def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch) -> 
     assert packet["surface_influence_packet"]["relationship"]["relationship_distance"] == "close"
 
 
-def test_build_surface_context_packet_collects_live_tribe_context(monkeypatch) -> None:
-    calls: list[dict] = []
+def test_build_surface_context_packet_collects_stable_life_snapshot(monkeypatch) -> None:
+    snapshot_calls: list[str] = []
 
-    class _FakeCortex:
-        def collect_tribe_context(self, **kwargs):  # noqa: ANN003
-            calls.append(dict(kwargs))
-            return {
-                "vital_signs": {
-                    "stress_index": 0.74,
-                    "cognitive_load_index": 0.82,
-                    "immune_risk_level": "high",
-                    "loneliness_level": 0.62,
+    def _snapshot(person_id: str) -> dict:
+        snapshot_calls.append(person_id)
+        return {
+            "person_id": person_id,
+            "version": 4,
+            "state_digest": "stable-life-digest",
+            "updated_at_ms": 40,
+            "state": {
+                "person_id": person_id,
+                "version": 4,
+                "affect": {"mood": "guarded", "tension": 0.74, "energy": 0.3},
+                "life_pressure": {"work": 0.82, "fatigue": 0.2},
+                "embodiment": {"emotion_tag": "ANGRY"},
+                "organ_runtime": {
+                    "organ_count": 2,
+                    "top_organs": [
+                        {"organ_id": "limbic", "activation": 0.8},
+                        {"organ_id": "prefrontal", "activation": 0.7},
+                    ],
                 },
-                "emotion_context": {"emotion_tag": "ANGRY", "emotion_intensity": 0.6},
-                "bond_context": {
-                    "stage": "CONFIDANT",
-                    "bond_vector": {"intimacy": 0.86, "trust": 0.78},
-                },
-                "raw_organ_outputs": {"limbic": {"messages": ["RAW SHOULD NOT PASS"]}},
-            }
+            },
+        }
 
     monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
     monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
-    monkeypatch.setattr("host_brain.tribe.cortex_agent.get_cortex_agent", lambda: _FakeCortex())
+    monkeypatch.setattr("host_brain.app.surface_context_packet.read_life_snapshot", _snapshot)
 
     packet = build_surface_context_packet(
         user_message="我有点烦",
@@ -222,30 +245,22 @@ def test_build_surface_context_packet_collects_live_tribe_context(monkeypatch) -
     )
     rendered = str(packet)
 
-    assert calls
-    assert calls[0]["session_id"] == "sess-live-organ"
-    assert calls[0]["user_id"] == "user-live"
-    assert calls[0]["request_body"]["user_message"] == "我有点烦"
-    assert packet["surface_organ_context_meta"]["source"] == "cortex_collect_tribe_context"
+    assert snapshot_calls == ["user-live"]
+    assert packet["surface_organ_context_meta"]["source"] == "life_snapshot_reader"
     assert packet["surface_organ_context_meta"]["status"] == "OK"
+    assert packet["surface_organ_context_meta"]["snapshot_version"] == 4
     assert packet["surface_organ_context_meta"]["compressed_route_attached"] is True
     assert packet["organ_influence_packet"]["organ_trace"]["contract_version"] == 1
-    assert packet["surface_influence_packet"]["organ_trace"]["risk_level"] == "high"
-    mapped_organs = packet["surface_influence_packet"]["organ_trace"]["mapped_organs"]
-    assert "limbic" in mapped_organs
-    assert "cortex" in mapped_organs
-    assert "thalamus" in mapped_organs
     assert "RAW SHOULD NOT PASS" not in rendered
 
 
-def test_build_surface_context_packet_degrades_when_live_tribe_context_fails(monkeypatch) -> None:
-    class _FailingCortex:
-        def collect_tribe_context(self, **_kwargs):  # noqa: ANN003
-            raise RuntimeError("no tribe today")
-
+def test_build_surface_context_packet_degrades_when_snapshot_reader_fails(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
     monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
-    monkeypatch.setattr("host_brain.tribe.cortex_agent.get_cortex_agent", lambda: _FailingCortex())
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.read_life_snapshot",
+        lambda _person_id: (_ for _ in ()).throw(RuntimeError("snapshot unavailable")),
+    )
 
     packet = build_surface_context_packet(
         user_message="继续",

@@ -18,30 +18,27 @@ from host_brain.skills.registry import SkillMeta, SkillRegistry, SkillSchedulerP
 
 RETIRED_AUTO_SCHEDULE_SKILLS = {
     "inner_world_tick",
+    "inner_world_numeric_tick",
+    "inner_world_monologue_tick",
+    "silence_tick",
+    "body_sense_tick",
+    "emotion_decay_tick",
+    "proactive_talk",
 }
 
 SCHEDULER_SEED_TASK_ORDER = (
-    "proactive_talk_periodic",
+    "life_tick",
     "evolution_cycle_daily",
     "lightnovel_recommender_daily",
     "diary_writer_daily",
     "dream_generator_sleep",
     "life_memory_sleep_replay_daily",
-    "inner_world_numeric_tick",
-    "inner_world_monologue_tick",
-    "silence_tick",
-    "body_sense_tick",
     "gaming_companion_tick",
     "emergent_growth_weekly",
-    "emotion_decay_tick",
 )
 
 CORE_ORGAN_TICK_TASK_IDS = (
-    "inner_world_numeric_tick",
-    "inner_world_monologue_tick",
-    "silence_tick",
-    "body_sense_tick",
-    "emotion_decay_tick",
+    "life_tick",
 )
 
 
@@ -377,6 +374,7 @@ def build_system_scheduler_task_configs() -> list[SchedulerTaskConfig]:
 
     user_id = get_canonical_persona_self_id()
     return [
+        build_life_tick_task_config(),
         SchedulerTaskConfig(
             task_id="evolution_cycle_daily",
             trigger_mode=TriggerMode.CRON,
@@ -393,29 +391,6 @@ def build_system_scheduler_task_configs() -> list[SchedulerTaskConfig]:
             resource_profile={
                 "resource_class": "background_llm",
                 "uses_llm": True,
-                "uses_gpu": False,
-                "advisory_policy": "rule",
-            },
-        ),
-        SchedulerTaskConfig(
-            task_id="emotion_decay_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 30},
-            intent_template={
-                "skill_name": "emotion_decay_tick",
-                "args": {},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            description=(
-                "D4/D6/D7/D8: 情绪衰减连续动态系统 tick——每 30s 驱动 LimbicAgent 情绪衰减、"
-                "CircadianAgent 基线调制、InteroceptionAgent 身体预算、GlymphaticAgent 恢复窗口"
-            ),
-            resource_profile={
-                "resource_class": "light_tick",
-                "uses_llm": False,
                 "uses_gpu": False,
                 "advisory_policy": "rule",
             },
@@ -441,6 +416,42 @@ def build_system_scheduler_task_configs() -> list[SchedulerTaskConfig]:
             },
         ),
     ]
+
+
+def build_life_tick_task_config() -> SchedulerTaskConfig:
+    """Build the sole governed periodic producer for Digital Life evolution."""
+
+    interval_seconds = _clamp_int(
+        os.environ.get("HOST_LIFE_TICK_INTERVAL_SEC"),
+        default=60,
+        low=30,
+        high=3_600,
+    )
+    return SchedulerTaskConfig(
+        task_id="life_tick",
+        trigger_mode=TriggerMode.INTERVAL,
+        trigger_config={"seconds": interval_seconds},
+        intent_template={
+            "skill_name": "life_tick",
+            "args": {"person_id": "default", "timezone": "Asia/Shanghai"},
+            "proposer_node_id": "scheduler",
+        },
+        priority=TaskPriority.LOW,
+        mode_allowlist=["normal", "focus", "gaming", "sleep"],
+        enabled=True,
+        max_consecutive_failures=3,
+        description=(
+            "Single governed Digital Life tick; the handler emits one LifeCommand "
+            "and owns no Life side effects"
+        ),
+        resource_profile={
+            "resource_class": "light_tick",
+            "uses_llm": False,
+            "uses_gpu": False,
+            "advisory_policy": "rule",
+            "periodic_authority": "scheduler_clock",
+        },
+    )
 
 
 def register_scheduler_seed_tasks(

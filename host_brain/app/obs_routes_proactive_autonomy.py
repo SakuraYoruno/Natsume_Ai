@@ -49,10 +49,16 @@ def build_proactive_autonomy_snapshot(ledger: Any, person_id: str = "default") -
             _project_nudge_pull,
             compute_proactive_readiness,
         )
+        from host_brain.app.life_application_boundary import read_life_snapshot
         from host_brain.runtime.autonomous_self import get_reach_out_calibration
-        from host_brain.runtime.life_continuity import get_life_state
 
-        state = get_life_state(ledger, resolved)
+        # ``ledger`` remains for the public compatibility seam; the injected
+        # reader owns canonical snapshot selection and never initializes state.
+        _ = ledger
+        life_snapshot = read_life_snapshot(resolved)
+        state = dict(life_snapshot.get("state") or {})
+        if int(life_snapshot.get("version") or 0) <= 0:
+            return snapshot
         weather = dict(state.get("inner_weather") or {}) if isinstance(state.get("inner_weather"), dict) else {}
         growth = dict(state.get("self_growth") or {}) if isinstance(state.get("self_growth"), dict) else {}
         active_projects = list(growth.get("active_projects") or state.get("self_projects") or [])

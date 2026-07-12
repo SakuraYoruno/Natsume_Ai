@@ -1,15 +1,8 @@
-"""Host-side runtime entrypoints for the digital-life loop."""
+"""Host runtime package.
 
-from host_brain.runtime.digital_life_supervisor import (  # noqa: F401
-    CORE_TICK_TASK_IDS,
-    DigitalLifeRuntimeConfig,
-    DigitalLifeSupervisor,
-    ForegroundTurnResult,
-)
+DigitalLifeSupervisor was a fixture/soak harness, not the production life
+authority.  It is intentionally no longer exported from the runtime surface;
+validation tools import it through :mod:`host_brain.validation`.
+"""
 
-__all__ = [
-    "CORE_TICK_TASK_IDS",
-    "DigitalLifeRuntimeConfig",
-    "DigitalLifeSupervisor",
-    "ForegroundTurnResult",
-]
+__all__: list[str] = []

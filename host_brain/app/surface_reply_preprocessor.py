@@ -89,6 +89,8 @@ class SurfaceReplyInput:
     ts_ms: int = 0
     intent_draft: Dict[str, Any] = field(default_factory=dict)
     trace_stage_meta: Dict[str, Any] = field(default_factory=dict)
+    governor_result: Dict[str, Any] = field(default_factory=dict)
+    delivery_authorization: Dict[str, Any] = field(default_factory=dict)
     llm_runtime: Optional[Dict[str, Any]] = None
     render_policy: Dict[str, Any] = field(default_factory=dict)
     surface_task_control: Dict[str, Any] = field(default_factory=dict)

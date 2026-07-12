@@ -3812,6 +3812,14 @@ async def _async_post_process(
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
 
+    if bool(normalized_trace_stage_meta.get("life_projection_mode")):
+        # AW-04 projection replay owns only durable audit, conversation,
+        # Memory and Bond projections above. Persona/Tribe mutations and all
+        # VTS/TTS transports below are separate Life intents/outbox messages;
+        # replaying them here would recreate parallel writers and duplicate
+        # external effects.
+        return
+
     if skip_heavy_persona_postprocess and surface_main_chain_used:
         try:
             surface_session_end = await _run_in_post_process_executor(

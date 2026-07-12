@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import logging
@@ -31,8 +30,6 @@ from host_brain.runtime.autonomous_self import (
 
 LOGGER = logging.getLogger("Natsume.life_continuity")
 DEFAULT_PERSON_ID = "default"
-_LIFE_LOOP_TASK: asyncio.Task[Any] | None = None
-_LIFE_LOOP_STOP: asyncio.Event | None = None
 _LAST_TICK_RESULT: dict[str, Any] = {}
 LIFE_STATE_OCC_CONFLICT = "LIFE_STATE_OCC_CONFLICT"
 LIFE_STATE_SINGLE_WRITER_FALLBACK = "LIFE_STATE_SINGLE_WRITER_FALLBACK"
@@ -347,15 +344,11 @@ def get_life_state(ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str,
     state = _repository(ledger).get_state(resolved)
     if isinstance(state, dict) and state:
         return _normalize_state(state, resolved)
+    # Query paths must never initialize durable state.  The AW-04 command
+    # service creates the first projection together with its immutable event
+    # and receipt; readers receive a deterministic empty/default view only.
     state = _default_state(resolved)
-    try:
-        _save_state(ledger, state, expected_version=0, command_ref="state_initialized", source_kind="init", allow_single_writer_fallback=False)
-        _append_state_event(ledger, resolved, "init", "state_initialized", {}, state, {"created": True}, ["status_panel"])
-    except LifeStateOCCConflict:
-        existing = _repository(ledger).get_state(resolved)
-        if isinstance(existing, dict) and existing:
-            return _normalize_state(existing, resolved)
-        raise
+    state["version"] = 0
     return copy.deepcopy(state)
 
 
@@ -1225,26 +1218,29 @@ async def attempt_life_proactive_push(*, ledger: Any, person_id: str = DEFAULT_P
             reason = "DRY_RUN"
             result = {"would_send": True, "target": target}
         else:
-            try:
-                from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
-
-                rpc_result = await post_gateway_reply(
-                    platform=str(target.get("platform") or ""),
-                    conversation_id=str(target.get("conversation_id") or ""),
-                    content=composed,
-                    msg_type="text",
-                    raw_extra={"source_kind": "life_proactive", "life_source_kind": source_kind, "motive": motive, "pressure": round(float(pressure), 3), "scene": str(director.get("scene") or "")},
-                    request_id=_event_id("lifepro_send"),
-                    wait_result=True,
-                    timeout_ms=_int_env("HOST_LIFE_PROACTIVE_SEND_TIMEOUT_MS", 12000, 1000, 60000),
-                )
-                result = rpc_result.as_dict() if hasattr(rpc_result, "as_dict") else dict(rpc_result or {})
-                status = "SENT" if bool(result.get("success")) else "FAILED"
-                reason = str(result.get("reason_code") or result.get("status") or "")
-            except Exception as exc:
-                status = "FAILED"
-                reason = type(exc).__name__
-                result = {"success": False, "detail": str(exc)[:240]}
+            # Compatibility planner only. Production delivery is inserted into
+            # life_delivery_outbox by LifeCommandService and dispatched after
+            # the command/event/state transaction commits.
+            status = "QUEUED"
+            reason = "LIFE_DELIVERY_OUTBOX_REQUIRED"
+            result = {
+                "delivery_intent": {
+                    "destination": "edge.proactive",
+                    "payload": {
+                        "platform": str(target.get("platform") or ""),
+                        "conversation_id": str(target.get("conversation_id") or ""),
+                        "content": composed,
+                        "msg_type": "text",
+                        "raw_extra": {
+                            "source_kind": "life_proactive",
+                            "life_source_kind": source_kind,
+                            "motive": motive,
+                            "pressure": round(float(pressure), 3),
+                            "scene": str(director.get("scene") or ""),
+                        },
+                    },
+                }
+            }
     outbox_id = _append_proactive_outbox(ledger=ledger, person_id=resolved, source_kind=source_kind, motive=motive, pressure=pressure, target=target, message=message, gate=gate, status=status, reason_code=reason, result=result, now_ms=now)
     proactive_episode: dict[str, Any] = {}
     proactive_memory: dict[str, Any] = {}
@@ -1896,26 +1892,30 @@ async def dispatch_life_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERS
     state = get_life_state(ledger, person_id); target = _map(director_pack.get("embodiment_target")) or _map(state.get("embodiment")); now = _now_ms(); cooldown = _int_env("HOST_LIFE_EMBODIMENT_COOLDOWN_MS", 30000, 0, 600000); last = int(_map(state.get("embodiment")).get("last_dispatch_ms") or 0)
     if not force and cooldown > 0 and now - last < cooldown:
         return {"status": "SKIPPED", "reason_code": "EMBODIMENT_COOLDOWN", "cooldown_ms": cooldown, "target": target}
-    result: dict[str, Any] = {"vts": {}, "mateengine": {}}; status = "APPLIED"; reason = ""; emotion = str(target.get("emotion_tag") or "NEUTRAL").upper(); req_id = _event_id("lifebody")
+    result: dict[str, Any] = {"delivery_intents": []}; status = "QUEUED"; reason = "LIFE_DELIVERY_OUTBOX_REQUIRED"; emotion = str(target.get("emotion_tag") or "NEUTRAL").upper(); req_id = _event_id("lifebody")
     if _bool_env("HOST_LIFE_VTS_EMBODIMENT_ENABLED", True):
-        try:
-            from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
-            result["vts"] = await _drive_stream_vts_emotion(request_id=req_id, emotion_context={"emotion_tag": emotion}, ts_ms=now)
-        except Exception as exc:
-            status = "DEGRADED"; reason = "VTS_DISPATCH_FAILED"; result["vts"] = {"status": "DEGRADED", "detail": str(exc)[:240]}
+        result["delivery_intents"].append(
+            {
+                "destination": "vts.emotion",
+                "payload": {
+                    "request_id": req_id,
+                    "emotion_context": {"emotion_tag": emotion},
+                    "ts_ms": now,
+                },
+            }
+        )
     if _bool_env("HOST_LIFE_MATEENGINE_EMBODIMENT_ENABLED", True):
-        try:
-            from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
-            mate_raw = send_mateengine_action(action="state", state=str(target.get("mateengine_state") or "idle"), emotion_tag=emotion, expression=str(target.get("expression") or ""))
-            if hasattr(mate_raw, "as_dict"):
-                result["mateengine"] = mate_raw.as_dict()
-            elif hasattr(mate_raw, "__dict__"):
-                result["mateengine"] = dict(mate_raw.__dict__)
-            else:
-                result["mateengine"] = {"value": str(mate_raw)}
-        except Exception as exc:
-            if status == "APPLIED": status = "DEGRADED"; reason = "MATEENGINE_DISPATCH_FAILED"
-            result["mateengine"] = {"status": "DEGRADED", "detail": str(exc)[:240]}
+        result["delivery_intents"].append(
+            {
+                "destination": "mateengine.state",
+                "payload": {
+                    "action": "state",
+                    "state": str(target.get("mateengine_state") or "idle"),
+                    "emotion_tag": emotion,
+                    "expression": str(target.get("expression") or ""),
+                },
+            }
+        )
     after = copy.deepcopy(state); emb = _map(after.get("embodiment")); emb.update(target); emb.update({"last_dispatch_ms": now, "last_dispatch_id": req_id}); after["embodiment"] = emb; after["version"] = int(after.get("version") or 1) + 1; _save_state(ledger, after, expected_version=int(state.get("version") or 1), command_ref=req_id, source_kind="embodiment_dispatch", allow_single_writer_fallback=False)
     dispatch_id = _event_id("lifebody")
     _repository(ledger).append_embodiment_dispatch(
@@ -1970,37 +1970,25 @@ def get_current_life_action(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) 
 
 
 def record_life_experience(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, session_id: str = "", source_kind: str = "manual_ingest", event_kind: str = "inner_stream_tick", content_summary: str = "", evidence: Mapping[str, Any] | None = None, salience: float = 0.3, valence: float = 0.0, uncertainty: float = 0.1, consume: bool = True) -> dict[str, Any]:
-    ensure_life_schema(ledger)
-    resolved = str(person_id or DEFAULT_PERSON_ID)
-    before = get_life_state(ledger, resolved)
-    now = _now_ms()
-    experience = append_life_experience(
+    """Compatibility wrapper; production callers use digital_life.experience_ingress."""
+
+    from host_brain.digital_life.experience_ingress import (  # noqa: PLC0415
+        record_life_experience as canonical_record_life_experience,
+    )
+
+    return canonical_record_life_experience(
         ledger=ledger,
-        person_id=resolved,
+        person_id=person_id,
         session_id=session_id,
         source_kind=source_kind,
         event_kind=event_kind,
         content_summary=content_summary,
-        evidence=evidence or {},
+        evidence=evidence,
         salience=salience,
         valence=valence,
         uncertainty=uncertainty,
-        now_ms=now,
         consume=consume,
     )
-    after = synthesize_life_state_from_organs(ledger=ledger, base_state=before, person_id=resolved, source_experience_event_id=str(experience.get("event_id") or ""), now_ms=now) if consume else copy.deepcopy(before)
-    if consume:
-        after["version"] = int(after.get("version") or 1) + 1
-        _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref=str(experience.get("event_id") or ""), source_kind="life_experience", allow_single_writer_fallback=False)
-    director = build_life_director_pack(ledger=ledger, person_id=resolved, reason=event_kind)
-    action = build_life_action_plan(state=after, director_pack=director, source_kind=event_kind)
-    action_expected = int(after.get("version") or 1)
-    after["life_action"] = action
-    after["version"] = action_expected + 1
-    _save_state(ledger, after, expected_version=action_expected, command_ref=str(experience.get("event_id") or ""), source_kind="life_action_plan", allow_single_writer_fallback=False)
-    visible = list(director.get("visible_obligation") or ["status_panel"])
-    state_event_id = _append_state_event(ledger, resolved, "life_experience", event_kind, before, after, {"experience": experience, "life_action": action}, visible)
-    return {"event_id": experience.get("event_id"), "memory_event_id": experience.get("memory_event_id"), "state_event_id": state_event_id, "state": after, "life_director": director, "life_action": action, "visible_channels": visible, "experience": experience}
 
 
 def get_recent_proactive_outbox(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, limit: int = 20) -> dict[str, Any]:
@@ -2074,52 +2062,4 @@ def recalibrate_inner_life_state(*, ledger: Any, person_id: str = DEFAULT_PERSON
     event = append_life_experience(ledger=ledger, person_id=resolved, session_id="inner_life_recalibration", source_kind="system", event_kind="inner_life_recalibrated", content_summary="inner life state recalibrated", evidence={"cleared_stale_preoccupation": not bool(anchor), "adjusted_organs": adjusted}, salience=0.12, valence=0.0, uncertainty=0.02, now_ms=now, consume=False)
     return {"status": "OK", "person_id": resolved, "adjusted_organs": adjusted, "event_id": event.get("event_id"), "state_version": int(after.get("version") or 1)}
 
-def start_life_continuity_loop(*, ledger: Any, logger: Any | None = None) -> dict[str, Any]:
-    global _LIFE_LOOP_TASK, _LIFE_LOOP_STOP
-    ensure_life_schema(ledger)
-    if not _bool_env("HOST_LIFE_CONTINUITY_ENABLED", True):
-        return {"running": False, "status": "SKIPPED", "reason_code": "HOST_LIFE_CONTINUITY_DISABLED"}
-    if _LIFE_LOOP_TASK is not None and not _LIFE_LOOP_TASK.done():
-        return {"running": True, "status": "OK", "reason_code": "ALREADY_RUNNING"}
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return {"running": False, "status": "DEGRADED", "reason_code": "NO_RUNNING_EVENT_LOOP"}
-    interval = _int_env("HOST_LIFE_TICK_INTERVAL_SEC", 60, 30, 3600); _LIFE_LOOP_STOP = asyncio.Event(); _LIFE_LOOP_TASK = loop.create_task(_life_loop_runner(ledger=ledger, stop_event=_LIFE_LOOP_STOP, interval_s=interval, logger=logger or LOGGER))
-    return {"running": True, "status": "OK", "interval_s": interval}
-
-
-async def _life_loop_runner(*, ledger: Any, stop_event: asyncio.Event, interval_s: int, logger: Any) -> None:
-    try:
-        if _bool_env("HOST_LIFE_TICK_ON_STARTUP", True):
-            await run_life_tick(ledger=ledger, reason="startup_tick", force_dispatch=True)
-    except Exception as exc:
-        logger.warning("Life continuity startup tick degraded: %s", exc)
-    while not stop_event.is_set():
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=float(interval_s)); break
-        except asyncio.TimeoutError:
-            pass
-        try:
-            await run_life_tick(ledger=ledger, reason="periodic_tick", force_dispatch=False)
-        except Exception as exc:
-            logger.warning("Life continuity periodic tick degraded: %s", exc)
-
-
-async def stop_life_continuity_loop() -> dict[str, Any]:
-    global _LIFE_LOOP_TASK, _LIFE_LOOP_STOP
-    task = _LIFE_LOOP_TASK
-    if _LIFE_LOOP_STOP is not None:
-        _LIFE_LOOP_STOP.set()
-    if task is not None and not task.done():
-        try:
-            await asyncio.wait_for(task, timeout=3.0)
-        except asyncio.TimeoutError:
-            task.cancel()
-        except Exception:
-            pass
-    _LIFE_LOOP_TASK = None; _LIFE_LOOP_STOP = None
-    return {"running": False, "status": "STOPPED"}
-
-
-__all__ = ["advance_inner_life_to_now", "advance_life_to_now", "attempt_life_proactive_push", "build_life_action_plan", "build_life_director_pack", "dispatch_life_embodiment", "ensure_life_schema", "get_current_embodiment", "get_current_environment", "get_current_life_action", "get_life_runtime_health", "get_life_state", "get_recent_causality", "get_recent_proactive_outbox", "record_dialogue_aftereffect", "record_life_experience", "record_work_environment_event", "run_life_tick", "recalibrate_inner_life_state", "start_life_continuity_loop", "stop_life_continuity_loop"]
+__all__ = ["advance_inner_life_to_now", "advance_life_to_now", "attempt_life_proactive_push", "build_life_action_plan", "build_life_director_pack", "dispatch_life_embodiment", "ensure_life_schema", "get_current_embodiment", "get_current_environment", "get_current_life_action", "get_life_runtime_health", "get_life_state", "get_recent_causality", "get_recent_proactive_outbox", "record_dialogue_aftereffect", "record_life_experience", "record_work_environment_event", "run_life_tick", "recalibrate_inner_life_state"]

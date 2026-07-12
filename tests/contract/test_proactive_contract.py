@@ -93,7 +93,7 @@ class TestProactiveTalkTrigger:
             return {"status": "OK"}
 
         ts = now_ms()
-        execute_proactive_talk(
+        result = execute_proactive_talk(
             {},
             {
                 "sys_mode": "normal",
@@ -103,8 +103,9 @@ class TestProactiveTalkTrigger:
                 "time_period": "evening",
             },
         )
-        assert len(pushed) == 1
-        assert pushed[0]["type"] == "proactive_talk"
+        assert pushed == []
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
+        assert result["delivery_intent"]["payload"]["type"] == "proactive_talk"
 
     def test_topic_hint_passed_to_llm(self) -> None:
         received = []

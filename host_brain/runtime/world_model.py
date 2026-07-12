@@ -6,7 +6,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from host_brain.runtime.environment_state import build_environment_snapshot
-from host_brain.runtime.life_continuity import DEFAULT_PERSON_ID
+# World-model queries must not import the retired Life runtime just to obtain a
+# string default; the canonical Life reader owns state selection.
+DEFAULT_PERSON_ID = "default"
 from host_brain.persistence.world_model_query_repository import (
     WorldModelPersistenceSnapshot,
     WorldModelQueryRepository,

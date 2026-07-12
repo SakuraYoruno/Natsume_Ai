@@ -1318,6 +1318,7 @@ def _build_chat_input(
     intent_draft: dict[str, Any],
     trace_stage_meta: dict[str, Any],
     sub_agent_context,
+    governor_result: Mapping[str, Any] | None = None,
 ):
     from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput  # noqa: PLC0415
     from host_brain.app.graph_config_builder import resolve_surface_reply_llm_runtime  # noqa: PLC0415
@@ -1333,6 +1334,35 @@ def _build_chat_input(
     chat_trace_stage_meta = dict(trace_stage_meta or {})
     chat_trace_stage_meta.setdefault("input_source", str(getattr(request_body, "input_source", "") or "").strip())
     chat_trace_stage_meta.setdefault("reply_channel", str(getattr(request_body, "reply_channel", "") or "").strip())
+
+    governor = dict(governor_result or {})
+    delivery_authorization: dict[str, str] = {}
+    if (
+        request_id
+        and str(governor.get("decision") or "").strip().upper() == "APPROVE"
+    ):
+        from host_brain.orchestration.governor_grant import governor_grant_ref  # noqa: PLC0415
+
+        authority_principal_id = str(
+            governor.get("principal_id")
+            or getattr(request_body, "principal_id", "")
+            or person_id
+            or ""
+        ).strip()
+        if authority_principal_id:
+            delivery_authorization = {
+                "request_id": request_id,
+                "governor_grant_ref": governor_grant_ref(request_id, governor),
+                "authority_kind": "surface_governor",
+                "authority_principal_id": authority_principal_id,
+            }
+            chat_trace_stage_meta["delivery_authorization"] = dict(
+                delivery_authorization
+            )
+            chat_trace_stage_meta["governor_grant_request_id"] = request_id
+            chat_trace_stage_meta["governor_grant_ref"] = delivery_authorization[
+                "governor_grant_ref"
+            ]
 
     intent_args = intent_draft.get("args") if isinstance(intent_draft, dict) else None
     scene_awareness = intent_draft.get("scene_awareness") if isinstance(intent_draft, dict) else None
@@ -1359,6 +1389,8 @@ def _build_chat_input(
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=chat_trace_stage_meta,
+        governor_result=governor,
+        delivery_authorization=delivery_authorization,
         llm_runtime=resolved_llm_runtime,
         render_policy=dict(getattr(request_body, "render_policy", {}) or {}),
         surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
@@ -1873,6 +1905,7 @@ async def _stream_chat_with_context(
     trace_stage_meta: dict[str, Any],
     sub_agent_context,
     runtime_capability_payload: dict[str, Any] | None,
+    governor_result: Mapping[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     from host_brain.app.surface_reply_runtime import surface_reply_sse_generator  # noqa: PLC0415
 
@@ -1893,6 +1926,7 @@ async def _stream_chat_with_context(
         intent_draft=intent_draft,
         trace_stage_meta=trace_stage_meta,
         sub_agent_context=sub_agent_context,
+        governor_result=governor_result,
     )
     async for event in stream_chat_route(
         route="chat",
@@ -2698,6 +2732,7 @@ async def _executive_runtime_core_impl(
             },
             sub_agent_context=None,
             runtime_capability_payload=runtime_capability_payload,
+            governor_result=governor_result,
         ):
             yield event
         runtime_task_registry.mark_completed(
@@ -2786,6 +2821,7 @@ async def _executive_runtime_core_impl(
                 outcome=plan_chat_outcome,
             ),
             runtime_capability_payload=runtime_capability_payload,
+            governor_result=governor_result,
         ):
             yield event
         return
@@ -2938,6 +2974,7 @@ async def _executive_runtime_core_impl(
             outcome=outcome,
         ),
         runtime_capability_payload=runtime_capability_payload,
+        governor_result=governor_result,
     ):
         yield event
 

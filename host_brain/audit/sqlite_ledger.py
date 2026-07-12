@@ -395,8 +395,20 @@ class SQLiteLedger(
         self._insert("intent_log", payload)
 
     def log_governor(self, row: dict[str, Any]) -> None:
+        # approved_action_binding is an authorization artifact, not optional
+        # response decoration.  The legacy table has no dedicated column, so
+        # mirror it into the durable JSON tokens column before column filtering.
+        # Old rows without this binding intentionally remain unusable for
+        # scoped proactive/embodiment grants.
+        durable_row = dict(row)
+        binding = durable_row.get("approved_action_binding")
+        if isinstance(binding, dict):
+            raw_tokens = durable_row.get("tokens")
+            tokens = dict(raw_tokens) if isinstance(raw_tokens, dict) else {}
+            tokens["approved_action_binding"] = dict(binding)
+            durable_row["tokens"] = tokens
         available_columns = {key for key in GOVERNOR_COLUMNS if self._table_has_column("governor_log", key)}
-        payload = {key: row.get(key) for key in available_columns}
+        payload = {key: durable_row.get(key) for key in available_columns}
         # FIX-4.2：tribe_params_snapshot 需要 JSON 序列化（dict → str）
         if payload.get("tribe_params_snapshot") is not None and isinstance(payload["tribe_params_snapshot"], dict):
             payload["tribe_params_snapshot"] = json.dumps(

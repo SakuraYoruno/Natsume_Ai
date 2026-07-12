@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.runtime import DigitalLifeRuntimeConfig, DigitalLifeSupervisor  # noqa: E402
+from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor  # noqa: E402
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "digital_life_wall_clock_soak"

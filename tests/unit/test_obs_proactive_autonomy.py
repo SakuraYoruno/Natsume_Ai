@@ -6,23 +6,24 @@
 
 from __future__ import annotations
 
-import sqlite3
 import time
-from types import SimpleNamespace
 
 from host_brain.app.obs_routes_proactive_autonomy import build_proactive_autonomy_snapshot
-from host_brain.runtime import life_continuity as lc
 
 
-def _ledger() -> SimpleNamespace:
-    ledger = SimpleNamespace(_conn=sqlite3.connect(":memory:", check_same_thread=False))
-    lc.ensure_life_schema(ledger)
-    return ledger
+def _install_snapshot(monkeypatch, state: dict, *, version: int = 1) -> None:  # noqa: ANN001
+    monkeypatch.setattr(
+        "host_brain.app.life_application_boundary.read_life_snapshot",
+        lambda person_id: {
+            "person_id": person_id,
+            "version": version,
+            "state": {"person_id": person_id, "version": version, **state},
+        },
+    )
 
 
-def test_snapshot_surfaces_proactive_signals() -> None:
-    ledger = _ledger()
-    state = lc.get_life_state(ledger, "default")
+def test_snapshot_surfaces_proactive_signals(monkeypatch) -> None:
+    state: dict = {}
     state["inner_weather"] = {"label": "空·想找人", "reach_out_bias": 0.7}
     state["reach_out_calibration"] = {"value": 0.45, "samples": 3, "last_outcome": "annoyed"}
     state["self_growth"] = {
@@ -31,9 +32,9 @@ def test_snapshot_surfaces_proactive_signals() -> None:
              "title": "陪你追天文", "progress": 0.5, "last_worked_at_ms": int(time.time() * 1000)}
         ]
     }
-    lc._save_state(ledger, state)
+    _install_snapshot(monkeypatch, state, version=4)
 
-    snap = build_proactive_autonomy_snapshot(ledger, "default")
+    snap = build_proactive_autonomy_snapshot(object(), "default")
     assert snap["available"] is True
     assert snap["inner_weather"]["label"] == "空·想找人"
     assert snap["reach_out_calibration"]["value"] == 0.45
@@ -43,19 +44,18 @@ def test_snapshot_surfaces_proactive_signals() -> None:
     assert snap["top_intention"]["project_id"] == "emergent_天文"
 
 
-def test_snapshot_low_calibration_damps_readiness() -> None:
-    ledger = _ledger()
-    state = lc.get_life_state(ledger, "default")
+def test_snapshot_low_calibration_damps_readiness(monkeypatch) -> None:
+    state: dict = {}
     state["inner_weather"] = {"reach_out_bias": 0.8}
     state["reach_out_calibration"] = {"value": 0.15}  # 被冷落
-    lc._save_state(ledger, state)
-    snap = build_proactive_autonomy_snapshot(ledger, "default")
+    _install_snapshot(monkeypatch, state, version=2)
+    snap = build_proactive_autonomy_snapshot(object(), "default")
     assert snap["proactive_readiness"] < 0.8  # 校准阻尼
 
 
-def test_snapshot_default_state_available() -> None:
-    ledger = _ledger()
-    snap = build_proactive_autonomy_snapshot(ledger, "default")
-    assert snap["available"] is True
+def test_snapshot_missing_state_is_explicitly_unavailable(monkeypatch) -> None:
+    _install_snapshot(monkeypatch, {}, version=0)
+    snap = build_proactive_autonomy_snapshot(object(), "default")
+    assert snap["available"] is False
     assert "proactive_readiness" in snap
-    assert snap["top_intention"] is None  # 无项目
+    assert snap["top_intention"] is None

@@ -5,6 +5,10 @@ from typing import Any
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.app.life_application_boundary import (
+    project_surface_organ_context,
+    read_life_snapshot,
+)
 from host_brain.app.relational_chat_detector import detect_relational_chat_topic
 from host_brain.persona.organ_influence_contract import build_organ_influence_packet
 from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
@@ -335,36 +339,30 @@ def _resolve_surface_organ_context(
             "key_count": len(payload),
         }
     try:
-        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-        request_body = {
-            "request_id": str(request_id or "").strip(),
-            "person_id": str(person_id or "").strip(),
-            "session_id": str(session_id or "").strip(),
-            "user_message": str(user_message or "").strip(),
-        }
-        raw = get_cortex_agent().collect_tribe_context(
-            request_body=request_body,
-            session_id=str(session_id or "").strip() or None,
-            user_id=str(person_id or "").strip() or None,
-        )
+        snapshot = read_life_snapshot(str(person_id or "").strip() or "default")
+        raw = project_surface_organ_context(snapshot)
     except Exception as exc:
         return {}, {
             "status": "DEGRADED",
-            "source": "cortex_collect_tribe_context",
+            "source": "life_snapshot_reader",
             "reason_code": type(exc).__name__,
             "key_count": 0,
         }
     if not isinstance(raw, Mapping) or not raw:
         return {}, {
             "status": "EMPTY",
-            "source": "cortex_collect_tribe_context",
+            "source": "life_snapshot_reader",
+            "person_id": str(person_id or "").strip() or "default",
+            "snapshot_version": int(snapshot.get("version") or 0),
             "key_count": 0,
         }
     payload = dict(raw)
     return payload, {
         "status": "OK",
-        "source": "cortex_collect_tribe_context",
+        "source": "life_snapshot_reader",
+        "person_id": str(snapshot.get("person_id") or person_id or "default"),
+        "snapshot_version": int(snapshot.get("version") or 0),
+        "state_digest": str(snapshot.get("state_digest") or ""),
         "key_count": len(payload),
     }
 

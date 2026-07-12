@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-03 已完成，AW-04 正式实施
+当前代码基线：`codex/m48-integration`，AW-00～AW-04 已完成，AW-05 正式实施
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -219,7 +219,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-04：Digital Life 单内核
 
-状态：`IN_PROGRESS`
+状态：`DONE`（LifeCommand/Event/Reducer/Projection/Outbox/Receipt 单事务脊柱、单 SchedulerClock 与生产读写切流已完成；两轮 P0/P1 审查问题清零）
 
 目标：把 LifeContinuity、LifeOrgans、Tribe、InnerWorld、DigitalLifeSupervisor、Proactive 与 Surface 中的状态推进收敛到一个 event/reducer coordinator 和一个 clock。
 
@@ -231,9 +231,13 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：同一 event replay 得到相同 state；preview/retry/replay 零写入；长期字段单 writer；主动/具身动作都有 grant、outbox 和 receipt。
 
+完成事实：新增 immutable `LifeCommand`、event journal、snapshot/projection、projection intent、typed delivery outbox/authorization/receipt 与 per-person fenced aggregate lease；World/Appraisal/Affect/Homeostasis/Relationship/Scene/Intent 由纯 reducer 确定性推导，replay/rebuild/preview 不写入且延迟事件不会回拨长期时间。Surface/Input/GET 均改为 snapshot 纯读，真实对话只提交一次 foreground command；SchedulerClock 成为唯一 activation/evolution/dispatch 时钟，旧 Life loop、重复 proactive/inner-world/body/emotion schedule、Surface fire-and-forget 与直发 VTS/Mate/Gateway 路径退役。外部 HTTP 只接受 semantic intent，服务端重建 authority/time；每次物理输出发送前复核 durable Governor grant，成功状态与 immutable receipt 同事务写入。Tribe JSON 与 OfflineInnerWorld 持久化默认关闭，`DigitalLifeSupervisor` 已移至 validation harness；Memory/InnerWorld/MemoryEventStore 生产 experience 入口直连 canonical command service，legacy runtime 仅保留无生产 import 的兼容 facade。
+
+验收事实：AW-04 单次 integration wave 首轮 `212 passed`，4 个失败均为 AW-02 已切流后仍断言 retired progress fastpath、异步旁路与旧 settings/request-id 约定的陈旧单测；只修正该文件后 `15 passed`，未重复运行其余 201 个未变化节点。封板审查随后发现并修复 grant scope P0 与 lease/digest 两项 P1：真实 `IntentDecisionEngine → SQLiteLedger → require_bound`、普通 APPROVE 越权及 person/action/target/payload mismatch 等 grant 节点 `24 passed`，新增 untrusted principal 回归 `8 passed`；single-claim/fence/digest 新增节点 `3 passed`、Projection/Delivery 定向回归 `11 passed`。最终复审再关闭 transport-time binding/expiry 与慢 handler heartbeat 两项 P1：transport/grant `19 passed`，scheduler person/principal 双身份链 `21 passed`，heartbeat 新增节点 `2 passed`、dispatcher 定向 `6 passed`。此前 grant/并发切片 `52 passed`、experience ingress 切片 `10 passed`、validation supervisor `11 passed`；targeted compile、静态 production-import 禁边、`git diff --check` 与 0079 checksum `f2cc0b206b0d23c68e9bac97bde164039ecad16f61441f1f32b3c16115b573ca` 均通过。
+
 ### AW-05：Model、Prompt、Governor、Capability 与 Domain Packs
 
-状态：`WAITING_FOR_AW_02_AW_03`
+状态：`IN_PROGRESS`
 
 目标：统一模型尝试、prompt 注册、授权、Tool/Capability Broker，并把领域流程从通用 executor 抽成受治理 Domain Pack。
 
@@ -433,12 +437,12 @@ AW-08 只有在以下全部成立时才完成：
 | AW-01 | `DONE` | Host security 显式 container/lifecycle、composition 禁边、Mate 真实 socket-activation 已切流；无 P0/P1 |
 | AW-02 | `DONE` | chat/host input/Internal Agent/Scheduler 共用 governed Task/Agent 主链，canonical assignment 决定真实 executor |
 | AW-03 | `DONE` | migration/UoW/journal/outbox、Memory/Canon 单写脊柱已切流；业务 SQLite authority 为 0；无 P0/P1 |
-| AW-04 | `IN_PROGRESS` | 建立唯一 LifeCoordinator/Clock/Outbox，删除读侧推进、多主动发送与平行 InnerWorld/Tribe writer |
-| AW-05 | `WAITING` | 单 Model/Capability/Governor 路径与首批 Domain Pack |
+| AW-04 | `DONE` | LifeCommand/Event/Reducer/Projection/Outbox/Receipt 单脊柱、SchedulerClock 单时钟与 execution-time grant/lease fencing 已切流；无 P0/P1 |
+| AW-05 | `IN_PROGRESS` | PromptRegistry/ModelAttemptService foundation 后，原子切换 Surface/Thalamus/Agent/Tool/Pack 真实调用链并删除旧 authority |
 | AW-06 | `WAITING` | AW-01 后可建 Edge foundation；AW-02/03/04 后完成 production cutover、设备单 authority |
 | AW-07 | `WAITING` | Query-only projection 与 typed Operator |
 | AW-08 | `WAITING` | 旧架构删除、`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`、一次最终实测与 Core Release |
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-04 的立即执行顺序：先冻结 `LifeCommandService`、`LifeSnapshotReader`、`LifeOutbox` 三个生产接口并建立单事务 Life event/reducer/outbox coordinator；随后并行切断 `runtime_lifespan`/Tribe 第二时钟、Life/Scheduler 双 proactive transport、Surface/Input/GET 读侧推进与两个未监管 post-process task；最后删除 OfflineInnerWorld/Tribe JSON writer 和 runtime `DigitalLifeSupervisor` authority，只保留 validation harness。整个波只在三条生产切流汇合后执行一次 integration wave，无需用户再次确认。
+AW-05 的立即执行顺序：先冻结 `PromptRegistry → ModelAttemptService → RoutePolicy → ProviderAdapter` 唯一接口与 attempt audit；随后按同一接口并行切换 Surface/Thalamus、Agent/SubAgent/Vision/Emergent 与现有 provider/llm helper，禁止业务模块自选 provider、内部重试或跨请求缓存；再把 Tool/Skill/MCP 收口到 Capability Broker，并抽取 Pentest、Media/Translation、Research/Browser 三类 Domain Pack。三条生产切流汇合后删除旧模型路由/重试与通用 executor 内的领域流程，只运行一次 AW-05 integration wave，无需用户再次确认。

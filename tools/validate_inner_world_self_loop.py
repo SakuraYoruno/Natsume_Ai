@@ -334,7 +334,7 @@ async def _run_loop(
     user_id = bond_user_id
     session_id = components.session_id
     state_dir = out_dir / "inner_world_state"
-    world = OfflineInnerWorld(state_dir=str(state_dir))
+    world = OfflineInnerWorld(state_dir=str(state_dir), persistence_enabled=True)
     registry = TribeStateRegistry()
     default_agent = DefaultModeAgent(state_registry=registry)
     store = components.store
@@ -787,7 +787,10 @@ def _run_circuit_breaker_probe(*, out_dir: Path, user_id: str) -> dict[str, Any]
             "available": False,
             "route_reason_code": "FIXTURE_MODEL_DOWN",
         }
-        world = OfflineInnerWorld(state_dir=str(out_dir / "breaker_probe_inner_world"))
+        world = OfflineInnerWorld(
+            state_dir=str(out_dir / "breaker_probe_inner_world"),
+            persistence_enabled=True,
+        )
         world.on_session_end(
             user_id=user_id,
             valence=-0.4,

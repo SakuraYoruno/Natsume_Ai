@@ -145,7 +145,6 @@ def runtime_lifespan(
         ledger = get_ledger()
         _activity_monitor = None
         _resource_manager = None
-        _life_continuity_started = False
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
@@ -562,23 +561,9 @@ def runtime_lifespan(
                     "Pentest zombie run recovery startup degraded: %s",
                     _pentest_recovery_exc,
                 )
-            try:
-                if not _background_tasks_enabled:
-                    new_module_statuses["life_continuity_loop"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    from host_brain.runtime.life_continuity import start_life_continuity_loop  # noqa: PLC0415
-
-                    _life_status = start_life_continuity_loop(ledger=ledger, logger=logger)
-                    _life_continuity_started = bool(_life_status.get("running"))
-                    new_module_statuses["life_continuity_loop"] = (
-                        f"{_life_status.get('status', 'UNKNOWN')} "
-                        f"(running={_life_status.get('running', False)}, "
-                        f"interval={_life_status.get('interval_s', '-')})"
-                    )
-                    logger.info("LifeContinuity loop startup: %s", _life_status)
-            except Exception as _life_loop_exc:
-                new_module_statuses["life_continuity_loop"] = f"DEGRADED: {_life_loop_exc}"
-                logger.warning("LifeContinuity loop startup degraded: %s", _life_loop_exc)
+            new_module_statuses["life_continuity_loop"] = (
+                "RETIRED: governed SchedulerClock life_tick owns periodic Life commands"
+            )
             try:
                 from host_brain.app.startup import reconcile_startup_degradation  # noqa: PLC0415
 
@@ -757,20 +742,10 @@ def runtime_lifespan(
                 _bus = get_tribe_event_bus()
                 await _bus.start()
 
-                # T-29：启动时从磁盘恢复 TribeStateRegistry 状态快照
-                try:
-                    from host_brain.tribe.tribe_state import get_global_registry as _get_global_registry  # noqa: PLC0415
-                    _registry = _get_global_registry()
-                    _loaded = _registry.load_snapshot()
-                    if _loaded:
-                        logger.info("TribeStateRegistry 状态快照已恢复（跨会话持久化）")
-                    else:
-                        logger.debug("TribeStateRegistry 无持久化快照（首次启动或文件不存在）")
-                    # T-32：启动定时保存（默认每 5 分钟，可通过 NATSUME_TRIBE_STATE_SAVE_INTERVAL 覆盖）
-                    _registry.start_periodic_save()
-                    logger.info("TribeStateRegistry 定时保存已启动")
-                except Exception as _snap_exc:
-                    logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
+                new_module_statuses["tribe_state_persistence"] = (
+                    "RETIRED: production Tribe registry is transient; durable Life state "
+                    "belongs to the command repository"
+                )
 
                 # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent
                 # → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent
@@ -846,7 +821,6 @@ def runtime_lifespan(
             await _shutdown_runtime(
                 activity_monitor=_activity_monitor,
                 resource_manager=_resource_manager,
-                life_continuity_started=_life_continuity_started,
                 logger=logger,
             )
 

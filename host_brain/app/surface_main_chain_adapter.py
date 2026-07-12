@@ -9,9 +9,15 @@ from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
 
 from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.app.life_application_boundary import (
+    project_life_director_pack,
+    read_life_snapshot,
+    submit_life_command,
+)
 from host_brain.app.settings import get_persistence_settings
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.response_form_contract import normalize_response_form
+from host_brain.digital_life.contracts import LifeDeliveryAuthorization
 from host_brain.persona.surface_affect_control import (
     SurfaceAffectControlPacket,
     affect_control_packet_from_mapping,
@@ -760,10 +766,6 @@ async def surface_main_chain_sse_generator(
         llm_latency_ms=llm_latency_ms,
     )
     model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
-    trace["life_causality"] = {
-        "status": "SCHEDULED",
-        "reason_code": "POST_COMMIT_AFTEREFFECT",
-    }
     envelope = ReplyEnvelope.final_reply(
         text=narrative,
         response_form="text",
@@ -777,6 +779,70 @@ async def surface_main_chain_sse_generator(
             "emotion_confidence": float(result.runtime.emotion_confidence or 0.0),
         },
     )
+    if envelope.persistable:
+        try:
+            foreground_receipt = await asyncio.to_thread(
+                _submit_surface_foreground_completed,
+                agent_input=agent_input,
+                result=result,
+                envelope=envelope,
+                narrative=narrative,
+                trace_stage_meta=trace,
+                timings_ms=timings_ms,
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=llm_latency_ms,
+            )
+        except Exception as exc:
+            trace["life_causality"] = {
+                "status": "FAILED",
+                "reason_code": "LIFE_FOREGROUND_COMMIT_FAILED",
+                "error_type": type(exc).__name__,
+            }
+            failure_envelope = ReplyEnvelope.no_reply(
+                reason_code="LIFE_FOREGROUND_COMMIT_FAILED",
+                source="surface_main_chain",
+                audit={
+                    "request_id": request_id,
+                    "error_type": type(exc).__name__,
+                    "durability": "fail_closed_before_render",
+                },
+            )
+            yield _sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "NO_REPLY",
+                    "reason_code": failure_envelope.reason_code,
+                    "narrative": "",
+                    "request_id": request_id,
+                    "reply_envelope": failure_envelope.as_dict(),
+                    "audit_refs": {
+                        "request_id": request_id,
+                        "path": "surface_reply:surface_main_chain",
+                        "durability": "fail_closed_before_render",
+                        "trace_stage_meta": {
+                            **trace,
+                            "surface_main_chain_used": True,
+                            "reply_source": "surface_main_chain",
+                        },
+                    },
+                }
+            )
+            return
+        trace["life_causality"] = {
+            "status": str(foreground_receipt.get("status") or "UNKNOWN"),
+            "reason_code": foreground_receipt.get("reason_code"),
+            "command_id": foreground_receipt.get("command_id"),
+            "event_id": foreground_receipt.get("event_id"),
+            "state_version": foreground_receipt.get("state_version"),
+            "outbox_count": foreground_receipt.get("outbox_count"),
+            "replayed": bool(foreground_receipt.get("replayed")),
+        }
+    else:
+        trace["life_causality"] = {
+            "status": "SKIPPED",
+            "reason_code": "REPLY_NOT_PERSISTABLE",
+        }
     if narrative:
         yield _sse({"phase": "RENDER", "chunk": narrative})
         yield _sse({"phase": "SENTENCE", "sentence": narrative, "sentence_index": 0})
@@ -815,21 +881,6 @@ async def surface_main_chain_sse_generator(
                 },
             },
         }
-    )
-    _schedule_surface_post_process(
-        agent_input=agent_input,
-        result=result,
-        envelope=envelope,
-        narrative=narrative,
-        trace_stage_meta=trace,
-        timings_ms=timings_ms,
-        total_latency_ms=total_latency_ms,
-        llm_latency_ms=llm_latency_ms,
-    )
-    _schedule_surface_life_aftereffect(
-        agent_input=agent_input,
-        narrative=narrative,
-        trace_stage_meta=trace,
     )
 
 
@@ -1941,7 +1992,7 @@ def _merge_delegated_agent_trace(trace: dict[str, Any], delegated_agents: Sequen
     trace["delegated_agent_count"] = len(list(delegated_agents))
 
 
-def _schedule_surface_post_process(
+def _submit_surface_foreground_completed(
     *,
     agent_input: Any,
     result: SurfaceMainChainResult,
@@ -1951,97 +2002,250 @@ def _schedule_surface_post_process(
     timings_ms: Mapping[str, int],
     total_latency_ms: int,
     llm_latency_ms: int,
-) -> None:
-    ab_eval_mode = str(os.environ.get("AB_EVAL_MODE") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    } or bool(trace_stage_meta.get("ab_eval"))
-    if ab_eval_mode or not envelope.persistable:
-        return
-    try:
-        from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
+) -> dict[str, Any]:
+    """Commit one governed command for every durable Surface completion.
 
-        llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
-        model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
-        delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
-        trace = {
-            **dict(trace_stage_meta or {}),
-            "surface_main_chain_used": True,
-            "surface_reply_used": True,
-            "reply_source": "surface_main_chain",
-            "reply_envelope": envelope.as_dict(),
-            "surface_main_chain": _public_result_trace(result),
-            "timings_ms": dict(timings_ms),
-            "skip_heavy_persona_postprocess": True,
+    The former adapter launched two independent background writers.  Projection
+    and delivery work is now represented as intents committed atomically with the
+    foreground event; downstream workers own their execution and retry policy.
+    """
+
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
+    session_id = str(getattr(agent_input, "session_id", "") or "").strip()
+    user_message = str(getattr(agent_input, "user_message", "") or "")
+    reply_channel = str(
+        getattr(agent_input, "reply_channel", "")
+        or getattr(agent_input, "platform", "")
+        or ""
+    ).strip()
+    reply_target = str(
+        getattr(agent_input, "reply_target", "")
+        or getattr(agent_input, "conversation_id", "")
+        or ""
+    ).strip()
+    request_ts_ms = _coerce_int(getattr(agent_input, "ts_ms", 0), default=0)
+    completed_at_ms = int(time.time() * 1000)
+    emotion_context = _surface_emotion_context(agent_input, result=result)
+    bond_summary = _safe_mapping(getattr(agent_input, "bond_summary", None))
+    reply_plan = _selected_reply_plan(agent_input, trace_stage_meta)
+    life_director = _safe_mapping(dict(trace_stage_meta or {}).get("life_director"))
+    model_audit = _surface_model_audit_fields(
+        agent_input=agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
+    governor_result = _safe_mapping(
+        getattr(agent_input, "governor_result", None)
+    )
+    delivery_authorization = _surface_delivery_authorization(
+        agent_input,
+        trace_stage_meta=trace_stage_meta,
+        request_id=request_id,
+        governor_result=governor_result,
+    )
+    projection_base = {
+        "request_id": request_id,
+        "session_id": session_id,
+        "person_id": person_id,
+        "user_message": user_message,
+        "assistant_reply": str(narrative or ""),
+        "completed_at_ms": completed_at_ms,
+    }
+    delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
+    post_process_trace = {
+        **dict(trace_stage_meta or {}),
+        "surface_main_chain_used": True,
+        "surface_reply_used": True,
+        "reply_source": "surface_main_chain",
+        "reply_envelope": envelope.as_dict(),
+        "surface_main_chain": _public_result_trace(result),
+        "timings_ms": dict(timings_ms),
+        "skip_heavy_persona_postprocess": True,
+    }
+    _merge_delegated_agent_trace(post_process_trace, delegated_agents)
+    post_process_payload = {
+        **projection_base,
+        # Keep the former _async_post_process input contract together in one
+        # projection row.  The projection worker can therefore recover the
+        # conversation, emotion/bond and audit effects atomically.
+        "narrative": str(narrative or ""),
+        "thread_id": str(getattr(agent_input, "thread_id", "") or ""),
+        "request_ts_ms": request_ts_ms,
+        "ts_ms": request_ts_ms or completed_at_ms,
+        "render_target_lang": str(
+            getattr(agent_input, "render_target_lang", "zh") or "zh"
+        ),
+        "emotion_context": emotion_context,
+        "bond_summary": bond_summary,
+        "reply_plan": reply_plan,
+        "reply_envelope": envelope.as_dict(),
+        "reply_channel": reply_channel or None,
+        "reply_target": reply_target or None,
+        "model_audit": model_audit,
+        "provider_name": str(model_audit.get("provider_name") or ""),
+        "model_id": str(model_audit.get("model_id") or ""),
+        "timings_ms": dict(timings_ms),
+        "total_latency_ms": max(0, int(total_latency_ms or 0)),
+        "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
+        "first_token_ms": max(0, int(llm_latency_ms or 0)) if narrative else None,
+        "buffer_stream": True,
+        "delegated_agents": delegated_agents,
+        "retrieval_summary": _safe_mapping(
+            getattr(agent_input, "retrieval_summary", None)
+        ),
+        "retrieval_evidence_items": [
+            dict(item)
+            for item in list(
+                getattr(agent_input, "retrieval_evidence_items", None) or []
+            )
+            if isinstance(item, Mapping)
+        ],
+        "gov_decision": governor_result,
+        "pii_ingress_stats": _safe_mapping(
+            getattr(agent_input, "pii_ingress_stats", None)
+        ),
+        "pii_egress_stats": _safe_mapping(
+            getattr(agent_input, "pii_egress_stats", None)
+        ),
+        "llm_input_digest": json.dumps(
+            _public_result_trace(result), ensure_ascii=False
+        )[:500],
+        "motive_state": _safe_mapping(
+            dict(trace_stage_meta or {}).get("motive_state")
+            or getattr(agent_input, "motive_state", None)
+        ),
+        "trace_stage_meta": post_process_trace,
+        "attachments": [
+            dict(item)
+            for item in list(getattr(agent_input, "attachments", None) or [])
+            if isinstance(item, Mapping)
+        ],
+        "multimodal_observations": _safe_mapping(
+            getattr(agent_input, "multimodal_observations", None)
+        ),
+        "attachment_summary": str(
+            getattr(agent_input, "attachment_summary", "") or ""
+        ).strip(),
+        "life_director": life_director,
+    }
+    projection_intents = [
+        {
+            "target": "surface.post_process",
+            "payload": post_process_payload,
         }
-        _merge_delegated_agent_trace(trace, delegated_agents)
-        asyncio.create_task(
-            _async_post_process(
-                request_id=str(getattr(agent_input, "request_id", "") or ""),
-                person_id=str(getattr(agent_input, "person_id", "") or ""),
-                session_id=str(getattr(agent_input, "session_id", "") or ""),
-                user_message=str(getattr(agent_input, "user_message", "") or ""),
-                narrative=narrative,
-                emotion_context=_surface_emotion_context(agent_input, result=result),
-                bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
-                ts_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0) or int(time.time() * 1000),
-                render_target_lang="zh",
-                total_latency_ms=max(0, int(total_latency_ms or 0)),
-                llm_latency_ms=max(0, int(llm_latency_ms or 0)),
-                first_token_ms=max(0, int(llm_latency_ms or 0)) if narrative else None,
-                provider_name=str(model_audit.get("provider_name") or llm_runtime.get("provider_name") or ""),
-                model_id=str(model_audit.get("model_id") or llm_runtime.get("model_id") or ""),
-                buffer_stream=True,
-                delegated_agents=delegated_agents,
-                retrieval_summary=_safe_mapping(getattr(agent_input, "retrieval_summary", None)),
-                gov_decision={"decision": "APPROVE" if envelope.sendable else "NO_REPLY"},
-                pii_ingress_stats={},
-                pii_egress_stats={},
-                llm_input_digest=json.dumps(_public_result_trace(result), ensure_ascii=False)[:500],
-                retrieval_evidence_items=list(getattr(agent_input, "retrieval_evidence_items", None) or []),
-                motive_state=None,
-                reply_plan=_selected_reply_plan(agent_input, trace_stage_meta),
-                trace_stage_meta=trace,
-                attachments=list(getattr(agent_input, "attachments", None) or []),
-                multimodal_observations=_safe_mapping(getattr(agent_input, "multimodal_observations", None)),
-                attachment_summary=str(getattr(agent_input, "attachment_summary", "") or "").strip(),
-                reply_channel=str(getattr(agent_input, "reply_channel", "") or "").strip() or None,
-            )
+    ]
+    deliveries: list[dict[str, Any]] = []
+    embodiment_target = _safe_mapping(life_director.get("embodiment_target"))
+    if embodiment_target and delivery_authorization is not None:
+        delivery_request_base = request_id or session_id or person_id
+        deliveries.extend(
+            [
+                {
+                    "destination": "vts.emotion",
+                    "authorization": delivery_authorization.as_dict(),
+                    "payload": {
+                        "request_id": f"{delivery_request_base}:vts",
+                        "person_id": person_id,
+                        "emotion_tag": str(embodiment_target.get("emotion_tag") or "NEUTRAL"),
+                        "expression": str(embodiment_target.get("expression") or ""),
+                        "source_kind": "foreground_completed",
+                    },
+                },
+                {
+                    "destination": "mateengine.state",
+                    "authorization": delivery_authorization.as_dict(),
+                    "payload": {
+                        "request_id": f"{delivery_request_base}:mateengine",
+                        "person_id": person_id,
+                        "state": str(embodiment_target.get("mateengine_state") or "idle"),
+                        "emotion_tag": str(embodiment_target.get("emotion_tag") or "NEUTRAL"),
+                        "expression": str(embodiment_target.get("expression") or ""),
+                        "source_kind": "foreground_completed",
+                    },
+                },
+            ]
         )
-    except Exception:
-        return
+    state_patch: dict[str, Any] = {
+        "clock": {
+            "last_user_seen_ms": completed_at_ms,
+            "idle_minutes": 0,
+        },
+        "continuity": {
+            "last_interaction_digest": (user_message or str(narrative or ""))[:160],
+        },
+    }
+    if reply_channel and reply_target:
+        state_patch["proactive"] = {
+            "last_target": {
+                "platform": reply_channel,
+                "conversation_id": reply_target,
+            }
+        }
+    payload = {
+        **projection_base,
+        "state_patch": state_patch,
+        "emotion_context": emotion_context,
+        "bond_summary": bond_summary,
+        "reply_plan": reply_plan,
+        "life_director": life_director,
+        "model_audit": model_audit,
+        "surface_result": _public_result_trace(result),
+        "timings_ms": dict(timings_ms),
+        "total_latency_ms": max(0, int(total_latency_ms or 0)),
+        "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
+        "projection_intents": projection_intents,
+        "deliveries": deliveries,
+    }
+    return submit_life_command(
+        command_type="foreground_completed",
+        person_id=person_id,
+        command_id=(
+            f"life::foreground_completed::{request_id or session_id}"
+            if request_id or session_id
+            else ""
+        ),
+        correlation_id=request_id or None,
+        payload=payload,
+        created_at_ms=completed_at_ms,
+        metadata={
+            "source": "surface_main_chain",
+            "reply_sendable": bool(envelope.sendable),
+            "reply_persistable": bool(envelope.persistable),
+            "delivery_authorized": delivery_authorization is not None,
+        },
+    )
 
 
-def _schedule_surface_life_aftereffect(
-    *,
+def _surface_delivery_authorization(
     agent_input: Any,
-    narrative: str,
+    *,
     trace_stage_meta: Mapping[str, Any],
-) -> None:
-    async def _run() -> None:
-        try:
-            from host_brain.runtime.life_continuity import record_dialogue_aftereffect  # noqa: PLC0415
-
-            await record_dialogue_aftereffect(
-                ledger=_surface_life_ledger(),
-                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
-                session_id=str(getattr(agent_input, "session_id", "") or "").strip(),
-                request_id=str(getattr(agent_input, "request_id", "") or "").strip(),
-                user_message=str(getattr(agent_input, "user_message", "") or ""),
-                reply_text=str(narrative or ""),
-                life_director=_safe_mapping(dict(trace_stage_meta or {}).get("life_director")),
-                platform=str(getattr(agent_input, "reply_channel", "") or getattr(agent_input, "platform", "") or "").strip(),
-                conversation_id=str(getattr(agent_input, "reply_target", "") or getattr(agent_input, "conversation_id", "") or "").strip(),
-            )
-        except Exception:
-            return
-
+    request_id: str,
+    governor_result: Mapping[str, Any],
+) -> LifeDeliveryAuthorization | None:
+    if (
+        not request_id
+        or str(governor_result.get("decision") or "").strip().upper()
+        != "APPROVE"
+    ):
+        return None
+    raw = _safe_mapping(getattr(agent_input, "delivery_authorization", None))
+    if not raw:
+        raw = _safe_mapping(dict(trace_stage_meta or {}).get("delivery_authorization"))
     try:
-        asyncio.create_task(_run())
-    except Exception:
-        return
+        authorization = LifeDeliveryAuthorization.from_mapping(raw)
+    except ValueError:
+        return None
+    if authorization.request_id != request_id:
+        return None
+    from host_brain.orchestration.governor_grant import governor_grant_ref  # noqa: PLC0415
+
+    if authorization.governor_grant_ref != governor_grant_ref(
+        request_id,
+        governor_result,
+    ):
+        return None
+    return authorization
 
 
 def _surface_emotion_context(agent_input: Any, *, result: SurfaceMainChainResult | None = None) -> dict[str, Any]:
@@ -2948,12 +3152,6 @@ def _surface_user_preference_pack(agent_input: Any) -> dict[str, Any]:
         return {}
 
 
-def _surface_life_ledger() -> Any:
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-
-    return get_ledger()
-
-
 def _surface_life_director_pack(
     agent_input: Any,
     *,
@@ -2970,31 +3168,19 @@ def _surface_life_director_pack(
     if pack:
         return pack
     try:
-        from host_brain.runtime.life_continuity import advance_life_to_now, build_life_director_pack  # noqa: PLC0415
-
-        advance_life_to_now(
-            ledger=_surface_life_ledger(),
-            person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
-            reason="foreground_user_message",
-            incoming_event={
-                "session_id": str(getattr(agent_input, "session_id", "") or "").strip(),
-                "user_message": str(getattr(agent_input, "user_message", "") or "")[:240],
-            },
-            force=False,
+        snapshot = read_life_snapshot(
+            str(getattr(agent_input, "person_id", "") or "").strip() or "default"
         )
-
-        return _safe_mapping(
-            build_life_director_pack(
-                ledger=_surface_life_ledger(),
-                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
-                session_id=str(getattr(agent_input, "session_id", "") or "").strip(),
-                user_message=str(getattr(agent_input, "user_message", "") or ""),
-                task_mode=task_mode,
-                response_move=response_move,
-                reason="surface_main_chain",
-                trace_stage_meta=trace,
-            )
-        )
+        pack = project_life_director_pack(snapshot)
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["life_snapshot_ref"] = {
+                "person_id": snapshot["person_id"],
+                "version": snapshot["version"],
+                "state_digest": snapshot["state_digest"],
+                "source": "life_snapshot_reader",
+            }
+        _ = task_mode, response_move
+        return _safe_mapping(pack)
     except Exception:
         return {}
 

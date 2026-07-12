@@ -218,6 +218,20 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         lambda **_kwargs: base_lifespan(),
     )
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(
+        asgi,
+        "_compose_life_command_authority",
+        lambda current: (object(), object())
+        if current is ledger
+        else pytest.fail("wrong Life ledger"),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "_compose_life_dispatchers",
+        lambda current: (object(), object())
+        if current is ledger
+        else pytest.fail("wrong Life dispatcher ledger"),
+    )
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(asgi, "get_skill_registry", lambda: skill_registry)
     monkeypatch.setattr(asgi, "get_intent_engine", object)
@@ -423,6 +437,20 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
         lambda **_kwargs: base_lifespan(),
     )
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(
+        asgi,
+        "_compose_life_command_authority",
+        lambda current: (object(), object())
+        if current is ledger
+        else pytest.fail("wrong Life ledger"),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "_compose_life_dispatchers",
+        lambda current: (object(), object())
+        if current is ledger
+        else pytest.fail("wrong Life dispatcher ledger"),
+    )
     monkeypatch.setattr(asgi, "get_token_service", object)
     monkeypatch.setattr(
         asgi,

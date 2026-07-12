@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
 from typing import Any
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+import host_brain.conversation.memory_spine as memory_spine
 from host_brain.conversation.memory_spine import (
     backfill_conversation_turn_memory_spine,
     count_conversation_turn_memory_spine_gaps,
     record_conversation_turn_memory_spine,
 )
+from host_brain.digital_life.contracts import LifeCommand
+from host_brain.digital_life.service import LifeCommandService
 from host_brain.persistence.context_repository import ContextRepository
-from host_brain.persistence.experience_repository import ExperienceRepository
+from host_brain.persistence.life_command_repository import LifeCommandRepository
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,16 +51,18 @@ def _append_turn(
     person_id: str = "person-1",
     role: str = "user",
     ts_ms: int,
+    content: str | None = None,
+    turn_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
     repository.append_turn(
         {
-            "turn_id": f"turn::{request_id}::{role}",
+            "turn_id": turn_id or f"turn::{request_id}::{role}",
             "session_id": session_id,
             "person_id": person_id,
             "request_id": request_id,
             "role": role,
-            "content": f"content::{request_id}",
+            "content": content or f"content::{request_id}",
             "ts_ms": ts_ms,
             "turn_index": ts_ms - NOW,
             "lang": "zh",
@@ -65,7 +71,7 @@ def _append_turn(
     )
 
 
-def _append_life_projection(
+def _append_legacy_life_projection(
     db_path: Path,
     *,
     request_id: str,
@@ -87,7 +93,45 @@ def _append_life_projection(
         )
 
 
-def test_repositories_preserve_turn_window_filters_order_and_life_dedup(
+def _append_canonical_receipt(
+    db_path: Path,
+    *,
+    request_id: str,
+    role: str,
+    session_id: str = "session-main",
+    turn_id: str = "",
+    content: str = "",
+    ts_ms: int = NOW,
+    person_id: str = "person-1",
+) -> str:
+    command_id = memory_spine._conversation_turn_command_id(
+        request_id=request_id,
+        session_id=session_id,
+        turn_id=turn_id or f"turn::{request_id}::{role}",
+        role=role,
+        content=content or f"content::{request_id}",
+        ts_ms=ts_ms,
+    )
+    repository = LifeCommandRepository(db_path)
+    snapshot = repository.get_snapshot(person_id)
+    receipt = LifeCommandService(
+        repository,
+        clock=lambda: NOW + 100,
+    ).submit(
+        LifeCommand(
+            command_id=command_id,
+            person_id=person_id,
+            command_type="conversation_turn_recorded",
+            payload={"source": "memory_spine_test"},
+            expected_version=snapshot.version,
+            created_at_ms=NOW + 100,
+        )
+    )
+    assert receipt.command_id == command_id
+    return command_id
+
+
+def test_repositories_preserve_turn_window_filters_and_canonical_receipts(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
@@ -124,7 +168,12 @@ def test_repositories_preserve_turn_window_filters_order_and_life_dedup(
         person_id="person-2",
         ts_ms=NOW + 50,
     )
-    _append_life_projection(db_path, request_id="request-old", role="user")
+    command_id = _append_canonical_receipt(
+        db_path,
+        request_id="request-old",
+        role="user",
+        ts_ms=NOW + 10,
+    )
 
     default_window = turns.list_memory_spine_turns(
         person_id="person-1",
@@ -155,22 +204,9 @@ def test_repositories_preserve_turn_window_filters_order_and_life_dedup(
         include_asr_sessions=False,
     )] == ["request-asr"]
 
-    experience = ExperienceRepository(db_path)
-    assert experience.existing_conversation_turn_life_keys(
-        (("request-old", "user"), ("request-new", "assistant"))
-    ) == frozenset({("request-old", "user")})
-    assert experience.count_conversation_turn_memory_spine_gaps(
-        person_id="person-1",
-        session_id="",
-        limit=2_000,
-        include_asr_sessions=False,
-    ) == 1
-    assert experience.count_conversation_turn_memory_spine_gaps(
-        person_id="person-1",
-        session_id="",
-        limit=2_000,
-        include_asr_sessions=True,
-    ) == 3
+    receipt = LifeCommandRepository(db_path).get_receipt(command_id)
+    assert receipt is not None
+    assert receipt.command_id == command_id
 
 
 def test_memory_spine_orchestrates_durable_repositories_without_private_access(
@@ -192,14 +228,21 @@ def test_memory_spine_orchestrates_durable_repositories_without_private_access(
         role="assistant",
         ts_ms=NOW + 20,
     )
-    _append_life_projection(db_path, request_id="request-old", role="user")
+    _append_canonical_receipt(
+        db_path,
+        request_id="request-old",
+        role="user",
+        ts_ms=NOW + 10,
+    )
+    # A legacy experience row is deliberately present for request-new. It is
+    # not the dedupe authority, so that turn must remain eligible.
+    _append_legacy_life_projection(
+        db_path,
+        request_id="request-new",
+        role="assistant",
+    )
     ledger = DurableLedgerReference(db_path)
     monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr(
-        "host_brain.runtime.life_continuity.ensure_life_schema",
-        lambda _ledger: None,
-    )
-
     result = backfill_conversation_turn_memory_spine(
         person_id="person-1",
         dry_run=True,
@@ -226,11 +269,7 @@ def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
 
     monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
     monkeypatch.setattr(
-        "host_brain.runtime.life_continuity.ensure_life_schema",
-        lambda _ledger: None,
-    )
-    monkeypatch.setattr(
-        "host_brain.runtime.life_continuity.record_life_experience",
+        "host_brain.digital_life.experience_ingress.record_life_experience",
         fake_record_life_experience,
     )
     result = record_conversation_turn_memory_spine(
@@ -257,6 +296,82 @@ def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
     assert captured["uncertainty"] == 0.35
     assert captured["evidence"]["request_id"] == "request-voice"
     assert captured["evidence"]["input_source"] == "asr"
+    assert captured["evidence"]["canonical_life_command_id"] == (
+        "life::conversation_turn::request-voice::user"
+    )
+    assert captured["evidence"]["command_id"] == (
+        "life::conversation_turn::request-voice::user"
+    )
+    assert captured["evidence"]["idempotency_key"] == (
+        "life::conversation_turn::request-voice::user"
+    )
+    assert captured["evidence"]["canonical_idempotency_strategy"] == (
+        "request_id_role"
+    )
+    assert captured["evidence"]["canonical_turn_identity"] == {
+        "request_id": "request-voice",
+        "session_id": "session-main",
+        "turn_id": "turn::voice",
+        "turn_index": 7,
+        "role": "user",
+        "content_sha256": hashlib.sha256(
+            "不对，重新来".encode("utf-8")
+        ).hexdigest(),
+        "ts_ms": NOW,
+    }
+
+
+def test_record_turn_skips_on_canonical_receipt_not_legacy_event(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    _append_canonical_receipt(
+        db_path,
+        request_id="request-duplicate",
+        role="assistant",
+        content="已经处理",
+        turn_id="turn::duplicate",
+        ts_ms=NOW + 7,
+    )
+    ledger = DurableLedgerReference(db_path)
+    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+
+    result = record_conversation_turn_memory_spine(
+        request_id="request-duplicate",
+        session_id="session-main",
+        person_id="person-1",
+        role="assistant",
+        content="已经处理",
+        ts_ms=NOW + 7,
+        lang="zh",
+        turn_id="turn::duplicate",
+    )
+
+    assert result == {
+        "status": "SKIPPED",
+        "reason_code": "DUPLICATE_CONVERSATION_TURN",
+    }
+
+
+def test_requestless_turn_command_id_is_stable_and_content_sensitive() -> None:
+    kwargs = {
+        "request_id": "",
+        "session_id": "session-derived",
+        "turn_id": "turn-derived",
+        "role": "user",
+        "content": "同一条消息",
+        "ts_ms": NOW + 9,
+    }
+    first = memory_spine._conversation_turn_command_id(**kwargs)
+    second = memory_spine._conversation_turn_command_id(**kwargs)
+    changed = memory_spine._conversation_turn_command_id(
+        **{**kwargs, "content": "另一条消息"}
+    )
+
+    assert first == second
+    assert first.startswith("life::conversation_turn::derived::")
+    assert changed != first
 
 
 def test_memory_spine_module_has_no_sql_or_ledger_private_access() -> None:
@@ -264,6 +379,9 @@ def test_memory_spine_module_has_no_sql_or_ledger_private_access() -> None:
         ROOT / "host_brain" / "conversation" / "memory_spine.py"
     ).read_text(encoding="utf-8")
     forbidden = (
+        "ExperienceRepository",
+        "has_conversation_turn_life_event",
+        "existing_conversation_turn_life_keys",
         "._conn",
         "._write_lock",
         ".execute(",
