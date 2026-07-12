@@ -3,13 +3,13 @@
 
 # Natsume AI V1 长期演化能力重构架构基线（代码事实版）
 
-版本：v1.2
-日期：2026-07-10
+版本：v1.3
+日期：2026-07-12
 状态：`ADOPTED_ARCHITECTURE_BASELINE`
 代码基线：`dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72`
 工作区状态：dirty；未提交业务改动和运行数据未被视为稳定代码基线。
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
-正式执行入口：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`
+历史 M48 记录：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`
 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 完整程序执行：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
 
@@ -261,11 +261,11 @@ TaskStore 的持久化语义不仅是 SQLite 表，还包括：
 |---|---|
 | PRD | `FR-NLE-001`～`FR-NLE-005` |
 | DevSpec | `docs/30_devspec/DevSpec.md` §15 |
-| DevTasks | `TASK-0461`～`TASK-0486` |
-| 正式执行文档 | `docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md` |
+| 历史 DevTasks | `TASK-0461`～`TASK-0486`（仅作追踪） |
+| 正式执行文档 | `docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md` v2 |
 | TestPlan | `T-NLE-01`～`T-NLE-24` |
 | Trace | `R-178`～`R-182` |
 
-架构基线状态为 ADOPTED 不等于代码已经完成。任何能力只有在对应 TASK、T-NLE、迁移/对账、回滚证据和 Seal Result 均成立后，才可从规划口径变成当前代码事实。
+架构基线状态为 ADOPTED 不等于代码已经完成。任何能力只有在所属 Architecture Wave 完成 production cutover、旧 authority 收敛并通过 Master v2 的分层验收后，才可从规划口径变成当前代码事实。
 
-当前执行状态（2026-07-11）：TASK-0461～TASK-0485 已完成；TASK-0486 已生成全链验证、rollback matrix 和机器可读 Seal Result，但状态为 `BLOCKED`，不得表述为 `SEALED`。阻塞项是受信 previous IdentitySnapshot、live/prod rollback target 与 MASTER 最终批准。
+当前执行状态（2026-07-12）：M48 已实现资产作为历史地基复用，未完成的 production 接线并入 AW-00。旧 TASK-0486 的 identity/live/prod 环境欠项进入 AW-08 最终验收，不再阻塞 AW-01～AW-07 的本地架构实施。

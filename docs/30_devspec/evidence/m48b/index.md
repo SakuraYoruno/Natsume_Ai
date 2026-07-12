@@ -1,6 +1,6 @@
-# M48-B Evidence
+# M48-B Historical Evidence
 
-当前包含已批准的 Entry Gate 资产、TASK-0487～0495 交付证据与 TASK-0496 Safety Seal 结果；TASK-0487、TASK-0488、TASK-0493 已 `DONE`，TASK-0489～TASK-0492、TASK-0494～0495 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。TASK-0496 Safety Seal `BLOCKED` 于 protected production handoff、TASK-0486 Release Seal 与 MASTER 批准。
+本目录冻结为 2026-07-12 以前的历史证据，不再承担执行、handoff、Seal 或解锁职责。旧状态只描述当时的局部实现；未完成 production 接线已统一并入 Architecture Waves v2 的 AW-00，后续不再创建逐 TASK evidence 目录。
 
 - `M48B_ENTRY_GATE_PACKET.json`：所有权、migration、cutover、隔离 fixture 与 P0 控制的机器可读 SSOT。
 - `M48B_ENTRY_GATE_PACKET.md`：人工评审视图。

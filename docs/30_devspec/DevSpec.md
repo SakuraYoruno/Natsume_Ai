@@ -2,11 +2,11 @@
 标题：开发规格 DevSpec（当前代码工程契约参考）
 
 # Natsume Ai 开发规格（DevSpec）
-版本：v2.5
-日期：2026-07-10
+版本：v2.6
+日期：2026-07-12
 定位：当前代码的工程契约参考手册。每条契约应能追溯到具体文件、路由或运行时边界。
 
-状态说明：§1～§14 主要记录当前代码事实；§15 是 M48 `READY_FOR_EXECUTION` 契约；§16 是 M48～M57 `ADOPTED_TARGET_ARCHITECTURE` 完整目标合同。§15、§16 均不得在对应 TASK、测试与 Seal 证据成立前被观测或文档引用为当前运行能力。
+状态说明：§1～§14 主要记录当前代码事实；§15 保留 M48 历史工程合同；§16 是 Architecture Waves v2 的 `ADOPTED_TARGET_ARCHITECTURE` 合同。能力只有在所属 Wave 完成 production cutover、旧路径收敛并通过分层验收后才能描述为当前运行事实；旧 TASK/Seal 状态不再决定能力状态。
 
 ---
 
@@ -560,7 +560,7 @@ WAITING_ACCEPTANCE_REVIEW → ACCEPTED | FAILED | RETRY_PENDING | CANCELLED
 
 ---
 
-## 16. M48～M57 完整目标架构合同
+## 16. Architecture Waves v2 完整目标架构合同
 
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
 
@@ -568,7 +568,7 @@ Master 执行文档：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_
 
 M48 地基执行：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
 
-本节冻结目标工程边界，对应 `FR-ARCH-001`～`FR-ARCH-010`。目标蓝图解释最终归宿和设计理由；Master 执行文档定义 `TASK-0461～TASK-0622` 的任务顺序、依赖 Gate、切流、停止条件与回滚。三者发生冲突时，不得自行扩大实现范围：代码事实优先触发停工和文档修订，实施顺序与切流以 Master 执行文档为准，产品验收边界以 PRD 为准。
+本节冻结目标工程边界，对应 `FR-ARCH-001`～`FR-ARCH-010`。目标蓝图解释最终归宿和设计理由；Master v2 以 AW-00～AW-08 定义执行顺序、生产切流、验证层级、停止条件与回滚。历史 `TASK-0461～TASK-0622` 只保留需求和测试追踪，不再作为独立执行、提交或 Seal 单元。三者发生冲突时，以实际代码事实修订 Master 并继续推进；产品验收边界仍以 PRD 为准。
 
 ### 16.1 目标层次与依赖方向
 
@@ -724,26 +724,11 @@ read-model / UI contribution
 - UI 不直接查询业务表、domain private store 或进程全局缓存；不得显示 raw thought、secret、cookie 或未授权 identity/memory 正文。
 - 前端 client 从版本化 OpenAPI 生成，并通过 typecheck、unit/component、a11y、E2E、权限矩阵和 degraded-state 测试。
 
-TASK-0489 本地实现口径（implementation commit `3bc7eb7309f757dc40a6bc15167eac67e3ea17d6`）：
-
-- Obs 实际应用的 18 个基线 mutation route 已全部撤下；静态审计为 111 个 route entry、104 个唯一 method/path、0 个 mutation，保留的 3 个 POST 均绑定到明确的纯查询 endpoint。7 个重复 GET entry 是 M56 projection/route 收敛债务，不含 writer。
-- 16 个具有真实 domain owner 的原写动作已形成 typed command manifest、server authority binding、domain port 与 `/v1/host/obs-commands/{command_id}` HTTP adapter。`capability_forge.runtime-match` 不是 operator command，继续由 Host 内部受治理服务调用；不存在生产 owner 的 `wechat.channel.reset` 已显式退役，未知/退役 command 稳定拒绝且不写 outcome WAL。
-- `HOST_OBS_COMMAND_RELOCATION_MODE` 默认 `LEGACY_AUDIT`；只有 `QUERY_ONLY + HOST_SECURE_INGRESS_MODE=ENFORCE` 才允许执行。`SHADOW` 只评估，不执行 domain side effect；非法配置、缺 secret/store/journal/owner 均 terminal OFF。
-- Outcome journal 使用 auth/preauth digest 域、checksum chain、durable head anchor、容量预检、文件/目录 fsync、跨进程锁和 composition-lifetime owner；claim/receipt gap 保守封为 `UNCERTAIN`，terminal replay 补齐中央 result receipt，shutdown 必须先关闭 admission 并 drain in-flight 后释放 owner。
-- 当前状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，不是完成切流：受保护的 `host_brain/app/router_registry.py` 仍由 `MASTER / auto-jp-media-translation` 持有，Host production tree 尚未 mount command router，也未在 lifespan 构造/`aclose()` composition。handoff 前所有旧 mutation 保持拒绝，绝不恢复匿名 Obs writer。
-- JSONL journal 当前仍为 lock 内全量校验且 128 MiB 后 fail closed；validated index、segment rollover/archive 由后续 persistence 工作承接，不得在未解决前宣称长期高吞吐 production ready。
-
-TASK-0490 本地实现口径（implementation commit `161daa3c3c3bface5f98d2d212a44a4faa0a1816`）：
-
-- `HOST_SUPPLY_CHAIN_ACTIVATION_MODE` 只接受 `BUILTINS_ONLY`、`QUARANTINE`、`STAGED`；默认和非法配置均收敛到 fail-closed 的 `BUILTINS_ONLY`。`QUARANTINE` 只验证并隔离，`STAGED` 最多写入 durable `STAGED`；TASK-0490 不在 Host 进程内 import、activate 或 execute 外部 Python。
-- 严格 signed manifest 将 `bundle_kind`、`publisher_id`、name/version、完整 canonical inventory、SBOM 和 sandbox policy 绑定到专用 signer trust statement。调用方 kind/publisher 必须与签名身份一致；重复/非有限 JSON、未知字段、path traversal/歧义/碰撞、symlink/reparse/special file 和 depth/count/size 超限均 fail closed。
-- physical quarantine 采用 content-addressed 目录、无跟随链接的有界复制、fsync、临时目录复验、per-digest 跨进程锁与原子 no-replace 发布。source 或 manifest/evidence 在 verify→quarantine 间切换时，必须在 durable catalog mutation 前拒绝。
-- catalog migration `0060_skill_supply_chain.sql` 的 SHA-256 为 `ea7471978f063b6152f3f1699f6896fe5782bede412214b2162b3592b9a1618e`；bundle/append-only operation 表只保存 digest、signer、SBOM、sandbox、state/fencing 与 audit refs，不保存 raw bundle、signature 或 secret，repository 不在 runtime 建表。
-- 旧 Hub source install/search、raw custom-provider install/package import 和 package-manager auto-repair 在网络、subprocess、active package mutation 之前拒绝。focused unit/security/contract 为 `136 passed, 2 skipped`；integration 首次且仅一次 `1 passed`；独立审计已清零 TASK-owned P0/P1。
-- 当前状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`：受保护的 `host_brain/skills/provider_catalog.py` 仍有 `HOST_SKILL_EXTRA_PROVIDERS` production dynamic import；新 signed intake route 也尚未接 TASK-0487 SecureIngress 与 durable decision audit。两项 handoff 和 production construction test 落地前不得标 DONE，也不得宣称 production activation/sandbox execution。rollback 固定为 `BUILTINS_ONLY`，并保持旧 Hub/custom/extra/auto-repair 开关关闭。
+TASK-0489/0490 的局部实现细节与旧 handoff 状态已从工程合同移除；其代码事实由 AW-00 的 production composition、signed intake 和定向测试直接验收。Git 历史仍保留原始实现记录，但不再建立任务级批准门槛。
 
 ### 16.12 Evolution、Identity 与 Release 合同
 
+- 本节的 Evolution 新能力属于 AW-08 Core Release 之后的独立 Follow-up Goal；AW-00～AW-08 只冻结其边界，不实施 TASK-0609～0619，也不允许其阻塞核心架构封板。
 - Evolution Lab 提供 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 identity migration analysis；输出只能进入受治理 proposal/review，不得直接改写生产状态。
 - Identity 使用 immutable baseline + versioned adaptive overlay；激活前必须产生 replay/shadow evaluation、IdentitySnapshot/diff、审批和 rollback target。
 - ReleaseManifest 包含 commit、package、schema、protocol、model/prompt/avatar assets、SBOM、Gate 结果和 rollback compatibility。
@@ -756,25 +741,23 @@ TASK-0490 本地实现口径（implementation commit `161daa3c3c3bface5f98d2d212
 3. 双写不是默认策略；确需同步时只能由 transactional outbox 驱动，并具备 reconciliation、停止和 rollback 证据。
 4. 兼容 facade 必须声明 owner、usage telemetry、introduced version、remove-by version 和 fallback 行为；不得新增业务逻辑。
 5. 旧 projection 只读保留至对账完成；旧任务由旧执行器 drain，禁止跨执行器恢复。
-6. facade usage=0、两个稳定发布窗口、rollback drill 通过后必须删除旧入口、旧 writer、runtime DDL 和 feature flag。
+6. facade usage=0、所属 Architecture Wave 的 integration 与 rollback drill 通过后必须删除旧入口、旧 writer、runtime DDL 和 feature flag，不把退役统一拖到最终阶段。
 7. 不允许以“暂时兼容”为名永久保留新旧目录两套 Runtime、Life Core、Memory writer、Model Gateway、Governor 或 Device authority。
 
-### 16.14 M48～M57 里程碑合同
+### 16.14 Architecture Wave 合同
 
-下表的需求映射是主交付映射，不是排他映射。`FR-ARCH-001` 在 M49 建立边界并由 M57 终验全量依赖/巨石退役；`FR-ARCH-002` 在 M48-B/M49 建立安全与合同边界，并随 Host、Edge、Query/UI 迁移至 M56 完成跨运行面终验。
+| Wave | 目标主题 | 需求映射 | 退出 Gate |
+|---|---|---|---|
+| AW-00 | 平台安全能力生产接线 | FR-ARCH-002、007～009 | Obs/Pentest/Signed Intake/Bridge/Service Catalog 进入真实 lifecycle，默认 fail closed |
+| AW-01 | Contracts、Kernel、Composition 与依赖脊柱 | FR-ARCH-001～002 | 单 composition root、typed config、import guard 和真实无-global slice |
+| AW-02 | Governed Host Command/Task/Agent 主链 | FR-ARCH-003 | production chat/host input 使用 same revision、单 executor/receipt |
+| AW-03 | Durable Data/Event/Memory/Canon 脊柱 | FR-ARCH-005 | UoW/Journal/Outbox、projection rebuild，inline DDL/private conn 为 0 |
+| AW-04 | Digital Life 单内核 | FR-NLE-001～005、FR-ARCH-004 | 单 clock/writer、Surface 纯读、主动/具身 outbox |
+| AW-05 | Model/Prompt/Governor/Capability 与 Domain Packs | FR-ARCH-006～007 | 单 ModelAttempt/Broker/Grant 路径，Pack 无第二平台内核 |
+| AW-06 | Edge/Gateway/Device Authority | FR-ARCH-008 | Edge contracts-only 独立安装，物理输出 authority 唯一 |
+| AW-07 | Query/Observability 与 Operator Plane | FR-ARCH-009 | Query-only projection、generated client、写动作回 Secure Ingress |
+| AW-08 | Decompat 与 Core Release | FR-ARCH-010 | 旧 authority 删除，`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`，一次完整质量矩阵、真实 smoke 与 rollback Gate |
 
-| 里程碑 | 目标主题 | TASK 范围 | 需求映射 | 退出 Gate |
-|---|---|---|---|---|
-| M48-A | 长期演化安全地基 | TASK-0461～0486 | FR-NLE-001～005；FR-ARCH 全局前置 | 边界、TaskStore、Review、Event、Life OCC 及回滚 Seal |
-| M48-B | 平台 P0 安全封口 | TASK-0487～0496 | FR-ARCH-002、007～009 | Ingress/Gateway/Obs/Skill/Device 高风险入口 fail closed |
-| M49 | Contracts、Kernel、Composition、依赖治理 | TASK-0497～0510 | FR-ARCH-001～002 | 共享合同、UoW/Outbox 地基、依赖规则和 composition 成立 |
-| M50 | Host Application 与 Task/Agent Runtime 分层 | TASK-0511～0524 | FR-ARCH-003 | 单一任务执行主链、same revision、restart/retry 不重复副作用 |
-| M51 | Digital Life Kernel、Surface 与 Identity | TASK-0525～0538 | FR-ARCH-004 | 单时钟/单 writer、Surface 纯读、关系/身份可重放回滚 |
-| M52 | Memory、Knowledge、Event 与 Persistence | TASK-0539～0552 | FR-ARCH-005 | 唯一 Memory/Canon 写入口、projection 可重建、runtime DDL 为 0 |
-| M53 | Domain Pack 与 Capability Platform | TASK-0553～0566 | FR-ARCH-006 | Pack 可独立启停/授权/回滚且无平台级第二内核 |
-| M54 | Model、Prompt、Governor 与 Security Plane | TASK-0567～0580 | FR-ARCH-007 | 单一 ModelAttempt/ToolBroker/Authorization，供应链 Gate 通过 |
-| M55 | Edge、Gateway、Voice、Avatar 与 Device Runtime | TASK-0581～0594 | FR-ARCH-008 | Edge 独立安装，Host 实现导入为 0，物理输出 authority 唯一 |
-| M56 | Query/Observability Plane 与 Operator Console | TASK-0595～0608 | FR-ARCH-009 | Obs 只读、typed UI client、无 Query 绕写或私密泄漏 |
-| M57 | Evolution Lab、Decompat、Release 与最终封板 | TASK-0609～0622 | FR-ARCH-010 | 旧 facade/writer 按 Gate 删除，完整质量矩阵和 rollback Seal |
+AW-02/AW-03 及 AW-04/AW-05/AW-06 允许按 Master DAG 并行。执行状态只维护到 Architecture Wave；不得恢复“一个 TASK 同时只能一个 IN_PROGRESS”、逐任务证据、逐任务提交或外部 Seal 阻塞本地代码的旧机制。
 
-M48-A 与 M48-B 只有在文件、migration 和切流范围不重叠时才可并行；M49 以后按前置 Gate 和 Master 执行文档推进，不得只依据任务编号并行。任何里程碑未通过退出 Gate 时，后续里程碑不得把目标能力描述为已实现事实。
+历史 TASK-0609～0619 在 Core Release 后进入独立 Evolution Follow-up Goal；它们不参与 AW-08 DONE 判定。

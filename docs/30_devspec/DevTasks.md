@@ -1,28 +1,25 @@
 受众：CODEX
-标题：DevTasks（任务清单：唯一可执行任务来源）
+标题：DevTasks（历史任务与需求追踪登记册）
 
-版本：v2.11
+版本：v2.12
 日期：2026-07-12
+状态：`HISTORICAL_TRACE_REGISTRY`
 
-本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+本文件保留既有 TASK 编号、需求映射和历史交付记录，不再是完整架构重构的调度或提交 SSOT。自 Architecture Waves v2 起，唯一执行入口为：
 
-唯一性口径：本文件是任务注册与路由 SSOT；`TASK-0461～0486` 的完整任务卡委托给 M48-A 详细执行文档，`TASK-0487～0622` 的完整任务卡委托给 Master 执行文档。两份被委托文档均须由本文件登记后才可作为实现入口，架构蓝图、PRD、DevSpec 和 Trace 不能直接生成未登记任务。
+`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
 
-## 当前活动程序：M48～M57 完整架构重构
+## 当前活动程序：Architecture Waves v2
 
-- 完整程序执行文档：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
-- 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
-- 程序任务编号：`TASK-0461`～`TASK-0622`，共 162 项，编号不得复用或跳号。
-- 当前可执行批次：M48-A，`TASK-0461`～`TASK-0486`，详细任务卡见 `NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
-- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；Entry Gate 已于 2026-07-11 在仅限本地 default-off 实施范围内批准，`TASK-0487～0488` 与 `TASK-0493` 已 `DONE`，`TASK-0489～0492`、`TASK-0494～0495` 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`；`TASK-0496` BLOCKED 于这些 production handoff、M48-A Release Seal 与 MASTER Safety Seal 批准。
-- 后续批次：M49～M57，`TASK-0497`～`TASK-0622`，状态为 `PROGRAMMED`；只能按依赖 Gate 解锁，不能因任务已编号而越级实施。
-- 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
-- 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
-- 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0485` 已完成；Capability Maturity、durable DegradationState、Release Identity Snapshot、Execution/Review UI、Life evolution UI 与 Capability/Health/Identity governance UI 已按 T-NLE-01～23 落地，新增 read route/UI 默认关闭且不扩大写权限。
-- 当前任务：M48-A 的 `TASK-0486 / LTE-WP-80` 继续 `BLOCKED` 于真实 identity/live/prod/MASTER Seal；独立的 M48-B Entry Gate 已 OPEN。`TASK-0487～0488` 已完成且默认 fail closed。`TASK-0489` 的 production router/lifespan、`TASK-0490` 的 protected provider catalog/signed intake、`TASK-0491` 的 protected Pentest secure route/composition，以及 `TASK-0492` 的真实 service startup/reservation provider 均等待 handoff。`TASK-0493` 已完成不可降级 Edge contracts-only Delivery Gate。`TASK-0494` 已完成 Mate/Desktop/WeChat owned 安全内核，状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。`TASK-0495` 已完成不可变五域隔离 profile、no-real-I/O guard、双 fresh-root golden/fault matrix 与 provider fail-closed construction；focused `172 passed`、最终 changed-boundary atomic E2E `1 passed`，最终复审 P0/P1 cleared。生产 router/provider/startup/producer/verifier 与 live cutover 未 handoff，故同样保持 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。`TASK-0496` 三路只读 Seal 审计已生成机器可读 `BLOCKED` 结果：本地 owned 控制 PASS，但 protected handoff、TASK-0491 到期例外、TASK-0486 Release Seal、identity/live/prod rollback 与独立 MASTER 签署均未闭环；M49～M57 未解锁。
+- 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
+- `TASK-0461～TASK-0622` 共 162 个编号在 2026-07-12 冻结，仅作需求、测试和实现线索，不再维护独立执行状态。
+- 旧 `DONE` 只表示对应历史交付曾通过其局部验收，不代表最终 production authority 已切换。
+- 旧 `PROGRAMMED`、`BLOCKED`、`IMPLEMENTED_AWAITING_PROTECTED_HANDOFF` 均由 Master §10 映射到 AW-00～AW-08；不再等待 WIP owner、handoff、逐任务 Seal 或 MASTER 批准。
+- 当前唯一进行中的执行单元是 `AW-00 平台安全能力生产接线`；完成后按 Master DAG 自主进入 AW-01。
+- 每个 Architecture Wave 以 production cutover、单一 authority、旧路径删除和架构指标为完成条件；TASK 数量、文档、fixture 和测试数量不计为完成度。
+- 关联需求仍为 `FR-NLE-001～005`、`FR-ARCH-001～010`；关联测试仍可复用 `T-NLE-01～24`、`T-ARCH-01～30`，但验证频率服从 Master §5。
 
-本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
+本文件后续的所有任务条目均为历史记录。与当前代码事实或 Architecture Waves v2 冲突时，直接以代码事实修订 Master，不得恢复逐任务执行机制。
 
 ### 当前任务与主链入口（2026-06-04）
 

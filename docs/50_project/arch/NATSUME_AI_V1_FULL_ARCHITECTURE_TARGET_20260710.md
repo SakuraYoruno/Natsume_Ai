@@ -3,16 +3,16 @@
 
 # Natsume AI V1 完整架构重构目标蓝图（代码事实版）
 
-版本：v1.0
-日期：2026-07-10
+版本：v1.1
+日期：2026-07-12
 状态：`ADOPTED_TARGET_ARCHITECTURE`
-代码基线：`dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72`
-工作区状态：dirty；未提交业务代码和生成数据未被视为稳定基线。
+代码基线：目标事实最初采自 `dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72`；当前执行基线为 `codex/m48-integration@0aa4e9314`。
+工作区状态：AW-00 生产接线进行中；未知遗留源码 WIP 不再受保护，运行数据与 secret 不纳入 Git。
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 M48 地基执行：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`
 完整执行程序：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
 
-本文定义最终架构归宿和边界，不是直接任务来源。正式任务编号、依赖、切流和回滚以完整 CODEX 执行程序为准。
+本文定义最终架构归宿和边界，不是直接调度来源。依赖、切流、验证和回滚以 Architecture Waves v2 Master 执行合同为准；历史 TASK 编号只作追踪。
 
 ---
 
@@ -32,7 +32,7 @@ M48 只解决“系统能否安全地继续重构”：TaskStore、Verification�
 - 一个只读 Query/Observability Plane 和契约驱动的 Operator Console；
 - 一个受控的 Evolution Lab、Skill Compiler、Feedback 和 Identity Migration 闭环。
 
-完整工程任务范围为 `TASK-0461～TASK-0622`。Master 逐任务控制点名义相加约 454～787 日，其中共享基础设施、阶段 Seal、集成和回滚证据在多行重复计入；蓝图校准毛估约 420～660 个有效开发日，合并跨阶段重叠后的程序估算约 300～480 个有效开发日。对单人项目约为 18～30 个月；3～4 名熟悉代码库的工程师并行，仍需约 10～16 个月完成迁移、soak 和退役。
+历史 `TASK-0461～TASK-0622` 已证明不适合作为执行粒度：逐任务证据、提交、复审和 Seal 重复放大成本，却允许生产主链长期不切换。自 2026-07-12 起，核心架构改由 AW-00～AW-08 九个端到端架构波推进；每波必须包含 production cutover、单一 authority 收敛和旧路径删除。Evolution 新能力在 Core Release 后另立 Follow-up Goal。旧任务与原始日估仅保留为范围参考，不再用任务完成数或名义工期衡量架构进展。
 
 ---
 
@@ -467,23 +467,23 @@ Operator Console 不是简单监控页，而是三个受治理产品面：
 
 ---
 
-## 14. 完整里程碑
+## 14. Architecture Waves v2
 
-| 里程碑 | 主题 | TASK 范围 | 估算 |
-|---|---|---|---:|
-| M48-A | 长期演化安全地基 | TASK-0461～0486 | 58～97 日 |
-| M48-B | 平台 P0 安全封口 | TASK-0487～0496 | 20～35 日 |
-| M49 | Contracts、Kernel、Composition 与依赖治理 | TASK-0497～0510 | 30～50 日 |
-| M50 | Host Application 与 Task/Agent Runtime 分层 | TASK-0511～0524 | 40～65 日 |
-| M51 | Digital Life Kernel、Surface 与 Identity | TASK-0525～0538 | 45～75 日 |
-| M52 | Memory、Knowledge、Event 与 Persistence | TASK-0539～0552 | 40～70 日 |
-| M53 | Domain Pack 与 Capability Platform | TASK-0553～0566 | 35～60 日 |
-| M54 | Model、Prompt、Governor 与 Security Plane | TASK-0567～0580 | 35～60 日 |
-| M55 | Edge、Gateway、Voice、Avatar 与 Device Runtime | TASK-0581～0594 | 40～70 日 |
-| M56 | Query/Observability Plane 与 Operator Console | TASK-0595～0608 | 30～55 日 |
-| M57 | Evolution Lab、Decompat、Release 与最终封板 | TASK-0609～0622 | 45～75 日 |
+| Wave | 主题 | 核心结果 |
+|---|---|---|
+| AW-00 | 平台安全生产接线 | 已实现的 Ingress/Obs/Pentest/Supply-chain/Bridge 能力进入真实 composition 与 lifecycle |
+| AW-01 | Contracts/Kernel/Composition 脊柱 | 单装配根、typed settings、lifecycle、service catalog、依赖门禁 |
+| AW-02 | Governed Host Runtime | Secure Ingress → Application → Task/Agent Runtime 成为唯一新请求链 |
+| AW-03 | Durable Data/Event 脊柱 | UoW、Journal/Outbox、Migration、Memory/Canon 单写与 projection rebuild |
+| AW-04 | Digital Life 单内核 | 单 coordinator/clock/writer，Surface 纯读，主动/具身 durable outbox |
+| AW-05 | Model/Capability/Governor/Domain Pack | 单 ModelAttempt/Broker/Grant，领域逻辑离开通用 executor |
+| AW-06 | Edge/Gateway/Device Authority | Edge contracts-only 独立发布，物理输出单 authority |
+| AW-07 | Query/Operator Plane | Obs 只读、versioned projections、generated client、写动作回 Ingress |
+| AW-08 | Decompat/Core Release | 删除旧 authority，`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`，一次最终全量与真实实测 |
 
-M48-A、M48-B 在文件不重叠时允许并行。M49 以后以依赖 Gate 为准，而不是只按编号串行。
+AW-02/AW-03 和 AW-04/AW-05/AW-06 可按公共合同与文件 owner 安全并行。具体 DAG、效率护栏和测试频率以 Master v2 为准。
+
+Evolution Lab、Skill Compiler、Counterfactual、Knowledge OS 与 Identity Migration 仍属于完整目标架构，但移到 Core Release 后的独立 Follow-up Goal。它们不得在核心 authority、persistence 和 governance 尚未封板时提前成为实现主线。
 
 ---
 
@@ -491,25 +491,25 @@ M48-A、M48-B 在文件不重叠时允许并行。M49 以后以依赖 Gate 为�
 
 | 上游能力 | 目标落点 | 里程碑 |
 |---|---|---|
-| Universal Agent Runtime | Task/Agent Runtime | M48-A、M50 |
-| GraphState/Mutation/Replay | Task Event + Domain Journal + Projection | M48-A、M52、M56 |
-| Context/Capability/Search | Context Plane + Capability Plane + Retrieval | M48-A、M52～M54 |
-| Verifier/Critic/Judge/Review | Acceptance + Review/Token | M48-A、M54 |
-| Domain Pack | Domain Pack SDK/Registry | M53 |
-| Digital Life Core | `digital_life/` kernel and contexts | M51～M52 |
-| Operator Console | Typed Query Plane UI | M56 |
-| World Model | WorldProjection | M51 |
-| Scene Engine | SceneResolver | M51 |
-| Intent Arbiter | IntentArbiter | M51、M54 |
-| Shadow Execution | Task shadow + policy simulation | M48-A、M54、M57 |
-| Capability Maturity | CapabilityCatalog/Maturity | M48-A、M53 |
-| Skill Compiler | Evolution Lab + SkillBundle | M57 |
-| Experience Feedback | Feedback proposal pipeline | M57 |
-| Runtime Guardian | Lifecycle/Degradation/Service Catalog | M48-B、M49、M55 |
-| Counterfactual | Replay/Lab analysis | M57 |
-| Scenario Lab | Evolution Lab | M57 |
-| Knowledge OS | Knowledge context + Operator workflows | M52、M56、M57 |
-| Identity Migration | versioned identity + regression/migration | M51、M57 |
+| Universal Agent Runtime | Task/Agent Runtime | AW-02 |
+| GraphState/Mutation/Replay | Task Event + Domain Journal + Projection | AW-02、AW-03、AW-07 |
+| Context/Capability/Search | Context Plane + Capability Plane + Retrieval | AW-03、AW-05 |
+| Verifier/Critic/Judge/Review | Acceptance + Review/Token | AW-02、AW-05 |
+| Domain Pack | Domain Pack SDK/Registry | AW-05 |
+| Digital Life Core | `digital_life/` kernel and contexts | AW-04 |
+| Operator Console | Typed Query Plane UI | AW-07 |
+| World Model | WorldProjection | AW-04 |
+| Scene Engine | SceneResolver | AW-04 |
+| Intent Arbiter | IntentArbiter | AW-04、AW-05 |
+| Shadow Execution | Task shadow + policy simulation | AW-02、AW-05、Evolution Follow-up |
+| Capability Maturity | CapabilityCatalog/Maturity | AW-05 |
+| Skill Compiler | Evolution Lab + SkillBundle | Evolution Follow-up |
+| Experience Feedback | Feedback proposal pipeline | Evolution Follow-up |
+| Runtime Guardian | Lifecycle/Degradation/Service Catalog | AW-00、AW-01、AW-06 |
+| Counterfactual | Replay/Lab analysis | Evolution Follow-up |
+| Scenario Lab | Evolution Lab | Evolution Follow-up |
+| Knowledge OS | Knowledge context + Operator workflows | AW-03、AW-07、Evolution Follow-up |
+| Identity Migration | versioned identity + regression/migration | AW-04、Evolution Follow-up |
 
 ---
 

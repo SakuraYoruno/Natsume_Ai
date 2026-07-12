@@ -3,10 +3,10 @@
 
 # Natsume AI V1 长期演化能力重构正式执行文档（M48）
 
-版本：v1.1
-日期：2026-07-10
-状态：`BLOCKED`（TASK-0461～TASK-0485 已 `DONE`；TASK-0486 已完成本地验证与 Seal 资产，但阻塞于 identity continuity、生产演练环境和 MASTER Seal）
-文档类型：DevTasks / Execution Contract
+版本：v1.2
+日期：2026-07-12
+状态：`HISTORICAL_EXECUTION_RECORD`
+文档类型：Historical DevTasks / Implementation Record
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
 代码基线：`dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72`
@@ -16,9 +16,11 @@
 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 完整程序执行：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
-维护责任：MASTER 负责范围与切流批准；CODEX 负责按任务卡实施、验证和交付证据。
+维护责任：仅保留 M48 历史实现和测试线索；不再承担调度、批准或解锁职责。
 
-本文是完整架构程序的 **M48-A 安全地基**详细实现入口，不代表完整架构重构范围。架构依据用于解释“为什么”，本文定义 TASK-0461～0486“按什么顺序改哪些代码、如何验收、何时停止”；跨 M48-B～M57 的范围、依赖、切流、退役和最终 Gate 以完整程序执行文档为准。代码事实变化时先暂停对应任务并修订相应执行文档，不得用文档覆盖代码现实。
+> 执行替代声明：自 2026-07-12 起，`TASK-0461～0486` 不再是独立执行或 Seal 单元。已实现资产按代码事实复用，未完成 production 接线并入 Architecture Waves v2；identity/live/prod 环境欠项只进入最终验收，不阻塞本地架构重构。
+
+本文仅记录完整架构程序的 M48-A 历史安全地基，不代表完整架构重构范围，也不再定义执行顺序。当前唯一执行合同为 `NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md` v2.0。本文中的逐任务交付、独立报告、独立提交、MASTER 批准和 Seal 阻断条款全部失效。
 
 ---
 
