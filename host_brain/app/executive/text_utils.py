@@ -93,8 +93,7 @@ def _flatten_result_text(payload: Any) -> str:
         return str(payload)
     if isinstance(payload, list):
         parts = [_flatten_result_text(item) for item in payload]
-        return "
-".join(part for part in parts if part)
+        return "\n".join(part for part in parts if part)
     if isinstance(payload, dict):
         for key in ("result_text", "result", "detail", "message", "summary", "output", "text"):
             text = _flatten_result_text(payload.get(key))

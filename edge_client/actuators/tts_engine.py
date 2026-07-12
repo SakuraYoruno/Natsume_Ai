@@ -637,26 +637,23 @@ def build_tts_playback_event(
     - status 必须是合法值（否则抛出 ValueError）
     - 失败状态（failed）必须有 reason_code
     """
-    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
-    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
-
     if not request_id or not str(request_id).strip():
         err = ValueError("TTSPlaybackEvent requires request_id")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if not evidence_ref or not str(evidence_ref).strip():
         err = ValueError("TTSPlaybackEvent requires evidence_ref")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if status not in _VALID_PLAYBACK_STATUSES:
         err = ValueError(f"invalid TTS playback status: {status!r}")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     return TTSPlaybackEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         request_id=str(request_id),
         intent_id=intent_id,
         text=str(text),
@@ -664,7 +661,7 @@ def build_tts_playback_event(
         status=status,
         reason_code=reason_code,
         stage=stage,
-        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
         evidence_ref=str(evidence_ref),
     )
 
@@ -716,21 +713,18 @@ def build_barge_in_event(
     - asr_continued 默认 True（打断后 ASR 继续上送）
     - 打断不构成执行事实（无 intent_draft 字段）
     """
-    from host_brain.core.errors import VOICE_SCHEMA_INVALID as _VOICE_SCHEMA_INVALID
-    from host_brain.core.ids import new_request_id as _new_request_id
-
     if not interrupted_request_id or not str(interrupted_request_id).strip():
         err = ValueError("BargeInEvent requires interrupted_request_id")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     if not evidence_ref or not str(evidence_ref).strip():
         err = ValueError("BargeInEvent requires evidence_ref")
-        err.reason_code = _VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
+        err.reason_code = VOICE_SCHEMA_INVALID  # type: ignore[attr-defined]
         raise err
 
     return BargeInEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         session_id=str(session_id),
         interrupted_request_id=str(interrupted_request_id),
         trigger_ts_ms=int(trigger_ts_ms),

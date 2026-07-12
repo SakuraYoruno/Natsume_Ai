@@ -12,7 +12,7 @@ from host_brain.core.errors import (
     VOICE_GATE_RESOURCE_LIMITED,
     VOICE_GATE_TASK_INVALID,
 )
-from host_brain.core.ids import now_ms
+from host_brain.core.ids import new_request_id, now_ms
 
 
 TASK_ASR_INGRESS = "ASR_INGRESS"
@@ -92,8 +92,6 @@ def build_resource_preemption_event(
     - preemptor/preempted 必须是合法的 TASK_* 常量
     - evidence_ref 必填
     """
-    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
-
     valid_tasks = set(TASK_PRIORITY.keys())
     if preemptor not in valid_tasks:
         raise ValueError(f"invalid preemptor task: {preemptor!r}")
@@ -103,11 +101,11 @@ def build_resource_preemption_event(
         raise ValueError("ResourcePreemptionEvent requires evidence_ref")
 
     return ResourcePreemptionEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         preemptor=str(preemptor),
         preempted=str(preempted),
         reason_code=_RESOURCE_GATE_PREEMPTED,
-        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
         evidence_ref=str(evidence_ref),
     )
 

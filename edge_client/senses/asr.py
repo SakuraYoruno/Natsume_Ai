@@ -447,8 +447,6 @@ def build_asr_transcript_event(
     - 低置信度自动标注 low_confidence=True + reason_code=ASR_LOW_CONFIDENCE
     """
     from host_brain.core.errors import ASR_LOW_CONFIDENCE as _ASR_LOW_CONFIDENCE
-    from host_brain.core.ids import new_request_id as _new_request_id
-
     if not evidence_ref or not str(evidence_ref).strip():
         raise ValueError("ASRTranscriptEvent requires evidence_ref")
 
@@ -459,7 +457,7 @@ def build_asr_transcript_event(
     code = _ASR_LOW_CONFIDENCE if low_conf else None
 
     return ASRTranscriptEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         session_id=str(session_id),
         segment_id=str(segment_id),
         text=str(text),

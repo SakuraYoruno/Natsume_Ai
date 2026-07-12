@@ -25,8 +25,6 @@ from host_brain.core.errors import (
     RPC_EVENT_NETWORK_UNAVAILABLE,
     RPC_EVENT_SCHEMA_INVALID,
 )
-from host_brain.core.ids import now_ms
-
 logger = logging.getLogger("Natsume.edge.event_reporter")
 
 # ── 配置常量 ──

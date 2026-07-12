@@ -27,7 +27,7 @@ from host_brain.core.errors import (
     VTS_RECONNECTED,
     VTS_RECONNECT_EXHAUSTED,
 )
-from host_brain.core.ids import new_request_id, now_ms
+from host_brain.core.ids import now_ms
 
 logger = logging.getLogger("Natsume.edge.vts")
 
