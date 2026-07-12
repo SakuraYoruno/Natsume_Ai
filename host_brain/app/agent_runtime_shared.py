@@ -12,15 +12,14 @@ import concurrent.futures
 from functools import partial
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import Mapping
 from typing import Any, Callable, Sequence
 
-from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
 from host_brain.app.response_form_contract import derive_render_profile_for_response_form
+from host_brain.app.settings.orchestration import get_orchestration_settings
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
 
@@ -61,12 +60,7 @@ _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
 
 def _resolve_post_process_executor_workers() -> int:
-    raw = str(os.environ.get("HOST_POST_PROCESS_EXECUTOR_WORKERS") or "4").strip()
-    try:
-        value = int(raw)
-    except ValueError:
-        value = 4
-    return max(1, min(value, 16))
+    return get_orchestration_settings().post_process_executor_workers
 
 
 _POST_PROCESS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
@@ -1520,9 +1514,10 @@ class _SubAgentGatewayAdapter:
     def _resolve_fallback_model_ids(*, provider_name: str, primary_model_id: str) -> list[str]:
         if str(provider_name or "").strip().lower() != "gemini":
             return []
-        raw = str(os.environ.get("HOST_SUBAGENT_FALLBACK_MODEL_IDS") or "").strip()
-        if not raw:
-            raw = "gemini-3.1-pro-preview,gemini-2.5-flash-lite"
+        raw = (
+            get_orchestration_settings().subagent_fallback_model_ids.strip()
+            or "gemini-3.1-pro-preview,gemini-2.5-flash-lite"
+        )
         primary = str(primary_model_id or "").strip()
         rows: list[str] = []
         for chunk in raw.split(","):
@@ -1922,7 +1917,7 @@ def _maybe_build_recent_turn_answer(
     detect_recent_turn_query_role: Callable[[str], str | None] | None = None,
     load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
 ) -> str | None:
-    if not _parse_bool_env("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", default=True):
+    if not get_orchestration_settings().recent_turn_direct_answer_enabled:
         return None
     _detect_query_role = detect_recent_turn_query_role or _detect_recent_turn_query_role
     _load_turns = load_continuity_turns or _load_continuity_turns
@@ -2351,23 +2346,14 @@ def _render_delegated_result_naturally(
 
 
 def _resolve_retrieval_timeout_seconds() -> float:
-    raw = str(os.environ.get("HOST_TOP_AGENT_RETRIEVAL_TIMEOUT_MS") or "").strip()
-    try:
-        timeout_ms = int(raw) if raw else 20_000
-    except ValueError:
-        timeout_ms = 20_000
-    timeout_ms = max(500, min(timeout_ms, 60_000))
-    return timeout_ms / 1000.0
+    return get_orchestration_settings().top_agent_retrieval_timeout_ms / 1000.0
 
 
 def _resolve_selection_followup_retrieval_timeout_seconds() -> float:
-    raw = str(os.environ.get("HOST_SELECTION_FOLLOWUP_RETRIEVAL_TIMEOUT_MS") or "").strip()
-    try:
-        timeout_ms = int(raw) if raw else 35_000
-    except ValueError:
-        timeout_ms = 35_000
-    timeout_ms = max(1_000, min(timeout_ms, 90_000))
-    return timeout_ms / 1000.0
+    return (
+        get_orchestration_settings().selection_followup_retrieval_timeout_ms
+        / 1000.0
+    )
 
 
 def _needs_selection_followup_retrieval_budget(message: str) -> bool:
@@ -2678,7 +2664,7 @@ def _should_buffer_stream_output(
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
 ) -> bool:
-    if not _parse_bool_env("HOST_STREAM_REFLECTION_BUFFER_ENABLED", default=True):
+    if not get_orchestration_settings().stream_reflection_buffer_enabled:
         return False
     try:
         from host_brain.app.dependencies import get_reflection_chain  # noqa: PLC0415
@@ -2867,8 +2853,9 @@ async def _cortex_orchestrator_sse_generator_impl(
     async_post_process_fn: Callable[..., Any] | None = None,
     resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
     prefetch_retrieval_persona_inputs_fn: Callable[..., Any] | None = None,
-    chat_lite_governor_fn: Callable[..., dict[str, Any]] | None = None,
     resolve_person_id_fn: Callable[..., str] | None = None,
+    governed_command_application: Any | None = None,
+    command_authority: Mapping[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     orchestrator_started_ms = int(time.time() * 1000)
     _emit_sse = sse_fn or _sse
@@ -2883,7 +2870,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     _post_process = async_post_process_fn or _async_post_process
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
     _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or _prefetch_retrieval_persona_inputs
-    _chat_governor = chat_lite_governor_fn or chat_lite_governor
     _resolve_person = resolve_person_id_fn or resolve_person_id
 
     user_message = str(request_body.message or "").strip()
@@ -2951,8 +2937,11 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     yield _emit_sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
-    gov = _chat_governor(session_id=session_id, request_id=request_id)
-    if gov["decision"] != "APPROVE":
+    # The surface Governor is the only authorization authority.  The former
+    # chat-lite pass was a second, unrelated decision after the official
+    # route grant and could silently override it.
+    gov = dict(governor_result or {})
+    if str(gov.get("decision") or "").strip().upper() != "APPROVE":
         yield _emit_sse(
             {
                 "phase": "COMMIT",
@@ -2962,6 +2951,32 @@ async def _cortex_orchestrator_sse_generator_impl(
                 "request_id": request_id,
             }
         )
+        return
+
+    render_target_lang = _resolve_text_render_target_lang(
+        request_body=request_body,
+        sanitized_message=sanitized_message,
+    )
+
+    if (
+        governed_command_application is not None
+        and callable(getattr(governed_command_application, "supports", None))
+        and governed_command_application.supports(intent_draft)
+    ):
+        async for governed_event in governed_command_application.execute_stream(
+            request_body=request_body,
+            request_id=request_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+            intent_draft=intent_draft,
+            governor_result=gov,
+            person_id=person_id,
+            sanitized_message=sanitized_message,
+            emotion_context=emotion_context,
+            render_target_lang=render_target_lang,
+            command_authority=dict(command_authority or {}),
+        ):
+            yield _emit_sse(dict(governed_event))
         return
 
     bond_summary: dict[str, Any] = {}
@@ -2975,11 +2990,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             request_id=str(request_id or ""),
         )
 
-    render_target_lang = _resolve_text_render_target_lang(
-        request_body=request_body,
-        sanitized_message=sanitized_message,
-    )
-
     task_progress_answer = (
         _task_progress_fastpath(
             request_id=request_id,
@@ -2988,7 +2998,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             render_target_lang=render_target_lang,
         )
-        if _parse_bool_env("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", default=False)
+        if get_orchestration_settings().legacy_direct_text_routes_enabled
         else None
     )
     if task_progress_answer:
@@ -3049,7 +3059,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             render_target_lang=render_target_lang,
         )
-        if _parse_bool_env("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", default=False)
+        if get_orchestration_settings().legacy_direct_text_routes_enabled
         else None
     )
     if recent_turn_answer:
@@ -3226,7 +3236,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             render_target_lang=render_target_lang,
         )
-        if _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
+        if get_orchestration_settings().clarification_direct_enabled
         else None
     )
     if clarification_direct_answer:
@@ -3960,10 +3970,9 @@ async def _async_post_process(
         _logger.debug("[%s] cortex_orchestrator post_process vts failed: %s", request_id, exc)
 
     try:
-        tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
-        tts_sentence_stream = str(os.environ.get("HOST_TTS_SENTENCE_STREAM_ENABLED") or "true").strip().lower()
-        skip_bulk_tts = tts_sentence_stream in ("1", "true", "yes", "on")
-        if tts_enabled in ("1", "true", "yes", "on") and narrative.strip() and not skip_bulk_tts:
+        orchestration_settings = get_orchestration_settings()
+        skip_bulk_tts = orchestration_settings.tts_sentence_stream_enabled
+        if orchestration_settings.stream_tts_enabled and narrative.strip() and not skip_bulk_tts:
             from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
             from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
 

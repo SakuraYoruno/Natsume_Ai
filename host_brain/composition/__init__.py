@@ -20,17 +20,31 @@ from host_brain.composition.security_services import (
     SecurityServiceStatus,
     build_process_security_service_container,
 )
+from host_brain.composition.task_runtime import (
+    ProcessTaskRuntimeContainer,
+    TaskRuntimeCloseFailure,
+    TaskRuntimeContainerCloseError,
+    TaskRuntimeContainerConstructionError,
+    TaskRuntimeContainerError,
+    build_process_task_runtime_container,
+)
 
 __all__ = [
     "ActivationResult",
     "PreparedServiceStart",
     "ProcessSecurityServiceContainer",
+    "ProcessTaskRuntimeContainer",
     "SecurityServiceCloseFailure",
     "SecurityServiceContainerCloseError",
     "SecurityServiceName",
     "SecurityServiceStatus",
     "ServiceCatalogStartupCoordinator",
+    "TaskRuntimeCloseFailure",
+    "TaskRuntimeContainerCloseError",
+    "TaskRuntimeContainerConstructionError",
+    "TaskRuntimeContainerError",
     "activate_candidate",
     "build_process_security_service_container",
+    "build_process_task_runtime_container",
     "prepare_service_start",
 ]

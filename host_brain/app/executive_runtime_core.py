@@ -10,9 +10,9 @@ entrypoints are intentionally not reintroduced here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -25,6 +25,7 @@ from host_brain.app.relational_chat_detector import build_relational_chat_reason
 from host_brain.app.runtime_capability_synthesizer import synthesize_runtime_capability
 from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_skill_dag_plan
 from host_brain.app.skill_family_router import build_skill_route_decision
+from host_brain.app.settings.orchestration import get_orchestration_settings
 from host_brain.agent_runtime.skill_ids import AGENT_RUN_MODE_BY_SKILL_ID, is_agent_runtime_skill
 from host_brain.skills.executor_registry import dispatch_executor_payload
 
@@ -161,28 +162,6 @@ class _ExecutionOutcome:
 def _normalize_text(value: Any, *, lower: bool = False) -> str:
     text = str(value or "").strip()
     return text.lower() if lower else text
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    value = str(os.getenv(name) or "").strip().lower()
-    if not value:
-        return bool(default)
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
-    raw = str(os.getenv(name) or "").strip()
-    if not raw:
-        return int(default)
-    try:
-        value = int(raw)
-    except Exception:
-        return int(default)
-    return max(int(minimum), min(int(maximum), value))
 
 
 def _run_awaitable_sync(awaitable: Any) -> Any:
@@ -590,12 +569,7 @@ def _should_force_complex_plan(
         return True
 
     normalized_message = _normalize_text(user_message)
-    min_chars = _parse_int_env(
-        "HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_MIN_CHARS",
-        default=24,
-        minimum=8,
-        maximum=400,
-    )
+    min_chars = get_orchestration_settings().executive_auto_complex_plan_min_chars
     if len(normalized_message) < min_chars:
         return False
 
@@ -794,12 +768,7 @@ async def _dispatch_to_sub_agent(
 
     started = time.time()
     dispatcher = get_sub_agent_dispatcher()
-    timeout_ms = _parse_int_env(
-        "HOST_SUBAGENT_DISPATCH_TIMEOUT_MS",
-        default=90_000,
-        minimum=5_000,
-        maximum=300_000,
-    )
+    timeout_ms = get_orchestration_settings().subagent_dispatch_timeout_ms
     response = await dispatcher.dispatch(
         SubAgentRequest(
             agent_id=target_id,
@@ -837,11 +806,18 @@ def _log_skill_exec_row(
     result_digest: str,
     approval_token_ref: str | None,
     ts_ms: int,
+    ledger: Any | None = None,
+    evidence_ref: str | None = None,
 ) -> None:
+    if ledger is False:
+        return
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        if ledger is None:
+            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
 
-        get_ledger().log_skill_exec(
+            ledger = get_ledger()
+
+        ledger.log_skill_exec(
             {
                 "request_id": request_id,
                 "thread_id": None,
@@ -855,13 +831,20 @@ def _log_skill_exec_row(
                 "result_status": result_status,
                 "result_code": result_code,
                 "result_digest": result_digest[:4000] if result_digest else None,
-                "evidence_ref": f"skill_exec::{request_id}::{skill_name}",
+                "evidence_ref": evidence_ref or _skill_receipt_ref(request_id, skill_name),
                 "manifest_ref": None,
                 "ts_ms": ts_ms,
             }
         )
     except Exception as exc:
         _logger.debug("[%s] skill exec audit skipped skill=%s: %s", request_id, skill_name, exc)
+
+
+def _skill_receipt_ref(request_id: str, skill_name: str) -> str:
+    digest = hashlib.sha256(
+        f"{str(request_id or '').strip()}\n{str(skill_name or '').strip()}".encode("utf-8")
+    ).hexdigest()
+    return f"skillreceipt://sha256/{digest}"
 
 
 def _execute_skill(
@@ -878,12 +861,18 @@ def _execute_skill(
     intent_draft: dict[str, Any],
     emotion_context: dict[str, Any],
     render_target_lang: str,
+    skill_registry: Any | None = None,
+    token_service_override: Any | None = None,
+    ledger: Any | None = None,
 ) -> _ExecutionOutcome:
-    from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
-
     started = time.time()
-    registry = get_skill_registry()
+    if skill_registry is None:
+        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+
+        skill_registry = get_skill_registry()
+    registry = skill_registry
     skill_meta = registry.require(skill_id)
+    skill_receipt_ref = _skill_receipt_ref(request_id, skill_id)
     approval_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("approval_token_ref"))
     confirm_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("confirm_token_ref"))
     execution_intent_id = _normalize_text(intent_id) or f"intent::{request_id}::{skill_id}"
@@ -900,6 +889,8 @@ def _execute_skill(
             result_digest=error_text,
             approval_token_ref=approval_token_ref or None,
             ts_ms=int(time.time() * 1000),
+            ledger=ledger,
+            evidence_ref=skill_receipt_ref,
         )
         return _ExecutionOutcome(
             route_type="skill",
@@ -909,7 +900,10 @@ def _execute_skill(
             result_text="",
             error_text=error_text,
             latency_ms=latency_ms,
-            payload={"approval_token_ref": approval_token_ref or None},
+            payload={
+                "approval_token_ref": approval_token_ref or None,
+                "receipt_ref": skill_receipt_ref,
+            },
         )
 
     action_arbiter_decision: dict[str, Any] | None = None
@@ -931,10 +925,13 @@ def _execute_skill(
             authority_error = "ARBITER_INTENT_SEQ_INVALID"
 
         if not authority_error:
-            from host_brain.app.dependencies import get_token_service  # noqa: PLC0415
             from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL  # noqa: PLC0415
 
-            token_service = get_token_service()
+            if token_service_override is None:
+                from host_brain.app.dependencies import get_token_service  # noqa: PLC0415
+
+                token_service_override = get_token_service()
+            token_service = token_service_override
             token_check = token_service.validate_bound_token(
                 approval_token_ref or None,
                 expected_type=TOKEN_TYPE_APPROVAL,
@@ -1024,6 +1021,8 @@ def _execute_skill(
                 result_digest=authority_error,
                 approval_token_ref=approval_token_ref or None,
                 ts_ms=int(time.time() * 1000),
+                ledger=ledger,
+                evidence_ref=skill_receipt_ref,
             )
             return _ExecutionOutcome(
                 route_type="skill",
@@ -1036,6 +1035,7 @@ def _execute_skill(
                 payload={
                     "approval_token_ref": approval_token_ref or None,
                     "action_arbiter_decision": action_arbiter_decision,
+                    "receipt_ref": skill_receipt_ref,
                 },
             )
 
@@ -1110,6 +1110,8 @@ def _execute_skill(
             result_digest=(result_text or str(raw_result or "")),
             approval_token_ref=approval_token_ref or None,
             ts_ms=int(time.time() * 1000),
+            ledger=ledger,
+            evidence_ref=skill_receipt_ref,
         )
         return _ExecutionOutcome(
             route_type="skill",
@@ -1123,6 +1125,7 @@ def _execute_skill(
                 "result": raw_result,
                 "approval_token_ref": approval_token_ref or None,
                 "fallback_policy": str(skill_meta.fallback_policy or "chat_fallback"),
+                "receipt_ref": skill_receipt_ref,
             },
         )
     except Exception as exc:
@@ -1136,6 +1139,8 @@ def _execute_skill(
             result_digest=str(exc),
             approval_token_ref=approval_token_ref or None,
             ts_ms=int(time.time() * 1000),
+            ledger=ledger,
+            evidence_ref=skill_receipt_ref,
         )
         return _ExecutionOutcome(
             route_type="skill",
@@ -1148,6 +1153,7 @@ def _execute_skill(
             payload={
                 "approval_token_ref": approval_token_ref or None,
                 "fallback_policy": str(getattr(skill_meta, "fallback_policy", "chat_fallback") or "chat_fallback"),
+                "receipt_ref": skill_receipt_ref,
             },
         )
 
@@ -2249,14 +2255,12 @@ async def stream_chat_route(
 
 
 def _legacy_direct_text_routes_enabled() -> bool:
-    raw = str(os.environ.get("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return get_orchestration_settings().legacy_direct_text_routes_enabled
 
 
 def _action_arbiter_execution_enabled() -> bool:
     """Canary switch; release cutover enables this after focused validation."""
-    raw = str(os.environ.get("HOST_ACTION_ARBITER_ENABLED") or "false").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return get_orchestration_settings().action_arbiter_enabled
 
 
 async def _executive_runtime_core_impl(

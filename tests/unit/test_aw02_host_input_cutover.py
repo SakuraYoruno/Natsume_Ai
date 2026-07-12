@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from fastapi import HTTPException
+
+import host_brain.app.input_routes as input_routes
+from host_brain.app.input_routes import InputPayload
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _secure_outcome() -> HostGatewayIngressOutcome:
+    return HostGatewayIngressOutcome(
+        allowed=True,
+        duplicate=False,
+        reason_code="SECURE_INGRESS_ALLOWED",
+        claim_ref="secure-ingress-claim://aw02/input",
+        audit_ref="secure-ingress-audit://aw02/input",
+        principal_id="service.edge.gateway",
+        idempotency_key="aw02-input",
+        body_sha256="a" * 64,
+        request_id="request.gateway.aw02.input",
+    )
+
+
+def _gateway_body() -> InputPayload:
+    return InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="conversation-aw02",
+        content="请执行这个任务",
+    )
+
+
+def _prepare_receive_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        input_routes,
+        "_evaluate_host_gateway_ingress",
+        lambda **_kwargs: _secure_outcome(),
+    )
+    monkeypatch.setattr(
+        input_routes,
+        "_evaluate_immune_gate_for_input",
+        lambda **_kwargs: {"decision": "ALLOW", "reason_codes": []},
+    )
+    monkeypatch.setattr(
+        input_routes,
+        "_record_feedback_for_latest_persona_reply",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(input_routes, "_get_ledger_safe", lambda: None)
+
+
+def test_router_factory_closure_injects_governed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = Mock(name="governed_provider")
+    delegated = AsyncMock(
+        return_value=input_routes.InputResponse(
+            success=True,
+            request_id="request.gateway.aw02.factory",
+            source="GATEWAY",
+            status="COMPLETED",
+            detail="ok",
+            ts_ms=1,
+        )
+    )
+    monkeypatch.setattr(input_routes, "receive_input", delegated)
+    router = input_routes.create_input_router(
+        governed_command_application_provider=provider,
+    )
+    endpoint = next(route.endpoint for route in router.routes if route.path.endswith("/input"))
+
+    _run(endpoint(_gateway_body(), SimpleNamespace()))
+
+    assert delegated.await_args.kwargs["governed_command_application_provider"] is provider
+
+
+def test_dispatch_is_awaited_and_carries_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = Mock(name="governed_provider")
+    authority = {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": "secure-ingress-claim://aw02/awaited",
+        "audit_ref": "secure-ingress-audit://aw02/awaited",
+        "body_sha256": "b" * 64,
+    }
+    expected = {
+        "decision": "APPROVE",
+        "commit_event": {"execution_receipt": {"command_id": "command::aw02"}},
+    }
+    worker = AsyncMock(return_value=expected)
+    monkeypatch.setattr(input_routes, "_dispatch_to_graph_worker", worker)
+    monkeypatch.setattr(input_routes, "_get_ledger_safe", lambda: None)
+    monkeypatch.setattr(input_routes, "_log_input_event", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        input_routes,
+        "_maybe_schedule_gateway_immediate_ack",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(input_routes, "_build_gateway_route_preview", lambda _text: {})
+
+    result = _run(
+        input_routes._dispatch_to_graph(
+            request_id="request.gateway.aw02.awaited",
+            session_id="conversation-aw02",
+            source="GATEWAY",
+            text="执行",
+            payload={"platform": "qq", "conversation_id": "conversation-aw02"},
+            ts_ms=1,
+            governed_command_application_provider=provider,
+            command_authority=authority,
+        )
+    )
+
+    assert result == expected
+    assert worker.await_count == 1
+    assert worker.await_args.kwargs["dispatch_mode"] == "governed.awaited"
+    assert worker.await_args.kwargs["governed_command_application_provider"] is provider
+    assert worker.await_args.kwargs["command_authority"] == authority
+
+
+def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_receive_input(monkeypatch)
+    provider = Mock(name="governed_provider")
+    dispatch = AsyncMock(
+        return_value={
+            "decision": "APPROVE",
+            "reason_code": None,
+            "route_decision": {"route": "skill", "target_id": "runtime.skill"},
+            "commit_event": {
+                "phase": "COMMIT",
+                "execution_receipt": {"command_id": "command::aw02::durable"},
+            },
+        }
+    )
+    legacy_complete = Mock(side_effect=AssertionError("must not overwrite command id"))
+    monkeypatch.setattr(input_routes, "_dispatch_to_graph", dispatch)
+    monkeypatch.setattr(input_routes, "_complete_host_gateway_ingress", legacy_complete)
+
+    response = _run(
+        input_routes.receive_input(
+            _gateway_body(),
+            SimpleNamespace(),
+            governed_command_application_provider=provider,
+        )
+    )
+
+    assert response.request_id == "request.gateway.aw02.input"
+    assert response.status == "COMPLETED"
+    assert response.receipt_ref == "command::aw02::durable"
+    legacy_complete.assert_not_called()
+    assert dispatch.await_args.kwargs["command_authority"] == {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": "secure-ingress-claim://aw02/input",
+        "audit_ref": "secure-ingress-audit://aw02/input",
+        "body_sha256": "a" * 64,
+    }
+
+
+def test_direct_skill_missing_receipt_fails_without_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_receive_input(monkeypatch)
+    provider = Mock(name="governed_provider")
+    monkeypatch.setattr(
+        input_routes,
+        "_dispatch_to_graph",
+        AsyncMock(
+            return_value={
+                "decision": "APPROVE",
+                "route_decision": {"route": "skill", "target_id": "runtime.skill"},
+                "commit_event": {"phase": "COMMIT"},
+            }
+        ),
+    )
+    legacy_complete = Mock()
+    monkeypatch.setattr(input_routes, "_complete_host_gateway_ingress", legacy_complete)
+
+    with pytest.raises(HTTPException) as raised:
+        _run(
+            input_routes.receive_input(
+                _gateway_body(),
+                SimpleNamespace(),
+                governed_command_application_provider=provider,
+            )
+        )
+
+    assert raised.value.status_code == 503
+    assert "execution receipt" in str(raised.value.detail)
+    legacy_complete.assert_not_called()

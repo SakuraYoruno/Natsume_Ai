@@ -9,11 +9,16 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 import re
 import time
 from typing import Any, Mapping
+
+from host_brain.app.settings.input import (
+    InputSettings,
+    get_input_settings,
+    input_settings_from_mapping,
+)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -61,6 +66,13 @@ class HostGatewayIngressOutcome:
     principal_id: str | None = None
     idempotency_key: str | None = None
     body_sha256: str | None = None
+    request_id: str | None = None
+
+
+def _resolve_input_settings(env: Mapping[str, str] | None) -> InputSettings:
+    if env is None:
+        return get_input_settings()
+    return input_settings_from_mapping(env)
 
 
 def complete_host_gateway_ingress(
@@ -75,15 +87,13 @@ def complete_host_gateway_ingress(
 
     if not str(claim_ref or "").strip() or not str(result_ref or "").strip():
         return False
-    source = os.environ if env is None else env
+    settings = _resolve_input_settings(env)
     from host_brain.secure_ingress import SQLiteSecureIngressStore  # noqa: PLC0415
 
     resolved_db_path = Path(
         str(
             db_path
-            or source.get("NATSUME_AUDIT_DB")
-            or source.get("Natsume_AUDIT_DB")
-            or "host_brain/data/audit.sqlite3"
+            or settings.audit_db_path
         )
     )
     store = None
@@ -139,10 +149,10 @@ def _decode_identity_header(value: str) -> bytes:
 
 
 def _secure_ingress_secret_resolver(
-    env: Mapping[str, str],
+    settings: InputSettings,
 ):
     configured: dict[str, str] = {}
-    raw_mapping = str(env.get("HOST_SECURE_INGRESS_HMAC_SECRETS_JSON") or "").strip()
+    raw_mapping = str(settings.secure_ingress_hmac_secrets_json or "").strip()
     if raw_mapping:
         try:
             parsed = json.loads(raw_mapping)
@@ -154,12 +164,8 @@ def _secure_ingress_secret_resolver(
                 for key, value in parsed.items()
                 if str(key).strip() and isinstance(value, str) and value
             }
-    edge_key_id = str(
-        env.get("HOST_EDGE_GATEWAY_HMAC_KEY_ID") or "edge.gateway.hmac.v1"
-    ).strip()
-    edge_secret = str(
-        env.get("HOST_EDGE_GATEWAY_HMAC_SECRET") or ""
-    )
+    edge_key_id = str(settings.edge_gateway_hmac_key_id or "").strip()
+    edge_secret = str(settings.edge_gateway_hmac_secret or "")
     if edge_key_id and edge_secret:
         configured.setdefault(edge_key_id, edge_secret)
 
@@ -185,7 +191,7 @@ def evaluate_host_gateway_ingress(
     metadata.
     """
 
-    source = os.environ if env is None else env
+    settings = _resolve_input_settings(env)
     from natsume_contracts.identity import (  # noqa: PLC0415
         CredentialProof,
         CredentialProofKind,
@@ -202,10 +208,12 @@ def evaluate_host_gateway_ingress(
         SecureIngressService,
         SQLiteSecureIngressStore,
         build_surface_request,
-        load_secure_ingress_mode,
     )
 
-    mode = load_secure_ingress_mode(source)
+    try:
+        mode = SecureIngressMode(str(settings.secure_ingress_mode or "OFF").strip().upper())
+    except ValueError:
+        mode = SecureIngressMode.OFF
     if mode is not SecureIngressMode.ENFORCE:
         return HostGatewayIngressOutcome(
             allowed=False,
@@ -216,9 +224,7 @@ def evaluate_host_gateway_ingress(
     resolved_db_path = Path(
         str(
             db_path
-            or source.get("NATSUME_AUDIT_DB")
-            or source.get("Natsume_AUDIT_DB")
-            or "host_brain/data/audit.sqlite3"
+            or settings.audit_db_path
         )
     )
     store = None
@@ -229,7 +235,7 @@ def evaluate_host_gateway_ingress(
                 # Registry dispatch remains scheme-owned by TASK-0487.
                 # The wire contract currently admits only the seeded HMAC key.
                 CredentialProofKind.HMAC_SHA256: HmacSha256CredentialVerifier(
-                    secret_resolver=_secure_ingress_secret_resolver(source),
+                    secret_resolver=_secure_ingress_secret_resolver(settings),
                 )
             }
         )
@@ -324,6 +330,7 @@ def evaluate_host_gateway_ingress(
             principal_id=ingress_request.principal_id,
             idempotency_key=ingress_request.idempotency_key,
             body_sha256=ingress_request.body_sha256,
+            request_id=ingress_request.request_id,
         )
     except Exception:
         return HostGatewayIngressOutcome(
@@ -342,24 +349,6 @@ def evaluate_host_gateway_ingress(
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    import os  # noqa: PLC0415
-    val = str(os.environ.get(name, "")).strip().lower()
-    if val in {"1", "true", "yes", "on"}:
-        return True
-    if val in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _parse_int_env(name: str, *, default: int) -> int:
-    import os  # noqa: PLC0415
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-
 
 def _coerce_float(value: Any) -> float | None:
     if value is None or value == "":
@@ -435,8 +424,9 @@ def build_gateway_skill_manifest_lines(*, skill_registry: Any) -> list[str]:
     if skill_registry is None:
         return fallback_lines
     try:
-        max_items = max(8, min(120, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MANIFEST_MAX", default=64)))
-        max_risk_level = max(1, min(5, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MAX_RISK_LEVEL", default=5)))
+        settings = get_input_settings()
+        max_items = settings.gateway_intent_skill_manifest_max
+        max_risk_level = settings.gateway_intent_skill_max_risk_level
         entries = skill_registry.build_skill_manifest(
             scopes=["host", "memory", "system"],
             max_risk_level=max_risk_level,

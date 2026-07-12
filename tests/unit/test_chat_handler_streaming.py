@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import importlib
 from typing import Any
 
 import pytest
@@ -96,8 +95,11 @@ def _parse_sse_chunk(chunk: Any) -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_handle_chat_streams_presence_before_thalamus_classification(monkeypatch) -> None:
     fake_thalamus = _FakeThalamusAgent()
+    governed_command_application = object()
+    cortex_kwargs: dict[str, Any] = {}
 
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        cortex_kwargs.update(kwargs)
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
@@ -113,6 +115,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         request_body=ChatRequest(message="我想和你认真聊聊今天的心情。"),
         request=_build_request(),
         metrics=metrics,
+        governed_command_application=governed_command_application,
     )
 
     assert fake_thalamus.calls == 0
@@ -138,6 +141,8 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         remaining.append(_parse_sse_chunk(chunk))
 
     assert any(event.get("phase") == "COMMIT" for event in remaining)
+    assert cortex_kwargs["governed_command_application"] is governed_command_application
+    assert cortex_kwargs["command_authority"] == {}
 
 
 @pytest.mark.asyncio
@@ -306,16 +311,26 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
     assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
-def test_resolve_governor_executor_workers_defaults_to_four(monkeypatch) -> None:
-    monkeypatch.delenv("HOST_GOVERNOR_EXECUTOR_WORKERS", raising=False)
-    reloaded = importlib.reload(chat_handler_module)
+def test_chat_settings_are_typed_and_resolved_without_module_reload(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "64")
+    monkeypatch.setenv("HOST_MATEENGINE_MEMORY_RECALL_CUE_TEXT", "正在找记忆")
 
-    assert reloaded._resolve_governor_executor_workers() == 4
+    assert chat_handler_module._action_arbiter_enabled() is True
+    assert chat_handler_module._mateengine_bubble_text_limit() == 64
+    assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
 
 
 @pytest.mark.asyncio
-async def test_evaluate_governor_with_timing_reports_queue_and_execute_ms() -> None:
+async def test_evaluate_governor_with_timing_stays_on_ledger_owner_thread(monkeypatch) -> None:
     engine = _FakeIntentEngine()
+    scheduled: list[Any] = []
+
+    async def _fake_to_thread(function):  # noqa: ANN001
+        scheduled.append(function)
+        return function()
+
+    monkeypatch.setattr(chat_handler_module.asyncio, "to_thread", _fake_to_thread)
 
     result, timing = await chat_handler_module._evaluate_governor_with_timing(
         engine=engine,
@@ -326,6 +341,7 @@ async def test_evaluate_governor_with_timing_reports_queue_and_execute_ms() -> N
     )
 
     assert result["decision"] == "APPROVE"
+    assert scheduled == []
     assert timing["total_latency_ms"] >= 0
     assert timing["queue_wait_ms"] >= 0
     assert timing["execute_ms"] >= 0

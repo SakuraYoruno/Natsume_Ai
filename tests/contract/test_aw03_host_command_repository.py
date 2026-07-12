@@ -1,0 +1,395 @@
+from __future__ import annotations
+
+import hashlib
+import inspect
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from host_brain.agent_runtime.task_graph import (
+    TaskGraph,
+    TaskGraphStatus,
+    TaskNode,
+    TaskNodeStatus,
+)
+from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.host_command_repository import (
+    HOST_COMMAND_CONFLICT,
+    HOST_COMMAND_DURABLE_DATA_INVALID,
+    HOST_COMMAND_INGRESS_CONFLICT,
+    HOST_COMMAND_MIGRATION_ASSET_KEY,
+    HOST_COMMAND_MIGRATION_SHA256,
+    HOST_COMMAND_SCHEMA_NOT_READY,
+    HostCommandRepository,
+    HostCommandRepositoryError,
+)
+import host_brain.persistence.host_command_repository as repository_module
+from natsume_contracts.task.v1 import (
+    ExecutorAssignment,
+    HostCommand,
+    HostCommandSurface,
+    TaskExecutor,
+    TaskRuntimeMode,
+    build_host_command,
+)
+
+
+NOW = 1_800_000_000_000
+
+
+def _sha256(value: str) -> str:
+    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
+
+
+def _migrated_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "host-command.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw03-host-command-migration",
+        ts_ms=NOW,
+    )
+    assert result.success is True, result.as_dict()
+    return db_path
+
+
+def _admission(
+    *,
+    surface: HostCommandSurface = HostCommandSurface.CHAT,
+    request_id: str = "request-aw03-1",
+    input_sha256: str | None = None,
+    ingress_claim_ref: str | None = None,
+    ingress_audit_ref: str | None = None,
+) -> tuple[HostCommand, AgentWorkOrder, ExecutorAssignment, TaskGraph]:
+    work_order = AgentWorkOrder(
+        work_order_id="work-order-aw03-1",
+        domain="code",
+        run_mode="inspect",
+        objective="execute the admitted host command",
+        input_pack={"input_ref": "host-input://request-aw03-1"},
+        allowed_actions=[],
+        forbidden_actions=["write_files"],
+        acceptance_criteria=["reply produced"],
+    )
+    node = TaskNode(
+        node_id="node-aw03-1",
+        dependencies=(),
+        route="host_chat",
+        input_refs=("host-input://request-aw03-1",),
+        output_contract={"type": "host_reply"},
+        retry_policy={"max_attempts": 1},
+        risk_level=1,
+        acceptance_criteria=("reply produced",),
+        status=TaskNodeStatus.READY,
+        status_version=0,
+    )
+    graph = TaskGraph(
+        graph_id="graph-aw03-1",
+        root_work_order_id=work_order.work_order_id,
+        revision=1,
+        planner_ref="planner://host-command/aw03",
+        status=TaskGraphStatus.CREATED,
+        created_at=NOW,
+        nodes=(node,),
+    )
+    assignment = ExecutorAssignment(
+        work_order_id=work_order.work_order_id,
+        executor=TaskExecutor.CANONICAL,
+        mode=TaskRuntimeMode.CANONICAL,
+        assignment_id="runtime-assignment://work-order-aw03-1/canonical",
+        assigned_at_ms=NOW,
+        canary_percent=100,
+        canary_selected=True,
+        kill_switch_active=False,
+        is_new_task=True,
+        reason_code="RUNTIME_NEW_TASK_CANONICAL",
+    )
+    command = build_host_command(
+        surface=surface,
+        request_id=request_id,
+        session_id="session-aw03-1",
+        principal_id="principal-aw03-1",
+        ingress_claim_ref=ingress_claim_ref,
+        ingress_audit_ref=ingress_audit_ref,
+        governor_grant_ref="governor-grant://aw03/1",
+        input_ref="host-input://request-aw03-1",
+        input_sha256=input_sha256 or _sha256("aw03-input"),
+        root_work_order_id=work_order.work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        route_type="chat",
+        target_id=node.node_id,
+        business_scope="host-command-aw03",
+        operation_fingerprint=_sha256("aw03-operation"),
+        created_at_ms=NOW,
+    )
+    return command, work_order, assignment, graph
+
+
+def _insert_committed_claim(
+    db_path: Path,
+    *,
+    claim_ref: str,
+    audit_ref: str,
+    request_id: str,
+    input_sha256: str,
+    result_ref: str | None = None,
+) -> None:
+    stored_body_sha256 = str(input_sha256).removeprefix("sha256:")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO secure_ingress_idempotency_claim(
+                principal_id, surface, idempotency_digest, action,
+                required_scopes_json, request_id, body_sha256, claim_ref,
+                result_ref, claim_status, provisional_expires_at_ms,
+                claimed_at_ms, updated_at_ms, expires_at_ms
+            ) VALUES (?, 'host.input', ?, 'host:input', '["host:write"]', ?, ?, ?, ?,
+                      'COMMITTED', NULL, ?, ?, ?)
+            """,
+            (
+                "principal-aw03-1",
+                _sha256("wire-idempotency"),
+                request_id,
+                stored_body_sha256,
+                claim_ref,
+                result_ref,
+                NOW,
+                NOW,
+                NOW + 60_000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO secure_ingress_audit(
+                audit_ref, request_id, correlation_id, surface, action, method,
+                normalized_path, principal_id, tenant_id, key_id,
+                credential_kind, credential_ref_digest, requested_scopes_json,
+                required_scopes_json, body_sha256, idempotency_digest,
+                nonce_digest, transport_key_digest, decision, reason_code,
+                stage, claim_ref, rate_snapshot_json, side_effects_executed, ts_ms
+            ) VALUES (?, ?, NULL, 'host.input', 'host:input', 'POST', '/v1/host/input',
+                      'principal-aw03-1', 'tenant-aw03', 'key-aw03', 'HMAC_SHA256',
+                      ?, '["host:write"]', '["host:write"]', ?, ?, ?, ?, 'ALLOW',
+                      'SECURE_INGRESS_ALLOWED', 'COMPLETE', ?, '{}', 0, ?)
+            """,
+            (
+                audit_ref,
+                request_id,
+                _sha256("credential-ref"),
+                stored_body_sha256,
+                _sha256("wire-idempotency"),
+                _sha256("nonce"),
+                _sha256("transport"),
+                claim_ref,
+                NOW,
+            ),
+        )
+
+
+def _counts(db_path: Path) -> dict[str, int]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return {
+            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in (
+                "host_command_journal",
+                "task_runtime_graph",
+                "task_runtime_node",
+                "task_runtime_outbox",
+            )
+        }
+
+
+def test_aw03_migration_is_catalog_owned_and_repository_contains_no_ddl(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    repository.assert_schema_ready()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        asset = conn.execute(
+            "SELECT checksum, disposition FROM schema_migration_assets WHERE asset_key = ?",
+            (HOST_COMMAND_MIGRATION_ASSET_KEY,),
+        ).fetchone()
+    assert asset == (HOST_COMMAND_MIGRATION_SHA256, "APPLIED")
+    assert "CREATE TABLE" not in inspect.getsource(repository_module)
+
+
+def test_aw03_schema_missing_or_checksum_drift_fails_closed(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.sqlite3"
+    missing.write_bytes(b"")
+    with pytest.raises(HostCommandRepositoryError) as absent:
+        HostCommandRepository(missing)
+    assert absent.value.reason_code == HOST_COMMAND_SCHEMA_NOT_READY
+
+    db_path = _migrated_db(tmp_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE schema_migration_assets SET checksum = ? WHERE asset_key = ?",
+            ("0" * 64, HOST_COMMAND_MIGRATION_ASSET_KEY),
+        )
+    with pytest.raises(HostCommandRepositoryError) as drifted:
+        HostCommandRepository(db_path)
+    assert drifted.value.reason_code == HOST_COMMAND_SCHEMA_NOT_READY
+
+
+def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    command, work_order, assignment, graph = _admission()
+
+    created = repository.admit(command, work_order, assignment, graph)
+    replayed = repository.admit(command, work_order, assignment, graph)
+
+    assert created["created"] is True and created["replayed"] is False
+    assert replayed["created"] is False and replayed["replayed"] is True
+    assert isinstance(replayed["command"], HostCommand)
+    assert isinstance(replayed["work_order"], AgentWorkOrder)
+    assert isinstance(replayed["assignment"], ExecutorAssignment)
+    assert isinstance(replayed["graph"], TaskGraph)
+    assert replayed["assignment_id"] == assignment.assignment_id
+    assert _counts(db_path) == {
+        "host_command_journal": 1,
+        "task_runtime_graph": 1,
+        "task_runtime_node": 1,
+        "task_runtime_outbox": 2,
+    }
+    with sqlite3.connect(str(db_path)) as conn:
+        events = conn.execute(
+            "SELECT aggregate_type, event_type FROM task_runtime_outbox ORDER BY aggregate_type"
+        ).fetchall()
+    assert events == [
+        ("HOST_COMMAND", "HOST_COMMAND_ADMITTED"),
+        ("TASK_GRAPH", "TASK_GRAPH_CREATED"),
+    ]
+
+
+def test_aw03_replay_payload_drift_fails_without_mutation(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    original = _admission()
+    repository.admit(*original)
+    drifted = _admission(input_sha256=_sha256("different-input"))
+
+    with pytest.raises(HostCommandRepositoryError) as error:
+        repository.admit(*drifted)
+
+    assert error.value.reason_code == HOST_COMMAND_CONFLICT
+    assert _counts(db_path)["task_runtime_outbox"] == 2
+
+
+@pytest.mark.parametrize("fault_stage", ["after_graph", "after_command", "after_outboxes", "after_ingress_claim"])
+def test_aw03_any_admission_fault_rolls_back_graph_command_outboxes_and_claim(
+    tmp_path: Path,
+    fault_stage: str,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    claim_ref = "secure-ingress-claim://aw03/fault"
+    input_sha = _sha256("aw03-input")
+    _insert_committed_claim(
+        db_path,
+        claim_ref=claim_ref,
+        audit_ref="secure-ingress-audit://aw03/fault",
+        request_id="request-aw03-fault",
+        input_sha256=input_sha,
+    )
+    command, work_order, assignment, graph = _admission(
+        surface=HostCommandSurface.HOST_INPUT,
+        request_id="request-aw03-fault",
+        ingress_claim_ref=claim_ref,
+        ingress_audit_ref="secure-ingress-audit://aw03/fault",
+    )
+
+    def fault(stage: str) -> None:
+        if stage == fault_stage:
+            raise RuntimeError(f"fault:{stage}")
+
+    repository = HostCommandRepository(db_path, clock=lambda: NOW, fault_injector=fault)
+    with pytest.raises(RuntimeError, match=f"fault:{fault_stage}"):
+        repository.admit(command, work_order, assignment, graph)
+
+    assert _counts(db_path) == {
+        "host_command_journal": 0,
+        "task_runtime_graph": 0,
+        "task_runtime_node": 0,
+        "task_runtime_outbox": 0,
+    }
+    with sqlite3.connect(str(db_path)) as conn:
+        result_ref = conn.execute(
+            "SELECT result_ref FROM secure_ingress_idempotency_claim WHERE claim_ref = ?",
+            (claim_ref,),
+        ).fetchone()[0]
+    assert result_ref is None
+
+
+def test_aw03_ingress_claim_is_cas_bound_in_the_admission_transaction(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    claim_ref = "secure-ingress-claim://aw03/success"
+    input_sha = _sha256("aw03-input")
+    _insert_committed_claim(
+        db_path,
+        claim_ref=claim_ref,
+        audit_ref="secure-ingress-audit://aw03/success",
+        request_id="request-aw03-success",
+        input_sha256=input_sha,
+    )
+    command, work_order, assignment, graph = _admission(
+        surface=HostCommandSurface.HOST_INPUT,
+        request_id="request-aw03-success",
+        ingress_claim_ref=claim_ref,
+        ingress_audit_ref="secure-ingress-audit://aw03/success",
+    )
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+
+    admitted = repository.admit(command, work_order, assignment, graph)
+    replayed = repository.admit(command, work_order, assignment, graph)
+
+    assert admitted["created"] is True
+    assert replayed["replayed"] is True
+    with sqlite3.connect(str(db_path)) as conn:
+        result_ref = conn.execute(
+            "SELECT result_ref FROM secure_ingress_idempotency_claim WHERE claim_ref = ?",
+            (claim_ref,),
+        ).fetchone()[0]
+    assert result_ref == command.command_id
+
+
+def test_aw03_ingress_binding_drift_fails_before_any_task_write(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    claim_ref = "secure-ingress-claim://aw03/drift"
+    _insert_committed_claim(
+        db_path,
+        claim_ref=claim_ref,
+        audit_ref="secure-ingress-audit://aw03/drift",
+        request_id="request-aw03-drift",
+        input_sha256=_sha256("different-wire-body"),
+    )
+    admission = _admission(
+        surface=HostCommandSurface.HOST_INPUT,
+        request_id="request-aw03-drift",
+        ingress_claim_ref=claim_ref,
+        ingress_audit_ref="secure-ingress-audit://aw03/drift",
+    )
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+
+    with pytest.raises(HostCommandRepositoryError) as error:
+        repository.admit(*admission)
+
+    assert error.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
+    assert _counts(db_path)["task_runtime_graph"] == 0
+
+
+def test_aw03_tampered_typed_json_fails_closed_on_read(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    command, work_order, assignment, graph = _admission()
+    repository.admit(command, work_order, assignment, graph)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE host_command_journal SET assignment_json = ? WHERE command_id = ?",
+            ('{"schema_version":"tampered"}', command.command_id),
+        )
+
+    with pytest.raises(HostCommandRepositoryError) as error:
+        repository.get(command.command_id)
+
+    assert error.value.reason_code == HOST_COMMAND_DURABLE_DATA_INVALID

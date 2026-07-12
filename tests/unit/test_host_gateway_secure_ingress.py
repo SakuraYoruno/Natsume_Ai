@@ -190,10 +190,12 @@ def test_valid_exact_raw_body_is_allowed_and_restart_duplicate_is_stable(tmp_pat
     )
 
     assert first.allowed is True
+    assert first.request_id == "request.gateway.1"
     assert first.claim_ref
     assert first.body_sha256
     assert duplicate.allowed is False
     assert duplicate.duplicate is True
+    assert duplicate.request_id == first.request_id
     assert duplicate.claim_ref == first.claim_ref
 
     assert complete_host_gateway_ingress(

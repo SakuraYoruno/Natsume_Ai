@@ -7,16 +7,22 @@ resume. It does not run workers or replay side effects.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 import hashlib
 import json
 from typing import Any, Iterable, Mapping, Sequence
 
+from natsume_contracts.task import (
+    EXECUTOR_ASSIGNMENT_SCHEMA_VERSION,
+    ExecutorAssignment,
+    TaskContractError,
+    TaskExecutor,
+    TaskRuntimeMode,
+)
+
 from host_brain.core.ids import now_ms
 
 
-RUNTIME_ASSIGNMENT_SCHEMA_VERSION = "Natsume.agent.runtime_assignment.v1"
+RUNTIME_ASSIGNMENT_SCHEMA_VERSION = EXECUTOR_ASSIGNMENT_SCHEMA_VERSION
 RUNTIME_ASSIGNMENT_INVALID = "RUNTIME_ASSIGNMENT_INVALID"
 RUNTIME_CANARY_OWNER_REQUIRED = "RUNTIME_CANARY_OWNER_REQUIRED"
 RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED = "RUNTIME_CROSS_EXECUTOR_RESUME_REJECTED"
@@ -29,80 +35,12 @@ RUNTIME_NEW_TASK_LEGACY = "RUNTIME_NEW_TASK_LEGACY"
 RUNTIME_SHADOW_LEGACY_EXECUTOR = "RUNTIME_SHADOW_LEGACY_EXECUTOR"
 
 
-class RuntimeRouterError(RuntimeError):
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or RUNTIME_ASSIGNMENT_INVALID)
-        self.detail = str(detail or "runtime router operation failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
-    def to_dict(self) -> dict[str, str]:
-        return {"reason_code": self.reason_code, "detail": self.detail}
-
-
-class RuntimeMode(StrEnum):
-    LEGACY = "legacy"
-    SHADOW = "shadow"
-    CANONICAL = "canonical"
-
-
-class RuntimeExecutor(StrEnum):
-    LEGACY = "legacy"
-    CANONICAL = "canonical"
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeAssignment:
-    work_order_id: str
-    executor: RuntimeExecutor
-    mode: RuntimeMode
-    assignment_id: str
-    assigned_at_ms: int
-    canary_percent: int
-    canary_selected: bool
-    kill_switch_active: bool
-    is_new_task: bool
-    reason_code: str
-    schema_version: str = RUNTIME_ASSIGNMENT_SCHEMA_VERSION
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "RuntimeAssignment":
-        data = dict(payload or {})
-        try:
-            assignment = cls(
-                work_order_id=_required_text(data.get("work_order_id"), "work_order_id"),
-                executor=RuntimeExecutor(_text(data.get("executor")).lower()),
-                mode=RuntimeMode(_text(data.get("mode")).lower()),
-                assignment_id=_required_text(data.get("assignment_id"), "assignment_id"),
-                assigned_at_ms=_exact_int(data.get("assigned_at_ms"), "assigned_at_ms", minimum=0),
-                canary_percent=_exact_int(data.get("canary_percent"), "canary_percent", minimum=0, maximum=100),
-                canary_selected=_exact_bool(data.get("canary_selected"), "canary_selected"),
-                kill_switch_active=_exact_bool(data.get("kill_switch_active"), "kill_switch_active"),
-                is_new_task=_exact_bool(data.get("is_new_task"), "is_new_task"),
-                reason_code=_required_text(data.get("reason_code"), "reason_code"),
-                schema_version=_required_text(data.get("schema_version"), "schema_version"),
-            )
-        except ValueError as exc:
-            raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, str(exc)) from exc
-        if assignment.schema_version != RUNTIME_ASSIGNMENT_SCHEMA_VERSION:
-            raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, "runtime assignment schema version is unsupported")
-        if not assignment.assignment_id.startswith("runtime-assignment://"):
-            raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, "assignment_id must be a durable runtime assignment ref")
-        return assignment
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "work_order_id": self.work_order_id,
-            "executor": self.executor.value,
-            "mode": self.mode.value,
-            "assignment_id": self.assignment_id,
-            "assigned_at_ms": self.assigned_at_ms,
-            "canary_percent": self.canary_percent,
-            "canary_selected": self.canary_selected,
-            "kill_switch_active": self.kill_switch_active,
-            "is_new_task": self.is_new_task,
-            "reason_code": self.reason_code,
-        }
+# Backward-compatible import surface.  There is one assignment model: the
+# runtime-independent contract in natsume_contracts.task.
+RuntimeRouterError = TaskContractError
+RuntimeMode = TaskRuntimeMode
+RuntimeExecutor = TaskExecutor
+RuntimeAssignment = ExecutorAssignment
 
 
 class CanonicalRuntimeRouter:
@@ -128,9 +66,19 @@ class CanonicalRuntimeRouter:
             raise RuntimeRouterError(RUNTIME_ASSIGNMENT_INVALID, "clock must be callable")
         self._clock = clock
 
-    def assign_new_task(self, work_order_id: str) -> RuntimeAssignment:
+    def assign_new_task(
+        self,
+        work_order_id: str,
+        *,
+        assigned_at_ms: int | None = None,
+    ) -> RuntimeAssignment:
         work_ref = _required_text(work_order_id, "work_order_id")
-        ts_ms = int(self._clock())
+        ts_ms = int(self._clock() if assigned_at_ms is None else assigned_at_ms)
+        if ts_ms < 0:
+            raise RuntimeRouterError(
+                RUNTIME_ASSIGNMENT_INVALID,
+                "assigned_at_ms must be non-negative",
+            )
         if self.kill_switch:
             return self._assignment(
                 work_ref,

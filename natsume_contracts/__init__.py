@@ -20,6 +20,19 @@ from .identity import (
     match_scopes,
     parse_identity_envelope,
 )
+from .task import (
+    EXECUTOR_ASSIGNMENT_INVALID,
+    EXECUTOR_ASSIGNMENT_SCHEMA_VERSION,
+    HOST_COMMAND_SCHEMA_VERSION,
+    ExecutorAssignment,
+    HostCommand,
+    HostCommandSurface,
+    TaskContractError,
+    TaskContractReasonCode,
+    TaskExecutor,
+    TaskRuntimeMode,
+    build_host_command,
+)
 
 __all__ = [
     "CredentialProof",
@@ -33,6 +46,17 @@ __all__ = [
     "PrincipalKind",
     "ScopeMatchMode",
     "ScopeMatchResult",
+    "EXECUTOR_ASSIGNMENT_INVALID",
+    "EXECUTOR_ASSIGNMENT_SCHEMA_VERSION",
+    "HOST_COMMAND_SCHEMA_VERSION",
+    "ExecutorAssignment",
+    "HostCommand",
+    "HostCommandSurface",
+    "TaskContractError",
+    "TaskContractReasonCode",
+    "TaskExecutor",
+    "TaskRuntimeMode",
+    "build_host_command",
     "match_scopes",
     "parse_identity_envelope",
 ]

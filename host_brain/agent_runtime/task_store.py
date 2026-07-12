@@ -613,57 +613,117 @@ class DurableTaskStore:
         *,
         outbox: OutboxMessage,
     ) -> dict[str, Any]:
-        graph.validate()
         ts_ms = self._now()
         with self._transaction() as conn:
+            self.insert_graph_in_transaction(
+                conn,
+                graph,
+                outbox=outbox,
+                ts_ms=ts_ms,
+            )
+        return self.get_graph(graph.graph_id, graph.revision)
+
+    def insert_graph_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        graph: TaskGraph,
+        *,
+        outbox: OutboxMessage,
+        ts_ms: int,
+    ) -> None:
+        """Insert one canonical graph and its event into an existing UoW.
+
+        The caller owns commit, rollback, and connection lifetime.  This narrow
+        hook lets a higher-level admission repository atomically bind a command
+        to the exact graph it creates without duplicating TaskStore SQL or
+        opening a nested SQLite transaction.
+        """
+
+        if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "connection-scoped graph insertion requires an active SQLite transaction",
+            )
+        graph.validate()
+        try:
+            trusted_ts_ms = int(ts_ms)
+        except (TypeError, ValueError) as exc:
+            raise TaskStoreError(TASK_STORE_INVALID, "graph timestamp is invalid") from exc
+        if trusted_ts_ms < 0:
+            raise TaskStoreError(TASK_STORE_INVALID, "graph timestamp must be non-negative")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref, status,
+                status_version, graph_json, source_kind, source_ref,
+                legacy_snapshot_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, 0, ?, 'CANONICAL', ?, NULL, ?, ?)
+            """,
+            (
+                graph.graph_id,
+                graph.revision,
+                graph.root_work_order_id,
+                graph.planner_ref,
+                graph.status.value,
+                _dumps(graph.to_dict()),
+                f"{graph.graph_id}@{graph.revision}",
+                trusted_ts_ms,
+                trusted_ts_ms,
+            ),
+        )
+        for node in graph.nodes:
             conn.execute(
                 """
-                INSERT INTO task_runtime_graph(
-                    graph_id, revision, root_work_order_id, planner_ref, status,
-                    status_version, graph_json, source_kind, source_ref,
-                    legacy_snapshot_json, created_ts_ms, updated_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, 0, ?, 'CANONICAL', ?, NULL, ?, ?)
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, cancellation_requested_ts_ms, created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
                 """,
                 (
                     graph.graph_id,
                     graph.revision,
-                    graph.root_work_order_id,
-                    graph.planner_ref,
-                    graph.status.value,
-                    _dumps(graph.to_dict()),
-                    f"{graph.graph_id}@{graph.revision}",
-                    ts_ms,
-                    ts_ms,
+                    node.node_id,
+                    node.status.value,
+                    node.status_version,
+                    _dumps(node.to_dict()),
+                    trusted_ts_ms,
+                    trusted_ts_ms,
                 ),
             )
-            for node in graph.nodes:
-                conn.execute(
-                    """
-                    INSERT INTO task_runtime_node(
-                        graph_id, graph_revision, node_id, status, status_version,
-                        node_json, cancellation_requested_ts_ms, created_ts_ms, updated_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
-                    """,
-                    (
-                        graph.graph_id,
-                        graph.revision,
-                        node.node_id,
-                        node.status.value,
-                        node.status_version,
-                        _dumps(node.to_dict()),
-                        ts_ms,
-                        ts_ms,
-                    ),
-                )
-            self._insert_outbox(
-                conn,
-                outbox,
-                ts_ms=ts_ms,
-                expected_aggregate=("TASK_GRAPH", graph.graph_id, 0),
-                expected_event_type="TASK_GRAPH_CREATED",
-                expected_attempt_id=None,
+        self.insert_outbox_in_transaction(
+            conn,
+            outbox,
+            ts_ms=trusted_ts_ms,
+            expected_aggregate=("TASK_GRAPH", graph.graph_id, 0),
+            expected_event_type="TASK_GRAPH_CREATED",
+            expected_attempt_id=None,
+        )
+
+    def insert_outbox_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        message: OutboxMessage,
+        *,
+        ts_ms: int,
+        expected_aggregate: tuple[str, str, int],
+        expected_event_type: str,
+        expected_attempt_id: str | None = None,
+    ) -> None:
+        """Append a validated TaskStore outbox row inside an existing UoW."""
+
+        if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "connection-scoped outbox insertion requires an active SQLite transaction",
             )
-        return self.get_graph(graph.graph_id, graph.revision)
+        self._insert_outbox(
+            conn,
+            message,
+            ts_ms=int(ts_ms),
+            expected_aggregate=expected_aggregate,
+            expected_event_type=expected_event_type,
+            expected_attempt_id=expected_attempt_id,
+        )
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
         conn = self._connect()

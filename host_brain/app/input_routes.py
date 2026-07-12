@@ -11,12 +11,11 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import Future, ThreadPoolExecutor
+from collections.abc import Callable
 import hashlib
 import inspect
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -74,15 +73,11 @@ from host_brain.app.input_service_quality import (
 from host_brain.app.response_feedback_store import (
     record_feedback_for_latest_persona_reply as _record_feedback_for_latest_persona_reply,
 )
+from host_brain.app.settings.input import get_input_settings
 
 _logger = logging.getLogger("Natsume.input_routes")
 
-router = APIRouter(prefix="/v1/host", tags=["input"])
-_INPUT_DISPATCH_EXECUTOR_LOCK = threading.Lock()
-_INPUT_DISPATCH_EXECUTOR: ThreadPoolExecutor | None = None
-_SESSION_DISPATCH_LOCKS_LOCK = threading.Lock()
-_SESSION_DISPATCH_LOCKS: dict[str, threading.Lock] = {}
-_SESSION_DISPATCH_LOCK_MAX = 512
+GovernedCommandApplicationProvider = Callable[[], Any]
 
 # ASR 相关常量（未迁移，仅在本文件使用）
 _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
@@ -95,8 +90,6 @@ _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
 _VOICE_TEXT_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 _VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 _GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
-_GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
-_GATEWAY_DEDUPE_LOCK = threading.Lock()
 _GATEWAY_RECENT_MULTIMODAL_CACHE: dict[str, dict[str, Any]] = {}
 _GATEWAY_RECENT_MULTIMODAL_LOCK = threading.Lock()
 _GATEWAY_SOURCE_PLATFORM_ALIASES: dict[str, str] = {
@@ -163,36 +156,6 @@ class InputResponse(BaseModel):
 
 # ── 本文件保留的 ASR 相关工具函数（未迁移，仅在本文件使用）──────────────────
 
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _parse_float_env(name: str, *, default: float) -> float:
-    raw = str(os.environ.get(name) or "").strip()
-    if not raw:
-        return float(default)
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _parse_int_env(name: str, *, default: int) -> int:
-    raw = str(os.environ.get(name) or "").strip()
-    if not raw:
-        return int(default)
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return int(default)
-
 
 def _normalize_input_source(raw_source: str) -> tuple[str, str | None]:
     source = str(raw_source or "").upper().strip()
@@ -202,138 +165,8 @@ def _normalize_input_source(raw_source: str) -> tuple[str, str | None]:
     return source, None
 
 
-def _resolve_input_dispatch_thread_workers() -> int:
-    return max(1, min(8, _parse_int_env("HOST_INPUT_DISPATCH_THREAD_WORKERS", default=4)))
-
-
-def _get_input_dispatch_executor() -> ThreadPoolExecutor:
-    global _INPUT_DISPATCH_EXECUTOR
-    with _INPUT_DISPATCH_EXECUTOR_LOCK:
-        if _INPUT_DISPATCH_EXECUTOR is None:
-            _INPUT_DISPATCH_EXECUTOR = ThreadPoolExecutor(
-                max_workers=_resolve_input_dispatch_thread_workers(),
-                thread_name_prefix="input-dispatch",
-            )
-        return _INPUT_DISPATCH_EXECUTOR
-
-
-def _get_session_dispatch_lock(session_id: str) -> threading.Lock:
-    key = str(session_id or "").strip() or "__default__"
-    with _SESSION_DISPATCH_LOCKS_LOCK:
-        lock = _SESSION_DISPATCH_LOCKS.get(key)
-        if lock is None:
-            if len(_SESSION_DISPATCH_LOCKS) >= _SESSION_DISPATCH_LOCK_MAX:
-                for stale_key, stale_lock in list(_SESSION_DISPATCH_LOCKS.items()):
-                    if not stale_lock.locked():
-                        _SESSION_DISPATCH_LOCKS.pop(stale_key, None)
-                        if len(_SESSION_DISPATCH_LOCKS) < _SESSION_DISPATCH_LOCK_MAX:
-                            break
-            lock = threading.Lock()
-            _SESSION_DISPATCH_LOCKS[key] = lock
-        return lock
-
-
-def _run_dispatch_worker_in_thread(
-    *,
-    request_id: str,
-    session_id: str,
-    source: str,
-    text: str,
-    payload: dict[str, Any],
-    ts_ms: int,
-    ledger: Any,
-    dispatch_mode: str,
-    run_in_thread: bool,
-) -> None:
-    worker_ledger = _get_ledger_safe()
-    lock = _get_session_dispatch_lock(session_id)
-    with lock:
-        asyncio.run(
-            _dispatch_to_graph_worker(
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-                ledger=worker_ledger,
-                dispatch_mode=dispatch_mode,
-                run_in_thread=run_in_thread,
-            )
-        )
-
-
-def _log_dispatch_thread_future_exception(future: Future[Any], *, request_id: str) -> None:
-    try:
-        exc = future.exception()
-    except Exception as callback_exc:
-        _logger.error(
-            "input_routes: threaded dispatch future inspection failed request_id=%s: %s",
-            request_id,
-            callback_exc,
-            exc_info=callback_exc,
-        )
-        return
-    if exc is not None:
-        _logger.error(
-            "input_routes: threaded dispatch task failed request_id=%s: %s",
-            request_id,
-            exc,
-            exc_info=exc,
-        )
-
-
-def _gateway_dedupe_ttl_s() -> float:
-    return max(600.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=86400.0))
-
-
 def _gateway_recent_multimodal_ttl_s() -> float:
-    return max(60.0, _parse_float_env("HOST_GATEWAY_MULTIMODAL_RECENT_TTL_S", default=600.0))
-
-
-def _build_gateway_dedupe_key(*, payload: InputPayload, text: str) -> str:
-    platform = str(payload.platform or "").strip().lower()
-    conversation_id = str(payload.conversation_id or "").strip()
-    msg_id = str(payload.msg_id or "").strip()
-    if platform and conversation_id and msg_id:
-        return f"{platform}|{conversation_id}|msg:{msg_id}"
-    digest_source = "|".join(
-        [
-            platform,
-            conversation_id,
-            str(payload.from_id or "").strip(),
-            str(payload.to_id or "").strip(),
-            str(payload.msg_type or "").strip().lower(),
-            str(payload.reply_to_msg_id or "").strip(),
-            str(text or "").strip(),
-        ]
-    )
-    digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()
-    return f"{platform}|{conversation_id}|hash:{digest}"
-
-
-def _mark_gateway_dedupe(key: str) -> float:
-    now = time.time()
-    expires_at = now + _gateway_dedupe_ttl_s()
-    with _GATEWAY_DEDUPE_LOCK:
-        expired = [cache_key for cache_key, expiry in _GATEWAY_DEDUPE_CACHE.items() if expiry <= now]
-        for cache_key in expired:
-            _GATEWAY_DEDUPE_CACHE.pop(cache_key, None)
-        existing_expiry = _GATEWAY_DEDUPE_CACHE.get(key)
-        if existing_expiry and existing_expiry > now:
-            return float(existing_expiry)
-        _GATEWAY_DEDUPE_CACHE[key] = expires_at
-    return 0.0
-
-
-def _release_gateway_dedupe(key: str, *, expected_expiry: float | None = None) -> None:
-    with _GATEWAY_DEDUPE_LOCK:
-        current = _GATEWAY_DEDUPE_CACHE.get(key)
-        if current is None:
-            return
-        if expected_expiry is not None and float(current) != float(expected_expiry):
-            return
-        _GATEWAY_DEDUPE_CACHE.pop(key, None)
+    return float(get_input_settings().gateway_multimodal_recent_ttl_s)
 
 
 async def _ensure_gateway_multimodal_observed_for_dispatch(
@@ -346,11 +179,7 @@ async def _ensure_gateway_multimodal_observed_for_dispatch(
     ts_ms: int,
     ledger: Any,
 ) -> bool:
-    """Populate multimodal observations inside the background dispatch worker.
-
-    Gateway HTTP reporting must ACK quickly; image/emoji observation may call a
-    cloud vision model and must not hold the edge reporter socket open.
-    """
+    """Populate multimodal observations before governed command admission."""
 
     if str(source or "").upper().strip() != "GATEWAY":
         return True
@@ -418,17 +247,10 @@ async def _ensure_gateway_multimodal_observed_for_dispatch(
     _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
 
     if str(observer_result.get("mode") or "").strip().lower() == "async":
-        job = _schedule_gateway_multimodal_async_job(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            ledger=ledger,
-        )
-        payload["multimodal_job"] = job
-        return False
+        # The input surface is now an awaited, governed admission boundary.  An
+        # observer may label its strategy async, but it has already returned the
+        # usable observation above; never fork a second ungoverned pipeline.
+        payload["attachment_processing_mode"] = "governed_waited"
     return True
 
 
@@ -528,15 +350,16 @@ def _evaluate_asr_noise_gate(
     text: str,
     payload: dict[str, Any] | None,
 ) -> tuple[bool, str | None]:
+    settings = get_input_settings()
     text_value = str(text or "").strip()
     if not text_value:
         return False, "ASR_TEXT_EMPTY"
     if _looks_like_asr_placeholder_text(text_value):
         return False, "ASR_PLACEHOLDER_TEXT"
-    min_text_len = max(1, _parse_int_env("HOST_INPUT_ASR_MIN_TEXT_LEN", default=2))
+    min_text_len = settings.asr_min_text_len
     if len(text_value) < min_text_len:
         return False, "ASR_TEXT_TOO_SHORT"
-    require_speech_chars = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_SPEECH_CHARS", default=True)
+    require_speech_chars = settings.asr_require_speech_chars
     if require_speech_chars and not _contains_speech_chars(text_value):
         return False, "ASR_NON_SPEECH_TEXT"
     payload_dict = dict(payload or {})
@@ -546,8 +369,8 @@ def _evaluate_asr_noise_gate(
     low_confidence = _coerce_bool(payload_dict.get("low_confidence"), default=False)
     if low_confidence:
         return False, "ASR_LOW_CONFIDENCE"
-    min_confidence = max(0.0, min(1.0, _parse_float_env("HOST_INPUT_ASR_MIN_CONFIDENCE", default=0.75)))
-    require_confidence = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_CONFIDENCE", default=False)
+    min_confidence = settings.asr_min_confidence
+    require_confidence = settings.asr_require_confidence
     confidence = _coerce_float(payload_dict.get("confidence"))
     if confidence is None and require_confidence:
         return False, "ASR_CONFIDENCE_MISSING"
@@ -670,7 +493,7 @@ def _should_send_gateway_route_started_voice_ack(
 ) -> tuple[bool, str]:
     if str(source or "").strip().upper() != "GATEWAY":
         return False, "ROUTE_ACK_SOURCE_NOT_GATEWAY"
-    if not _parse_bool_env("HOST_GATEWAY_ROUTE_ACK_VOICE_ENABLED", default=True):
+    if not get_input_settings().gateway_route_ack_voice_enabled:
         return False, "ROUTE_ACK_DISABLED"
     if not str(payload.get("platform") or "").strip() or not str(payload.get("conversation_id") or "").strip():
         return False, "ROUTE_ACK_TARGET_MISSING"
@@ -882,125 +705,8 @@ async def _maybe_send_gateway_realign_notice(
         resolve_bond_stage_fn=_resolve_bond_stage_for_ack,
         resolve_emotion_tag_fn=_resolve_emotion_tag_for_ack,
     )
-
-
-
-
-def _parse_int_env(name: str, *, default: int) -> int:
-    raw = str(os.environ.get(name) or "").strip()
-    if not raw:
-        return int(default)
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return int(default)
-
-
 def _gateway_auto_reply_enabled() -> bool:
-    return _parse_bool_env("HOST_INPUT_GATEWAY_AUTO_REPLY", default=True)
-
-
-def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _looks_like_asr_placeholder_text(text: str) -> bool:
-    normalized = str(text or "").strip().upper()
-    if not normalized:
-        return True
-    return _ASR_PLACEHOLDER_PATTERN.fullmatch(normalized) is not None
-
-
-def _contains_speech_chars(text: str) -> bool:
-    return _ASR_SPEECH_CHAR_PATTERN.search(str(text or "")) is not None
-
-
-def _evaluate_asr_noise_gate(
-    *,
-    text: str,
-    payload: dict[str, Any] | None,
-) -> tuple[bool, str | None]:
-    text_value = str(text or "").strip()
-    if not text_value:
-        return False, "ASR_TEXT_EMPTY"
-    if _looks_like_asr_placeholder_text(text_value):
-        return False, "ASR_PLACEHOLDER_TEXT"
-
-    min_text_len = max(1, _parse_int_env("HOST_INPUT_ASR_MIN_TEXT_LEN", default=2))
-    if len(text_value) < min_text_len:
-        return False, "ASR_TEXT_TOO_SHORT"
-
-    require_speech_chars = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_SPEECH_CHARS", default=True)
-    if require_speech_chars and not _contains_speech_chars(text_value):
-        return False, "ASR_NON_SPEECH_TEXT"
-
-    payload_dict = dict(payload or {})
-    reason_code = str(payload_dict.get("reason_code") or "").strip().upper()
-    if reason_code in {"ASR_VAD_NO_SPEECH", "ASR_LOW_CONFIDENCE"}:
-        return False, reason_code
-
-    low_confidence = _coerce_bool(payload_dict.get("low_confidence"), default=False)
-    if low_confidence:
-        return False, "ASR_LOW_CONFIDENCE"
-
-    min_confidence = max(
-        0.0,
-        min(1.0, _parse_float_env("HOST_INPUT_ASR_MIN_CONFIDENCE", default=0.75)),
-    )
-    require_confidence = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_CONFIDENCE", default=False)
-    confidence = _coerce_float(payload_dict.get("confidence"))
-    if confidence is None and require_confidence:
-        return False, "ASR_CONFIDENCE_MISSING"
-    if confidence is not None and confidence < min_confidence:
-        return False, "ASR_LOW_CONFIDENCE"
-
-    return True, None
-
-
-def _is_invalid_gateway_conversation_id(value: str | None) -> bool:
-    normalized = str(value or "").strip().lower()
-    if not normalized:
-        return True
-    return normalized in _PLACEHOLDER_GATEWAY_CONVERSATIONS
-
-
-def _evaluate_immune_gate_for_input(
-    *,
-    text: str,
-    source: str,
-    session_id: str,
-    person_id: str | None = None,
-) -> dict[str, Any]:
-    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
-
-    return get_immune_agent().inspect_text(
-        text=text,
-        source=f"http.v1.host.input.{str(source or '').lower()}",
-        metadata={
-            "session_id": str(session_id or "").strip() or None,
-            "person_id": str(person_id or "").strip() or None,
-        },
-    )
+    return get_input_settings().gateway_auto_reply
 
 
 def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
@@ -1080,6 +786,7 @@ def _coerce_bool_flag(value: Any, *, default: bool) -> bool:
 
 
 def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = get_input_settings()
     raw_extra = payload.get("raw_extra")
     raw_extra_map = dict(raw_extra) if isinstance(raw_extra, dict) else {}
 
@@ -1092,11 +799,16 @@ def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, A
                 return _coerce_bool_flag(raw_extra_map.get(key), default=default), "raw_extra"
         return bool(default), "default"
 
-    def _pick_bool(keys: tuple[str, ...], *, env_name: str, default: bool) -> bool:
+    def _pick_bool(
+        keys: tuple[str, ...],
+        *,
+        configured: bool | None,
+        default: bool,
+    ) -> bool:
         value, source = _pick_payload_bool(keys, default=default)
         if source != "default":
             return value
-        return _parse_bool_env(env_name, default=default)
+        return default if configured is None else bool(configured)
 
     def _pick_mode() -> str:
         for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
@@ -1105,7 +817,7 @@ def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, A
         for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
             if key in raw_extra_map:
                 return str(raw_extra_map.get(key) or "").strip().lower()
-        return str(os.environ.get("HOST_GATEWAY_VOICE_SELECTION_MODE") or "").strip().lower()
+        return str(settings.gateway_voice_selection_mode or "").strip().lower()
 
     selection_mode = _pick_mode()
     if selection_mode not in {"smart", "always", "off", "planned"}:
@@ -1123,23 +835,23 @@ def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, A
             force_dual_voice_reply = False
             force_source = "selection_mode"
         else:
-            force_dual_voice_reply = _parse_bool_env("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", default=False)
-            force_source = "env" if force_dual_voice_reply else "default"
+            force_dual_voice_reply = settings.gateway_force_dual_voice_reply
+            force_source = "settings" if force_dual_voice_reply else "default"
 
     effective_selection_mode = selection_mode or ("always" if force_dual_voice_reply else "smart")
     wait_voice_reply_result = _pick_bool(
         ("wait_voice_reply_result", "gateway_voice_wait_result"),
-        env_name="HOST_GATEWAY_VOICE_REPLY_WAIT_RESULT",
+        configured=settings.gateway_voice_reply_wait_result,
         default=False,
     )
     allow_voice_reply_on_primary_failure = _pick_bool(
         ("allow_voice_reply_on_primary_failure", "gateway_voice_on_primary_failure"),
-        env_name="HOST_GATEWAY_VOICE_REPLY_ON_PRIMARY_FAILURE",
+        configured=settings.gateway_voice_reply_on_primary_failure,
         default=force_dual_voice_reply,
     )
     send_gateway_voice_message = _pick_bool(
         ("send_gateway_voice_message", "gateway_voice_message", "send_voice_record", "voice_record_reply"),
-        env_name="HOST_GATEWAY_SEND_VOICE_MESSAGE",
+        configured=settings.gateway_send_voice_message,
         default=False,
     )
     return {
@@ -1212,7 +924,7 @@ def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
     normalized = str(emotion_tag or "").strip().upper()
     if normalized and normalized != "NEUTRAL":
         return normalized
-    configured = str(os.environ.get("HOST_GATEWAY_DEFAULT_VOICE_EMOTION_TAG") or "").strip().upper()
+    configured = str(get_input_settings().gateway_default_voice_emotion_tag or "").strip().upper()
     return configured or None
 
 
@@ -1285,16 +997,20 @@ async def _read_input_raw_body(body: InputPayload, request: Any) -> bytes:
     ).encode("utf-8")
 
 
-@router.post("/input", response_model=InputResponse)
-async def receive_input(body: InputPayload, request: Request) -> InputResponse:
-    request_id = new_request_id()
+async def receive_input(
+    body: InputPayload,
+    request: Request,
+    *,
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
+) -> InputResponse:
+    pre_auth_request_id = new_request_id()
+    request_id = pre_auth_request_id
     ts_ms = int(time.time() * 1000)
     raw_source = str(body.source or "").upper().strip()
     source, source_alias_platform = _normalize_input_source(raw_source)
     gateway_ingress: _HostGatewayIngressOutcome | None = None
-    gateway_dedupe_key: str | None = None
-    gateway_dedupe_expiry: float | None = None
-
     _logger.info("input_routes: received edge input source=%s request_id=%s", raw_source or source, request_id)
 
     if source == "ASR":
@@ -1362,31 +1078,43 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         raw_body=await _read_input_raw_body(body, request),
         received_at_ms=ts_ms,
     )
+    if gateway_ingress.allowed or gateway_ingress.duplicate:
+        authoritative_request_id = str(gateway_ingress.request_id or "").strip()
+        if not authoritative_request_id:
+            raise HTTPException(
+                status_code=503,
+                detail="host secure ingress omitted its authoritative request id",
+            )
+        request_id = authoritative_request_id
+        _logger.info(
+            "input_routes: secure ingress bound request_id=%s pre_auth_correlation=%s",
+            request_id,
+            pre_auth_request_id,
+        )
     if gateway_ingress.duplicate:
         existing = str(gateway_ingress.existing_result_ref or "")
-        if not existing:
+        if existing.startswith("host-input-result://"):
+            if existing.rsplit("/", 1)[-1] in {"ACCEPTED", "COMPLETED"}:
+                return InputResponse(
+                    success=True,
+                    request_id=request_id,
+                    source=source,
+                    status="IGNORED",
+                    detail=f"duplicate host input delivery: {gateway_ingress.reason_code}",
+                    ts_ms=ts_ms,
+                    **_host_input_receipt_fields(
+                        gateway_ingress,
+                        receipt_ref=existing,
+                    ),
+                )
             raise HTTPException(
                 status_code=409,
-                detail="host input is already claimed and has no durable result",
+                detail="host input previously completed without acceptance",
             )
-        if existing.rsplit("/", 1)[-1] in {"ACCEPTED", "COMPLETED"}:
-            return InputResponse(
-                success=True,
-                request_id=request_id,
-                source=source,
-                status="IGNORED",
-                detail=f"duplicate host input delivery: {gateway_ingress.reason_code}",
-                ts_ms=ts_ms,
-                **_host_input_receipt_fields(
-                    gateway_ingress,
-                    receipt_ref=existing,
-                ),
-            )
-        raise HTTPException(
-            status_code=409,
-            detail="host input previously completed without acceptance",
-        )
-    if not gateway_ingress.allowed:
+        # A blank result means the first delivery has not yet reached atomic
+        # admission; a non-legacy result is a HostCommand id.  Both re-enter the
+        # governed application, whose repository owns exact replay semantics.
+    if not gateway_ingress.allowed and not gateway_ingress.duplicate:
         raise HTTPException(
             status_code=_gateway_ingress_rejection_http_status(gateway_ingress.reason_code),
             detail=f"host secure ingress rejected: {gateway_ingress.reason_code}",
@@ -1416,40 +1144,6 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 payload["content"] = placeholder_text
                 payload["content_is_multimodal_placeholder"] = True
                 text = placeholder_text
-    if source == "GATEWAY" and gateway_ingress is None:
-        gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
-        gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)
-        if gateway_dedupe_expiry:
-            payload["gateway_dedupe"] = {
-                "decision": "DUPLICATE_IGNORED",
-                "key": gateway_dedupe_key,
-                "expires_at_ms": int(gateway_dedupe_expiry * 1000),
-            }
-            _log_input_event(
-                ledger=_get_ledger_safe(),
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload=payload,
-                phase="DUPLICATE_IGNORED",
-                status="IGNORED",
-                reason_code="GATEWAY_DUPLICATE_INPUT",
-                detail="duplicate gateway input ignored",
-                ts_ms=ts_ms,
-            )
-            _logger.info(
-                "input_routes: duplicate gateway input ignored request_id=%s key=%s",
-                request_id,
-                gateway_dedupe_key,
-            )
-            return InputResponse(
-                success=True,
-                request_id=request_id,
-                source=source,
-                status="IGNORED",
-                detail="duplicate gateway input ignored",
-                ts_ms=ts_ms,
-            )
     if source == "ASR":
         allow_asr, reject_reason = _evaluate_asr_noise_gate(text=text, payload=payload)
         if not allow_asr:
@@ -1600,57 +1294,106 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     if source == "GATEWAY" and not list(payload.get("attachments") or []):
         _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
 
-    if source == "GATEWAY":
-        handled_by_progress_fastpath = await _try_handle_gateway_progress_fastpath(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ledger=_get_ledger_safe(),
-            ts_ms=ts_ms,
+    try:
+        pipeline_result = dict(
+            await _dispatch_to_graph(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+                governed_command_application_provider=(
+                    governed_command_application_provider
+                ),
+                command_authority={
+                    "principal_id": gateway_ingress.principal_id,
+                    "claim_ref": gateway_ingress.claim_ref,
+                    "audit_ref": gateway_ingress.audit_ref,
+                    "body_sha256": gateway_ingress.body_sha256,
+                },
+            )
+            or {}
         )
-        if handled_by_progress_fastpath:
-            completed_ms = int(time.time() * 1000)
+        commit_event = dict(pipeline_result.get("commit_event") or {})
+        execution_receipt = dict(commit_event.get("execution_receipt") or {})
+        command_id = str(execution_receipt.get("command_id") or "").strip()
+        decision = str(
+            pipeline_result.get("decision")
+            or ("APPROVE" if governed_command_application_provider is None else "REJECT")
+        ).strip().upper()
+        reason_code = str(pipeline_result.get("reason_code") or "").strip() or None
+        completed_ms = int(time.time() * 1000)
+        if command_id:
+            return InputResponse(
+                success=(decision == "APPROVE"),
+                request_id=request_id,
+                source=source,
+                status="COMPLETED" if decision == "APPROVE" else "REJECTED",
+                detail=(
+                    "governed command completed"
+                    if decision == "APPROVE"
+                    else f"governed command rejected: {reason_code or 'REJECTED'}"
+                ),
+                ts_ms=completed_ms,
+                **_host_input_receipt_fields(
+                    gateway_ingress,
+                    receipt_ref=command_id,
+                ),
+            )
+
+        if decision != "APPROVE":
+            terminal_status = "PAUSED" if decision == "PAUSE" else "REJECTED"
             if not _persist_gateway_ingress_result(
                 gateway_ingress,
                 request_id=request_id,
-                status="COMPLETED",
+                status=terminal_status,
                 at_ms=completed_ms,
             ):
                 raise HTTPException(
                     status_code=503,
-                    detail="gateway durable acceptance result unavailable",
+                    detail="gateway durable rejection result unavailable",
                 )
             return InputResponse(
-                success=True,
+                success=False,
                 request_id=request_id,
                 source=source,
-                status="COMPLETED",
-                detail="gateway progress fastpath replied",
+                status=terminal_status,
+                detail=f"input not admitted: {reason_code or decision}",
                 ts_ms=completed_ms,
                 **_host_input_receipt_fields(
                     gateway_ingress,
                     receipt_ref=_host_input_result_ref(
                         request_id=request_id,
-                        status="COMPLETED",
+                        status=terminal_status,
                     ),
                 ),
             )
 
-    try:
-        await _dispatch_to_graph(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
+        route_decision = dict(pipeline_result.get("route_decision") or {})
+        route_type = str(route_decision.get("route") or "").strip().lower()
+        route_target = str(route_decision.get("target_id") or "").strip()
+        direct_skill_cutover = route_type == "skill" and bool(route_target)
+        if (
+            governed_command_application_provider is not None
+            and direct_skill_cutover
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="direct skill command completed without an execution receipt",
+            )
+
+        # Chat/delegate paths not yet owned by Task Runtime still complete in
+        # the awaited legacy pipeline.  Direct-skill cutover never falls back.
+        legacy_status = (
+            "COMPLETED"
+            if governed_command_application_provider is not None
+            else "ACCEPTED"
         )
         if not _persist_gateway_ingress_result(
             gateway_ingress,
             request_id=request_id,
-            status="ACCEPTED",
+            status=legacy_status,
             at_ms=int(time.time() * 1000),
         ):
             raise HTTPException(
@@ -1661,27 +1404,30 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             success=True,
             request_id=request_id,
             source=source,
-            status="ACCEPTED",
-            detail="input accepted for processing",
+            status=legacy_status,
+            detail=(
+                "input completed by awaited legacy pipeline"
+                if legacy_status == "COMPLETED"
+                else "input accepted for processing"
+            ),
             ts_ms=ts_ms,
             **_host_input_receipt_fields(
                 gateway_ingress,
                 receipt_ref=_host_input_result_ref(
                     request_id=request_id,
-                    status="ACCEPTED",
+                    status=legacy_status,
                 ),
             ),
         )
     except Exception as exc:
-        if gateway_dedupe_key:
-            _release_gateway_dedupe(gateway_dedupe_key, expected_expiry=gateway_dedupe_expiry)
         _logger.error("input_routes: dispatch failed source=%s request_id=%s: %s", source, request_id, exc)
-        _persist_gateway_ingress_result(
-            gateway_ingress,
-            request_id=request_id,
-            status="ERROR",
-            at_ms=int(time.time() * 1000),
-        )
+        if governed_command_application_provider is None:
+            _persist_gateway_ingress_result(
+                gateway_ingress,
+                request_id=request_id,
+                status="ERROR",
+                at_ms=int(time.time() * 1000),
+            )
         if isinstance(exc, HTTPException):
             raise
         return InputResponse(
@@ -1709,7 +1455,7 @@ async def _try_handle_gateway_progress_fastpath(
         return False
     if str(source or "").strip().upper() != "GATEWAY":
         return False
-    if not _parse_bool_env("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", default=True):
+    if not get_input_settings().gateway_progress_fastpath_enabled:
         return False
     if not _looks_like_progress_query_for_ack_skip(text):
         return False
@@ -1758,8 +1504,9 @@ async def _try_handle_gateway_progress_fastpath(
         )
         return False
 
-    wait_result = _parse_bool_env("HOST_GATEWAY_PROGRESS_FASTPATH_WAIT_RESULT", default=True)
-    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_PROGRESS_FASTPATH_TIMEOUT_MS", default=6000))
+    settings = get_input_settings()
+    wait_result = settings.gateway_progress_fastpath_wait_result
+    timeout_ms = settings.gateway_progress_fastpath_timeout_ms
     started_ms = int(time.time() * 1000)
     result = await post_gateway_reply(
         platform=platform,
@@ -2026,11 +1773,12 @@ async def _run_gateway_proactive_progress_push(
     if not platform or not conversation_id:
         return
 
-    warmup_ms = max(0, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_WARMUP_MS", default=15000))
-    interval_ms = max(2000, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_INTERVAL_MS", default=15000))
-    max_updates = max(1, min(8, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_MAX_UPDATES", default=2)))
-    wait_result = _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_WAIT_RESULT", default=False)
-    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_TIMEOUT_MS", default=4000))
+    settings = get_input_settings()
+    warmup_ms = settings.gateway_progress_push_warmup_ms
+    interval_ms = settings.gateway_progress_push_interval_ms
+    max_updates = settings.gateway_progress_push_max_updates
+    wait_result = settings.gateway_progress_push_wait_result
+    timeout_ms = settings.gateway_progress_push_timeout_ms
 
     if warmup_ms > 0:
         try:
@@ -2358,14 +2106,25 @@ async def _run_cortex_orchestrator_pipeline(
     payload: dict[str, Any],
     ts_ms: int,
     intent_draft_override: dict[str, Any] | None = None,
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
+    command_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from host_brain.app.chat_handler import _evaluate_governor_with_timing  # noqa: PLC0415
+    from host_brain.app.dependencies import get_intent_engine  # noqa: PLC0415
     from host_brain.app.emotion_context import (  # noqa: PLC0415
         build_chat_emotion_snapshot,
+        build_chat_governance_snapshot,
         resolve_chat_emotion_context,
     )
     from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
     from host_brain.app.schemas import ChatRequest  # noqa: PLC0415
     from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
+    from host_brain.governor.route_token import (  # noqa: PLC0415
+        RouteTokenDisposition,
+        validate_governor_route_token,
+    )
 
     reply_channel = str(payload.get("platform") or "").strip() or None
     reply_target = str(payload.get("conversation_id") or "").strip() or None
@@ -2423,7 +2182,121 @@ async def _run_cortex_orchestrator_pipeline(
             person_id=person_id,
             ts_ms=ts_ms,
         )
-    governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
+
+    def _result_from_commit(commit: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "decision": str(commit.get("decision") or "").strip().upper() or "REJECT",
+            "reason_code": str(commit.get("reason_code") or "").strip() or None,
+            "narrative": str(commit.get("narrative") or "").strip(),
+            "commit_event": commit,
+            "intent_draft": dict(intent_draft or {}),
+            "route_decision": {
+                "route": str(intent_draft.get("route") or "chat").strip().lower() or "chat",
+                "target_id": str(intent_draft.get("target_id") or "").strip(),
+                "task": str(intent_draft.get("task") or "").strip(),
+                "reason_code": str(
+                    intent_draft.get("reason_code")
+                    or intent_draft.get("route_reason")
+                    or ""
+                ).strip()
+                or None,
+                "source": str(intent_draft.get("route_source") or "").strip() or None,
+                "confidence": _normalize_route_confidence(
+                    intent_draft.get("route_confidence")
+                    if intent_draft.get("route_confidence") is not None
+                    else intent_draft.get("confidence")
+                ),
+                "override_reason": str(
+                    intent_draft.get("route_override_reason") or ""
+                ).strip()
+                or None,
+                "llm_route_used": bool(intent_draft.get("llm_route_used")),
+            },
+        }
+
+    governance_snapshot = build_chat_governance_snapshot(
+        emotion_context=emotion_context,
+        ts_ms=ts_ms,
+    )
+    governor_result, governor_timing = await _evaluate_governor_with_timing(
+        engine=get_intent_engine(),
+        intent_draft=intent_draft,
+        request_id=request_id,
+        thread_id=session_id,
+        governance_snapshot=governance_snapshot,
+        inline=False,
+    )
+    governor_result = dict(governor_result or {})
+    governor_result.setdefault(
+        "queue_wait_ms",
+        int(governor_timing.get("queue_wait_ms") or 0),
+    )
+    governor_result.setdefault(
+        "execute_ms",
+        int(governor_timing.get("execute_ms") or 0),
+    )
+    governor_decision = str(governor_result.get("decision") or "").strip().upper()
+    governor_reason = str(governor_result.get("reason_code") or "").strip()
+    if governor_decision != "APPROVE":
+        terminal_decision = "PAUSE" if governor_decision == "PAUSE" else "REJECT"
+        return _result_from_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": terminal_decision,
+                "reason_code": governor_reason or "GOVERNOR_REJECTED",
+                "request_id": request_id,
+                "governor_result": governor_result,
+            }
+        )
+
+    route_validation = validate_governor_route_token(governor_result)
+    if route_validation.disposition == RouteTokenDisposition.PAUSE:
+        return _result_from_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "PAUSE",
+                "execution_state": "PAUSED_REVIEW",
+                "reason_code": "GOV_AIRLOCK_REVIEW",
+                "route_validation_reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token,
+                "request_id": request_id,
+                "governor_result": governor_result,
+            }
+        )
+    if route_validation.disposition == RouteTokenDisposition.BLOCK:
+        return _result_from_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "execution_state": "BLOCKED",
+                "reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token or None,
+                "request_id": request_id,
+                "governor_result": governor_result,
+            }
+        )
+
+    governed_command_application: Any | None = None
+    if governed_command_application_provider is not None:
+        authority = dict(command_authority or {})
+        missing_authority = [
+            key
+            for key in ("principal_id", "claim_ref", "audit_ref", "body_sha256")
+            if not str(authority.get(key) or "").strip()
+        ]
+        if missing_authority:
+            raise RuntimeError(
+                "governed_command_authority_incomplete:"
+                + ",".join(missing_authority)
+            )
+        governed_command_application = governed_command_application_provider()
+        if inspect.isawaitable(governed_command_application):
+            governed_command_application = await governed_command_application
+        if governed_command_application is None:
+            raise RuntimeError("governed_command_application_unavailable")
 
     commit_event: dict[str, Any] | None = None
     async for event in cortex_orchestrator_sse_generator(
@@ -2435,8 +2308,10 @@ async def _run_cortex_orchestrator_pipeline(
         emotion_context=emotion_context,
         emotion_snapshot=emotion_snapshot,
         governor_result=governor_result,
-        intent_id=request_id,
+        intent_id=str(governor_result.get("intent_id") or request_id),
         metrics=_NoopMetrics(),
+        governed_command_application=governed_command_application,
+        command_authority=dict(command_authority or {}),
     ):
         parsed = _parse_sse_data_event(event)
         if parsed and str(parsed.get("phase") or "").upper() == "COMMIT":
@@ -2445,27 +2320,7 @@ async def _run_cortex_orchestrator_pipeline(
     if commit_event is None:
         raise RuntimeError("cortex_orchestrator_commit_missing")
 
-    return {
-        "decision": str(commit_event.get("decision") or "").strip().upper() or "REJECT",
-        "reason_code": str(commit_event.get("reason_code") or "").strip() or None,
-        "narrative": str(commit_event.get("narrative") or "").strip(),
-        "commit_event": commit_event,
-        "intent_draft": dict(intent_draft or {}),
-        "route_decision": {
-            "route": str(intent_draft.get("route") or "chat").strip().lower() or "chat",
-            "target_id": str(intent_draft.get("target_id") or "").strip(),
-            "task": str(intent_draft.get("task") or "").strip(),
-            "reason_code": str(intent_draft.get("reason_code") or intent_draft.get("route_reason") or "").strip() or None,
-            "source": str(intent_draft.get("route_source") or "").strip() or None,
-            "confidence": _normalize_route_confidence(
-                intent_draft.get("route_confidence")
-                if intent_draft.get("route_confidence") is not None
-                else intent_draft.get("confidence")
-            ),
-            "override_reason": str(intent_draft.get("route_override_reason") or "").strip() or None,
-            "llm_route_used": bool(intent_draft.get("llm_route_used")),
-        },
-    }
+    return _result_from_commit(commit_event)
 
 
 async def _run_cortex_pipeline(
@@ -2498,6 +2353,12 @@ async def _maybe_realign_gateway_pipeline(
     pipeline_result: dict[str, Any],
     ledger: Any,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    commit_event = dict(pipeline_result.get("commit_event") or {})
+    if isinstance(commit_event.get("execution_receipt"), dict):
+        return pipeline_result, {
+            "triggered": False,
+            "reason_code": "DEVIATION_GOVERNED_RECEIPT_FINAL",
+        }
     route_decision = dict(pipeline_result.get("route_decision") or {})
     route_type = str(route_decision.get("route") or "").strip().lower()
     route_target = str(route_decision.get("target_id") or "").strip().lower()
@@ -2562,7 +2423,7 @@ async def _maybe_realign_gateway_pipeline(
     )
     detection["notice"] = notice_result
 
-    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_RETRY_ENABLED", default=True):
+    if not get_input_settings().gateway_deviation_retry_enabled:
         detection["retry_applied"] = False
         detection["retry_reason"] = "DEVIATION_RETRY_DISABLED"
         return pipeline_result, detection
@@ -2593,7 +2454,10 @@ async def _maybe_realign_gateway_pipeline(
         source_text=user_text,
         target_text=retry_narrative,
     )
-    min_overlap = float(detection.get("min_overlap") or _parse_float_env("HOST_GATEWAY_DEVIATION_MIN_OVERLAP", default=0.18))
+    min_overlap = float(
+        detection.get("min_overlap")
+        or get_input_settings().gateway_deviation_min_overlap
+    )
     retry_ok = retry_decision == "APPROVE" and bool(retry_narrative) and retry_overlap >= min_overlap
     detection["retry_applied"] = retry_ok
     detection["retry_overlap_ratio"] = retry_overlap
@@ -2858,8 +2722,9 @@ async def _deliver_gateway_reply(
         media_is_remote = envelope_media_ref.startswith(("http://", "https://", "data:"))
         primary_content = reply_text or (envelope_media_ref if media_is_remote else "")
         primary_media_path = None if media_is_remote else envelope_media_ref
-        wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_MEDIA_REPLY_WAIT_RESULT", default=True)
-        timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
+        settings = get_input_settings()
+        wait_result = settings.gateway_media_reply_wait_result
+        timeout_ms = settings.gateway_reply_timeout_ms
         result = await post_gateway_reply(
             platform=platform,
             conversation_id=conversation_id,
@@ -3121,11 +2986,12 @@ async def _deliver_gateway_reply(
     primary_msg_type_enum, primary_content = _normalize_form_for_platform(form_decision.primary, primary_content)
     primary_msg_type = primary_msg_type_enum.value
 
-    wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_REPLY_WAIT_RESULT", default=False)
-    text_reply_async = _parse_bool_env("HOST_INPUT_GATEWAY_TEXT_REPLY_ASYNC", default=True)
+    settings = get_input_settings()
+    wait_result = settings.gateway_reply_wait_result
+    text_reply_async = settings.gateway_text_reply_async
     if primary_msg_type == MsgType.TEXT.value and text_reply_async:
         wait_result = False
-    timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
+    timeout_ms = settings.gateway_reply_timeout_ms
     result = await post_gateway_reply(
         platform=platform,
         conversation_id=conversation_id,
@@ -3236,10 +3102,7 @@ async def _send_gateway_voice_reply(
         if not send_gateway_voice_message:
             voice_result["voice_gateway_detail"] = "Gateway voice message disabled; Edge playback/VTS only"
         elif audio_path and platform and conversation_id:
-            gateway_timeout_ms = max(
-                1000,
-                _parse_int_env("HOST_GATEWAY_VOICE_REPLY_TIMEOUT_MS", default=30000),
-            )
+            gateway_timeout_ms = get_input_settings().gateway_voice_reply_timeout_ms
             gateway_result = await post_gateway_reply(
                 platform=platform,
                 conversation_id=conversation_id,
@@ -3301,7 +3164,11 @@ async def _dispatch_to_graph(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
-) -> None:
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
+    command_authority: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ledger = _get_ledger_safe()
     source_upper = str(source or "").upper().strip()
     if source_upper == "ASR":
@@ -3326,10 +3193,21 @@ async def _dispatch_to_graph(
                 source_upper,
                 reject_reason,
             )
-            return
+            return {
+                "decision": "REJECT",
+                "reason_code": reject_reason,
+                "narrative": "",
+                "commit_event": {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": reject_reason,
+                    "request_id": request_id,
+                },
+                "route_decision": {},
+            }
 
-    run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
-    dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
+    dispatch_mode = "governed.awaited"
     gateway_route_preview: dict[str, Any] | None = None
     if source_upper == "GATEWAY":
         gateway_route_preview = _build_gateway_route_preview(text)
@@ -3356,43 +3234,20 @@ async def _dispatch_to_graph(
             ledger=ledger,
         )
 
-    if run_in_thread:
-        future = _get_input_dispatch_executor().submit(
-            _run_dispatch_worker_in_thread,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            ledger=ledger,
-            dispatch_mode=dispatch_mode,
-            run_in_thread=run_in_thread,
-        )
-        future.add_done_callback(
-            lambda completed: _log_dispatch_thread_future_exception(
-                completed,
-                request_id=request_id,
-            )
-        )
-        return
-
-    lock = _get_session_dispatch_lock(session_id)
-    await asyncio.to_thread(lock.acquire)
-    try:
-        await _dispatch_to_graph_worker(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            ledger=ledger,
-            dispatch_mode=dispatch_mode,
-            run_in_thread=run_in_thread,
-        )
-    finally:
-        lock.release()
+    return await _dispatch_to_graph_worker(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+        payload=payload,
+        ts_ms=ts_ms,
+        ledger=ledger,
+        dispatch_mode=dispatch_mode,
+        governed_command_application_provider=(
+            governed_command_application_provider
+        ),
+        command_authority=dict(command_authority or {}),
+    )
 
 
 async def _dispatch_to_graph_worker(
@@ -3405,8 +3260,11 @@ async def _dispatch_to_graph_worker(
     ts_ms: int,
     ledger: Any,
     dispatch_mode: str,
-    run_in_thread: bool,
-) -> None:
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
+    command_authority: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Run cortex orchestrator pipeline and optionally deliver Gateway reply."""
 
     dispatch_ts = int(time.time() * 1000)
@@ -3522,7 +3380,7 @@ async def _dispatch_to_graph_worker(
             detail="gateway multimodal dispatch deferred to async job",
             ts_ms=int(time.time() * 1000),
         )
-        return
+        raise RuntimeError("gateway_multimodal_observation_incomplete")
     try:
         pipeline_result = await _run_cortex_orchestrator_pipeline(
             request_id=request_id,
@@ -3532,6 +3390,10 @@ async def _dispatch_to_graph_worker(
             payload=payload,
             ts_ms=ts_ms,
             intent_draft_override=thalamus_intent_draft,
+            governed_command_application_provider=(
+                governed_command_application_provider
+            ),
+            command_authority=dict(command_authority or {}),
         )
         deviation_meta: dict[str, Any] | None = None
         if source_upper == "GATEWAY":
@@ -3652,7 +3514,6 @@ async def _dispatch_to_graph_worker(
         detail_parts = [
             f"cortex_orchestrator decision={decision}",
             f"mode={dispatch_mode}",
-            f"thread_flag={str(bool(run_in_thread)).lower()}",
             f"latency_ms={latency_ms}",
         ]
         if reason_code:
@@ -3681,9 +3542,8 @@ async def _dispatch_to_graph_worker(
             gateway_reason_code = str(gateway_delivery.get("reason_code") or "")
             gateway_detail = str(gateway_delivery.get("detail") or "")
             if not gateway_success:
-                degrade_on_gateway_failure = _parse_bool_env(
-                    "HOST_GATEWAY_REPLY_FAILURE_DEGRADE_INPUT",
-                    default=True,
+                degrade_on_gateway_failure = (
+                    get_input_settings().gateway_reply_failure_degrade_input
                 )
                 if degrade_on_gateway_failure:
                     completion_status = "DEGRADED"
@@ -3742,7 +3602,7 @@ async def _dispatch_to_graph_worker(
             "skill_exec_count": 0,
         }
         if (
-            _parse_bool_env("HOST_INPUT_EXEC_QUALITY_GATE_ENABLED", default=True)
+            get_input_settings().execution_quality_gate_enabled
             and isinstance(pipeline_result.get("commit_event"), dict)
         ):
             execution_quality = _analyze_request_execution_quality(
@@ -3831,6 +3691,7 @@ async def _dispatch_to_graph_worker(
             latency_ms,
             dispatch_mode,
         )
+        return pipeline_result
     except Exception as exc:
         await _stop_progress_push_task(
             stop_event=progress_push_stop_event,
@@ -3852,3 +3713,45 @@ async def _dispatch_to_graph_worker(
             ts_ms=fail_ts,
         )
         _logger.error("input_routes: dispatch failed request_id=%s: %s", request_id, exc)
+        raise
+
+
+def create_input_router(
+    *,
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
+) -> APIRouter:
+    """Create an input router whose governed application is closure-injected."""
+
+    input_router = APIRouter(prefix="/v1/host", tags=["input"])
+
+    @input_router.post("/input", response_model=InputResponse)
+    async def receive_host_input(
+        body: InputPayload,
+        request: Request,
+    ) -> InputResponse:
+        return await receive_input(
+            body,
+            request,
+            governed_command_application_provider=(
+                governed_command_application_provider
+            ),
+        )
+
+    return input_router
+
+
+# Compatibility seam for direct imports and legacy unit tests.  Production
+# registration calls ``create_input_router`` with the composition-owned provider.
+router = create_input_router()
+
+
+__all__ = [
+    "GovernedCommandApplicationProvider",
+    "InputPayload",
+    "InputResponse",
+    "create_input_router",
+    "receive_input",
+    "router",
+]

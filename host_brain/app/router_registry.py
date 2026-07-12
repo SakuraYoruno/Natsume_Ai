@@ -15,7 +15,10 @@ from host_brain.app.bond_routes import (
 )
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.app.health_routes import router as health_router
-from host_brain.app.input_routes import router as input_router
+from host_brain.app.input_routes import (
+    GovernedCommandApplicationProvider,
+    create_input_router,
+)
 from host_brain.app.internal_agent_routes import router as internal_codex_router
 from host_brain.app.internal_security_immune_routes import router as internal_security_immune_router
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
@@ -82,6 +85,9 @@ def register_host_routers(
     signed_skill_provider_intake_provider: (
         SignedSkillProviderIntakeProvider | None
     ) = None,
+    governed_command_application_provider: (
+        GovernedCommandApplicationProvider | None
+    ) = None,
 ) -> None:
     app.include_router(canon_router)
     app.include_router(scheduler_router)
@@ -91,7 +97,13 @@ def register_host_routers(
     app.include_router(prompt_config_router)
     app.include_router(bond_router)
     app.include_router(agent_router)
-    app.include_router(input_router)
+    app.include_router(
+        create_input_router(
+            governed_command_application_provider=(
+                governed_command_application_provider
+            ),
+        )
+    )
     app.include_router(internal_tribe_router)
     app.include_router(internal_codex_router)
     app.include_router(internal_security_immune_router)
