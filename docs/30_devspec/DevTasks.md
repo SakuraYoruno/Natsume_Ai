@@ -1,7 +1,7 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v2.10
+版本：v2.11
 日期：2026-07-12
 
 本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
@@ -14,13 +14,13 @@
 - 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 - 程序任务编号：`TASK-0461`～`TASK-0622`，共 162 项，编号不得复用或跳号。
 - 当前可执行批次：M48-A，`TASK-0461`～`TASK-0486`，详细任务卡见 `NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
-- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；Entry Gate 已于 2026-07-11 在仅限本地 default-off 实施范围内批准，`TASK-0487～0488` 与 `TASK-0493` 已 `DONE`，`TASK-0489～0492` 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，`TASK-0494` 为下一独立执行入口。
+- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；Entry Gate 已于 2026-07-11 在仅限本地 default-off 实施范围内批准，`TASK-0487～0488` 与 `TASK-0493` 已 `DONE`，`TASK-0489～0492`、`TASK-0494` 为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，`TASK-0495` 为下一隔离验证入口。
 - 后续批次：M49～M57，`TASK-0497`～`TASK-0622`，状态为 `PROGRAMMED`；只能按依赖 Gate 解锁，不能因任务已编号而越级实施。
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
 - 最近完成任务：`TASK-0461～TASK-0485` 已完成；Capability Maturity、durable DegradationState、Release Identity Snapshot、Execution/Review UI、Life evolution UI 与 Capability/Health/Identity governance UI 已按 T-NLE-01～23 落地，新增 read route/UI 默认关闭且不扩大写权限。
-- 当前任务：M48-A 的 `TASK-0486 / LTE-WP-80` 继续 `BLOCKED` 于真实 identity/live/prod/MASTER Seal；独立的 M48-B Entry Gate 已 OPEN。`TASK-0487～0488` 已完成且默认 fail closed。`TASK-0489` 的 production router/lifespan、`TASK-0490` 的 protected provider catalog/signed intake、`TASK-0491` 的 protected Pentest secure route/composition，以及 `TASK-0492` 的真实 service startup/reservation provider 均等待 handoff，故四者标 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。`TASK-0493` 已完成不可降级的 Edge contracts-only Delivery Gate：冻结 122 条内容寻址 finding 与 54 个 `TASK-0581` 迁移组，guard unit `64 passed`、contract/aggregator `47 passed`、唯一 integration 首次 `1 passed`，独立复审 P0/P1 cleared。`TASK-0494` 是下一独立执行入口，TASK-0495～0622 仍按 Gate 为 `PROGRAMMED`。
+- 当前任务：M48-A 的 `TASK-0486 / LTE-WP-80` 继续 `BLOCKED` 于真实 identity/live/prod/MASTER Seal；独立的 M48-B Entry Gate 已 OPEN。`TASK-0487～0488` 已完成且默认 fail closed。`TASK-0489` 的 production router/lifespan、`TASK-0490` 的 protected provider catalog/signed intake、`TASK-0491` 的 protected Pentest secure route/composition，以及 `TASK-0492` 的真实 service startup/reservation provider 均等待 handoff。`TASK-0493` 已完成不可降级 Edge contracts-only Delivery Gate。`TASK-0494` 已完成 Mate/Desktop/WeChat owned 安全内核：默认 DISABLED、专属 HMAC/scope/rate/replay/audit、remote approval、bounded admission/queue/path binding 与 auth-before-effect；focused `86 passed`、唯一 integration 首次 `1 passed`、C# `0 errors`，三路复审 P0/P1 cleared。Host unsigned Mate producer/raw 32145/startup、Edge signed WeChat producer、Gateway callback credential 与 Service Catalog/live cutover 尚待 protected handoff，故状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。`TASK-0495` 为下一隔离验证入口，TASK-0496～0622 仍按 Gate 为 `PROGRAMMED`。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 
