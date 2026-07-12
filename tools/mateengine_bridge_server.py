@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import secrets
 import socket
@@ -27,7 +28,17 @@ from natsume_contracts.bridge_auth import (
     HTTP_AUTH_HEADERS,
     body_sha256,
     build_hmac_signature,
+    build_http_auth_headers,
     canonical_hmac_payload,
+)
+from host_brain.composition.service_catalog_startup import (
+    MODE_ENFORCE,
+    STATUS_STARTED,
+    ServiceCatalogStartupCoordinator,
+)
+from host_brain.service_catalog.defaults import build_local_catalog
+from host_brain.service_catalog.socket_reservation import (
+    OwnedSocketReservationProbe,
 )
 
 
@@ -70,6 +81,11 @@ EXPOSURE_MODES = frozenset(
 )
 PROTOCOL_VERSION = "1"
 BRIDGE_CONSTRUCTION_FAILED = "BRIDGE_CONSTRUCTION_FAILED"
+BRIDGE_CATALOG_STARTUP_FAILED = "BRIDGE_CATALOG_STARTUP_FAILED"
+BRIDGE_CATALOG_ENFORCE_REQUIRED = "BRIDGE_CATALOG_ENFORCE_REQUIRED"
+MATE_BRIDGE_OWNER_ID = "host.mateengine.bridge"
+MATE_HTTP_ENDPOINT_ID = "host.mateengine.bridge.http"
+MATE_UDP_ENDPOINT_ID = "host.mateengine.bridge.udp"
 SCOPE_READ = "bridge:mateengine:read"
 SCOPE_SAY = "bridge:mateengine:say"
 SCOPE_EXPRESSION = "bridge:mateengine:expression"
@@ -97,6 +113,15 @@ class BridgeConstructionError(RuntimeError):
     reason_code = BRIDGE_CONSTRUCTION_FAILED
 
     def __init__(self) -> None:
+        super().__init__(self.reason_code)
+
+
+class CatalogGovernedBridgeStartupError(RuntimeError):
+    """Sanitized catalog/reservation startup rejection."""
+
+    def __init__(self, reason_code: str = BRIDGE_CATALOG_STARTUP_FAILED) -> None:
+        normalized = str(reason_code or "").strip()
+        self.reason_code = normalized or BRIDGE_CATALOG_STARTUP_FAILED
         super().__init__(self.reason_code)
 
 HTTP_HOST = os.getenv("MATEENGINE_BRIDGE_HTTP_HOST", "127.0.0.1").strip() or "127.0.0.1"
@@ -949,13 +974,6 @@ class BridgeSecurityRuntime:
     ) -> AuthorizationDecision:
         if self.config.exposure_mode == EXPOSURE_MODE_DISABLED:
             return AuthorizationDecision(False, 503, "bridge_disabled")
-        has_auth = any(str(metadata.get(key) or "").strip() for key in HTTP_AUTH_HEADERS)
-        if (
-            self.config.exposure_mode == EXPOSURE_MODE_LOOPBACK
-            and _is_loopback_host(remote_host)
-            and not has_auth
-        ):
-            return AuthorizationDecision(True, 200, "anonymous_loopback_health")
         return self.authorize(
             transport="http",
             method="GET",
@@ -1335,13 +1353,18 @@ def process_command_request(
     )
 
 
-def build_health_payload(runtime: BridgeSecurityRuntime) -> dict[str, Any]:
+def build_health_payload(
+    runtime: BridgeSecurityRuntime,
+    *,
+    udp_ready: bool = False,
+) -> dict[str, Any]:
     """Return a minimal owner/readiness payload without command bodies."""
 
     return {
         "status": "ok",
         "bridge": "mateengine",
-        "owner_id": "host.mateengine.bridge",
+        "owner_id": MATE_BRIDGE_OWNER_ID,
+        "protocol_id": "http",
         "protocol_version": PROTOCOL_VERSION,
         "exposure_mode": runtime.config.exposure_mode,
         "started_at": state["started_at"],
@@ -1353,8 +1376,11 @@ def build_health_payload(runtime: BridgeSecurityRuntime) -> dict[str, Any]:
         },
         "udp_ingress": {
             "enabled": runtime.config.udp_enabled,
+            "ready": bool(runtime.config.udp_enabled and udp_ready),
             "host": runtime.config.udp_host if runtime.config.udp_enabled else None,
             "port": runtime.config.udp_port if runtime.config.udp_enabled else None,
+            "protocol_id": "mateengine-udp" if runtime.config.udp_enabled else None,
+            "protocol_version": PROTOCOL_VERSION if runtime.config.udp_enabled else None,
         },
     }
 
@@ -1412,7 +1438,17 @@ class MateEngineBridgeHandler(BaseHTTPRequestHandler):
                 status=503,
             )
             return
-        self._send_json(build_health_payload(runtime))
+        udp_ready_event = getattr(self.server, "bridge_udp_ready_event", None)
+        udp_thread = getattr(self.server, "bridge_udp_thread", None)
+        udp_ready = bool(
+            udp_ready_event is not None
+            and callable(getattr(udp_ready_event, "is_set", None))
+            and udp_ready_event.is_set()
+            and udp_thread is not None
+            and callable(getattr(udp_thread, "is_alive", None))
+            and udp_thread.is_alive()
+        )
+        self._send_json(build_health_payload(runtime, udp_ready=udp_ready))
 
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -1498,6 +1534,36 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         )
         super().__init__(*args, **kwargs)
 
+    @classmethod
+    def from_prebound_socket(
+        cls,
+        bound_socket: socket.socket,
+        handler_class: type[BaseHTTPRequestHandler],
+    ) -> BoundedThreadingHTTPServer:
+        """Adopt one already-bound TCP socket without a close/rebind gap."""
+
+        if not isinstance(bound_socket, socket.socket) or bound_socket.fileno() < 0:
+            raise ValueError("a live pre-bound HTTP socket is required")
+        address = bound_socket.getsockname()
+        server = cls(address, handler_class, bind_and_activate=False)
+        unbound_socket = server.socket
+        try:
+            server.socket = bound_socket
+            unbound_socket.close()
+            server.server_address = address
+            server.server_name = socket.getfqdn(str(address[0]))
+            server.server_port = int(address[1])
+            # The reservation socket is already bound.  server_activate only
+            # transitions that same object to LISTEN; server_bind is never run.
+            server.server_activate()
+            return server
+        except BaseException:
+            try:
+                server.server_close()
+            except OSError:
+                pass
+            raise
+
     def get_request(self) -> tuple[socket.socket, Any]:
         request, address = super().get_request()
         request.settimeout(self._request_timeout_seconds)
@@ -1521,6 +1587,12 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._request_slots.release()
+
+    def service_actions(self) -> None:
+        ready_event = getattr(self, "bridge_http_ready_event", None)
+        if ready_event is not None:
+            ready_event.set()
+        super().service_actions()
 
 
 def handle_command(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2507,23 +2579,54 @@ def process_udp_datagram(
     )
 
 
-def serve_udp_bridge(runtime: BridgeSecurityRuntime) -> None:
+def serve_udp_bridge(
+    runtime: BridgeSecurityRuntime,
+    *,
+    bound_socket: socket.socket,
+    stop_event: threading.Event,
+    ready_event: threading.Event,
+) -> None:
+    """Serve UDP from an already-reserved socket; this function never binds."""
+
     if not runtime.config.udp_enabled:
         return
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.bind((runtime.config.udp_host, runtime.config.udp_port))
+        if bound_socket.fileno() < 0:
+            raise OSError("pre-bound UDP socket is closed")
+        actual_address = bound_socket.getsockname()
+        if int(actual_address[1]) != runtime.config.udp_port:
+            raise OSError("pre-bound UDP socket does not match catalog port")
+        bound_socket.settimeout(0.2)
+        ready_event.set()
+        print(
+            "[mateengine-bridge] "
+            f"udp://{runtime.config.udp_host}:{runtime.config.udp_port} "
+            f"-> udp://{MATEENGINE_HOST}:{MATEENGINE_PORT}",
+            flush=True,
+        )
+        while not stop_event.is_set():
+            try:
+                data, addr = bound_socket.recvfrom(
+                    min(65_535, runtime.config.max_body_bytes + 8192)
+                )
+            except socket.timeout:
+                continue
+            handle_udp_bridge_datagram(data, addr, runtime=runtime)
+    except OSError as exc:
+        if not stop_event.is_set():
+            with _STATE_LOCK:
+                state["error_count"] = int(state["error_count"]) + 1
+                state["last_error"] = f"UDP bridge failed: {type(exc).__name__}"
             print(
-                f"[mateengine-bridge] udp://{runtime.config.udp_host}:{runtime.config.udp_port} -> udp://{MATEENGINE_HOST}:{MATEENGINE_PORT}",
+                f"[mateengine-bridge] UDP bridge failed: {type(exc).__name__}",
                 flush=True,
             )
-            while True:
-                data, addr = sock.recvfrom(min(65_535, runtime.config.max_body_bytes + 8192))
-                handle_udp_bridge_datagram(data, addr, runtime=runtime)
-    except OSError as exc:
-        state["error_count"] = int(state["error_count"]) + 1
-        state["last_error"] = f"UDP bridge failed: {exc}"
-        print(f"[mateengine-bridge] UDP bridge failed: {exc}", flush=True)
+    finally:
+        ready_event.clear()
+        try:
+            bound_socket.close()
+        except OSError:
+            pass
 
 
 def handle_udp_bridge_datagram(
@@ -2551,16 +2654,237 @@ def handle_udp_bridge_datagram(
         )
 
 
-def start_udp_bridge_thread(runtime: BridgeSecurityRuntime) -> None:
+def start_udp_bridge_thread(
+    runtime: BridgeSecurityRuntime,
+    *,
+    bound_socket: socket.socket,
+    stop_event: threading.Event,
+    ready_event: threading.Event,
+) -> threading.Thread | None:
     if not runtime.config.udp_enabled:
-        return
+        return None
     thread = threading.Thread(
         target=serve_udp_bridge,
-        args=(runtime,),
+        kwargs={
+            "runtime": runtime,
+            "bound_socket": bound_socket,
+            "stop_event": stop_event,
+            "ready_event": ready_event,
+        },
         name="mateengine-bridge-udp",
-        daemon=True,
+        daemon=False,
     )
     thread.start()
+    return thread
+
+
+def _serve_http_candidate(
+    server: BoundedThreadingHTTPServer,
+    ready_event: threading.Event,
+) -> None:
+    try:
+        server.serve_forever(poll_interval=0.05)
+    finally:
+        ready_event.clear()
+
+
+def _wait_local_candidate_health(
+    runtime: BridgeSecurityRuntime,
+    *,
+    timeout_seconds: float = 1.0,
+) -> bool:
+    """Wait until the adopted HTTP socket serves the exact local identity."""
+
+    deadline = time.monotonic() + max(0.1, float(timeout_seconds))
+    while time.monotonic() < deadline:
+        readiness_headers = build_http_auth_headers(
+            secret=runtime.config.hmac_secret,
+            key_id=runtime.config.key_id,
+            method="GET",
+            path="/health",
+            timestamp_ms=int(time.time() * 1000),
+            nonce=secrets.token_urlsafe(24),
+            principal=runtime.config.service_principal,
+            scope=SCOPE_READ,
+            raw_body=b"",
+        )
+        readiness_headers["Accept"] = "application/json"
+        connection = http.client.HTTPConnection(
+            runtime.config.http_host,
+            runtime.config.http_port,
+            timeout=min(0.25, max(0.05, deadline - time.monotonic())),
+        )
+        try:
+            connection.request("GET", "/health", headers=readiness_headers)
+            response = connection.getresponse()
+            raw_body = response.read(65_537)
+            payload = json.loads(raw_body.decode("utf-8", errors="strict"))
+            udp = payload.get("udp_ingress") if type(payload) is dict else None
+            if (
+                response.status == 200
+                and type(payload) is dict
+                and payload.get("status") == "ok"
+                and payload.get("owner_id") == MATE_BRIDGE_OWNER_ID
+                and payload.get("protocol_id") == "http"
+                and payload.get("protocol_version") == PROTOCOL_VERSION
+                and (
+                    not runtime.config.udp_enabled
+                    or (
+                        type(udp) is dict
+                        and udp.get("ready") is True
+                        and udp.get("protocol_id") == "mateengine-udp"
+                        and udp.get("protocol_version") == PROTOCOL_VERSION
+                    )
+                )
+            ):
+                return True
+        except (OSError, ValueError, http.client.HTTPException, UnicodeError):
+            pass
+        finally:
+            connection.close()
+        time.sleep(0.01)
+    return False
+
+
+@dataclass(slots=True)
+class MateBridgeCandidateHandle:
+    """Exact candidate lifecycle handle used by catalog rollback and main."""
+
+    runtime: BridgeSecurityRuntime
+    http_server: BoundedThreadingHTTPServer
+    http_thread: threading.Thread
+    http_ready_event: threading.Event
+    udp_socket: socket.socket | None
+    udp_thread: threading.Thread | None
+    udp_stop_event: threading.Event
+    udp_ready_event: threading.Event
+    _stop_lock: threading.Lock = field(default_factory=threading.Lock)
+    _stopped: bool = False
+
+    def wait(self) -> None:
+        """Block while every configured listener remains alive."""
+
+        while self.http_thread.is_alive() and (
+            self.udp_thread is None or self.udp_thread.is_alive()
+        ):
+            self.http_thread.join(timeout=0.25)
+
+    def stop(self) -> None:
+        """Stop and close only this candidate's transferred sockets."""
+
+        with self._stop_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            self.udp_stop_event.set()
+            if self.udp_socket is not None:
+                try:
+                    self.udp_socket.close()
+                except OSError:
+                    pass
+            if self.http_thread.is_alive():
+                try:
+                    self.http_server.shutdown()
+                except Exception:
+                    pass
+            try:
+                self.http_server.server_close()
+            except OSError:
+                pass
+
+        current = threading.current_thread()
+        if self.http_thread is not current and self.http_thread.is_alive():
+            self.http_thread.join(timeout=2.0)
+        if (
+            self.udp_thread is not None
+            and self.udp_thread is not current
+            and self.udp_thread.is_alive()
+        ):
+            self.udp_thread.join(timeout=2.0)
+        if _SECURITY_RUNTIME is self.runtime:
+            _install_security_runtime(None)
+
+
+def start_prebound_bridge_candidate(
+    runtime: BridgeSecurityRuntime,
+    *,
+    http_socket: socket.socket,
+    udp_socket: socket.socket | None,
+) -> MateBridgeCandidateHandle:
+    """Start one candidate from transferred sockets with local rollback."""
+
+    if runtime.config.udp_enabled != (udp_socket is not None):
+        if udp_socket is not None:
+            udp_socket.close()
+        http_socket.close()
+        raise RuntimeError("catalog UDP handoff does not match bridge config")
+
+    http_server: BoundedThreadingHTTPServer | None = None
+    handle: MateBridgeCandidateHandle | None = None
+    try:
+        http_server = BoundedThreadingHTTPServer.from_prebound_socket(
+            http_socket,
+            MateEngineBridgeHandler,
+        )
+        http_server.bridge_security_runtime = runtime  # type: ignore[attr-defined]
+        http_ready = threading.Event()
+        udp_stop = threading.Event()
+        udp_ready = threading.Event()
+        http_thread = threading.Thread(
+            target=_serve_http_candidate,
+            args=(http_server, http_ready),
+            name="mateengine-bridge-http",
+            daemon=False,
+        )
+        http_server.bridge_http_ready_event = http_ready  # type: ignore[attr-defined]
+        handle = MateBridgeCandidateHandle(
+            runtime=runtime,
+            http_server=http_server,
+            http_thread=http_thread,
+            http_ready_event=http_ready,
+            udp_socket=udp_socket,
+            udp_thread=None,
+            udp_stop_event=udp_stop,
+            udp_ready_event=udp_ready,
+        )
+        udp_thread = None
+        if udp_socket is not None:
+            udp_thread = start_udp_bridge_thread(
+                runtime,
+                bound_socket=udp_socket,
+                stop_event=udp_stop,
+                ready_event=udp_ready,
+            )
+            handle.udp_thread = udp_thread
+        http_server.bridge_udp_ready_event = udp_ready  # type: ignore[attr-defined]
+        http_server.bridge_udp_thread = udp_thread  # type: ignore[attr-defined]
+        http_thread.start()
+        if not http_ready.wait(timeout=1.0) or not http_thread.is_alive():
+            raise RuntimeError("HTTP candidate did not become ready")
+        if udp_thread is not None and (
+            not udp_ready.wait(timeout=1.0) or not udp_thread.is_alive()
+        ):
+            raise RuntimeError("UDP candidate did not become ready")
+        if not _wait_local_candidate_health(runtime):
+            raise RuntimeError("HTTP candidate identity did not become ready")
+        return handle
+    except BaseException:
+        if handle is not None:
+            handle.stop()
+        else:
+            if http_server is not None:
+                http_server.server_close()
+            else:
+                try:
+                    http_socket.close()
+                except OSError:
+                    pass
+            if udp_socket is not None:
+                try:
+                    udp_socket.close()
+                except OSError:
+                    pass
+        raise
 
 
 def _clamp01(value: Any) -> float:
@@ -2628,27 +2952,77 @@ def build_bridge_security_runtime(
         raise BridgeConstructionError() from None
 
 
-def main() -> None:
-    try:
-        config = build_security_config()
-        runtime = build_bridge_security_runtime(config)
-    except BridgeConstructionError as exc:
-        raise SystemExit(
-            f"[mateengine-bridge] secure startup rejected: {exc.reason_code}"
-        ) from None
-    except Exception:
-        raise SystemExit(
-            f"[mateengine-bridge] secure startup rejected: {BRIDGE_CONSTRUCTION_FAILED}"
-        ) from None
-    if config.exposure_mode == EXPOSURE_MODE_DISABLED:
-        print("[mateengine-bridge] disabled by NATSUME_BRIDGE_EXPOSURE_MODE", flush=True)
-        return
-    _install_security_runtime(runtime)
-    started_audited = runtime.audit(
+def _system_clock_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _build_mate_catalog_health_probe(
+    config: BridgeSecurityConfig,
+    environ: Mapping[str, str],
+    *,
+    clock_ms: Callable[[], int],
+) -> Any:
+    from host_brain.service_catalog.mate_health_probe import (  # noqa: PLC0415
+        MateBridgeHealthProbe,
+        MateBridgeHealthProbeConfig,
+    )
+
+    principal = _mapping_text(
+        environ,
+        "NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL",
+        MATE_BRIDGE_OWNER_ID,
+    ) or MATE_BRIDGE_OWNER_ID
+    timeout_seconds = _mapping_float(
+        environ,
+        "NATSUME_MATEENGINE_BRIDGE_HEALTH_TIMEOUT_SECONDS",
+        2.0,
+    )
+    return MateBridgeHealthProbe(
+        config=MateBridgeHealthProbeConfig(
+            http_host=config.http_host,
+            http_port=config.http_port,
+            key_id=config.key_id,
+            timeout_seconds=timeout_seconds,
+        ),
+        secret=config.hmac_secret,
+        principal=principal,
+        clock_ms=clock_ms,
+    )
+
+
+def _close_socket_handoff(
+    handoff: Mapping[str, Sequence[socket.socket]],
+) -> None:
+    for endpoint_sockets in tuple(handoff.values()):
+        for owned in tuple(endpoint_sockets):
+            try:
+                owned.close()
+            except OSError:
+                pass
+
+
+def _one_handoff_socket(
+    handoff: Mapping[str, Sequence[socket.socket]],
+    endpoint_id: str,
+) -> socket.socket:
+    endpoint_sockets = handoff.get(endpoint_id)
+    if endpoint_sockets is None or len(endpoint_sockets) != 1:
+        raise RuntimeError("catalog handoff must contain exactly one socket per endpoint")
+    owned = endpoint_sockets[0]
+    if not isinstance(owned, socket.socket) or owned.fileno() < 0:
+        raise RuntimeError("catalog handoff contains an invalid socket")
+    return owned
+
+
+def _audit_candidate_started(
+    runtime: BridgeSecurityRuntime,
+    config: BridgeSecurityConfig,
+) -> bool:
+    return runtime.audit(
         {
             "event": "bridge_started",
             "ts_ms": int(time.time() * 1000),
-            "owner_id": "host.mateengine.bridge",
+            "owner_id": MATE_BRIDGE_OWNER_ID,
             "exposure_mode": config.exposure_mode,
             "approval_ref_digest": (
                 hashlib.sha256(config.approval_ref.encode("utf-8")).hexdigest()
@@ -2660,19 +3034,168 @@ def main() -> None:
             "udp_enabled": config.udp_enabled,
         }
     )
-    if not started_audited:
-        raise SystemExit("[mateengine-bridge] secure startup rejected: audit unavailable")
-    start_udp_bridge_thread(runtime)
-    server = BoundedThreadingHTTPServer(
-        (config.http_host, config.http_port),
-        MateEngineBridgeHandler,
+
+
+def start_catalog_governed_bridge(
+    config: BridgeSecurityConfig,
+    *,
+    environ: Mapping[str, str] | None = None,
+    clock_ms: Callable[[], int] | None = None,
+) -> MateBridgeCandidateHandle:
+    """Reserve, consume, start, and verify the production bridge candidate."""
+
+    source = {
+        str(key): str(value)
+        for key, value in (os.environ if environ is None else environ).items()
+    }
+    if str(source.get("HOST_SERVICE_CATALOG_MODE") or "").strip().upper() != MODE_ENFORCE:
+        raise CatalogGovernedBridgeStartupError(BRIDGE_CATALOG_ENFORCE_REQUIRED)
+    if config.exposure_mode == EXPOSURE_MODE_DISABLED:
+        raise CatalogGovernedBridgeStartupError(BRIDGE_CATALOG_STARTUP_FAILED)
+    if validate_security_config(config):
+        raise BridgeConstructionError()
+
+    active_clock = clock_ms or _system_clock_ms
+    try:
+        snapshot = build_local_catalog(source)
+        health_probe = _build_mate_catalog_health_probe(
+            config,
+            source,
+            clock_ms=active_clock,
+        )
+    except Exception:
+        raise CatalogGovernedBridgeStartupError() from None
+
+    reservation_probe = OwnedSocketReservationProbe()
+    coordinator = ServiceCatalogStartupCoordinator(
+        snapshot=snapshot,
+        env=source,
+        bind_probe=reservation_probe,
+        health_probe=health_probe,
+        clock_ms=active_clock,
     )
-    server.bridge_security_runtime = runtime  # type: ignore[attr-defined]
+    prepared = coordinator.prepare_service_start(
+        candidate_owner_id=MATE_BRIDGE_OWNER_ID
+    )
+    expected_endpoint_ids = {MATE_HTTP_ENDPOINT_ID}
+    if config.udp_enabled:
+        expected_endpoint_ids.add(MATE_UDP_ENDPOINT_ID)
+    if set(prepared.endpoint_ids) != expected_endpoint_ids:
+        reservation_probe.close()
+        raise CatalogGovernedBridgeStartupError(BRIDGE_CATALOG_STARTUP_FAILED)
+    if not prepared.start_allowed:
+        reservation_probe.close()
+        raise CatalogGovernedBridgeStartupError(prepared.reason_code)
+
+    candidate_holder: dict[str, MateBridgeCandidateHandle] = {}
+
+    def _start_candidate() -> MateBridgeCandidateHandle:
+        handoff = reservation_probe.take_consumed_sockets(
+            snapshot_digest=prepared.snapshot_digest,
+            endpoint_ids=prepared.endpoint_ids,
+            now_ms=active_clock(),
+        )
+        if handoff is None or set(handoff) != expected_endpoint_ids:
+            if handoff is not None:
+                _close_socket_handoff(handoff)
+            raise RuntimeError("catalog socket handoff unavailable")
+
+        runtime: BridgeSecurityRuntime | None = None
+        handle: MateBridgeCandidateHandle | None = None
+        try:
+            http_socket = _one_handoff_socket(handoff, MATE_HTTP_ENDPOINT_ID)
+            udp_socket = (
+                _one_handoff_socket(handoff, MATE_UDP_ENDPOINT_ID)
+                if config.udp_enabled
+                else None
+            )
+            runtime = build_bridge_security_runtime(config)
+            _install_security_runtime(runtime)
+            handle = start_prebound_bridge_candidate(
+                runtime,
+                http_socket=http_socket,
+                udp_socket=udp_socket,
+            )
+            if not _audit_candidate_started(runtime, config):
+                raise RuntimeError("candidate startup audit unavailable")
+            candidate_holder["handle"] = handle
+            return handle
+        except BaseException:
+            if handle is not None:
+                handle.stop()
+            else:
+                _close_socket_handoff(handoff)
+                if runtime is not None and _SECURITY_RUNTIME is runtime:
+                    _install_security_runtime(None)
+            raise
+
+    def _stop_candidate(handle: Any) -> None:
+        if type(handle) is not MateBridgeCandidateHandle:
+            raise TypeError("unexpected Mate bridge candidate handle")
+        handle.stop()
+
+    try:
+        activation = coordinator.activate_candidate(
+            prepared,
+            start_candidate=_start_candidate,
+            stop_candidate=_stop_candidate,
+        )
+    except BaseException:
+        started_handle = candidate_holder.get("handle")
+        if started_handle is not None:
+            started_handle.stop()
+        raise
+    finally:
+        # After a successful take the provider owns no sockets.  Otherwise this
+        # closes the unconsumed/expired reservation and nothing else.
+        reservation_probe.close()
+
+    handle = candidate_holder.get("handle")
+    if activation.status != STATUS_STARTED or handle is None:
+        raise CatalogGovernedBridgeStartupError(activation.reason_code)
+    return handle
+
+
+def main() -> None:
+    try:
+        config = build_security_config()
+    except BridgeConstructionError as exc:
+        raise SystemExit(
+            f"[mateengine-bridge] secure startup rejected: {exc.reason_code}"
+        ) from None
+    except Exception:
+        raise SystemExit(
+            f"[mateengine-bridge] secure startup rejected: {BRIDGE_CONSTRUCTION_FAILED}"
+        ) from None
+    if config.exposure_mode == EXPOSURE_MODE_DISABLED:
+        print("[mateengine-bridge] disabled by NATSUME_BRIDGE_EXPOSURE_MODE", flush=True)
+        return
+    try:
+        handle = start_catalog_governed_bridge(config, environ=os.environ)
+    except BridgeConstructionError as exc:
+        raise SystemExit(
+            f"[mateengine-bridge] secure startup rejected: {exc.reason_code}"
+        ) from None
+    except CatalogGovernedBridgeStartupError as exc:
+        raise SystemExit(
+            f"[mateengine-bridge] catalog startup rejected: {exc.reason_code}"
+        ) from None
+    except Exception:
+        raise SystemExit(
+            f"[mateengine-bridge] catalog startup rejected: {BRIDGE_CATALOG_STARTUP_FAILED}"
+        ) from None
     print(
-        f"[mateengine-bridge] http://{config.http_host}:{config.http_port} -> udp://{MATEENGINE_HOST}:{MATEENGINE_PORT}",
+        "[mateengine-bridge] "
+        f"http://{config.http_host}:{config.http_port} "
+        f"-> udp://{MATEENGINE_HOST}:{MATEENGINE_PORT}",
         flush=True,
     )
-    server.serve_forever()
+    try:
+        handle.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        handle.stop()
 
 
 if __name__ == "__main__":

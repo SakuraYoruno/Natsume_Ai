@@ -17,6 +17,13 @@
       "module_scope_only": true
     },
     {
+      "rule_id": "NLE-BND-COMPOSITION-APP",
+      "kind": "import",
+      "source_roots": ["host_brain/composition"],
+      "forbidden_module_prefixes": ["host_brain.app"],
+      "module_scope_only": false
+    },
+    {
       "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
       "kind": "import",
       "source_roots": ["host_brain/pentest"],

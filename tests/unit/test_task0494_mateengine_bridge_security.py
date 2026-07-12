@@ -283,7 +283,7 @@ def test_preauth_source_limiter_bounds_unauthenticated_audit_pressure(tmp_path: 
     assert sum(row.get("event") == "preauth_rate_limited" for row in rows) == 1
 
 
-def test_loopback_command_is_not_anonymous_and_health_is_minimal_anonymous(
+def test_loopback_command_and_health_both_require_authentication(
     tmp_path: Path,
 ) -> None:
     runtime = _runtime(tmp_path)
@@ -309,8 +309,8 @@ def test_loopback_command_is_not_anonymous_and_health_is_minimal_anonymous(
 
     assert rejected.allowed is False
     assert rejected.reason == "invalid_version"
-    assert health.allowed is True
-    assert health.reason == "anonymous_loopback_health"
+    assert health.allowed is False
+    assert health.reason == "invalid_version"
 
 
 def test_valid_hmac_is_one_shot_and_binds_exact_raw_body(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00 已完成并提交，AW-01 进行中
+当前代码基线：`codex/m48-integration`，AW-00～AW-01 已完成，AW-02/AW-03 进入并行实施
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -99,16 +99,16 @@ flowchart TB
 | 指标 | 当前值 | 目标 |
 |---|---:|---:|
 | `natsume_contracts` Python 文件 | 4 | 覆盖跨运行面稳定合同并被真实调用 |
-| `host_brain/composition` Python 文件 | 2 | 成为唯一装配与生命周期根 |
+| `host_brain/composition` Python 文件 | 4；Host security 与 legacy shutdown 已进入显式 composition | 成为唯一装配与生命周期根 |
 | `kernel/orchestration/task_runtime/digital_life/persistence/domain_packs/model_plane/capability_plane` Python 文件 | 0 | 各自形成生产职责边界，不以文件数冒充完成 |
 | 非 `app` 模块反向导入 `host_brain.app` | 81 个模块 / 约 210 条边 | 最终为 0；每个结构波单调下降 |
-| `app/dependencies.py` 单例/全局状态 | 约 57 处 | AW-01 后迁移 slice 为 0，最终删除 service locator |
-| `ServiceCatalogStartupCoordinator` production 调用点 | 0 | AW-01 接入真实 Host/Edge/Bridge startup |
+| `app/dependencies.py` 单例/全局状态 | 约 57 处；AW-01 security slice 已脱离 | 最终删除 service locator |
+| `ServiceCatalogStartupCoordinator` production 调用点 | 1（Mate HTTP/UDP 真实 listener） | 后续波次接管 Host/Edge 其余 listener |
 | Canonical assignment 是否决定真实 executor | 否；仍可落回 legacy executor | AW-02 后为唯一真实调度决定 |
 | Edge 直接导入 `host_brain` 的文件 | 21 | AW-06 后为 0 |
 | Host 直接访问私有 `._conn` 的文件 | 22 | AW-03 后为 0（persistence adapter 内部除外） |
 | Host 含 inline `CREATE TABLE` 的 Python 文件 | 15 | AW-03 后 production runtime 为 0 |
-| Host 直接读取环境变量的 Python 文件 | 207 | 最终只允许 composition/settings 与批准的 process adapter |
+| Host 直接读取环境变量的 Python 文件 | 208；AW-01 新增点仅在 composition 快照边界 | 最终只允许 composition/settings 与批准的 process adapter |
 | `surface_main_chain_adapter.py` | 4468 行 | 混合职责归零；保留文件仅作薄 facade |
 | `agent_runtime_shared.py` | 3845 行 | 混合职责归零；主链迁出 |
 | `production_executor.py` | 4251 行 | 通用 runtime 与领域流程彻底分离 |
@@ -169,7 +169,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-01：Contracts、Kernel、Composition 与依赖脊柱
 
-状态：`IN_PROGRESS`
+状态：`DONE`（Host security 生产 route 已改为显式 provider/container，删除旧 `platform_security_runtime.py`；shutdown 从 `http_hooks.py` 抽为显式 callback lifecycle；composition→app 禁边已生效；Mate HTTP/UDP 已用 Service Catalog `ENFORCE` 预绑定同一 socket 切流）
 
 目标：建立全仓唯一的 contracts、clock/result primitives、typed settings、container、lifecycle、feature flags 和 service catalog，使后续迁移不再向 `app` 添加新真相。
 
@@ -181,9 +181,11 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：干净进程可从一个 config snapshot 构造、readiness、degradation、逆序 shutdown；部分启动失败无 orphan；import guard 阻止新增非法边；至少一条 production slice 完全不依赖 legacy globals。
 
+完成事实：三条 security route 在每个 worker lifespan 内构造、发布、降级并逆序关闭，请求期不再查询旧 module global/app-state runtime；`http_hooks.py` 净减少混合 shutdown 职责；Mate candidate 只在 reservation consume 后接收原 TCP/UDP socket，不接管、不关闭 incumbent，匿名 `/health` 稳定 401。Host 定向验证、Mate/Catalog 定向验证与真实 listener integration 通过，两条独立 P0/P1 review 均清零。
+
 ### AW-02：Governed Host Command、Task 与 Agent 主链
 
-状态：`FOUNDATION_WAITING_FOR_AW_01`；production cutover 等待 AW-02/AW-03/AW-04
+状态：`IN_PROGRESS`；与 AW-03 共用合同冻结后并行，production cutover 不等待文档 Gate
 
 目标：把 chat、host input、gateway/scheduler work 收敛为 Secure Ingress → Application → Task Runtime → Agent Runtime → governed side effect 的唯一新请求链。
 
@@ -197,7 +199,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-03：Durable Data、Event、Memory 与 Canon 脊柱
 
-状态：`WAITING_FOR_AW_01`
+状态：`IN_PROGRESS_PARALLEL_WITH_AW_02`
 
 目标：统一 migration catalog、UoW、repository、journal/outbox/inbox、projection worker、Memory/Knowledge/Canon 写边界。
 
@@ -422,9 +424,9 @@ AW-08 只有在以下全部成立时才完成：
 | Wave | 状态 | 下一可验证结果 |
 |---|---|---|
 | AW-00 | `DONE` | production security composition/routes、Bridge/Service Catalog 单 owner 与认证探针已切流；无 P0/P1 |
-| AW-01 | `IN_PROGRESS` | 单 composition root 与第一条无 global dependency 的 production slice |
-| AW-02 | `WAITING` | chat/host input 进入同一 Task/Agent 主链 |
-| AW-03 | `WAITING` | UoW/Journal/Outbox 与无 inline DDL/private conn 的真实 slice |
+| AW-01 | `DONE` | Host security 显式 container/lifecycle、composition 禁边、Mate 真实 socket-activation 已切流；无 P0/P1 |
+| AW-02 | `IN_PROGRESS` | chat/host input 进入同一 Task/Agent 主链，canonical assignment 决定真实 executor |
+| AW-03 | `IN_PROGRESS` | 为 AW-02 冻结 UoW/Journal/Outbox 合同，切换首条无 inline DDL/private conn 的真实 slice |
 | AW-04 | `WAITING` | Digital Life 单 clock/writer、Surface 纯读 |
 | AW-05 | `WAITING` | 单 Model/Capability/Governor 路径与首批 Domain Pack |
 | AW-06 | `WAITING` | AW-01 后可建 Edge foundation；AW-02/03/04 后完成 production cutover、设备单 authority |
@@ -433,4 +435,4 @@ AW-08 只有在以下全部成立时才完成：
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-01 的立即执行顺序：以实际 `asgi.py/app_factory.py/http_hooks.py/dependencies.py` 为基线冻结 composition ownership → 把 Service Catalog 和 AW-00 security runtime 纳入一个显式 Host container/lifecycle → 迁移第一条 production route slice 脱离 global getter → 删除该 slice 的旧 provider setter/global → 定向验证与一次 AW-01 integration wave。无需用户再次确认。
+AW-02/AW-03 的立即执行顺序：先从真实 `/v1/chat` 与 `/v1/host/input` 生产路径提取共用 command/task 合同，同时为该 slice 建立唯一 migration/UoW/journal/outbox 持久边界 → 让 canonical assignment 决定真实 executor → 切断 route 直连 repository/provider 与进程内 attempt 真相 → 删除已迁移的 legacy authority。两波文件、schema 和 route owner 分区并行，每波只在汇合后执行一次 integration wave，无需用户再次确认。

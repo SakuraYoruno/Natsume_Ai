@@ -29,6 +29,9 @@ from host_brain.app.http_hooks_middleware import (
     build_personality_tick_status as _middleware_build_personality_tick_status,
 )
 from host_brain.core.ids import new_request_id
+from host_brain.app.legacy_runtime_shutdown_adapter import (
+    shutdown_runtime as _shutdown_runtime,
+)
 
 _AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
     "/monitor/",
@@ -1482,74 +1485,15 @@ def runtime_lifespan(
 
         except Exception as exc:
             logger.warning("Startup probe degraded: %s", exc, exc_info=True)
-        yield
-        # ── Shutdown 阶段 ──
-        # 停止 ActivityMonitor
         try:
-            if _activity_monitor is not None:
-                _activity_monitor.stop()
-                logger.info("ActivityMonitor 已停止")
-        except Exception as _am_stop_exc:
-            logger.warning("ActivityMonitor 停止失败: %s", _am_stop_exc)
-        try:
-            if _resource_manager is not None:
-                _resource_manager.stop()
-                logger.info("SystemResourceManager 已停止")
-        except Exception as _rm_stop_exc:
-            logger.warning("SystemResourceManager 停止失败: %s", _rm_stop_exc)
-        # 优雅关闭 BondUpdateQueue（drain 等待队列排空 + shutdown 停止 worker）
-        try:
-            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-            get_cortex_agent().shutdown_bond_update_queue(
+            yield
+        finally:
+            await _shutdown_runtime(
+                activity_monitor=_activity_monitor,
+                resource_manager=_resource_manager,
+                life_continuity_started=_life_continuity_started,
                 logger=logger,
-                timeout_s=3.0,
             )
-        except Exception as _bq_exc:
-            logger.warning("BondUpdateQueue 关闭失败: %s", _bq_exc)
-        try:
-            from host_brain.observability.service_health_heartbeat import stop_heartbeat
-            await stop_heartbeat()
-        except Exception:
-            pass
-        # [Tribe 分发循环] 停止 TribeEventBus dispatch_loop
-        try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
-
-            _shutdown_bus = get_tribe_event_bus()
-            if _shutdown_bus is not None:
-                await _shutdown_bus.stop()
-                logger.info("TribeEventBus dispatch_loop 已停止")
-        except Exception as _bus_stop_exc:
-            logger.warning("TribeEventBus dispatch_loop 停止失败: %s", _bus_stop_exc)
-        # T-32：停止 TribeStateRegistry 定时保存（并强制最后一次落盘）
-        try:
-            from host_brain.tribe.tribe_state import get_global_registry as _get_global_registry_shutdown  # noqa: PLC0415
-            _get_global_registry_shutdown().stop_periodic_save()
-            logger.info("TribeStateRegistry 定时保存已停止，最终快照已落盘")
-        except Exception as _periodic_stop_exc:
-            logger.debug("TribeStateRegistry.stop_periodic_save 失败（降级）: %s", _periodic_stop_exc)
-        try:
-            from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
-
-            await get_scheduler().stop()
-        except Exception as _host_task_scheduler_stop_exc:
-            logger.debug("HostTaskScheduler stop degraded: %s", _host_task_scheduler_stop_exc)
-        try:
-            if _life_continuity_started:
-                from host_brain.runtime.life_continuity import stop_life_continuity_loop  # noqa: PLC0415
-
-                await stop_life_continuity_loop()
-                logger.info("LifeContinuity loop stopped")
-        except Exception as _life_loop_stop_exc:
-            logger.debug("LifeContinuity loop stop degraded: %s", _life_loop_stop_exc)
-        try:
-            from host_brain.app.internal_agent_routes import stop_immune_auto_dispatch_monitor  # noqa: PLC0415
-
-            stop_immune_auto_dispatch_monitor(logger=logger)
-        except Exception as _codex_monitor_stop_exc:
-            logger.debug("Codex immune auto-dispatch monitor stop degraded: %s", _codex_monitor_stop_exc)
-        logger.info("Natsume AI Host Brain shutting down ...")
 
     return _lifespan()
 

@@ -1,6 +1,24 @@
 """Canonical endpoint catalog and startup preflight contracts."""
 
 from .defaults import build_local_catalog
+from .mate_health_probe import (
+    MATE_BRIDGE_HEALTH_ENDPOINT_INVALID,
+    MATE_BRIDGE_HEALTH_HTTP_IDENTITY_MISMATCH,
+    MATE_BRIDGE_HEALTH_OK,
+    MATE_BRIDGE_HEALTH_PATH,
+    MATE_BRIDGE_HEALTH_REQUEST_FAILED,
+    MATE_BRIDGE_HEALTH_RESPONSE_INVALID,
+    MATE_BRIDGE_HEALTH_SCOPE,
+    MATE_BRIDGE_HEALTH_UDP_IDENTITY_MISMATCH,
+    MATE_BRIDGE_HTTP_ENDPOINT_ID,
+    MATE_BRIDGE_OWNER_ID,
+    MATE_BRIDGE_PROTOCOL_VERSION,
+    MATE_BRIDGE_UDP_ENDPOINT_ID,
+    MateBridgeHealthProbe,
+    MateBridgeHealthProbeConfig,
+    MateBridgeHealthProbeConfigurationError,
+    build_mate_bridge_health_url,
+)
 from .models import (
     AuthKind,
     CatalogIssue,
@@ -29,6 +47,10 @@ from .probes import (
     ReservationAttestation,
     strict_socket_addresses,
 )
+from .socket_reservation import (
+    MAX_SOCKET_RESERVATION_TTL_MS,
+    OwnedSocketReservationProbe,
+)
 
 __all__ = [
     "AuthKind",
@@ -44,6 +66,23 @@ __all__ = [
     "HealthSpec",
     "HealthProbe",
     "HealthProbeResult",
+    "MAX_SOCKET_RESERVATION_TTL_MS",
+    "MATE_BRIDGE_HEALTH_PATH",
+    "MATE_BRIDGE_HEALTH_ENDPOINT_INVALID",
+    "MATE_BRIDGE_HEALTH_HTTP_IDENTITY_MISMATCH",
+    "MATE_BRIDGE_HEALTH_OK",
+    "MATE_BRIDGE_HEALTH_REQUEST_FAILED",
+    "MATE_BRIDGE_HEALTH_RESPONSE_INVALID",
+    "MATE_BRIDGE_HEALTH_SCOPE",
+    "MATE_BRIDGE_HEALTH_UDP_IDENTITY_MISMATCH",
+    "MATE_BRIDGE_HTTP_ENDPOINT_ID",
+    "MATE_BRIDGE_OWNER_ID",
+    "MATE_BRIDGE_PROTOCOL_VERSION",
+    "MATE_BRIDGE_UDP_ENDPOINT_ID",
+    "MateBridgeHealthProbe",
+    "MateBridgeHealthProbeConfig",
+    "MateBridgeHealthProbeConfigurationError",
+    "OwnedSocketReservationProbe",
     "PreflightDecision",
     "ProtocolSpec",
     "ReadOnlySocketBindProbe",
@@ -53,6 +92,7 @@ __all__ = [
     "Transport",
     "build_catalog_snapshot",
     "build_local_catalog",
+    "build_mate_bridge_health_url",
     "load_catalog_mode",
     "preflight_catalog",
     "strict_socket_addresses",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 from dataclasses import replace
 import json
@@ -25,12 +24,6 @@ from natsume_contracts.identity import (
 )
 from host_brain.app.pentest_secure_run_routes import (
     create_pentest_secure_run_http_router,
-)
-from host_brain.app.platform_security_runtime import (
-    OBS_COMMAND_COMPOSITION_STATE_ATTR,
-    PENTEST_SECURE_RUN_COMPOSITION_STATE_ATTR,
-    SKILL_PROVIDER_INTAKE_COMPOSITION_STATE_ATTR,
-    platform_security_runtime_lifespan,
 )
 from host_brain.app.router_registry import register_host_routers
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
@@ -68,14 +61,6 @@ TARGET = "http://127.0.0.1:18080/fixture"
 TOOL_ID = "pentest_http_probe"
 
 
-class _Logger:
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    def error(self, message: str, *_args: Any, **_kwargs: Any) -> None:
-        self.messages.append(str(message))
-
-
 def test_production_router_registry_mounts_each_secure_route_once() -> None:
     app = FastAPI()
     register_host_routers(app)
@@ -84,114 +69,6 @@ def test_production_router_registry_mounts_each_secure_route_once() -> None:
     assert paths.count("/v1/host/obs-commands/{command_id}") == 1
     assert paths.count(SECURE_RUN_NORMALIZED_PATH) == 1
     assert paths.count("/v1/host/skill-provider/intake") == 1
-
-
-def test_platform_security_lifecycle_publishes_then_stops_drains_and_closes() -> None:
-    events: list[str] = []
-    app = FastAPI()
-    logger = _Logger()
-
-    class Ledger:
-        canonical_db_path = "D:/test/central-audit.sqlite3"
-
-    class Ingress:
-        def close_admission(self) -> None:
-            events.append("obs-admission-close")
-
-    class Obs:
-        ingress = Ingress()
-
-        async def aclose(self) -> None:
-            assert getattr(app.state, OBS_COMMAND_COMPOSITION_STATE_ATTR) is None
-            events.append("obs-drain-aclose")
-
-    class Pentest:
-        def close(self) -> None:
-            assert (
-                getattr(
-                    app.state,
-                    PENTEST_SECURE_RUN_COMPOSITION_STATE_ATTR,
-                )
-                is None
-            )
-            events.append("pentest-close")
-
-    class SkillIntake:
-        def close(self) -> None:
-            assert (
-                getattr(
-                    app.state,
-                    SKILL_PROVIDER_INTAKE_COMPOSITION_STATE_ATTR,
-                )
-                is None
-            )
-            events.append("skill-intake-close")
-
-    obs = Obs()
-    pentest = Pentest()
-    skill_intake = SkillIntake()
-    shared_tokens = object()
-
-    def obs_builder(*, db_path: str) -> Obs:
-        assert db_path == Ledger.canonical_db_path
-        events.append("obs-build")
-        return obs
-
-    def pentest_builder(*, token_service: object, db_path: str) -> Pentest:
-        assert token_service is shared_tokens
-        assert db_path == Ledger.canonical_db_path
-        events.append("pentest-build")
-        return pentest
-
-    def skill_intake_builder(*, db_path: str) -> SkillIntake:
-        assert db_path == Ledger.canonical_db_path
-        events.append("skill-intake-build")
-        return skill_intake
-
-    async def scenario() -> None:
-        async with platform_security_runtime_lifespan(
-            app,
-            get_ledger=Ledger,
-            get_token_service=lambda: shared_tokens,
-            logger=logger,
-            obs_builder=obs_builder,
-            pentest_builder=pentest_builder,
-            skill_intake_builder=skill_intake_builder,
-        ):
-            events.append("serving")
-            assert (
-                getattr(app.state, OBS_COMMAND_COMPOSITION_STATE_ATTR)
-                is obs
-            )
-            assert (
-                getattr(
-                    app.state,
-                    PENTEST_SECURE_RUN_COMPOSITION_STATE_ATTR,
-                )
-                is pentest
-            )
-            assert (
-                getattr(
-                    app.state,
-                    SKILL_PROVIDER_INTAKE_COMPOSITION_STATE_ATTR,
-                )
-                is skill_intake
-            )
-
-    asyncio.run(scenario())
-
-    assert events == [
-        "obs-build",
-        "skill-intake-build",
-        "pentest-build",
-        "serving",
-        "obs-admission-close",
-        "obs-drain-aclose",
-        "pentest-close",
-        "skill-intake-close",
-    ]
-    assert logger.messages == []
-
 
 def test_pentest_production_defaults_to_disabled_without_touching_database(
     tmp_path: Path,

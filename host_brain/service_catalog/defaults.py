@@ -16,6 +16,7 @@ from .models import (
     build_catalog_snapshot,
     CatalogSnapshot,
 )
+from .mate_health_probe import build_mate_bridge_health_url
 
 
 def _text(env: Mapping[str, str], key: str, default: str) -> str:
@@ -109,6 +110,7 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
     if avatar_backend not in {"vts", "vrm"}:
         raise ValueError("EDGE_AVATAR_BACKEND must be vts or vrm")
     mate_enabled = _bool(source, "HOST_MATEENGINE_BRIDGE_ENABLED", False)
+    mate_udp_enabled = _bool(source, "MATEENGINE_BRIDGE_UDP_ENABLED", False)
     edge_insecure = _bool(source, "EDGE_ALLOW_INSECURE_AUTH", True)
     gateway_enabled = _bool(source, "EDGE_GATEWAY_ENABLED", True)
     infra_enabled = _bool(source, "HOST_EXTERNAL_INFRA_MANAGED", False)
@@ -126,6 +128,11 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
         source,
         "HOST_MATEENGINE_BRIDGE_HTTP_HOST",
         _text(source, "MATEENGINE_BRIDGE_HTTP_HOST", "127.0.0.1"),
+    )
+    mate_http_port = _port(
+        source,
+        "HOST_MATEENGINE_BRIDGE_HTTP_PORT",
+        _port(source, "MATEENGINE_BRIDGE_HTTP_PORT", 18770),
     )
     mate_udp_host = _text(source, "MATEENGINE_BRIDGE_UDP_HOST", "127.0.0.1")
     vrm_host = _text(source, "EDGE_VRM_BRIDGE_HOST", "127.0.0.1")
@@ -231,8 +238,8 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             listener_id="embodiment.bridge.http", owner_id="host.mateengine.bridge",
             kind=EndpointKind.LISTENER, transport=Transport.TCP,
             host=mate_http_host,
-            port=_port(source, "HOST_MATEENGINE_BRIDGE_HTTP_PORT", _port(source, "MATEENGINE_BRIDGE_HTTP_PORT", 18770)),
-            protocols=(("http", "0.1"),), health_kind="http",
+            port=mate_http_port,
+            protocols=(("http", "1"),), health_kind="http",
             health_path="/health", auth_kind=AuthKind.HMAC,
             auth_policy_ref="mateengine.bridge.hmac-v1", enabled=mate_active,
             source_refs=("tools/mateengine_bridge_server.py", "scripts/runtime/start_host_side.ps1"),
@@ -243,10 +250,14 @@ def build_local_catalog(env: Mapping[str, str] | None = None) -> CatalogSnapshot
             kind=EndpointKind.LISTENER, transport=Transport.UDP,
             host=mate_udp_host,
             port=_port(source, "MATEENGINE_BRIDGE_UDP_PORT", 18771),
-            protocols=(("mateengine-udp", "0.1"),), health_kind="indirect",
-            health_path="http://127.0.0.1:18770/health#bridge_udp",
+            protocols=(("mateengine-udp", "1"),), health_kind="indirect",
+            health_path=(
+                build_mate_bridge_health_url(mate_http_host, mate_http_port)
+                + "#bridge_udp"
+            ),
             auth_kind=AuthKind.HMAC,
-            auth_policy_ref="mateengine.bridge.hmac-v1", enabled=mate_active,
+            auth_policy_ref="mateengine.bridge.hmac-v1",
+            enabled=mate_active and mate_udp_enabled,
             source_refs=("tools/mateengine_bridge_server.py",),
         ),
         _endpoint(
