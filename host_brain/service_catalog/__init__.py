@@ -1,0 +1,60 @@
+"""Canonical endpoint catalog and startup preflight contracts."""
+
+from .defaults import build_local_catalog
+from .models import (
+    AuthKind,
+    CatalogIssue,
+    CatalogMode,
+    CatalogModeState,
+    CatalogSnapshot,
+    EndpointKind,
+    EndpointSpec,
+    Exposure,
+    HealthSpec,
+    PreflightDecision,
+    ProtocolSpec,
+    SERVICE_CATALOG_MODE_ENV,
+    SERVICE_CATALOG_SCHEMA_VERSION,
+    Transport,
+    build_catalog_snapshot,
+    load_catalog_mode,
+)
+from .preflight import preflight_catalog, validate_catalog
+from .probes import (
+    BindProbe,
+    BindProbeResult,
+    HealthProbe,
+    HealthProbeResult,
+    ReadOnlySocketBindProbe,
+    ReservationAttestation,
+    strict_socket_addresses,
+)
+
+__all__ = [
+    "AuthKind",
+    "BindProbe",
+    "BindProbeResult",
+    "CatalogIssue",
+    "CatalogMode",
+    "CatalogModeState",
+    "CatalogSnapshot",
+    "EndpointKind",
+    "EndpointSpec",
+    "Exposure",
+    "HealthSpec",
+    "HealthProbe",
+    "HealthProbeResult",
+    "PreflightDecision",
+    "ProtocolSpec",
+    "ReadOnlySocketBindProbe",
+    "ReservationAttestation",
+    "SERVICE_CATALOG_MODE_ENV",
+    "SERVICE_CATALOG_SCHEMA_VERSION",
+    "Transport",
+    "build_catalog_snapshot",
+    "build_local_catalog",
+    "load_catalog_mode",
+    "preflight_catalog",
+    "strict_socket_addresses",
+    "validate_catalog",
+]
