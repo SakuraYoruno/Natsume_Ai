@@ -57,6 +57,7 @@ EXPOSURE_MODES = frozenset(
 )
 PROTOCOL_VERSION = "1"
 AUTH_VERSION = "natsume.bridge-auth.v1"
+BRIDGE_CONSTRUCTION_FAILED = "BRIDGE_CONSTRUCTION_FAILED"
 HTTP_AUTH_HEADERS = {
     "version": "X-Natsume-Bridge-Version",
     "key_id": "X-Natsume-Bridge-Key-Id",
@@ -86,14 +87,23 @@ KNOWN_SCOPES = frozenset(
 )
 SAFE_CANONICAL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 
+
+class BridgeConstructionError(RuntimeError):
+    """Stable startup rejection that never exposes filesystem/provider detail."""
+
+    reason_code = BRIDGE_CONSTRUCTION_FAILED
+
+    def __init__(self) -> None:
+        super().__init__(self.reason_code)
+
 HTTP_HOST = os.getenv("MATEENGINE_BRIDGE_HTTP_HOST", "127.0.0.1").strip() or "127.0.0.1"
-HTTP_PORT = int(os.getenv("MATEENGINE_BRIDGE_HTTP_PORT", "18770").strip() or "18770")
+HTTP_PORT = _env_int("MATEENGINE_BRIDGE_HTTP_PORT", 18770)
 UDP_HOST = os.getenv("MATEENGINE_BRIDGE_UDP_HOST", "127.0.0.1").strip() or "127.0.0.1"
-UDP_PORT = int(os.getenv("MATEENGINE_BRIDGE_UDP_PORT", "18771").strip() or "18771")
+UDP_PORT = _env_int("MATEENGINE_BRIDGE_UDP_PORT", 18771)
 MATEENGINE_HOST = os.getenv("MATEENGINE_SIGNAL_HOST", "127.0.0.1").strip() or "127.0.0.1"
-MATEENGINE_PORT = int(os.getenv("MATEENGINE_SIGNAL_PORT", "32145").strip() or "32145")
+MATEENGINE_PORT = _env_int("MATEENGINE_SIGNAL_PORT", 32145)
 MATEENGINE_PLUGIN_HOST = os.getenv("MATEENGINE_PLUGIN_HOST", "127.0.0.1").strip() or "127.0.0.1"
-MATEENGINE_PLUGIN_PORT = int(os.getenv("MATEENGINE_PLUGIN_PORT", "32146").strip() or "32146")
+MATEENGINE_PLUGIN_PORT = _env_int("MATEENGINE_PLUGIN_PORT", 32146)
 WINDOW_MOTION_ENABLED = _env_bool("MATEENGINE_WINDOW_MOTION_ENABLED", False)
 WINDOW_TITLE = os.getenv("MATEENGINE_WINDOW_TITLE", "MateEngineX").strip() or "MateEngineX"
 WINDOW_MOTION_SCALE_X = _env_float("MATEENGINE_WINDOW_MOTION_SCALE_X", 700.0)
@@ -2654,12 +2664,29 @@ def _clamp_int(value: int, minimum: int, maximum: int) -> int:
     return value
 
 
-def main() -> None:
-    config = build_security_config()
+def build_bridge_security_runtime(
+    config: BridgeSecurityConfig,
+) -> BridgeSecurityRuntime:
+    """Construct the owned security runtime behind a sanitized boundary."""
+
     try:
-        runtime = BridgeSecurityRuntime(config)
-    except (OSError, sqlite3.Error, ValueError) as exc:
-        raise SystemExit(f"[mateengine-bridge] secure startup rejected: {exc}") from exc
+        return BridgeSecurityRuntime(config)
+    except (OSError, sqlite3.Error, ValueError):
+        raise BridgeConstructionError() from None
+
+
+def main() -> None:
+    try:
+        config = build_security_config()
+        runtime = build_bridge_security_runtime(config)
+    except BridgeConstructionError as exc:
+        raise SystemExit(
+            f"[mateengine-bridge] secure startup rejected: {exc.reason_code}"
+        ) from None
+    except Exception:
+        raise SystemExit(
+            f"[mateengine-bridge] secure startup rejected: {BRIDGE_CONSTRUCTION_FAILED}"
+        ) from None
     if config.exposure_mode == EXPOSURE_MODE_DISABLED:
         print("[mateengine-bridge] disabled by NATSUME_BRIDGE_EXPOSURE_MODE", flush=True)
         return

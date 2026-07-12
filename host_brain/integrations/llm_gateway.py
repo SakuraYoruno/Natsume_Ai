@@ -66,6 +66,18 @@ PROVIDER_MINIMAX = "minimax"
 PROVIDER_MOCK = "mock"
 PROVIDER_DISABLED = "disabled"
 
+_SUPPORTED_PROVIDERS = frozenset(
+    {
+        PROVIDER_OPENAI,
+        PROVIDER_CODEX,
+        PROVIDER_GEMINI,
+        PROVIDER_DEEPSEEK,
+        PROVIDER_MINIMAX,
+        PROVIDER_MOCK,
+        PROVIDER_DISABLED,
+    }
+)
+
 ProviderFn = Callable[[dict[str, Any]], Any]
 EgressGateFn = Callable[..., EgressGateResult]
 IngressQuarantineFn = Callable[..., IngressQuarantineResult]
@@ -139,8 +151,16 @@ class LlmGatewayContract:
         fallback_providers: list[dict[str, Any]] | None = None,
     ) -> None:
         self.ledger = ledger
-        self.provider = provider or _default_mock_provider
         self.provider_name = str(provider_name or PROVIDER_OPENAI).strip().lower()
+        self._provider_explicitly_configured = provider is not None
+        self.provider: ProviderFn | None = (
+            _default_mock_provider
+            if self.provider_name == PROVIDER_MOCK and provider is None
+            else provider
+        )
+        self._provider_binding_name: str | None = (
+            self.provider_name if callable(self.provider) else None
+        )
         # M24-A：优先从环境变量读取 API Key（不硬编码）
         self.api_key = _load_api_key_from_env(self.provider_name) if api_key is _API_KEY_UNSET else api_key
         self.available = bool(available)
@@ -206,13 +226,13 @@ class LlmGatewayContract:
                 reason_code=None,
                 detail="health probe ok",
             )
-        except Exception as exc:
+        except Exception:
             latency_ms = int(round((perf_counter() - start) * 1000))
             self._log_error(
                 request_id=req_id,
                 stage="S_LLM_HEALTH_PROBE",
                 reason_code=LLM_HEALTH_PROBE_FAILED,
-                detail=f"health probe failed: {exc}",
+                detail="llm health probe failed",
             )
             return LLMHealthProbeResult(
                 model_id=self.provider_name,
@@ -220,7 +240,7 @@ class LlmGatewayContract:
                 available=False,
                 latency_ms=latency_ms,
                 reason_code=LLM_HEALTH_PROBE_FAILED,
-                detail=f"health probe failed: {exc}",
+                detail="llm health probe failed",
             )
 
     def route_call(
@@ -267,9 +287,15 @@ class LlmGatewayContract:
 
         # 主模型失败，尝试备用模型
         for i, fallback_cfg in enumerate(self.fallback_providers):
-            fallback_name = str(fallback_cfg.get("provider_name", PROVIDER_MOCK))
+            if not isinstance(fallback_cfg, dict):
+                continue
+            fallback_name = (
+                str(fallback_cfg.get("provider_name", PROVIDER_DISABLED) or PROVIDER_DISABLED)
+                .strip()
+                .lower()
+            )
             fallback_key = fallback_cfg.get("api_key") or _load_api_key_from_env(fallback_name)
-            fallback_provider = fallback_cfg.get("provider_fn") or _default_mock_provider
+            fallback_provider = fallback_cfg.get("provider_fn")
 
             fallback_gw = LlmGatewayContract(
                 ledger=self.ledger,
@@ -424,14 +450,14 @@ class LlmGatewayContract:
                 latency_ms=latency_ms,
                 ts_ms=now_value,
             )
-        except Exception as exc:
+        except Exception:
             latency_ms = int(round((perf_counter() - start) * 1000))
             return self._degrade(
                 request_id=request_id,
                 model_profile_id=model_profile_id,
                 stage=S_LLM_GATEWAY_PROVIDER,
                 reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
-                detail=f"llm provider unavailable: {exc}",
+                detail="llm provider invocation failed",
                 payload=None,
                 egress=egress,
                 ingress=None,
@@ -491,30 +517,56 @@ class LlmGatewayContract:
             available = self.available
             provider_name = self.provider_name
             api_key = self.api_key
+            provider = self.provider
+            provider_explicitly_configured = self._provider_explicitly_configured
+            provider_binding_name = self._provider_binding_name
         if not available:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
+        if provider_name not in _SUPPORTED_PROVIDERS:
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider unsupported by gateway"
         if provider_name == PROVIDER_DISABLED:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
-        if provider_name == PROVIDER_CODEX:
-            if api_key:
-                return True, "", ""
-            try:
-                from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background
+        if callable(provider) and provider_binding_name != provider_name:
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider callable binding mismatch"
+        if provider_name == PROVIDER_MOCK:
+            if not callable(provider):
+                return False, SERVICE_UNAVAILABLE_DEPENDENCY, "explicit mock provider unavailable"
+            return True, "", ""
 
-                cli_available = codex_cli_lm_allowed_for_background()
+        try:
+            provider_kind = str(
+                getattr(provider, "natsume_provider_kind", "") or ""
+            ).strip().lower()
+        except Exception:
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider metadata unavailable"
+        if provider_kind == "mock" or provider is _default_mock_provider:
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, "mock provider rejected for real provider route"
+        if provider_kind == "unavailable":
+            try:
+                reason_code = str(
+                    getattr(provider, "natsume_provider_reason_code", "")
+                    or "HOST_PROVIDER_CONSTRUCTION_FAILED"
+                )
             except Exception:
-                cli_available = False
-            if cli_available:
-                return True, "", ""
-            return False, SERVICE_UNAVAILABLE_COLD_START, "OPENAI_API_KEY missing and Codex CLI unavailable"
+                reason_code = "HOST_PROVIDER_CONSTRUCTION_FAILED"
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, f"host provider unavailable: {reason_code}"
+        if provider_name == PROVIDER_CODEX:
+            if not api_key and not (provider_explicitly_configured and callable(provider)):
+                return False, SERVICE_UNAVAILABLE_COLD_START, "Codex credential or callable missing"
+            if not (provider_explicitly_configured and callable(provider)):
+                return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider callable not configured"
+            return True, "", ""
         provider_to_env_key = {
             PROVIDER_OPENAI: "OPENAI_API_KEY",
             PROVIDER_GEMINI: "GEMINI_API_KEY",
             PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+            PROVIDER_MINIMAX: "MINIMAX_API_KEY",
         }
         if provider_name in provider_to_env_key and not api_key:
             missing_key = provider_to_env_key[provider_name]
             return False, SERVICE_UNAVAILABLE_COLD_START, f"{missing_key} missing"
+        if not (provider_explicitly_configured and callable(provider)):
+            return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider callable not configured"
         return True, "", ""
 
     def _degrade(
@@ -640,7 +692,16 @@ class LlmGatewayContract:
         # 应用新配置（热更新立即生效，加锁保护）
         with self._route_lock:
             if "provider_name" in new_config:
-                self.provider_name = str(new_config["provider_name"])
+                self.provider_name = str(new_config["provider_name"]).strip().lower()
+                if not self._provider_explicitly_configured:
+                    self.provider = (
+                        _default_mock_provider
+                        if self.provider_name == PROVIDER_MOCK
+                        else None
+                    )
+                    self._provider_binding_name = (
+                        self.provider_name if callable(self.provider) else None
+                    )
             if "available" in new_config:
                 self.available = bool(new_config["available"])
             if "timeout_ms" in new_config:

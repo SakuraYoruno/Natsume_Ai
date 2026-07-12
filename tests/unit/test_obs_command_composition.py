@@ -299,7 +299,10 @@ def test_outcome_recovery_requires_exclusive_lifetime_owner(
 
     assert first.enabled is True
     assert second.enabled is False
-    assert second.reason_code == "OBS_COMMAND_OUTCOME_OWNER_UNAVAILABLE"
+    assert (
+        second.reason_code
+        == composition_module.OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED
+    )
     # The losing runtime must not recover records owned by the live runtime.
     assert _FakeOutcomeJournal.instances[0].recover_count == 1
     assert _FakeOutcomeJournal.instances[1].recover_count == 0
@@ -339,7 +342,10 @@ def test_sync_close_keeps_owner_until_in_flight_commands_are_drained(
         outcome_journal_path=journal_path,
     )
     assert contender.enabled is False
-    assert contender.reason_code == "OBS_COMMAND_OUTCOME_OWNER_UNAVAILABLE"
+    assert (
+        contender.reason_code
+        == composition_module.OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED
+    )
 
     asyncio.run(composition.aclose())
     assert composition.ingress.drain_count == 1
@@ -375,7 +381,10 @@ def test_outcome_journal_failure_closes_store_and_returns_terminal_off(
     assert composition.enabled is False
     assert composition.execution_enabled is False
     assert composition.effective_mode is SecureIngressMode.OFF
-    assert composition.reason_code == reason_code
+    assert (
+        composition.reason_code
+        == composition_module.OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED
+    )
     assert composition.outcome_journal is None
     assert len(_FakeStore.instances) == 1
     assert _FakeStore.instances[0].close_count == 1
@@ -475,6 +484,32 @@ def test_secret_configuration_failure_is_off_before_store(
     assert _FakeOutcomeJournal.instances == []
 
 
+def test_secret_mapping_provider_exception_is_sanitized_before_store(
+    monkeypatch,
+) -> None:
+    _install_fakes(monkeypatch)
+    private_detail = "private-secret-provider-detail-must-not-escape"
+
+    class _ExplodingSecretMapping(dict):
+        def get(self, key, default=None):  # noqa: ANN001
+            if key == composition_module.HOST_SECURE_INGRESS_HMAC_SECRETS_ENV:
+                raise RuntimeError(private_detail)
+            return super().get(key, default)
+
+    composition = composition_module.build_obs_command_composition(
+        env=_ExplodingSecretMapping(_env("QUERY_ONLY", "ENFORCE")),
+    )
+
+    assert composition.enabled is False
+    assert (
+        composition.reason_code
+        == composition_module.OBS_COMMAND_HMAC_SECRETS_INVALID
+    )
+    assert private_detail not in composition.reason_code
+    assert _FakeStore.instances == []
+    assert _FakeOutcomeJournal.instances == []
+
+
 def test_hmac_resolver_uses_only_dedicated_json_mapping(tmp_path, monkeypatch) -> None:
     _install_fakes(monkeypatch)
     composition = composition_module.build_obs_command_composition(
@@ -507,7 +542,10 @@ def test_construction_failure_closes_partial_store_and_returns_off(
 
     assert composition.enabled is False
     assert composition.effective_mode is SecureIngressMode.OFF
-    assert composition.reason_code == "schema/service construction failed"
+    assert (
+        composition.reason_code
+        == composition_module.OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED
+    )
     assert len(_FakeStore.instances) == 1
     assert _FakeStore.instances[0].close_count == 1
 
@@ -531,4 +569,7 @@ def test_schema_store_failure_returns_off_without_legacy_path(monkeypatch) -> No
 
     assert composition.enabled is False
     assert composition.execution_enabled is False
-    assert composition.reason_code == "SECURE_INGRESS_MIGRATION_DRIFT"
+    assert (
+        composition.reason_code
+        == composition_module.OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED
+    )

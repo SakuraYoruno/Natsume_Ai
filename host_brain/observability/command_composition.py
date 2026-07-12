@@ -38,6 +38,11 @@ HOST_SECURE_INGRESS_HMAC_SECRETS_ENV = "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON"
 HOST_OBS_COMMAND_OUTCOME_JOURNAL_PATH_ENV = (
     "HOST_OBS_COMMAND_OUTCOME_JOURNAL_PATH"
 )
+OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED = (
+    "OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED"
+)
+OBS_COMMAND_HMAC_SECRETS_INVALID = "OBS_COMMAND_HMAC_SECRETS_INVALID"
+OBS_COMMAND_HMAC_SECRETS_MISSING = "OBS_COMMAND_HMAC_SECRETS_MISSING"
 _HMAC_KEY_ID_MAX_BYTES = 255
 _HMAC_SECRET_MIN_BYTES = 32
 _HMAC_SECRET_MAX_BYTES = 4_096
@@ -342,10 +347,21 @@ def build_obs_command_composition(
     try:
         secrets = _strict_hmac_secrets(source)
     except Exception as exc:
+        raw_reason = exc.args[0] if len(exc.args) == 1 else None
+        reason_code = (
+            raw_reason
+            if type(raw_reason) is str
+            and raw_reason
+            in {
+                OBS_COMMAND_HMAC_SECRETS_INVALID,
+                OBS_COMMAND_HMAC_SECRETS_MISSING,
+            }
+            else OBS_COMMAND_HMAC_SECRETS_INVALID
+        )
         return _disabled_composition(
             relocation_mode=relocation_mode,
             global_mode=global_mode,
-            reason_code=str(exc) or "OBS_COMMAND_HMAC_SECRETS_INVALID",
+            reason_code=reason_code,
         )
 
     resolved_db_path = Path(
@@ -410,7 +426,7 @@ def build_obs_command_composition(
             router=router,
             outcome_journal=outcome_journal,
         )
-    except Exception as exc:
+    except Exception:
         if store is not None:
             try:
                 store.close()
@@ -424,10 +440,7 @@ def build_obs_command_composition(
         return _disabled_composition(
             relocation_mode=relocation_mode,
             global_mode=global_mode,
-            reason_code=(
-                str(exc).strip()
-                or "OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED"
-            ),
+            reason_code=OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED,
         )
 
     return ObsCommandComposition(
@@ -454,6 +467,9 @@ __all__ = [
     "HOST_SECURE_INGRESS_HMAC_SECRETS_ENV",
     "HOST_SECURE_INGRESS_MODE_ENV",
     "HOST_OBS_COMMAND_OUTCOME_JOURNAL_PATH_ENV",
+    "OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED",
+    "OBS_COMMAND_HMAC_SECRETS_INVALID",
+    "OBS_COMMAND_HMAC_SECRETS_MISSING",
     "ObsCommandComposition",
     "build_obs_command_composition",
 ]

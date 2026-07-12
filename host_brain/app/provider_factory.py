@@ -25,6 +25,7 @@ from host_brain.app.prompt_builder_utils import (
 from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
+    PROVIDER_DISABLED,
     PROVIDER_GEMINI,
     PROVIDER_MINIMAX,
     PROVIDER_MOCK,
@@ -51,6 +52,67 @@ from host_brain.app.prompt_builder import (
 _logger = logging.getLogger("Natsume.provider_factory")
 _MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
 _MINIMAX_STANDARD_CHAT_ENDPOINT = "https://api.minimaxi.com/v1/text/chatcompletion_v2"
+
+HOST_PROVIDER_DISABLED = "HOST_PROVIDER_DISABLED"
+HOST_PROVIDER_CREDENTIAL_REQUIRED = "HOST_PROVIDER_CREDENTIAL_REQUIRED"
+HOST_PROVIDER_UNSUPPORTED = "HOST_PROVIDER_UNSUPPORTED"
+HOST_PROVIDER_CODEX_UNAVAILABLE = "HOST_PROVIDER_CODEX_UNAVAILABLE"
+HOST_PROVIDER_CONSTRUCTION_FAILED = "HOST_PROVIDER_CONSTRUCTION_FAILED"
+
+_REAL_HOST_PROVIDERS = frozenset(
+    {
+        PROVIDER_OPENAI,
+        PROVIDER_CODEX,
+        PROVIDER_GEMINI,
+        PROVIDER_DEEPSEEK,
+        PROVIDER_MINIMAX,
+    }
+)
+
+
+class HostProviderUnavailableError(RuntimeError):
+    """Stable fail-closed error returned by an unavailable provider adapter.
+
+    Construction failures are intentionally projected to a reason code instead
+    of retaining the source exception.  The latter may include credentials,
+    endpoints, response bodies, or machine-local paths.
+    """
+
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        provider_name: str,
+        node_id: str | None = None,
+    ) -> None:
+        self.reason_code = str(reason_code)
+        self.provider_name = str(provider_name or "unknown")
+        self.node_id = str(node_id or "")
+        super().__init__(self.reason_code)
+
+
+def build_host_unavailable_provider_fn(
+    *,
+    provider_name: str,
+    reason_code: str,
+    node_id: str | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    """Build a callable that deterministically rejects instead of fabricating output."""
+
+    resolved_provider = str(provider_name or "unknown").strip().lower() or "unknown"
+    resolved_reason = str(reason_code or HOST_PROVIDER_CONSTRUCTION_FAILED).strip()
+    resolved_node = str(node_id or "").strip() or None
+
+    def _provider(_prompt_payload: dict[str, Any]) -> Any:
+        raise HostProviderUnavailableError(
+            resolved_reason,
+            provider_name=resolved_provider,
+            node_id=resolved_node,
+        )
+
+    setattr(_provider, "natsume_provider_kind", "unavailable")
+    setattr(_provider, "natsume_provider_reason_code", resolved_reason)
+    return _provider
 
 
 def _load_template_mapping(template_id: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
@@ -624,6 +686,7 @@ def build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[str
             sort_keys=True,
         )
 
+    setattr(_provider, "natsume_provider_kind", "mock")
     return _provider
 
 
@@ -669,13 +732,41 @@ def build_host_provider_fn(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_allowed_for_background():
-        return _build_codex_cli_provider_fn(
-            model_id=model_id,
-            timeout_ms=timeout_ms,
-            node_id=None,
+    if provider == PROVIDER_MOCK:
+        return build_host_mock_provider()
+    if provider == PROVIDER_DISABLED:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_DISABLED,
         )
-    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI, PROVIDER_MINIMAX} and key_value:
+    if provider not in _REAL_HOST_PROVIDERS:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_UNSUPPORTED,
+        )
+    if provider == PROVIDER_CODEX and not key_value:
+        if not codex_cli_lm_allowed_for_background():
+            return build_host_unavailable_provider_fn(
+                provider_name=provider,
+                reason_code=HOST_PROVIDER_CODEX_UNAVAILABLE,
+            )
+        try:
+            return _build_codex_cli_provider_fn(
+                model_id=model_id,
+                timeout_ms=timeout_ms,
+                node_id=None,
+            )
+        except Exception:
+            return build_host_unavailable_provider_fn(
+                provider_name=provider,
+                reason_code=HOST_PROVIDER_CONSTRUCTION_FAILED,
+            )
+    if not key_value:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_CREDENTIAL_REQUIRED,
+        )
+    try:
         return build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,
@@ -683,7 +774,11 @@ def build_host_provider_fn(
             timeout_ms=timeout_ms,
             base_url_override=base_url_override,
         )
-    return build_host_mock_provider()
+    except Exception:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_CONSTRUCTION_FAILED,
+        )
 
 
 def build_host_provider_fn_for_node(
@@ -732,12 +827,50 @@ def build_host_provider_fn_for_node(
 
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_allowed_for_background():
-        return _build_codex_cli_provider_fn(
-            model_id=model_id,
-            timeout_ms=timeout_ms,
+    if provider == PROVIDER_MOCK:
+        return build_host_mock_provider_for_node(node_id)
+    if provider == PROVIDER_DISABLED:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_DISABLED,
             node_id=node_id,
         )
-    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    if provider not in _REAL_HOST_PROVIDERS:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_UNSUPPORTED,
+            node_id=node_id,
+        )
+    if provider == PROVIDER_CODEX and not key_value:
+        if not codex_cli_lm_allowed_for_background():
+            return build_host_unavailable_provider_fn(
+                provider_name=provider,
+                reason_code=HOST_PROVIDER_CODEX_UNAVAILABLE,
+                node_id=node_id,
+            )
+        try:
+            return _build_codex_cli_provider_fn(
+                model_id=model_id,
+                timeout_ms=timeout_ms,
+                node_id=node_id,
+            )
+        except Exception:
+            return build_host_unavailable_provider_fn(
+                provider_name=provider,
+                reason_code=HOST_PROVIDER_CONSTRUCTION_FAILED,
+                node_id=node_id,
+            )
+    if not key_value:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_CREDENTIAL_REQUIRED,
+            node_id=node_id,
+        )
+    try:
         return _build_single_key_provider(key_value)
-    return build_host_mock_provider_for_node(node_id)
+    except Exception:
+        return build_host_unavailable_provider_fn(
+            provider_name=provider,
+            reason_code=HOST_PROVIDER_CONSTRUCTION_FAILED,
+            node_id=node_id,
+        )
