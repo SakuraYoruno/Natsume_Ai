@@ -117,22 +117,7 @@ def _find_scheduler_task(snapshot: dict[str, Any] | None, task_id: str) -> dict[
 def _resolve_scheduler_task_for_obs(task_id: str) -> dict[str, Any] | None:
     host_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
     task = _find_scheduler_task(host_snapshot, task_id)
-    if task is not None:
-        return task
-    try:
-        from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-        registry = SchedulerTaskRegistry.get_instance()
-        local_task = registry.get(task_id)
-        if local_task is None:
-            return None
-        return {
-            "task_id": task_id,
-            "enabled": bool(getattr(local_task, "enabled", False)),
-            "status": "LOCAL",
-        }
-    except Exception:
-        return None
+    return task
 
 
 def _build_probe_registry(ledger, since_ms: int):

@@ -18,15 +18,12 @@ from host_brain.app.http_hooks_runtime_helpers import (
     read_world_canon_fact,
     run_life_memory_sleep_replay_handler,
     run_long_term_distillation_handler,
-    run_proactive_intent_dispatch,
 )
 # P3-2：导入拆分后的子模块
 from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
 from host_brain.app.http_hooks_outbound import global_exception_handler, startup_status_is_degraded
 from host_brain.app.http_hooks_middleware import (
     parse_bool_env as _middleware_parse_bool_env,
-    build_scheduler_emotion_state as _middleware_build_scheduler_emotion_state,
-    build_personality_tick_status as _middleware_build_personality_tick_status,
 )
 from host_brain.core.ids import new_request_id
 from host_brain.app.legacy_runtime_shutdown_adapter import (
@@ -60,92 +57,6 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return _middleware_parse_bool_env(name, default=default)
 
 
-def _resolve_scheduler_ledger(*, get_ledger: Callable[[], Any], logger: Any) -> Any | None:
-    try:
-        return get_ledger()
-    except Exception as exc:
-        logger.warning("Scheduler audit ledger unavailable: %s", exc)
-        return None
-
-
-def _resolve_continuous_organ_ticks_enabled(*, background_tasks_enabled: bool) -> bool:
-    """Core life ticks are not the same thing as heavy background jobs.
-
-    `HOST_BACKGROUND_TASKS_ENABLED=false` should disable proactive push,
-    distillation, weekly growth, and other expensive jobs. It should not turn
-    off the minimal inner-world/body/emotion rhythm unless explicitly asked.
-    """
-    _ = background_tasks_enabled
-    return _parse_bool_env(
-        "HOST_CONTINUOUS_ORGAN_TICKS_ENABLED",
-        default=True,
-    )
-
-
-def _build_scheduler_emotion_state() -> dict[str, Any]:
-    """构建调度器门控使用的情绪/内分泌快照。P3-2：委托给 http_hooks_middleware。"""
-    return _middleware_build_scheduler_emotion_state()
-
-
-def _build_audit_retention_task_config() -> Any:
-    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-        SchedulerTaskConfig,
-        TaskPriority,
-        TriggerMode,
-    )
-
-    return SchedulerTaskConfig(
-        task_id="audit_retention_daily",
-        trigger_mode=TriggerMode.CRON,
-        trigger_config={"hour": 2, "minute": 0, "catch_up_window_minutes": 1440},
-        intent_template={
-            "skill_name": "audit_retention",
-            "args": {},
-            "proposer_node_id": "scheduler",
-        },
-        priority=TaskPriority.LOW,
-        mode_allowlist=["normal", "sleep"],
-        enabled=True,
-        resource_profile={
-            "resource_class": "maintenance",
-            "uses_llm": False,
-            "uses_gpu": False,
-            "advisory_policy": "rule",
-        },
-        description="审计数据保留策略：每日 02:00 清理过期审计数据",
-    )
-
-
-def _build_lightnovel_recommender_task_config() -> Any:
-    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
-
-    return get_scheduled_task_config_by_task_id("lightnovel_recommender_daily")
-
-
-def _build_diary_writer_task_config() -> Any:
-    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
-
-    return get_scheduled_task_config_by_task_id("diary_writer_daily")
-
-
-def _build_dream_generator_task_config() -> Any:
-    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
-
-    return get_scheduled_task_config_by_task_id("dream_generator_sleep")
-
-
-def _build_memory_life_task_configs() -> list[Any]:
-    return [
-        _build_diary_writer_task_config(),
-        _build_dream_generator_task_config(),
-    ]
-
-
-def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
-    # P3-2：委托给 http_hooks_middleware.build_personality_tick_status
-    return _middleware_build_personality_tick_status(registry=registry, task_ids=task_ids)
-
-
 def _init_edge_command_pusher_status(*, logger: Any) -> str:
     try:
         from host_brain.tribe.edge_command_pusher import init_edge_command_pusher  # noqa: PLC0415
@@ -163,224 +74,6 @@ def _init_edge_command_pusher_status(*, logger: Any) -> str:
     except Exception as exc:
         logger.warning("EdgeCommandPusher initialization degraded: %s", exc)
         return f"DEGRADED: {exc}"
-
-
-def _build_codex_immune_scheduler_task(*, interval_s: float) -> Any:
-    from host_brain.app.automation.task_scheduler import ScheduledTask, TaskPriority  # noqa: PLC0415
-    from host_brain.app.internal_agent_routes import run_scheduled_immune_auto_dispatch_cycle  # noqa: PLC0415
-
-    async def _run_codex_immune_scheduler_task() -> None:
-        await run_scheduled_immune_auto_dispatch_cycle()
-
-    return ScheduledTask(
-        task_id="agent_immune_auto_dispatch_tick",
-        name="Codex immune auto-dispatch tick",
-        fn=_run_codex_immune_scheduler_task,
-        interval_s=float(interval_s),
-        max_retries=1,
-        retry_delay_s=15.0,
-        enabled=True,
-        priority=TaskPriority.P1,
-    )
-
-
-def _build_core_organ_tick_task_configs() -> list[Any]:
-    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
-        CORE_ORGAN_TICK_TASK_IDS,
-        get_scheduled_task_configs_by_task_ids,
-    )
-
-    return get_scheduled_task_configs_by_task_ids(CORE_ORGAN_TICK_TASK_IDS)
-
-
-def _bootstrap_core_organ_tick_scheduler(
-    *,
-    logger: Any,
-    get_ledger: Callable[[], Any],
-    retention_policy: Any,
-) -> dict[str, str]:
-    from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-    from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
-    from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-    from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-    registry = SchedulerTaskRegistry.get_instance()
-    health_reporter = SchedulerHealthReporter(registry=registry)
-    set_scheduler_providers(
-        registry=registry,
-        health_reporter=health_reporter,
-    )
-
-    registered_task_ids: list[str] = []
-    for config in _build_core_organ_tick_task_configs():
-        try:
-            if registry.get(config.task_id) is None:
-                registry.register(config)
-                logger.info("Core organ tick registered: task_id=%s", config.task_id)
-            registered_task_ids.append(config.task_id)
-        except Exception as exc:
-            logger.warning("Core organ tick registration degraded: task_id=%s err=%s", config.task_id, exc)
-
-    def _ui_pusher(_message: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "success": False,
-            "status": "SKIPPED",
-            "detail": "core organ tick scheduler does not push UI messages",
-        }
-
-    def _intent_dispatcher(system_intent: dict[str, Any]) -> dict[str, Any]:
-        skill_name = str(system_intent.get("skill_name") or "").strip()
-        if skill_name == "proactive_talk":
-            return {
-                "status": "SKIPPED",
-                "reason_code": "CORE_ORGAN_TICK_SCHEDULER_NO_PROACTIVE_TALK",
-            }
-        return run_proactive_intent_dispatch(
-            system_intent,
-            logger=logger,
-            get_ledger=get_ledger,
-            retention_policy=retention_policy,
-            ui_pusher=_ui_pusher,
-        )
-
-    scheduler = NatsumeScheduler(
-        registry=registry,
-        health_reporter=health_reporter,
-        intent_dispatcher=_intent_dispatcher,
-        ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
-        get_emotion_state=_build_scheduler_emotion_state,
-    )
-    set_scheduler_providers(
-        registry=registry,
-        health_reporter=health_reporter,
-        scheduler=scheduler,
-    )
-    scheduler.start()
-
-    return {
-        "organ_tick_scheduler": (
-            "OK "
-            f"(started; core_ticks={len(registered_task_ids)}; heavy_background_tasks=skip)"
-        ),
-        "personality_tick_registry": _build_personality_tick_status(
-            registry=registry,
-            task_ids=registered_task_ids,
-        ),
-    }
-
-
-def _bootstrap_personality_scheduler(
-    *,
-    logger: Any,
-    get_ledger: Callable[[], Any],
-    retention_policy: Any,
-    proactive_push_client_builder: Callable[[], Any] | None = None,
-) -> dict[str, str]:
-    from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-    from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
-    from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
-        build_personality_scheduler_seed_task_configs,
-        register_scheduler_seed_tasks,
-    )
-    from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-    registry = SchedulerTaskRegistry.get_instance()
-    health_reporter = SchedulerHealthReporter(registry=registry)
-    set_scheduler_providers(
-        registry=registry,
-        health_reporter=health_reporter,
-    )
-
-    proactive_push_state: dict[str, Any] = {
-        "client": None,
-        "detail": "proactive push client unavailable",
-    }
-
-    if proactive_push_client_builder is None:
-        try:
-            from host_brain.app.vision.proactive_push_client import (  # noqa: PLC0415
-                build_proactive_push_client as proactive_push_client_builder,
-            )
-        except Exception as exc:
-            proactive_push_client_builder = None
-            proactive_push_state["detail"] = str(exc) or proactive_push_state["detail"]
-            logger.warning("Proactive push client import degraded: %s", exc)
-
-    if proactive_push_client_builder is not None:
-        try:
-            proactive_push_state["client"] = proactive_push_client_builder()
-            proactive_push_state["detail"] = ""
-        except Exception as exc:
-            proactive_push_state["detail"] = str(exc) or proactive_push_state["detail"]
-            logger.warning("Proactive push client init degraded: %s", exc)
-
-    def _ui_pusher(message: dict[str, Any]) -> dict[str, Any]:
-        client = proactive_push_state.get("client")
-        if client is None:
-            return {
-                "success": False,
-                "status": "SKIPPED",
-                "detail": str(proactive_push_state.get("detail") or "proactive push client unavailable"),
-            }
-        return client.push(message)
-
-    def _intent_dispatcher(system_intent: dict[str, Any]) -> dict[str, Any]:
-        skill_name = str(system_intent.get("skill_name") or "").strip()
-        if skill_name == "proactive_talk" and proactive_push_state.get("client") is None:
-            return {
-                "status": "SKIPPED",
-                "reason_code": "PROACTIVE_PUSH_UNAVAILABLE",
-                "detail": str(proactive_push_state.get("detail") or "proactive push client unavailable"),
-            }
-        return run_proactive_intent_dispatch(
-            system_intent,
-            logger=logger,
-            get_ledger=get_ledger,
-            retention_policy=retention_policy,
-            ui_pusher=_ui_pusher,
-        )
-
-    scheduler = NatsumeScheduler(
-        registry=registry,
-        health_reporter=health_reporter,
-        intent_dispatcher=_intent_dispatcher,
-        ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
-        get_emotion_state=_build_scheduler_emotion_state,
-    )
-    set_scheduler_providers(
-        registry=registry,
-        health_reporter=health_reporter,
-        scheduler=scheduler,
-    )
-
-    seed_task_configs = build_personality_scheduler_seed_task_configs()
-    tracked_task_ids = register_scheduler_seed_tasks(
-        registry=registry,
-        logger=logger,
-        task_configs=seed_task_configs,
-    )
-
-    scheduler.start()
-    proactive_push_ready = proactive_push_state.get("client") is not None
-    proactive_push_status = (
-        "OK"
-        if proactive_push_ready
-        else f"DEGRADED: {proactive_push_state.get('detail') or 'proactive push client unavailable'}"
-    )
-
-    return {
-        "proactive_talk_scheduler": (
-            "OK "
-            f"(started; proactive_push={'ready' if proactive_push_ready else 'skip'}; "
-            f"background_ticks={len(tracked_task_ids)})"
-        ),
-        "proactive_push_client": proactive_push_status,
-        "personality_tick_registry": _build_personality_tick_status(
-            registry=registry,
-            task_ids=tracked_task_ids,
-        ),
-    }
 
 
 def _sync_world_canon_index_on_startup(
@@ -444,41 +137,27 @@ def runtime_lifespan(
                 get_semantic_recaller,
             )
             new_module_statuses: dict[str, str] = {}
-            _retention_policy: Any | None = None
             _startup_eager_warmup = _parse_bool_env(
                 "HOST_STARTUP_EAGER_WARMUP",
                 default=False,
             )
+            # Periodic execution is owned by the governed SchedulerClock,
+            # which is composed only after Task Runtime activation in asgi.py.
+            # This legacy lifespan may initialize producers, but it must never
+            # start either historical scheduler implementation.
             _background_tasks_enabled = _parse_bool_env(
                 "HOST_BACKGROUND_TASKS_ENABLED",
                 default=True,
             )
-            _continuous_organ_ticks_enabled = _resolve_continuous_organ_ticks_enabled(
-                background_tasks_enabled=_background_tasks_enabled,
+            new_module_statuses["legacy_periodic_schedulers"] = (
+                "RETIRED: governed SchedulerClock owns periodic execution"
             )
-            if not _background_tasks_enabled:
-                logger.warning(
-                    "Background periodic schedulers disabled by HOST_BACKGROUND_TASKS_ENABLED=false"
-                )
-                new_module_statuses["proactive_push_client"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-            try:
-                from host_brain.app.internal_agent_routes import (  # noqa: PLC0415
-                    start_immune_auto_dispatch_monitor,
-                )
-
-                if not _background_tasks_enabled:
-                    new_module_statuses["codex_immune_monitor"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    _codex_monitor_state = start_immune_auto_dispatch_monitor(logger=logger)
-                    if bool(_codex_monitor_state.get("scheduler_managed")):
-                        new_module_statuses["codex_immune_monitor"] = "OK (scheduler-managed auto-dispatch)"
-                    elif bool(_codex_monitor_state.get("enabled")):
-                        new_module_statuses["codex_immune_monitor"] = "OK (auto-dispatch monitor enabled)"
-                    else:
-                        new_module_statuses["codex_immune_monitor"] = "SKIPPED: HOST_CODEX_IMMUNE_AUTODISPATCH_ENABLED=false"
-            except Exception as _codex_monitor_exc:
-                new_module_statuses["codex_immune_monitor"] = f"DEGRADED: {_codex_monitor_exc}"
-                logger.warning("Codex immune auto-dispatch monitor startup degraded: %s", _codex_monitor_exc)
+            new_module_statuses["proactive_push_client"] = (
+                "DEFERRED: governed scheduler composition"
+            )
+            new_module_statuses["codex_immune_monitor"] = (
+                "RETIRED: governed scheduler immune definition"
+            )
             new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
                 ledger=ledger,
                 logger=logger,
@@ -622,295 +301,15 @@ def runtime_lifespan(
                 new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
                 logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
 
-            # [Ref #100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.app.dependencies import get_distillation_engine  # noqa: PLC0415
-                from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
-                    ScheduledTask, TaskPriority, get_scheduler,
-                )
-
-                _scheduler = get_scheduler()
-                _distill_engine: Any | None = None
-
-                def _get_distill_engine() -> Any:
-                    nonlocal _distill_engine
-                    if _distill_engine is None:
-                        _distill_engine = get_distillation_engine()
-                    return _distill_engine
-
-                async def _run_distillation_task() -> None:
-                    """DistillationEngine 蒸馏定时任务执行体。"""
-                    report = await _get_distill_engine().run_batch()
-                    logger.info(
-                        "蒸馏任务完成: 候选=%d, 成功=%d, 跳过=%d, 失败=%d, 耗时=%dms",
-                        report.total_candidates, report.distilled_count,
-                        report.skipped_count, report.failed_count, report.duration_ms,
-                    )
-
-                _distill_task = ScheduledTask(
-                    task_id="distillation_engine_periodic",
-                    name="情节记忆蒸馏（每 10 分钟）",
-                    fn=_run_distillation_task,
-                    interval_s=600.0,  # 10 分钟
-                    max_retries=2,
-                    retry_delay_s=30.0,
-                    enabled=True,
-                    priority=TaskPriority.P1,
-                )
-                _scheduler.register(_distill_task)
-                new_module_statuses["distillation_engine_scheduler"] = (
-                    f"OK (task_id={_distill_task.task_id}, interval=600s)"
-                )
-                logger.info(
-                    "DistillationEngine 蒸馏任务已注册到调度器: task_id=%s",
-                    _distill_task.task_id,
-                )
-            except Exception as _distill_exc:
-                if not _background_tasks_enabled:
-                    new_module_statuses["distillation_engine_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
-                logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
-
-            # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
-            # Codex immune auto-dispatch task registration for HostTaskScheduler.
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                _codex_scheduler_enabled = _parse_bool_env(
-                    "HOST_CODEX_IMMUNE_SCHEDULER_ENABLED",
-                    default=False,
-                )
-                if not _codex_scheduler_enabled:
-                    new_module_statuses["codex_immune_scheduler"] = (
-                        "SKIPPED: HOST_CODEX_IMMUNE_SCHEDULER_ENABLED=false"
-                    )
-                else:
-                    from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
-
-                    _codex_scheduler = get_scheduler()
-                    _codex_interval_s = float(
-                        max(
-                            15,
-                            min(
-                                86400,
-                                int(
-                                    str(
-                                        os.environ.get(
-                                            "HOST_CODEX_IMMUNE_SCHEDULER_INTERVAL_SECONDS"
-                                        )
-                                        or "300"
-                                    ).strip()
-                                    or "300"
-                                ),
-                            ),
-                        )
-                    )
-                    _codex_task = _build_codex_immune_scheduler_task(
-                        interval_s=_codex_interval_s
-                    )
-                    if not any(
-                        str(task.get("task_id") or "") == _codex_task.task_id
-                        for task in _codex_scheduler.get_all_tasks_status()
-                    ):
-                        _codex_scheduler.register(_codex_task)
-                    new_module_statuses["codex_immune_scheduler"] = (
-                        f"OK (task_id={_codex_task.task_id}, interval={int(_codex_interval_s)}s)"
-                    )
-                    logger.info(
-                        "Codex immune scheduler task registered: task_id=%s interval=%ss",
-                        _codex_task.task_id,
-                        int(_codex_interval_s),
-                    )
-            except Exception as _codex_scheduler_exc:
-                if not _background_tasks_enabled:
-                    new_module_statuses["codex_immune_scheduler"] = (
-                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                    )
-                else:
-                    new_module_statuses["codex_immune_scheduler"] = (
-                        f"DEGRADED: {_codex_scheduler_exc}"
-                    )
-                logger.warning(
-                    "Codex immune scheduler task registration degraded: %s",
-                    _codex_scheduler_exc,
-                )
-
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415
-                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-                _distill_config = make_distillation_task_config()
-                _task_registry = SchedulerTaskRegistry.get_instance()
-                _task_registry.register(_distill_config)
-                new_module_statuses["long_term_distiller_scheduler"] = (
-                    f"OK (task_id={_distill_config.task_id})"
-                )
-                logger.info(
-                    "LongTermDistiller 蒸馏任务已注册到调度器: task_id=%s trigger=%s",
-                    _distill_config.task_id,
-                    _distill_config.trigger_mode,
-                )
-            except Exception as _distill_exc:
-                if not _background_tasks_enabled:
-                    new_module_statuses["long_term_distiller_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
-                logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
-
-            # [Ref #34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.audit.retention import build_retention_policy_from_env  # noqa: PLC0415
-                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-                _retention_policy = build_retention_policy_from_env()
-                _retention_registry = SchedulerTaskRegistry.get_instance()
-                _retention_task = _build_audit_retention_task_config()
-                if _retention_registry.get(_retention_task.task_id) is None:
-                    _retention_registry.register(_retention_task)
-                new_module_statuses["audit_retention_scheduler"] = (
-                    f"OK (task_id={_retention_task.task_id})"
-                )
-                logger.info(
-                    "AuditRetention 保留策略任务已注册到调度器: task_id=%s trigger=%s",
-                    _retention_task.task_id,
-                    _retention_task.trigger_mode,
-                )
-            except Exception as _ret_exc:
-                if not _background_tasks_enabled:
-                    new_module_statuses["audit_retention_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
-                logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
-
-            # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
-                    build_personality_scheduler_seed_task_configs,
-                    register_scheduler_seed_tasks,
-                )
-                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-                from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
-
-                _proactive_registry = SchedulerTaskRegistry.get_instance()
-
-                # 构建 ui_pusher 回调（同步推送到 Edge）；失败时仅降级 proactive push，不阻断 core ticks
-                _proactive_push_detail = ""
-                try:
-                    from host_brain.app.vision.proactive_push_client import build_proactive_push_client  # noqa: PLC0415
-
-                    _push_client = build_proactive_push_client()
-                    _ui_pusher = lambda message, _client=_push_client: _client.push(message)
-                    new_module_statuses["proactive_push_client"] = "OK"
-                except Exception as _push_exc:
-                    _proactive_push_detail = str(_push_exc) or "proactive push client unavailable"
-                    new_module_statuses["proactive_push_client"] = f"DEGRADED: {_proactive_push_detail}"
-                    logger.warning("Proactive push client init degraded: %s", _push_exc)
-                    _ui_pusher = (
-                        lambda _message,
-                        _detail=_proactive_push_detail: {
-                            "success": False,
-                            "status": "SKIPPED",
-                            "detail": _detail,
-                        }
-                    )
-
-                def _proactive_intent_dispatcher(
-                    system_intent: dict[str, Any],
-                    _logger: Any = logger,
-                    _get_ledger: Callable[[], Any] = get_ledger,
-                    _retention_policy: Any = _retention_policy,
-                    _ui_pusher: Callable[[dict[str, Any]], dict[str, Any]] = _ui_pusher,
-                    _push_detail: str = _proactive_push_detail,
-                ) -> dict[str, Any]:
-                    if (
-                        str(system_intent.get("skill_name") or "").strip() == "proactive_talk"
-                        and _push_detail
-                    ):
-                        return {
-                            "status": "SKIPPED",
-                            "reason_code": "PROACTIVE_PUSH_UNAVAILABLE",
-                            "detail": _push_detail,
-                        }
-                    return run_proactive_intent_dispatch(
-                        system_intent,
-                        logger=_logger,
-                        get_ledger=_get_ledger,
-                        retention_policy=_retention_policy,
-                        ui_pusher=_ui_pusher,
-                    )
-
-                from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-                from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-
-                _health_reporter = SchedulerHealthReporter(registry=_proactive_registry)
-                set_scheduler_providers(
-                    registry=_proactive_registry,
-                    health_reporter=_health_reporter,
-                )
-                _natsume_scheduler = NatsumeScheduler(
-                    registry=_proactive_registry,
-                    health_reporter=_health_reporter,
-                    intent_dispatcher=_proactive_intent_dispatcher,
-                    ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
-                    get_emotion_state=_build_scheduler_emotion_state,
-                )
-                set_scheduler_providers(
-                    registry=_proactive_registry,
-                    health_reporter=_health_reporter,
-                    scheduler=_natsume_scheduler,
-                )
-
-                _core_personality_task_ids = register_scheduler_seed_tasks(
-                    registry=_proactive_registry,
-                    logger=logger,
-                    task_configs=build_personality_scheduler_seed_task_configs(),
-                )
-
-                # 关键约束：必须在全部 seed tasks 注册完成后再 start，
-                # 否则后续仅写入 registry 的任务不会被运行中的 scheduler 真正调度。
-                _natsume_scheduler.start()
-                new_module_statuses["proactive_talk_scheduler"] = (
-                    "OK "
-                    f"(started; core_ticks={len(_core_personality_task_ids)}; "
-                    f"proactive_push={'ready' if not _proactive_push_detail else 'skip'})"
-                )
-                new_module_statuses["personality_tick_registry"] = _build_personality_tick_status(
-                    registry=_proactive_registry,
-                    task_ids=_core_personality_task_ids,
-                )
-
-            except Exception as _proactive_exc:
-                if not _background_tasks_enabled and _continuous_organ_ticks_enabled:
-                    try:
-                        new_module_statuses.update(
-                            _bootstrap_core_organ_tick_scheduler(
-                                logger=logger,
-                                get_ledger=get_ledger,
-                                retention_policy=_retention_policy,
-                            )
-                        )
-                        new_module_statuses["proactive_talk_scheduler"] = (
-                            "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false; "
-                            "core organ ticks handled by organ_tick_scheduler"
-                        )
-                    except Exception as _organ_tick_exc:
-                        new_module_statuses["organ_tick_scheduler"] = f"DEGRADED: {_organ_tick_exc}"
-                        new_module_statuses["proactive_talk_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                        logger.warning("core organ tick scheduler startup degraded: %s", _organ_tick_exc)
-                elif not _background_tasks_enabled:
-                    new_module_statuses["proactive_talk_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                else:
-                    new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
-                logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
+            new_module_statuses.update({
+                "scheduler_seed_catalog": "DEFERRED: governed scheduler composition",
+                "distillation_engine_scheduler": "DEFERRED: governed scheduler composition",
+                "codex_immune_scheduler": "DEFERRED: governed scheduler composition",
+                "long_term_distiller_scheduler": "DEFERRED: governed scheduler composition",
+                "audit_retention_scheduler": "DEFERRED: governed scheduler composition",
+                "proactive_talk_scheduler": "DEFERRED: governed scheduler composition",
+                "personality_tick_registry": "DEFERRED: governed scheduler composition",
+            })
 
             # [builtin_tools_catalog] 将内置 READ 工具注册到 ToolCatalog / ToolBroker
             try:
@@ -1085,86 +484,16 @@ def runtime_lifespan(
                 new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
                 logger.warning("记忆维护工具注册失败（降级）: %s", _lt_exc)
 
-            try:
-                from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
-                    ScheduledTask,
-                    TaskPriority,
-                    get_scheduler,
-                )
-                from host_brain.app.dependencies import get_security_immune_agent  # noqa: PLC0415
-
-                _security_agent = get_security_immune_agent()
-                _security_policy = _security_agent.policy
-                if not _background_tasks_enabled:
-                    new_module_statuses["security_immune_agent"] = (
-                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                    )
-                elif not bool(_security_policy.enabled):
-                    new_module_statuses["security_immune_agent"] = (
-                        "SKIPPED: SECURITY_IMMUNE_ENABLED=false"
-                    )
-                else:
-                    _security_scheduler = get_scheduler()
-
-                    async def _run_security_immune_task() -> None:
-                        await get_security_immune_agent().run_once(reason="scheduled")
-
-                    _security_task = ScheduledTask(
-                        task_id="security_immune_periodic",
-                        name="内网安全免疫巡检",
-                        fn=_run_security_immune_task,
-                        interval_s=float(_security_policy.scan_interval_seconds),
-                        max_retries=1,
-                        retry_delay_s=15.0,
-                        enabled=True,
-                        priority=TaskPriority.P1,
-                    )
-                    if not any(
-                        str(task.get("task_id") or "") == _security_task.task_id
-                        for task in _security_scheduler.get_all_tasks_status()
-                    ):
-                        _security_scheduler.register(_security_task)
-                    if _parse_bool_env("SECURITY_IMMUNE_RUN_ON_STARTUP", default=True):
-                        await _security_agent.run_once(reason="startup")
-                    new_module_statuses["security_immune_agent"] = (
-                        f"OK (mode={_security_policy.mode.value}, "
-                        f"task_id={_security_task.task_id}, "
-                        f"interval={int(_security_policy.scan_interval_seconds)}s)"
-                    )
-                    logger.info(
-                        "SecurityImmuneAgent registered: mode=%s interval=%ss",
-                        _security_policy.mode.value,
-                        int(_security_policy.scan_interval_seconds),
-                    )
-            except Exception as _security_immune_exc:
-                new_module_statuses["security_immune_agent"] = f"DEGRADED: {_security_immune_exc}"
-                logger.warning("SecurityImmuneAgent startup degraded: %s", _security_immune_exc)
+            new_module_statuses["security_immune_agent"] = (
+                "DEFERRED: governed scheduler definition"
+            )
 
             dependency_probes = _edge_health
             if dependency_probes is None:
                 dependency_probes = await probe_edge_rpc_health()
-            try:
-                if not _background_tasks_enabled:
-                    new_module_statuses["host_task_scheduler"] = (
-                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
-                    )
-                else:
-                    from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
-
-                    _host_task_scheduler = get_scheduler()
-                    await _host_task_scheduler.start()
-                    new_module_statuses["host_task_scheduler"] = (
-                        f"OK (running={_host_task_scheduler.health().get('running', False)}, "
-                        f"task_count={len(_host_task_scheduler.get_all_tasks_status())})"
-                    )
-            except Exception as _host_task_scheduler_exc:
-                new_module_statuses["host_task_scheduler"] = (
-                    f"DEGRADED: {_host_task_scheduler_exc}"
-                )
-                logger.warning(
-                    "HostTaskScheduler startup degraded: %s",
-                    _host_task_scheduler_exc,
-                )
+            new_module_statuses["host_task_scheduler"] = (
+                "RETIRED: governed SchedulerClock owns periodic execution"
+            )
             try:
                 from host_brain.agent_runtime.production_executor import (  # noqa: PLC0415
                     recover_interrupted_lightnovel_recommendation_jobs,

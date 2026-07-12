@@ -42,7 +42,6 @@ class DigitalLifeRuntimeConfig:
     persona_self_id: str = ""
     session_id: str = "digital-life-host-runtime"
     out_dir: str | Path | None = None
-    start_scheduler_threads: bool = False
     manage_environment: bool = True
     reset_persona_state_for_run: bool = True
     tick_task_ids: Sequence[str] = DEFAULT_TICK_TASK_IDS
@@ -84,8 +83,9 @@ class ForegroundTurnResult:
 class DigitalLifeSupervisor:
     """Host-side supervisor for keeping the digital-life loop alive.
 
-    The supervisor owns the core background tick scheduler and exposes a small
-    foreground-turn boundary. The foreground boundary accepts a pluggable
+    The supervisor exposes a small foreground-turn and evidence boundary.
+    Periodic work belongs exclusively to the governed process scheduler.
+    The foreground boundary accepts a pluggable
     runner so the real chat adapter can be attached without making the runtime
     package depend on validation scripts or transport-specific code.
     """
@@ -127,11 +127,6 @@ class DigitalLifeSupervisor:
         self._old_self_dir: str | None = None
         self._old_default_agent: Any = None
         self._old_limbic_agent: Any = None
-        self._old_scheduler_registry: Any = None
-        self._old_scheduler_health: Any = None
-        self.registry: Any = None
-        self.health_reporter: Any = None
-        self.scheduler: Any = None
         self.alive = False
 
     def __enter__(self) -> "DigitalLifeSupervisor":
@@ -153,19 +148,11 @@ class DigitalLifeSupervisor:
         self._started_at_ms = _now_ms()
         self._prepare_runtime_environment()
         self._prepare_persona_state()
-        self._prepare_scheduler()
-        if bool(self.config.start_scheduler_threads) and self.scheduler is not None:
-            self.scheduler.start()
         self.alive = True
         self._record_event("runtime_started", self.snapshot())
         return self.snapshot()
 
     def stop(self) -> dict[str, Any]:
-        if self.scheduler is not None:
-            try:
-                self.scheduler.stop()
-            except Exception as exc:  # pragma: no cover - defensive shutdown
-                self.logger.debug("digital life scheduler stop degraded: %s", exc)
         snapshot = self.snapshot()
         if self.alive:
             self._record_event("runtime_stopped", snapshot)
@@ -178,18 +165,10 @@ class DigitalLifeSupervisor:
         selected = tuple(task_ids or self.config.tick_task_ids or DEFAULT_TICK_TASK_IDS)
         results: dict[str, Any] = {}
         for task_id in selected:
-            task_key = str(task_id)
-            if self.registry is not None and self.registry.get(task_key) is None:
-                results[task_key] = {"status": "SKIPPED", "reason_code": "TASK_NOT_REGISTERED"}
-                continue
-            try:
-                results[task_key] = self.scheduler.trigger_task_by_id(task_key)
-            except Exception as exc:  # pragma: no cover - diagnostic path
-                results[task_key] = {
-                    "status": "ERROR",
-                    "reason_code": type(exc).__name__,
-                    "detail": str(exc)[:200],
-                }
+            results[str(task_id)] = {
+                "status": "SKIPPED",
+                "reason_code": "GOVERNED_SCHEDULER_SERVICE_REQUIRED",
+            }
         self._tick_count += 1
         self._idle_tick_count += 1
         self._last_tick_ts_ms = _now_ms()
@@ -261,7 +240,38 @@ class DigitalLifeSupervisor:
         generation_event: dict[str, Any] = {}
         outbound = self._latest_proactive_outbox_record()
         if not outbound and generate_if_missing:
-            generation_event = self.run_idle_tick(task_ids=(PROACTIVE_TALK_TASK_ID,))
+            if self.mode == "fixture":
+                episode = self._build_emotional_proactive_episode(
+                    {"skill_name": "proactive_talk", "args": {}}
+                )
+                episode_record = self._write_proactive_episode_record(
+                    episode,
+                    scheduler_intent={"skill_name": "proactive_talk"},
+                )
+                if bool(episode.get("send_allowed")):
+                    queued = self._queue_proactive_outbox(
+                        {
+                            "type": "proactive_talk",
+                            "content": str(episode.get("opening_message") or ""),
+                            "proactive_episode": episode,
+                        }
+                    )
+                    generation_event = {
+                        "status": "FIXTURE_GENERATED",
+                        "episode": episode_record,
+                        "queue": queued,
+                    }
+                else:
+                    generation_event = {
+                        "status": "SKIPPED",
+                        "reason_code": "EMOTIONAL_PROACTIVE_HELD",
+                        "episode": episode_record,
+                    }
+            else:
+                generation_event = {
+                    "status": "SKIPPED",
+                    "reason_code": "GOVERNED_SCHEDULER_SERVICE_REQUIRED",
+                }
             outbound = self._latest_proactive_outbox_record()
         if not outbound:
             event = {
@@ -448,7 +458,6 @@ class DigitalLifeSupervisor:
         try:
             import host_brain.persona.inner_world as inner_world  # noqa: PLC0415
             import host_brain.persona.self_model as self_model  # noqa: PLC0415
-            import host_brain.scheduler.scheduler_routes as scheduler_routes  # noqa: PLC0415
             import host_brain.tribe.default_mode_agent as default_mode_agent  # noqa: PLC0415
             import host_brain.tribe.limbic_agent as limbic_agent  # noqa: PLC0415
             from host_brain.persona.inner_world import OfflineInnerWorld  # noqa: PLC0415
@@ -461,8 +470,6 @@ class DigitalLifeSupervisor:
             self._old_self_dir = str(getattr(self_model, "_DEFAULT_PERSISTENT_SELF_DIR", ""))
             self._old_default_agent = getattr(default_mode_agent, "_DEFAULT_MODE_AGENT", None)
             self._old_limbic_agent = getattr(limbic_agent, "_LIMBIC_AGENT", None)
-            self._old_scheduler_registry = getattr(scheduler_routes, "_registry", None)
-            self._old_scheduler_health = getattr(scheduler_routes, "_health_reporter", None)
 
             if self.out_dir is not None:
                 inner_dir = str(self.out_dir / "inner_world_state")
@@ -485,7 +492,6 @@ class DigitalLifeSupervisor:
         try:
             import host_brain.persona.inner_world as inner_world  # noqa: PLC0415
             import host_brain.persona.self_model as self_model  # noqa: PLC0415
-            import host_brain.scheduler.scheduler_routes as scheduler_routes  # noqa: PLC0415
             import host_brain.tribe.default_mode_agent as default_mode_agent  # noqa: PLC0415
             import host_brain.tribe.limbic_agent as limbic_agent  # noqa: PLC0415
 
@@ -496,110 +502,8 @@ class DigitalLifeSupervisor:
             limbic_agent.set_limbic_agent(self._old_limbic_agent)
             self_model._DEFAULT_PERSISTENT_SELF_DIR = self._old_self_dir or self_model._DEFAULT_PERSISTENT_SELF_DIR
             self_model._PERSISTENT_SELF_CACHE.clear()
-            scheduler_routes._registry = self._old_scheduler_registry
-            scheduler_routes._health_reporter = self._old_scheduler_health
         except Exception as exc:  # pragma: no cover - defensive restore
             self.logger.debug("persona state restore degraded: %s", exc)
-
-    def _prepare_scheduler(self) -> None:
-        from host_brain.app.http_hooks import _build_core_organ_tick_task_configs  # noqa: PLC0415
-        from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-        from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
-        from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-        from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-            SchedulerTaskConfig,
-            SchedulerTaskRegistry,
-            TaskPriority,
-            TriggerMode,
-        )
-
-        self.registry = SchedulerTaskRegistry()
-        self.health_reporter = SchedulerHealthReporter(registry=self.registry)
-        set_scheduler_providers(registry=self.registry, health_reporter=self.health_reporter)
-        for config in _build_core_organ_tick_task_configs():
-            if self.registry.get(config.task_id) is None:
-                self.registry.register(config)
-        if self.registry.get(PROACTIVE_TALK_TASK_ID) is None:
-            self.registry.register(
-                SchedulerTaskConfig(
-                    task_id=PROACTIVE_TALK_TASK_ID,
-                    trigger_mode=TriggerMode.INTERVAL,
-                    trigger_config={
-                        "seconds": int(os.environ.get("HOST_PROACTIVE_TALK_INTERVAL_SECONDS") or 180)
-                    },
-                    intent_template={
-                        "skill_name": "proactive_talk",
-                        "args": {
-                            "idle_threshold_ms": int(
-                                os.environ.get("HOST_PROACTIVE_TALK_IDLE_THRESHOLD_MS") or 2_700_000
-                            )
-                        },
-                        "proposer_node_id": "scheduler",
-                    },
-                    priority=TaskPriority.LOW,
-                    mode_allowlist=["normal", "sleep"],
-                    enabled=True,
-                    description="主动外呼：空闲阈值满足后写入安全 outbox，等待通讯网关接管。",
-                )
-            )
-        self.scheduler = NatsumeScheduler(
-            registry=self.registry,
-            health_reporter=self.health_reporter,
-            intent_dispatcher=self._dispatch_scheduler_intent,
-            get_emotion_state=self._scheduler_emotion_state,
-            get_immune_gate_state=lambda: {},
-            persist_tasks=False,
-        )
-
-    def _dispatch_scheduler_intent(self, system_intent: dict[str, Any]) -> dict[str, Any]:
-        from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch  # noqa: PLC0415
-
-        intent = dict(system_intent or {})
-        skill_name = str(intent.get("skill_name") or "").strip()
-        if skill_name != "proactive_talk":
-            return run_proactive_intent_dispatch(
-                intent,
-                logger=self.logger,
-                get_ledger=lambda: None,
-                retention_policy=None,
-                ui_pusher=self._queue_proactive_outbox,
-            )
-
-        episode = self._build_emotional_proactive_episode(intent)
-        episode_record = self._write_proactive_episode_record(episode, scheduler_intent=intent)
-        if not bool(episode.get("send_allowed")):
-            result = {
-                "status": "SKIPPED",
-                "reason_code": "EMOTIONAL_PROACTIVE_HELD",
-                "detail": str(episode.get("felt_reason") or ""),
-                "skill_name": skill_name,
-                "proactive_episode": episode_record,
-            }
-            self._record_event("proactive_episode_held", result)
-            return result
-
-        from host_brain.persona.emotional_proactive import (  # noqa: PLC0415
-            episode_to_motive_state,
-            episode_to_render_policy,
-        )
-
-        motive_state = episode_to_motive_state(episode)
-        render_policy = episode_to_render_policy(episode)
-        result = run_proactive_intent_dispatch(
-            intent,
-            logger=self.logger,
-            get_ledger=lambda: None,
-            retention_policy=None,
-            ui_pusher=self._queue_proactive_outbox,
-            llm_generator_override=self._proactive_template_fallback_generator,
-            last_interaction_ts_override=self._last_interaction_or_outbound_ts(),
-            motive_state_override=motive_state,
-            render_policy_override=render_policy,
-        )
-        if isinstance(result, Mapping):
-            result = dict(result)
-            result["proactive_episode"] = episode_record
-        return result
 
     def _last_interaction_or_outbound_ts(self) -> int | None:
         latest = max(int(self._last_foreground_ts_ms or 0), int(self._last_proactive_outbox_ts_ms or 0))
@@ -1077,20 +981,14 @@ class DigitalLifeSupervisor:
             self.logger.debug("inner world session end marker degraded: %s", exc)
 
     def _scheduler_snapshot(self) -> dict[str, Any]:
-        try:
-            from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
-
-            return dict(get_scheduler_health_snapshot_safe() or {})
-        except Exception as exc:
-            return {
-                "scheduler_status": "UNAVAILABLE",
-                "total_tasks": 0,
-                "enabled_tasks": 0,
-                "suspended_tasks": 0,
-                "error_tasks": 0,
-                "tasks": [],
-                "error": str(exc)[:160],
-            }
+        return {
+            "scheduler_status": "EXTERNAL_GOVERNED_RUNTIME",
+            "total_tasks": 0,
+            "enabled_tasks": 0,
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": [],
+        }
 
     def _inner_world_state(self) -> dict[str, Any]:
         try:

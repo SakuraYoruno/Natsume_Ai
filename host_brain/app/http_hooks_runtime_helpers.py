@@ -215,21 +215,16 @@ def _build_background_runtime_snapshot(
     if scheduler_snapshot_override is not None:
         scheduler_snapshot = dict(scheduler_snapshot_override or {})
     else:
-        try:
-            from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
-
-            scheduler_snapshot = dict(get_scheduler_health_snapshot_safe() or {})
-        except Exception as exc:
-            scheduler_error = str(exc)[:160]
-            scheduler_snapshot = {
-                "scheduler_status": "UNAVAILABLE",
-                "total_tasks": 0,
-                "enabled_tasks": 0,
-                "suspended_tasks": 0,
-                "error_tasks": 0,
-                "tasks": [],
-                "ts_ms": now_ms,
-            }
+        scheduler_error = "SCHEDULER_SERVICE_SNAPSHOT_REQUIRED"
+        scheduler_snapshot = {
+            "scheduler_status": "UNAVAILABLE",
+            "total_tasks": 0,
+            "enabled_tasks": 0,
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": [],
+            "ts_ms": now_ms,
+        }
 
     scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
     scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}

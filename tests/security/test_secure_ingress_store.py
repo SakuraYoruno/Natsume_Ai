@@ -289,6 +289,32 @@ def test_claim_is_restart_safe_for_duplicate_conflict_and_replay(tmp_path: Path)
         restarted.close()
 
 
+def test_committed_claim_remains_canonical_after_authentication_ttl(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    store = SQLiteSecureIngressStore(db_path)
+    try:
+        first = _claim(store, expires_at_ms=NOW + 10)
+        audit_ref = store.commit_with_audit(
+            claim_ref=first.claim_ref or "",
+            event=replace(_audit_event(), claim_ref=first.claim_ref),
+        )
+
+        duplicate = _claim(
+            store,
+            nonce="nonce.test.after-expiry",
+            request_id="request.test.after-expiry",
+            at_ms=NOW + 11,
+            expires_at_ms=NOW + 60_000,
+        )
+
+        assert duplicate.status is ClaimStatus.DUPLICATE_SAME
+        assert duplicate.claim_ref == first.claim_ref
+        assert duplicate.canonical_request_id == "request.test.1"
+        assert duplicate.canonical_audit_ref == audit_ref
+    finally:
+        store.close()
+
+
 def test_concurrent_claim_has_exactly_one_winner(tmp_path: Path) -> None:
     db_path = _migrated_db(tmp_path)
 

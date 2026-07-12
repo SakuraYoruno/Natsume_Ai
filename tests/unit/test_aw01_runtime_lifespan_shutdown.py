@@ -37,8 +37,7 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
 async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.app import internal_agent_routes, internal_tribe_routes
-    from host_brain.app.automation import task_scheduler
+    from host_brain.app import internal_tribe_routes
     from host_brain.observability import service_health_heartbeat
     from host_brain.runtime import life_continuity
     from host_brain.tribe import cortex_agent, tribe_state
@@ -69,19 +68,11 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         def stop_periodic_save(self) -> None:
             events.append("tribe-state")
 
-    class Scheduler:
-        async def stop(self) -> None:
-            events.append("task-scheduler")
-
     async def stop_heartbeat() -> None:
         events.append("heartbeat")
 
     async def stop_life_continuity() -> None:
         events.append("life-continuity")
-
-    def stop_immune_monitor(*, logger) -> None:
-        assert logger is test_logger
-        events.append("immune-monitor")
 
     test_logger = logging.getLogger("test.aw01.runtime-shutdown")
     monkeypatch.setattr(cortex_agent, "get_cortex_agent", Cortex)
@@ -92,16 +83,10 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
     )
     monkeypatch.setattr(internal_tribe_routes, "get_tribe_event_bus", Bus)
     monkeypatch.setattr(tribe_state, "get_global_registry", Registry)
-    monkeypatch.setattr(task_scheduler, "get_scheduler", Scheduler)
     monkeypatch.setattr(
         life_continuity,
         "stop_life_continuity_loop",
         stop_life_continuity,
-    )
-    monkeypatch.setattr(
-        internal_agent_routes,
-        "stop_immune_auto_dispatch_monitor",
-        stop_immune_monitor,
     )
 
     await http_hooks._shutdown_runtime(
@@ -118,7 +103,5 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         "heartbeat",
         "tribe-bus",
         "tribe-state",
-        "task-scheduler",
         "life-continuity",
-        "immune-monitor",
     ]

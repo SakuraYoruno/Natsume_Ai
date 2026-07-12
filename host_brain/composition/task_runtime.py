@@ -26,7 +26,11 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
 )
-from host_brain.persistence import HostCommandRepository
+from host_brain.persistence import (
+    HostCommandRepository,
+    SchedulerDefinitionRepository,
+    SchedulerExecutionResultRepository,
+)
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
@@ -87,6 +91,8 @@ MigrationRunnerBuilder = Callable[..., SQLiteMigrationRunner]
 TaskStoreBuilder = Callable[..., DurableTaskStore]
 CommandRepositoryBuilder = Callable[..., HostCommandRepository]
 AgentResultRepositoryBuilder = Callable[..., AgentExecutionResultRepository]
+SchedulerDefinitionRepositoryBuilder = Callable[..., SchedulerDefinitionRepository]
+SchedulerResultRepositoryBuilder = Callable[..., SchedulerExecutionResultRepository]
 RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 
@@ -96,6 +102,8 @@ _INFRASTRUCTURE_ORDER = (
     "task_store",
     "command_repository",
     "agent_result_repository",
+    "scheduler_definition_repository",
+    "scheduler_result_repository",
     "event_store",
     "outbox_publisher",
 )
@@ -149,6 +157,8 @@ class ProcessTaskRuntimeContainer:
     task_store: DurableTaskStore
     command_repository: HostCommandRepository
     agent_result_repository: AgentExecutionResultRepository
+    scheduler_definition_repository: SchedulerDefinitionRepository
+    scheduler_result_repository: SchedulerExecutionResultRepository
     event_store: RuntimeEventStore
     outbox_publisher: RuntimeOutboxPublisher
     startup_publish_result: Mapping[str, Any]
@@ -581,6 +591,12 @@ def build_process_task_runtime_container(
     agent_result_repository_builder: AgentResultRepositoryBuilder = (
         AgentExecutionResultRepository
     ),
+    scheduler_definition_repository_builder: SchedulerDefinitionRepositoryBuilder = (
+        SchedulerDefinitionRepository
+    ),
+    scheduler_result_repository_builder: SchedulerResultRepositoryBuilder = (
+        SchedulerExecutionResultRepository
+    ),
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
 ) -> ProcessTaskRuntimeContainer:
@@ -624,6 +640,14 @@ def build_process_task_runtime_container(
         constructed.append(("command_repository", command_repository))
         agent_result_repository = agent_result_repository_builder(canonical)
         constructed.append(("agent_result_repository", agent_result_repository))
+        scheduler_definition_repository = scheduler_definition_repository_builder(
+            canonical
+        )
+        constructed.append(
+            ("scheduler_definition_repository", scheduler_definition_repository)
+        )
+        scheduler_result_repository = scheduler_result_repository_builder(canonical)
+        constructed.append(("scheduler_result_repository", scheduler_result_repository))
         event_store = event_store_builder(canonical)
         constructed.append(("event_store", event_store))
         outbox_publisher = outbox_publisher_builder(
@@ -657,6 +681,8 @@ def build_process_task_runtime_container(
         task_store=task_store,
         command_repository=command_repository,
         agent_result_repository=agent_result_repository,
+        scheduler_definition_repository=scheduler_definition_repository,
+        scheduler_result_repository=scheduler_result_repository,
         event_store=event_store,
         outbox_publisher=outbox_publisher,
         startup_publish_result=dict(startup_publish_result),

@@ -402,6 +402,12 @@ class SQLiteSecureIngressStore:
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
+                # A committed claim is durable command authority, not a
+                # short-lived authentication cache.  HostCommand and
+                # Scheduler occurrence replay may need its canonical binding
+                # long after the credential/provisional lease expires.  Only
+                # abandoned, aborted, or provisional claims are collectible;
+                # committed idempotency keys remain single-use.
                 self._conn.execute(
                     "DELETE FROM secure_ingress_rate_event WHERE rate_key_digest = ? AND ts_ms <= ?",
                     (rate_key, cutoff),
@@ -462,7 +468,7 @@ class SQLiteSecureIngressStore:
                     DELETE FROM secure_ingress_nonce_claim
                     WHERE claim_ref IN (
                         SELECT claim_ref FROM secure_ingress_idempotency_claim
-                        WHERE expires_at_ms <= ?
+                        WHERE (claim_status != 'COMMITTED' AND expires_at_ms <= ?)
                            OR (claim_status = 'PROVISIONAL' AND provisional_expires_at_ms <= ?)
                     )
                     """,
@@ -471,7 +477,7 @@ class SQLiteSecureIngressStore:
                 self._conn.execute(
                     """
                     DELETE FROM secure_ingress_idempotency_claim
-                    WHERE expires_at_ms <= ?
+                    WHERE (claim_status != 'COMMITTED' AND expires_at_ms <= ?)
                        OR (claim_status = 'PROVISIONAL' AND provisional_expires_at_ms <= ?)
                     """,
                     (int(at_ms), int(at_ms)),

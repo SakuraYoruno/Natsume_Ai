@@ -185,7 +185,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-02：Governed Host Command、Task 与 Agent 主链
 
-状态：`IN_PROGRESS`；与 AW-03 共用合同冻结后并行，production cutover 不等待文档 Gate
+状态：`DONE`（Host chat/input、Internal Agent 与 Scheduler 已全部切入同一 governed Task Runtime；旧 scheduler/worker/provider authority 已删除）
 
 目标：把 chat、host input、gateway/scheduler work 收敛为 Secure Ingress → Application → Task Runtime → Agent Runtime → governed side effect 的唯一新请求链。
 
@@ -196,6 +196,8 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 删除目标：Executive 二次 planning、并行 scheduler authority、进程内 attempt/review 真相、route 直连 provider/repository、`agent_runtime_shared` 和 `executive_runtime_core` 中已迁移职责。
 
 退出指标：真实请求的 principal、grant、graph revision、attempt、verification、acceptance 和 side-effect receipt 可串联；重启/retry 不重复副作用；失败 verification 不可能 committed。
+
+完成事实：`/v1/chat`、`/v1/host/input`、Internal Agent 与 Scheduler 统一经过 Secure Ingress、Governor、HostCommand、TaskGraph、canonical assignment、verification/acceptance 和不可变 receipt；Scheduler definition revision/occurrence/result 已进入 0065 durable store，Clock 只生产 occurrence，不直接执行 handler，pending recovery、frozen revision、claim-completion crash gap 与有界 shutdown 已覆盖。两套旧 `NatsumeScheduler`/`HostTaskScheduler`、DigitalLife 私有 scheduler、scheduler skill unsigned loopback、notification APScheduler/JSON writer 已删除；未知 worker 在写 definition 前拒绝。合并定向验证 70 passed，附加 route/performance 回归 12 passed。
 
 ### AW-03：Durable Data、Event、Memory 与 Canon 脊柱
 
@@ -425,7 +427,7 @@ AW-08 只有在以下全部成立时才完成：
 |---|---|---|
 | AW-00 | `DONE` | production security composition/routes、Bridge/Service Catalog 单 owner 与认证探针已切流；无 P0/P1 |
 | AW-01 | `DONE` | Host security 显式 container/lifecycle、composition 禁边、Mate 真实 socket-activation 已切流；无 P0/P1 |
-| AW-02 | `IN_PROGRESS` | chat/host input 进入同一 Task/Agent 主链，canonical assignment 决定真实 executor |
+| AW-02 | `DONE` | chat/host input/Internal Agent/Scheduler 共用 governed Task/Agent 主链，canonical assignment 决定真实 executor |
 | AW-03 | `IN_PROGRESS` | 为 AW-02 冻结 UoW/Journal/Outbox 合同，切换首条无 inline DDL/private conn 的真实 slice |
 | AW-04 | `WAITING` | Digital Life 单 clock/writer、Surface 纯读 |
 | AW-05 | `WAITING` | 单 Model/Capability/Governor 路径与首批 Domain Pack |

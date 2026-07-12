@@ -37,7 +37,7 @@ from host_brain.observability.command_http import (
     ObsCommandIngressProvider,
     create_obs_command_http_router,
 )
-from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers as _set_scheduler_providers
+from host_brain.scheduler.scheduler_routes import router as scheduler_router
 from host_brain.skills.signed_intake_http import (
     SignedSkillProviderIntakeProvider,
     create_signed_skill_provider_intake_router,
@@ -62,18 +62,6 @@ def wire_route_providers(
     from host_brain.app.dependencies import get_bond_dynamics_writer  # noqa: PLC0415
 
     _set_bond_writer_provider(get_bond_dynamics_writer)
-    try:
-        from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
-        from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-        scheduler_registry = SchedulerTaskRegistry.get_instance()
-        scheduler_health = SchedulerHealthReporter(registry=scheduler_registry)
-        _set_scheduler_providers(
-            registry=scheduler_registry,
-            health_reporter=scheduler_health,
-        )
-    except Exception as exc:  # pragma: no cover - defensive startup guard
-        logger.warning("scheduler provider wiring degraded: %s", exc)
 
 
 def register_host_routers(
@@ -92,6 +80,7 @@ def register_host_routers(
     internal_agent_ingress_provider: Callable[[], Any | None] | None = None,
     internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
+    scheduler_command_service_provider: Callable[[], Any | None] | None = None,
 ) -> None:
     async def require_internal_agent_authority(request: Request) -> Any:
         ingress = (
@@ -145,23 +134,28 @@ def register_host_routers(
         if not authority.admissible:
             status_code = 503 if "ENFORCE" in authority.reason_code else 403
             raise HTTPException(status_code=status_code, detail=authority.reason_code)
-        if bool(getattr(authority, "duplicate", False)):
-            # Scheduler handlers still target the legacy scheduler.  Until the
-            # scheduler is a TaskRuntime consumer, a verified duplicate must
-            # stop at ingress instead of re-triggering that side effect.
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason_code": "SCHEDULER_COMMAND_REPLAY",
-                    "request_id": getattr(authority, "request_id", None),
-                    "result_ref": getattr(authority, "existing_result_ref", None),
-                },
-            )
         request.state.scheduler_command_authority = authority
         return authority
 
+    async def bind_scheduler_service(request: Request) -> Any:
+        service = (
+            scheduler_command_service_provider()
+            if scheduler_command_service_provider is not None
+            else None
+        )
+        if service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="SCHEDULER_COMMAND_SERVICE_UNAVAILABLE",
+            )
+        request.state.scheduler_command_service = service
+        return service
+
     app.include_router(canon_router)
-    scheduler_dependencies = [Depends(require_scheduler_authority)]
+    scheduler_dependencies = [
+        Depends(require_scheduler_authority),
+        Depends(bind_scheduler_service),
+    ]
     app.include_router(scheduler_router, dependencies=scheduler_dependencies)
     app.include_router(
         host_scheduler_router,

@@ -52,7 +52,6 @@ def run_wall_clock_soak(args: argparse.Namespace) -> dict[str, Any]:
                 persona_self_id=str(getattr(args, "persona_self_id", "") or ""),
                 session_id=str(getattr(args, "session_id", "") or "digital-life-wall-clock-soak"),
                 out_dir=out_dir / "state",
-                start_scheduler_threads=bool(getattr(args, "start_scheduler", False)),
             )
         ) as supervisor:
             final_snapshot = supervisor.snapshot()
@@ -410,7 +409,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reply", default="")
     parser.add_argument("--task-mode", default="daily_chat")
     parser.add_argument("--response-move", default="reply_current_turn")
-    parser.add_argument("--start-scheduler", action="store_true")
     return parser
 
 

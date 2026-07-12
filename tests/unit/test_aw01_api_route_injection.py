@@ -99,7 +99,7 @@ def test_app_factory_forwards_explicit_secure_route_providers(
     assert calls == {"obs": 1, "pentest": 1, "signed_intake": 1}
 
 
-def test_scheduler_duplicate_stops_before_legacy_handler() -> None:
+def test_scheduler_duplicate_reaches_single_governed_service() -> None:
     class _DuplicateIngress:
         def evaluate_http(self, **_kwargs):
             return SimpleNamespace(
@@ -110,21 +110,22 @@ def test_scheduler_duplicate_stops_before_legacy_handler() -> None:
                 existing_result_ref="scheduler-result://original",
             )
 
+    class _Service:
+        def health(self):
+            return {"status": "OK", "runtime": {"active": True}}
+
     app = FastAPI()
     router_registry.register_host_routers(
         app,
         scheduler_command_ingress_provider=lambda: _DuplicateIngress(),
+        scheduler_command_service_provider=lambda: _Service(),
     )
 
     with TestClient(app) as client:
         for path in ("/scheduler/health", "/host-scheduler/health"):
             response = client.get(path)
-            assert response.status_code == 409
-            assert response.json()["detail"] == {
-                "reason_code": "SCHEDULER_COMMAND_REPLAY",
-                "request_id": "request.scheduler.original",
-                "result_ref": "scheduler-result://original",
-            }
+            assert response.status_code == 200
+            assert response.json()["runtime"]["active"] is True
 
 
 def test_router_registry_has_no_platform_runtime_or_app_state_reverse_lookup() -> None:

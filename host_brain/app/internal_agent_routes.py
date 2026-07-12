@@ -646,35 +646,6 @@ async def get_immune_auto_state() -> dict[str, Any]:
         return dict(_immune_auto_state)
 
 
-async def run_scheduled_immune_auto_dispatch_cycle() -> dict[str, Any]:
-    result = {
-        "accepted": False,
-        "executed": False,
-        "reason_code": "IMMUNE_SCHEDULER_GOVERNED_AUTHORITY_REQUIRED",
-    }
-    with _immune_auto_state_lock:
-        _immune_auto_state["last_cycle_at_ms"] = now_ms()
-        _immune_auto_state["last_result_status"] = "DISPATCHED" if result.get("accepted") else "SKIPPED"
-    return result
-
-
-def start_immune_auto_dispatch_monitor(*, logger: Any | None = None) -> dict[str, Any]:
-    state = {"enabled": False, "running": False, "scheduler_managed": True}
-    if logger is not None:
-        logger.info("Codex immune monitor is scheduler-managed in runtime v2.")
-    return state
-
-
-def stop_immune_auto_dispatch_monitor(*, logger: Any | None = None) -> dict[str, Any]:
-    state = {"enabled": False, "running": False}
-    if logger is not None:
-        logger.info("Codex immune monitor stop requested; no standalone monitor is active.")
-    return state
-
-
 __all__ = [
     "router",
-    "run_scheduled_immune_auto_dispatch_cycle",
-    "start_immune_auto_dispatch_monitor",
-    "stop_immune_auto_dispatch_monitor",
 ]

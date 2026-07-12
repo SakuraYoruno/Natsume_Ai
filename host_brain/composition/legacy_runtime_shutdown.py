@@ -15,9 +15,7 @@ class LegacyRuntimeShutdownDependencies:
     stop_heartbeat: Callable[[], Awaitable[None]]
     get_tribe_event_bus: Callable[[], Any | None]
     stop_tribe_periodic_save: Callable[[], None]
-    stop_task_scheduler: Callable[[], Awaitable[None]]
     stop_life_continuity: Callable[[], Awaitable[None]]
-    stop_immune_monitor: Callable[[Any], None]
 
 
 async def shutdown_legacy_runtime(
@@ -66,22 +64,11 @@ async def shutdown_legacy_runtime(
             periodic_stop_exc,
         )
     try:
-        await dependencies.stop_task_scheduler()
-    except Exception as task_scheduler_stop_exc:
-        logger.debug("HostTaskScheduler stop degraded: %s", task_scheduler_stop_exc)
-    try:
         if life_continuity_started:
             await dependencies.stop_life_continuity()
             logger.info("LifeContinuity loop stopped")
     except Exception as life_loop_stop_exc:
         logger.debug("LifeContinuity loop stop degraded: %s", life_loop_stop_exc)
-    try:
-        dependencies.stop_immune_monitor(logger)
-    except Exception as codex_monitor_stop_exc:
-        logger.debug(
-            "Codex immune auto-dispatch monitor stop degraded: %s",
-            codex_monitor_stop_exc,
-        )
     logger.info("Natsume AI Host Brain shutting down ...")
 
 

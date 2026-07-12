@@ -3,23 +3,20 @@
 将 notification_registry.py 的归一化 payload 转化为真正的执行：
   - notify_desktop：调用系统原生通知（plyer / win10toast / notify-send）
   - notify_tts_speak：通过 edge_rpc_client.post_speak() 驱动 Edge TTS
-  - notify_schedule_reminder：写入系统 Scheduler（APScheduler / 文件队列）
+  - notify_schedule_reminder：生成 secret-free Governed Scheduler proposal
 
 降级策略：
   - plyer 不可用时，Windows 降级为 PowerShell toast，Linux 降级为 notify-send
   - Edge TTS 不可达时，返回 DEGRADED 状态（不抛异常）
-  - Scheduler 不可用时，写入本地 JSON 队列文件
+  - 提醒必须由 Secure Ingress + Governed Scheduler application 提交
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 from host_brain.core.ids import new_event_id, now_ms
@@ -33,9 +30,7 @@ STATUS_DEGRADED = "DEGRADED"
 NOTIFY_EXEC_ERROR = "NOTIFY_EXEC_ERROR"
 NOTIFY_TTS_FAILED = "NOTIFY_TTS_FAILED"
 NOTIFY_SCHEDULER_FAILED = "NOTIFY_SCHEDULER_FAILED"
-
-# 本地提醒队列文件（Scheduler 不可用时的降级存储）
-_REMINDER_QUEUE_FILE = Path(os.environ.get("NATSUME_REMINDER_QUEUE", "data/reminder_queue.json"))
+NOTIFY_GOVERNED_SCHEDULER_REQUIRED = "NOTIFY_GOVERNED_SCHEDULER_REQUIRED"
 
 
 def _reject(
@@ -238,7 +233,7 @@ def execute_notify_tts_speak(payload: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def execute_notify_schedule_reminder(payload: dict[str, Any]) -> dict[str, Any]:
-    """设置定时提醒（写入 APScheduler 或本地 JSON 队列）。"""
+    """Return a proposal; this skill layer has no scheduling authority."""
     ts = now_ms()
     event_id = new_event_id()
     title = payload.get("title") or ""
@@ -254,108 +249,41 @@ def execute_notify_schedule_reminder(payload: dict[str, Any]) -> dict[str, Any]:
         return _reject(event_id=event_id, reason_code="NOTIFY_REMINDER_MISSING_FIELDS",
                        detail="title and trigger_at are required", ts_ms=ts, request_id=request_id)
 
-    reminder_entry = {
-        "reminder_id": reminder_id,
-        "event_id": event_id,
-        "title": title,
-        "body": body,
-        "trigger_at": trigger_at,
-        "repeat": repeat,
-        "notify_type": notify_type,
-        "priority": priority,
-        "created_ts_ms": ts,
-        "request_id": request_id,
+    target_id = {
+        "desktop": "notify_desktop",
+        "tts": "notify_tts_speak",
+        "both": "notify_schedule_reminder",
+    }.get(str(notify_type), "notify_schedule_reminder")
+    proposal = {
+        "schema_version": "natsume.scheduler.proposal.v1",
+        "task_id": f"reminder::{reminder_id}",
+        "trigger_mode": "once" if repeat == "once" else "calendar",
+        "trigger_config": {"trigger_at": trigger_at, "repeat": repeat},
+        "intent_template": {
+            "route": "skill",
+            "target_id": target_id,
+            "args": {
+                "title": title,
+                "body": body,
+                "notify_type": notify_type,
+            },
+        },
+        "priority": str(priority).upper(),
+        "worker_key": "scheduler_production",
     }
-
-    # 优先尝试 APScheduler
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-not-found]
-        from apscheduler.triggers.date import DateTrigger  # type: ignore[import-not-found]
-        import dateutil.parser  # type: ignore[import-not-found]
-
-        scheduler = _get_or_create_scheduler()
-        trigger_dt = dateutil.parser.parse(trigger_at)
-
-        def _fire_reminder() -> None:
-            _dispatch_reminder(reminder_entry)
-
-        scheduler.add_job(
-            _fire_reminder,
-            trigger=DateTrigger(run_date=trigger_dt),
-            id=reminder_id,
-            replace_existing=True,
-        )
-        logger.info("Reminder scheduled via APScheduler: %s at %s", reminder_id, trigger_at)
-
-    except ImportError:
-        # APScheduler 不可用，写入本地 JSON 队列
-        _write_reminder_to_queue(reminder_entry)
-        logger.info("Reminder queued to file (APScheduler unavailable): %s", reminder_id)
-    except Exception as exc:
-        logger.warning("Scheduler failed, falling back to file queue: %s", exc)
-        _write_reminder_to_queue(reminder_entry)
-
     return {
-        "status": STATUS_EXECUTED,
+        "status": STATUS_REJECTED,
         "event_id": event_id,
         "manifest_ref": payload.get("manifest_ref"),
         "reminder_id": reminder_id,
         "trigger_at": trigger_at,
         "repeat": repeat,
+        "reason_code": NOTIFY_GOVERNED_SCHEDULER_REQUIRED,
+        "detail": "submit proposal through Secure Ingress and Governed Scheduler",
+        "scheduler_proposal": proposal,
         "request_id": request_id,
         "ts_ms": ts,
     }
-
-
-_scheduler_instance = None
-
-
-def _get_or_create_scheduler():
-    """获取或创建全局 APScheduler 实例。"""
-    global _scheduler_instance
-    if _scheduler_instance is None:
-        from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-not-found]
-        _scheduler_instance = BackgroundScheduler()
-        _scheduler_instance.start()
-    return _scheduler_instance
-
-
-def _write_reminder_to_queue(entry: dict[str, Any]) -> None:
-    """将提醒写入本地 JSON 队列文件（降级存储）。"""
-    _REMINDER_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    queue: list[dict[str, Any]] = []
-    if _REMINDER_QUEUE_FILE.exists():
-        try:
-            queue = json.loads(_REMINDER_QUEUE_FILE.read_text(encoding="utf-8-sig"))
-        except Exception:
-            queue = []
-    queue.append(entry)
-    _REMINDER_QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _dispatch_reminder(entry: dict[str, Any]) -> None:
-    """触发提醒（到时执行）。"""
-    notify_type = entry.get("notify_type") or "both"
-    title = entry.get("title") or "提醒"
-    body = entry.get("body") or ""
-
-    if notify_type in ("desktop", "both"):
-        execute_notify_desktop({
-            "title": title,
-            "body": body,
-            "duration_ms": 8000,
-            "manifest_ref": None,
-        })
-
-    if notify_type in ("tts", "both"):
-        text = f"{title}。{body}" if body else title
-        execute_notify_tts_speak({
-            "text": text,
-            "emotion_tag": "NEUTRAL",
-            "rate": 1.0,
-            "pitch": 1.0,
-            "manifest_ref": None,
-        })
 
 
 # 统一分发入口

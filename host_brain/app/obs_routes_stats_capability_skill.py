@@ -309,18 +309,11 @@ def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
         start_ms=since_ms,
         end_ms=now,
     )
+    # Live scheduler state is exposed only by the injected SchedulerCommandService.
+    # This observability route has no command-service authority, so it derives a
+    # read-only history projection from durable audit rows instead of consulting
+    # either retired process-global scheduler.
     scheduler_tasks: list[dict] = []
-    try:
-        from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe
-        scheduler_tasks = list((dict(get_scheduler_health_snapshot_safe() or {})).get("tasks") or [])
-    except Exception:
-        pass
-    if not scheduler_tasks:
-        try:
-            from host_brain.app.automation.task_scheduler import get_scheduler
-            scheduler_tasks = (get_scheduler().health()).get("tasks") or []
-        except Exception:
-            pass
     if not scheduler_tasks:
         task_agg: dict = defaultdict(lambda: {"task_id": "", "name": None, "status": "UNKNOWN", "run_count": 0, "error_count": 0, "last_run_ts": None, "last_error": None})
         for r in rows:

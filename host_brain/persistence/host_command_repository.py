@@ -656,18 +656,34 @@ class HostCommandRepository:
             )
         expected_result = str(normalized["command_id"])
         actual_result = str(row["result_ref"] or "").strip()
-        internal_result_matches = True
-        if str(normalized["surface"]) == "internal" and actual_result:
-            internal_result = conn.execute(
-                """
-                SELECT 1
-                FROM agent_execution_result
-                WHERE receipt_ref = ? AND command_id = ?
-                LIMIT 1
-                """,
-                (actual_result, expected_result),
-            ).fetchone()
-            internal_result_matches = internal_result is not None
+        surface = str(normalized["surface"])
+        terminal_result_matches = True
+        if surface == "internal" and actual_result:
+            terminal_result_matches = (
+                conn.execute(
+                    """
+                    SELECT 1
+                    FROM agent_execution_result
+                    WHERE receipt_ref = ? AND command_id = ?
+                    LIMIT 1
+                    """,
+                    (actual_result, expected_result),
+                ).fetchone()
+                is not None
+            )
+        elif surface == "scheduler" and actual_result:
+            terminal_result_matches = (
+                conn.execute(
+                    """
+                    SELECT 1
+                    FROM scheduler_execution_result
+                    WHERE receipt_ref = ? AND command_id = ?
+                    LIMIT 1
+                    """,
+                    (actual_result, expected_result),
+                ).fetchone()
+                is not None
+            )
         claim_body_sha256 = _normalize_external_sha256(
             row["body_sha256"],
             field_name="secure_ingress_idempotency_claim.body_sha256",
@@ -682,11 +698,11 @@ class HostCommandRepository:
             or str(row["request_id"]) != str(normalized["request_id"])
             or claim_body_sha256 != str(normalized["input_sha256"])
             or (
-                str(normalized["surface"]) == "internal"
-                and not internal_result_matches
+                surface in {"internal", "scheduler"}
+                and not terminal_result_matches
             )
             or (
-                str(normalized["surface"]) != "internal"
+                surface not in {"internal", "scheduler"}
                 and actual_result not in {"", expected_result}
             )
         )
@@ -714,10 +730,10 @@ class HostCommandRepository:
         if not claim_ref:
             return
         self._validate_ingress_claim(conn, normalized)
-        if str(normalized["surface"]) == "internal":
-            # Internal-Agent admission is not a terminal result.  Its secure
-            # ingress claim is completed by InternalAgentCommandService only
-            # after the immutable agent execution receipt exists.
+        if str(normalized["surface"]) in {"internal", "scheduler"}:
+            # Command admission is not a terminal result for governed worker
+            # surfaces.  Their application services complete the Secure
+            # Ingress claim only after an immutable worker receipt exists.
             return
         result_ref = str(normalized["command_id"])
         current = conn.execute(

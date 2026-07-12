@@ -10,6 +10,33 @@ from fastapi import FastAPI
 from host_brain.app import asgi
 
 
+def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) -> None:
+    monkeypatch.setattr(
+        asgi,
+        "get_input_settings",
+        lambda: SimpleNamespace(
+            secure_ingress_hmac_secrets_json='{"external.key":"external-secret"}',
+            edge_gateway_hmac_key_id="",
+            edge_gateway_hmac_secret="",
+        ),
+    )
+    monkeypatch.setattr(
+        asgi,
+        "get_scheduler_settings",
+        lambda: SimpleNamespace(
+            clock_key_id="scheduler.clock.key",
+            clock_hmac_secret=SimpleNamespace(
+                get_secret_value=lambda: "scheduler-clock-secret"
+            ),
+        ),
+    )
+
+    assert asgi._command_ingress_hmac_secrets() == {
+        "external.key": "external-secret",
+        "scheduler.clock.key": "scheduler-clock-secret",
+    }
+
+
 def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch,
 ) -> None:
@@ -43,9 +70,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     governed_runtime = object()
     internal_runtime = object()
+    scheduler_runtime = object()
     runtime_group = object()
     internal_ingress = object()
     scheduler_ingress = object()
+    scheduler_service = object()
     internal_service = object()
     command_evaluator = object()
     command_store = object()
@@ -64,6 +93,19 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("memory-closed")
 
     memory_container = MemoryContainer()
+
+    class SchedulerContainer:
+        runtime = scheduler_runtime
+        command_ingress = scheduler_ingress
+        command_service = scheduler_service
+
+        async def activate_clock(self) -> None:
+            events.append("scheduler-clock-activated")
+
+        async def stop_clock(self) -> None:
+            events.append("scheduler-clock-stopped")
+
+    scheduler_container = SchedulerContainer()
 
     class TaskRuntimeContainer:
         bound_runtime = None
@@ -144,8 +186,17 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert runtimes == {
             "host": governed_runtime,
             "internal_agent": internal_runtime,
+            "scheduler": scheduler_runtime,
         }
         return runtime_group
+
+    def fake_build_scheduler(**kwargs):
+        assert kwargs["task_runtime_container"] is task_runtime_container
+        assert kwargs["ledger"] is ledger
+        assert kwargs["evaluator"] is command_evaluator
+        assert kwargs["claim_result_store"] is command_store
+        events.append("scheduler-runtime-built")
+        return scheduler_container
 
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
@@ -179,6 +230,19 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     monkeypatch.setattr(
         asgi,
+        "get_scheduler_settings",
+        lambda: SimpleNamespace(
+            clock_key_id="",
+            clock_hmac_secret=SimpleNamespace(get_secret_value=lambda: ""),
+            clock_enabled=False,
+            background_tasks_enabled=True,
+            clock_poll_interval_seconds=1.0,
+            clock_batch_limit=64,
+        ),
+    )
+    monkeypatch.setattr(asgi, "_scheduler_seed_configs", lambda: [])
+    monkeypatch.setattr(
+        asgi,
         "build_process_security_service_container",
         fake_build_container,
     )
@@ -206,15 +270,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "GovernedRuntimeGroup", fake_runtime_group)
     monkeypatch.setattr(
         asgi,
-        "InternalAgentIngress",
-        lambda *, evaluator: internal_ingress
-        if evaluator is command_evaluator
-        else pytest.fail("wrong evaluator"),
+        "build_process_scheduler_container",
+        fake_build_scheduler,
     )
     monkeypatch.setattr(
         asgi,
-        "SchedulerCommandIngress",
-        lambda *, evaluator: scheduler_ingress
+        "InternalAgentIngress",
+        lambda *, evaluator: internal_ingress
         if evaluator is command_evaluator
         else pytest.fail("wrong evaluator"),
     )
@@ -244,6 +306,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             )
             assert application.state.governed_host_runtime is governed_runtime
             assert application.state.governed_internal_runtime is internal_runtime
+            assert application.state.governed_scheduler_runtime is scheduler_runtime
             assert application.state.memory_service_container is memory_container
             assert (
                 captured["governed_command_application_provider"]()
@@ -264,12 +327,14 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 is internal_service
             )
             assert captured["scheduler_command_ingress_provider"]() is scheduler_ingress
+            assert captured["scheduler_command_service_provider"]() is scheduler_service
             events.append("serving")
         assert application.state.security_service_container is None
         assert application.state.task_runtime_container is None
         assert application.state.task_runtime_container_provider() is None
         assert application.state.governed_host_runtime is None
         assert application.state.governed_internal_runtime is None
+        assert application.state.governed_scheduler_runtime is None
         assert captured["governed_command_application_provider"]() is None
 
     asyncio.run(scenario())
@@ -283,9 +348,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "memory-published",
         "governed-runtime-built",
         "internal-runtime-built",
+        "scheduler-runtime-built",
         "governed-runtime-bound",
         "governed-runtime-activated",
+        "scheduler-clock-activated",
         "serving",
+        "scheduler-clock-stopped",
         "task-runtime-closed",
         "memory-unpublished",
         "memory-closed",

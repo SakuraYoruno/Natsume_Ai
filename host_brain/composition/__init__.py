@@ -37,6 +37,11 @@ from host_brain.composition.command_ingress import (
     build_process_command_ingress_container,
 )
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
+from host_brain.composition.scheduler import (
+    ProcessSchedulerContainer,
+    SchedulerClockIdentityConfig,
+    build_process_scheduler_container,
+)
 
 __all__ = [
     "ActivationResult",
@@ -46,6 +51,8 @@ __all__ = [
     "ProcessMemoryContainer",
     "ProcessCommandIngressContainer",
     "GovernedRuntimeGroup",
+    "ProcessSchedulerContainer",
+    "SchedulerClockIdentityConfig",
     "SecurityServiceCloseFailure",
     "SecurityServiceContainerCloseError",
     "SecurityServiceName",
@@ -60,5 +67,6 @@ __all__ = [
     "build_process_task_runtime_container",
     "build_process_memory_container",
     "build_process_command_ingress_container",
+    "build_process_scheduler_container",
     "prepare_service_start",
 ]

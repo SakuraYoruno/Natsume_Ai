@@ -9,7 +9,6 @@ from host_brain.app.internal_agent_routes import (
     execute_work_order,
     get_codex_job,
     get_runtime_drain_report,
-    run_scheduled_immune_auto_dispatch_cycle,
 )
 from host_brain.app.internal_task_runtime import InternalAgentCommandService
 
@@ -149,13 +148,10 @@ async def test_execute_route_uses_governed_service_and_ignores_background_escape
 
 
 @pytest.mark.asyncio
-async def test_legacy_job_authority_is_retired_and_scheduler_cannot_fabricate_it() -> None:
+async def test_legacy_job_authority_is_retired() -> None:
     with pytest.raises(Exception) as retired:
         await get_codex_job("legacy-job")
     assert getattr(retired.value, "status_code", None) == 410
 
     drain = await get_runtime_drain_report()
     assert drain["drain"]["legacy_registry_retired"] is True
-    scheduled = await run_scheduled_immune_auto_dispatch_cycle()
-    assert scheduled["accepted"] is False
-    assert scheduled["reason_code"] == "IMMUNE_SCHEDULER_GOVERNED_AUTHORITY_REQUIRED"

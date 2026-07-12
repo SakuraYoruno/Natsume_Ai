@@ -32,7 +32,6 @@ def run_host_runtime(args: argparse.Namespace) -> dict[str, Any]:
             persona_self_id=str(getattr(args, "persona_self_id", "") or ""),
             session_id=str(getattr(args, "session_id", "") or "digital-life-host-runtime"),
             out_dir=out_dir / "state",
-            start_scheduler_threads=bool(getattr(args, "start_scheduler", False)),
         )
     ) as supervisor:
         snapshots.append(supervisor.snapshot())
@@ -84,8 +83,11 @@ def _summary(
     proactive_aftereffect = dict(final_snapshot.get("proactive_emotional_aftereffect") or {})
     proactive_outbox = dict(final_snapshot.get("proactive_outbox") or {})
     proactive_interaction = dict(final_snapshot.get("proactive_interaction") or {})
+    scheduler_status = str(scheduler.get("scheduler_status") or "")
+    scheduler_external = scheduler_status == "EXTERNAL_GOVERNED_RUNTIME"
+    runtime_ready = bool(background.get("core_ticks_registered")) or scheduler_external
     return {
-        "status": "PASS" if bool(final_snapshot.get("alive")) and bool(background.get("core_ticks_registered")) else "FAIL",
+        "status": "PASS" if bool(final_snapshot.get("alive")) and runtime_ready else "FAIL",
         "evaluation_mode": "digital_life_host_runtime_supervisor_no_text_quality_scoring",
         "mode": str(final_snapshot.get("mode") or ""),
         "run_id": str(final_snapshot.get("run_id") or ""),
@@ -96,7 +98,7 @@ def _summary(
         "registered_organ_count": int(organ_runtime.get("registered_organ_count") or 0),
         "surface_expected_organ_count": int(organ_runtime.get("surface_expected_organ_count") or 0),
         "last_mapped_organ_count": int(organ_runtime.get("last_mapped_organ_count") or 0),
-        "scheduler_status": str(scheduler.get("scheduler_status") or ""),
+        "scheduler_status": scheduler_status,
         "core_ticks_registered": bool(background.get("core_ticks_registered")),
         "tick_health": str(background.get("tick_health") or ""),
         "is_advancing": bool(background.get("is_advancing")),
@@ -192,7 +194,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--response-move", default="reply_current_turn")
     parser.add_argument("--ticks", type=int, default=1)
     parser.add_argument("--tick-interval-seconds", type=float, default=0.0)
-    parser.add_argument("--start-scheduler", action="store_true")
     return parser
 
 

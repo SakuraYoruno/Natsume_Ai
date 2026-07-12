@@ -37,13 +37,6 @@ def _dependencies() -> LegacyRuntimeShutdownDependencies:
 
         get_global_registry().stop_periodic_save()
 
-    async def stop_task_scheduler() -> None:
-        from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
-            get_scheduler,
-        )
-
-        await get_scheduler().stop()
-
     async def stop_life_continuity() -> None:
         from host_brain.runtime.life_continuity import (  # noqa: PLC0415
             stop_life_continuity_loop,
@@ -51,21 +44,12 @@ def _dependencies() -> LegacyRuntimeShutdownDependencies:
 
         await stop_life_continuity_loop()
 
-    def stop_immune_monitor(logger: Any) -> None:
-        from host_brain.app.internal_agent_routes import (  # noqa: PLC0415
-            stop_immune_auto_dispatch_monitor,
-        )
-
-        stop_immune_auto_dispatch_monitor(logger=logger)
-
     return LegacyRuntimeShutdownDependencies(
         stop_bond_queue=stop_bond_queue,
         stop_heartbeat=stop_heartbeat,
         get_tribe_event_bus=get_tribe_event_bus,
         stop_tribe_periodic_save=stop_tribe_periodic_save,
-        stop_task_scheduler=stop_task_scheduler,
         stop_life_continuity=stop_life_continuity,
-        stop_immune_monitor=stop_immune_monitor,
     )
 
 
