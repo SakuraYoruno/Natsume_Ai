@@ -87,6 +87,7 @@ def test_run_all_includes_nle_boundary_failures(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(run_all, "_load_bond_scan_module", lambda: EmptyScanner())
     monkeypatch.setattr(run_all, "_load_no_rule_degrade_module", lambda: EmptyScanner())
     monkeypatch.setattr(run_all, "_load_nle_boundary_scan_module", lambda: FailingNleScanner())
+    monkeypatch.setattr(run_all, "_load_edge_contracts_guard_module", lambda: EmptyScanner())
 
     report = run_all.run_static_scans(ROOT)
 
