@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 import threading
 from types import TracebackType
@@ -60,13 +59,15 @@ class SyncLifeLeaseHeartbeat:
 
 class AsyncLifeLeaseHeartbeat:
     def __init__(self, renew: Callable[[], None], *, lease_ms: int) -> None:
-        self._renew = renew
-        self._interval = heartbeat_interval_seconds(lease_ms)
-        self._stop = asyncio.Event()
-        self._task: asyncio.Task[None] | None = None
+        # Lease renewal must not depend on the handler's event loop or its
+        # shared default executor.  A busy loop/executor can otherwise starve
+        # ``asyncio.to_thread`` beyond the lease and fence an otherwise healthy
+        # handler.  The synchronous heartbeat already owns a dedicated daemon
+        # thread and provides the required fail-closed shutdown semantics.
+        self._heartbeat = SyncLifeLeaseHeartbeat(renew, lease_ms=lease_ms)
 
     async def __aenter__(self) -> "AsyncLifeLeaseHeartbeat":
-        self._task = asyncio.create_task(self._run())
+        self._heartbeat.__enter__()
         return self
 
     async def __aexit__(
@@ -75,25 +76,7 @@ class AsyncLifeLeaseHeartbeat:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool:
-        del exc_type, exc, traceback
-        self._stop.set()
-        task = self._task
-        if task is not None:
-            try:
-                await task
-            except BaseException as heartbeat_error:
-                raise LifeLeaseHeartbeatError(
-                    "Life lease heartbeat renewal failed"
-                ) from heartbeat_error
-        return False
-
-    async def _run(self) -> None:
-        while True:
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
-                return
-            except TimeoutError:
-                await asyncio.to_thread(self._renew)
+        return self._heartbeat.__exit__(exc_type, exc, traceback)
 
 
 __all__ = [

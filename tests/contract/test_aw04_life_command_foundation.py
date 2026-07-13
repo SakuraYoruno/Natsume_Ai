@@ -893,23 +893,68 @@ def test_sync_projection_heartbeat_prevents_reclaim_during_slow_handler(
 
 def test_async_outbox_heartbeat_prevents_reclaim_during_slow_handler(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _db_path, repository = _repository(tmp_path)
-    started_at = time.monotonic()
+    clock_lock = threading.Lock()
+    clock_state = {"now_ms": NOW}
 
     def clock() -> int:
-        return NOW + int((time.monotonic() - started_at) * 1_000)
+        with clock_lock:
+            return int(clock_state["now_ms"])
+
+    def set_clock(now_ms: int) -> None:
+        with clock_lock:
+            clock_state["now_ms"] = int(now_ms)
 
     LifeCommandService(repository, clock=clock).submit(_command("outbox-heartbeat"))
+    heartbeat_renewed = threading.Event()
+    renew_lock = threading.Lock()
+    renew_count = 0
+    renew_delivery_claim = repository.renew_delivery_claim
+
+    def tracking_renew_delivery_claim(
+        message,  # noqa: ANN001
+        *,
+        owner_token: str,
+        now_ms: int,
+        lease_ms: int,
+    ) -> None:
+        nonlocal renew_count
+        renew_delivery_claim(
+            message,
+            owner_token=owner_token,
+            now_ms=now_ms,
+            lease_ms=lease_ms,
+        )
+        if owner_token != "outbox-heartbeat-a":
+            return
+        with renew_lock:
+            renew_count += 1
+            # The dispatcher renews once immediately before entering the
+            # handler.  A second successful call proves the background
+            # heartbeat itself renewed the lease.
+            if renew_count >= 2:
+                heartbeat_renewed.set()
+
+    monkeypatch.setattr(
+        repository,
+        "renew_delivery_claim",
+        tracking_renew_delivery_claim,
+    )
 
     async def scenario():  # noqa: ANN202
         entered = asyncio.Event()
+        release = asyncio.Event()
         side_effects: list[str] = []
 
         async def slow_handler(message):  # noqa: ANN001, ANN202
             side_effects.append(message.outbox_id)
+            # Advance after the dispatcher's immediate renewal so the first
+            # background heartbeat extends beyond the original lease.
+            set_clock(NOW + 100)
             entered.set()
-            await asyncio.sleep(0.8)
+            await release.wait()
             return {"handled": True}
 
         first = LifeOutboxDispatcher(
@@ -930,11 +975,22 @@ def test_async_outbox_heartbeat_prevents_reclaim_during_slow_handler(
             first.dispatch_pending_async(limit=1, dispatch_at_ms=clock())
         )
         await asyncio.wait_for(entered.wait(), timeout=1.0)
-        await asyncio.sleep(0.5)
-        competing = await second.dispatch_pending_async(
-            limit=1,
-            dispatch_at_ms=clock(),
-        )
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while not heartbeat_renewed.is_set():
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("async Life heartbeat did not renew the lease")
+            await asyncio.sleep(0.01)
+        # The original NOW+300 claim is expired, while the observed heartbeat
+        # renewed it to at least NOW+400.  This tests reclaim prevention without
+        # depending on sub-second Windows scheduler timing.
+        set_clock(NOW + 350)
+        try:
+            competing = await second.dispatch_pending_async(
+                limit=1,
+                dispatch_at_ms=clock(),
+            )
+        finally:
+            release.set()
         return await pending, competing, side_effects
 
     completed, competing, side_effects = asyncio.run(scenario())
