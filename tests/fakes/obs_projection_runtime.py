@@ -78,4 +78,3 @@ class LedgerStatsRefreshingTestClient(TestClient):
     def request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         refresh_ledger_stats_projection()
         return super().request(*args, **kwargs)
-
