@@ -1,0 +1,2686 @@
+{
+  "architecture_gate_failures": [
+    1,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    15
+  ],
+  "architecture_gates": [
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:1",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=1",
+          "status": "PASS"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=1",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone"
+      ],
+      "gate": 1,
+      "issues": [
+        "required stage edge_standalone is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "package dependency and Edge boundary"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:2",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=2",
+          "status": "PASS"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=2"
+      ],
+      "gate": 2,
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
+      "title": "single composition root and app truth boundary"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:3",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=3",
+          "status": "PASS"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=3"
+      ],
+      "gate": 3,
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
+      "title": "mixed-responsibility production file limits"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:4",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=4",
+          "status": "PASS"
+        },
+        {
+          "id": "authority_lineage_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=4",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
+      ],
+      "gate": 4,
+      "issues": [
+        "required stage authority_lineage_contracts is SKIPPED",
+        "required stage contract_schema_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "single grant, lineage and side-effect receipt"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:5",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=5",
+          "status": "PASS"
+        },
+        {
+          "id": "authority_lineage_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=5",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts"
+      ],
+      "gate": 5,
+      "issues": [
+        "required stage authority_lineage_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "verification commit guard"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:6",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=6",
+          "status": "PASS"
+        },
+        {
+          "id": "state_outbox_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=6",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
+      ],
+      "gate": 6,
+      "issues": [
+        "required stage state_outbox_contracts is SKIPPED",
+        "required stage contract_schema_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "single writer and rebuildable projections"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:7",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=7",
+          "status": "PASS"
+        },
+        {
+          "id": "state_outbox_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=7",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts"
+      ],
+      "gate": 7,
+      "issues": [
+        "required stage state_outbox_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "zero-write surface and durable outbox"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:8",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=8",
+          "status": "PASS"
+        },
+        {
+          "id": "namespace_security_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=8",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts"
+      ],
+      "gate": 8,
+      "issues": [
+        "required stage namespace_security_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "knowledge namespace and promotion boundary"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:9",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=9",
+          "status": "PASS"
+        },
+        {
+          "id": "namespace_security_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=9",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts"
+      ],
+      "gate": 9,
+      "issues": [
+        "required stage namespace_security_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "authenticated and audited write ingress"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:10",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=10",
+          "status": "PASS"
+        },
+        {
+          "id": "persistence_boundary_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=persistence_boundary_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "migration_backup_restore",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=10",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=persistence_boundary_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore"
+      ],
+      "gate": 10,
+      "issues": [
+        "required stage persistence_boundary_contracts is SKIPPED",
+        "required stage migration_backup_restore is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "migration-only DDL and canonical persistence"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:11",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=11",
+          "status": "PASS"
+        },
+        {
+          "id": "service_bundle_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=service_bundle_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=11",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=service_bundle_contracts"
+      ],
+      "gate": 11,
+      "issues": [
+        "required stage service_bundle_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "single production services and signed bundle supply chain"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:12",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=12",
+          "status": "PASS"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=12",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
+      ],
+      "gate": 12,
+      "issues": [
+        "required stage edge_standalone is SKIPPED",
+        "required stage contract_schema_contracts is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "standalone Edge and unique physical-output authority"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:13",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=13",
+          "status": "PASS"
+        },
+        {
+          "id": "operator_query_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=operator_query_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "monitor_generated_client",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_generated_client",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "monitor_interaction_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=13",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=operator_query_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_generated_client",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke"
+      ],
+      "gate": 13,
+      "issues": [
+        "required stage operator_query_contracts is SKIPPED",
+        "required stage contract_schema_contracts is SKIPPED",
+        "required stage monitor_generated_client is SKIPPED",
+        "required stage monitor_interaction_smoke is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "pure Operator query and generated UI client"
+    },
+    {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:14",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=14",
+          "status": "PASS"
+        },
+        {
+          "id": "compatibility_registry_empty",
+          "kind": "check",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=compatibility_registry_empty",
+          "status": "PASS"
+        },
+        {
+          "id": "retired_paths_absent",
+          "kind": "check",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=retired_paths_absent",
+          "status": "PASS"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=14",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=compatibility_registry_empty",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=retired_paths_absent"
+      ],
+      "gate": 14,
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
+      "title": "retired compatibility authorities"
+    },
+    {
+      "evidence": [
+        {
+          "id": "offline_pytest",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=offline_pytest",
+          "status": "FAIL"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "golden_replay_chaos_identity",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=golden_replay_chaos_identity",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "isolated_runtime_http_drill",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=isolated_runtime_http_drill",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "migration_backup_restore",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "rollback_drill",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=rollback_drill",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "security_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=security_smoke",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "performance_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=performance_smoke",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "SKIPPED"
+        },
+        {
+          "id": "monitor_interaction_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke",
+          "status": "SKIPPED"
+        }
+      ],
+      "evidence_refs": [
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=offline_pytest",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=golden_replay_chaos_identity",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=isolated_runtime_http_drill",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=rollback_drill",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=security_smoke",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=performance_smoke",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke"
+      ],
+      "gate": 15,
+      "issues": [
+        "required stage offline_pytest is FAIL",
+        "required stage contract_schema_contracts is SKIPPED",
+        "required stage golden_replay_chaos_identity is SKIPPED",
+        "required stage isolated_runtime_http_drill is SKIPPED",
+        "required stage migration_backup_restore is SKIPPED",
+        "required stage rollback_drill is SKIPPED",
+        "required stage security_smoke is SKIPPED",
+        "required stage performance_smoke is SKIPPED",
+        "required stage edge_standalone is SKIPPED",
+        "required stage monitor_interaction_smoke is SKIPPED"
+      ],
+      "run_id": "aw08-core-final-20260713",
+      "status": "FAIL",
+      "title": "complete program acceptance"
+    }
+  ],
+  "archived_failed_log_sha256": "sha256:216dcf13d31bbc9dacc6fb95177a47971672f0fff4e376901a9077f699b36629",
+  "archived_for_resume_at": "2026-07-13T11:26:48.992452+00:00",
+  "artifacts": {
+    "manifest_ref": "docs/50_release/core/CORE_RELEASE_MANIFEST.json",
+    "receipt_ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json",
+    "rollback_matrix_ref": "docs/50_release/core/CORE_ROLLBACK_MATRIX.json",
+    "sbom_ref": "docs/50_release/core/SBOM.cdx.json"
+  },
+  "automatic_retry_count": 0,
+  "aw08_state_at_start": "CODE_COMPLETE",
+  "compatibility_registry": {
+    "active_count": 0,
+    "issues": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS",
+    "usage_count": 0
+  },
+  "completed_stage_count": 22,
+  "failed_stage_count": 1,
+  "finished_at": "2026-07-13T11:18:57.349967+00:00",
+  "initial_source_commit": "3ff5757e62b4883d31c965a2c40ce5ed6a3b9666",
+  "manifest_validation": {
+    "issues": [
+      "acceptance stages and all 15 independently evaluated architecture gates did not all pass"
+    ],
+    "status": "SKIPPED"
+  },
+  "passed_stage_count": 1,
+  "program_acceptance_finalized": true,
+  "resume_count": 1,
+  "resume_history": [
+    {
+      "archived_stage_logs": {
+        "architecture_static_gates": "docs/50_release/core/runs/aw08-core-final-20260713/architecture_static_gates.attempt-1.log",
+        "offline_pytest": "docs/50_release/core/runs/aw08-core-final-20260713/offline_pytest.attempt-1.log"
+      },
+      "attempt_number": 1,
+      "failed_stage_id": "offline_pytest",
+      "failed_stage_log_ref": "docs/50_release/core/runs/aw08-core-final-20260713/offline_pytest.attempt-1.log",
+      "failed_stage_log_sha256": "sha256:d678b67a1a7da1e5b1f1cbeaa63efb7cb317b8d277254281b10a89c755dc653e",
+      "finished_at": "2026-07-13T09:38:27.489095+00:00",
+      "receipt_ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.attempt-1.json",
+      "restart_stage_id": "architecture_static_gates",
+      "revalidated_pass_prefix": true,
+      "source_commit": "3ff5757e62b4883d31c965a2c40ce5ed6a3b9666",
+      "stage_source_commits": {
+        "architecture_static_gates": "3ff5757e62b4883d31c965a2c40ce5ed6a3b9666",
+        "offline_pytest": "3ff5757e62b4883d31c965a2c40ce5ed6a3b9666"
+      },
+      "stages": [
+        {
+          "command": [],
+          "detail": "internal acceptance stage passed",
+          "duration_ms": 19061,
+          "evidence": {
+            "failed_gates": [],
+            "gate_results": {
+              "1": {
+                "evidence": {
+                  "edge_finding_count": 0,
+                  "edge_violation_count": 0,
+                  "layer_edges": {
+                    "app": [
+                      "application",
+                      "composition",
+                      "contracts",
+                      "domain",
+                      "persistence"
+                    ],
+                    "application": [
+                      "contracts",
+                      "domain",
+                      "persistence"
+                    ],
+                    "composition": [
+                      "application",
+                      "contracts",
+                      "domain",
+                      "persistence"
+                    ],
+                    "contracts": [],
+                    "domain": [
+                      "contracts"
+                    ],
+                    "edge": [
+                      "contracts"
+                    ],
+                    "persistence": [
+                      "contracts",
+                      "domain"
+                    ]
+                  },
+                  "reverse_imports": [],
+                  "strongly_connected_components": []
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "10": {
+                "evidence": {
+                  "authorized_repository_connection_hits": [
+                    "edge_client/gateway/migration_runner.py:16: sqlite3.connect",
+                    "edge_client/persistence/sqlite.py:18: sqlite3.connect",
+                    "edge_client/services/wx_db_service.py:531: sqlite3.connect",
+                    "host_brain/audit/migration_runner.py:132: sqlite3.connect",
+                    "host_brain/audit/migration_runner.py:489: sqlite3.connect",
+                    "host_brain/audit/sqlite_ledger.py:187: sqlite3.connect",
+                    "host_brain/observability/projection_store.py:103: sqlite3.connect",
+                    "host_brain/persistence/agent_execution_repository.py:90: sqlite3.connect",
+                    "host_brain/persistence/bond_fallback_repository.py:403: sqlite3.connect",
+                    "host_brain/persistence/bond_fallback_repository.py:116: sqlite3.connect",
+                    "host_brain/persistence/bond_history_repository.py:49: sqlite3.connect",
+                    "host_brain/persistence/canon_apply_repository.py:175: sqlite3.connect",
+                    "host_brain/persistence/canon_repository.py:178: sqlite3.connect",
+                    "host_brain/persistence/capability_execution_repository.py:26: sqlite3.connect",
+                    "host_brain/persistence/context_memory_repository.py:140: sqlite3.connect",
+                    "host_brain/persistence/context_preference_repository.py:134: sqlite3.connect",
+                    "host_brain/persistence/context_repository.py:171: sqlite3.connect",
+                    "host_brain/persistence/embodiment_outbox_repository.py:29: sqlite3.connect",
+                    "host_brain/persistence/emotion_timeline_query_repository.py:53: sqlite3.connect",
+                    "host_brain/persistence/experience_repository.py:272: sqlite3.connect",
+                    "host_brain/persistence/full_text_repository.py:67: sqlite3.connect",
+                    "host_brain/persistence/full_text_repository.py:44: sqlite3.connect",
+                    "host_brain/persistence/gateway_transport_repository.py:506: sqlite3.connect",
+                    "host_brain/persistence/graph_evidence_repository.py:291: sqlite3.connect",
+                    "host_brain/persistence/graph_evidence_repository.py:196: sqlite3.connect",
+                    "host_brain/persistence/host_command_repository.py:130: sqlite3.connect",
+                    "host_brain/persistence/life_body_query_repository.py:107: sqlite3.connect",
+                    "host_brain/persistence/life_command_repository.py:158: sqlite3.connect",
+                    "host_brain/persistence/life_memory_repository.py:216: sqlite3.connect",
+                    "host_brain/persistence/markdown_kb_repository.py:23: sqlite3.connect",
+                    "host_brain/persistence/nvd_cache_repository.py:217: sqlite3.connect",
+                    "host_brain/persistence/nvd_cache_repository.py:158: sqlite3.connect",
+                    "host_brain/persistence/pentest_ingress_authority_repository.py:93: sqlite3.connect",
+                    "host_brain/persistence/pentest_knowledge_repository.py:180: sqlite3.connect",
+                    "host_brain/persistence/pentest_knowledge_repository.py:150: sqlite3.connect",
+                    "host_brain/persistence/pentest_run_repository.py:260: sqlite3.connect",
+                    "host_brain/persistence/rate_limit_repository.py:61: sqlite3.connect",
+                    "host_brain/persistence/rate_limit_repository.py:30: sqlite3.connect",
+                    "host_brain/persistence/response_feedback_repository.py:78: sqlite3.connect",
+                    "host_brain/persistence/review_repository.py:179: sqlite3.connect",
+                    "host_brain/persistence/runtime_event_repository.py:196: sqlite3.connect",
+                    "host_brain/persistence/runtime_read_repository.py:485: sqlite3.connect",
+                    "host_brain/persistence/scheduler_repository.py:213: sqlite3.connect",
+                    "host_brain/persistence/secure_ingress_repository.py:136: sqlite3.connect",
+                    "host_brain/persistence/sqlite_backup.py:145: sqlite3.connect",
+                    "host_brain/persistence/sqlite_backup.py:235: sqlite3.connect",
+                    "host_brain/persistence/sqlite_backup.py:240: sqlite3.connect",
+                    "host_brain/persistence/sqlite_backup.py:344: sqlite3.connect",
+                    "host_brain/persistence/sqlite_backup.py:349: sqlite3.connect",
+                    "host_brain/persistence/supply_chain_repository.py:264: sqlite3.connect",
+                    "host_brain/persistence/task_repository.py:528: sqlite3.connect",
+                    "host_brain/persistence/token_usage_query_repository.py:50: sqlite3.connect",
+                    "host_brain/persistence/tool_registry_repository.py:429: sqlite3.connect",
+                    "host_brain/persistence/tool_registry_repository.py:123: sqlite3.connect",
+                    "host_brain/persistence/vts_mapping_repository.py:456: sqlite3.connect",
+                    "host_brain/persistence/vts_mapping_repository.py:101: sqlite3.connect",
+                    "host_brain/persistence/world_model_query_repository.py:116: sqlite3.connect"
+                  ],
+                  "explicit_connection_authorities": [
+                    "edge_client/services/wx_db_service.py",
+                    "host_brain/observability/projection_store.py"
+                  ],
+                  "inline_ddl_hits": [],
+                  "private_connection_hits": []
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "11": {
+                "evidence": {
+                  "service_constructors": {
+                    "CapabilityBroker": {
+                      "allowed_paths": [
+                        "host_brain/capability_plane/production_composition.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/capability_plane/production_composition.py"
+                      ]
+                    },
+                    "IntentDecisionEngine": {
+                      "allowed_paths": [
+                        "host_brain/composition/process_runtime_services.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/composition/process_runtime_services.py"
+                      ]
+                    },
+                    "ModelAttemptService": {
+                      "allowed_paths": [
+                        "host_brain/model_runtime/composition.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/model_runtime/composition.py"
+                      ]
+                    },
+                    "ToolBroker": {
+                      "allowed_paths": [
+                        "host_brain/composition/process_runtime_services.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/composition/process_runtime_services.py"
+                      ]
+                    }
+                  },
+                  "supply_chain_anchors": [
+                    "host_brain/skills/supply_chain.py",
+                    "tests/security/test_skill_supply_chain_quarantine.py",
+                    "tests/contract/test_sandbox_contract.py"
+                  ]
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "12": {
+                "evidence": {
+                  "edge_to_host_imports": [],
+                  "edge_transport_migration": "edge_client/gateway/migrations/0001_embodiment_transport.sql",
+                  "receipt_contract": "natsume_contracts/edge/embodiment_v1.py"
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "13": {
+                "evidence": {
+                  "generated_client_paths": [
+                    "host_brain/app/monitor_ui/src/shared/api/generated/operator-command.openapi.json",
+                    "host_brain/app/monitor_ui/src/shared/api/generated/operatorCommandClient.ts",
+                    "host_brain/app/monitor_ui/src/shared/api/operatorCommandGateway.js"
+                  ],
+                  "query_contracts": [
+                    "tests/contract/test_obs_query_only_boundary.py",
+                    "tests/contract/test_aw07_operator_query_privacy_contract.py"
+                  ]
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "14": {
+                "evidence": {
+                  "production_hits": [],
+                  "production_symbol_hits": [],
+                  "retired_flags": [
+                    "HOST_CANONICAL_PLANNER_ADAPTER_ENABLED",
+                    "HOST_OBS_COMMAND_RELOCATION_MODE",
+                    "HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED",
+                    "HOST_TASK_RUNTIME_MODE",
+                    "HOST_TASK_RUNTIME_SHADOW_OWNER",
+                    "HOST_TASK_RUNTIME_CANARY_PERCENT",
+                    "HOST_TASK_RUNTIME_KILL_SWITCH",
+                    "HOST_PENTEST_KNOWLEDGE_MODE",
+                    "HOST_PENTEST_LEGACY_CANON_ROOT",
+                    "EDGE_WECHAT_UIA_BRIDGE_AUTO_START"
+                  ],
+                  "retired_symbols": [
+                    "LegacyKernelAdapter",
+                    "AGENT_ID_PENTEST_ATTACK",
+                    "AGENT_PENTEST_ATTACK",
+                    "PENTEST_ATTACK_AGENT_HANDLER_ID"
+                  ]
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "2": {
+                "evidence": {
+                  "capability_broker_paths": [
+                    "host_brain/capability_plane/production_composition.py"
+                  ],
+                  "composition_calls": {
+                    "build_default_production_model_runtime": {
+                      "allowed_paths": [
+                        "host_brain/composition/process_services.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/composition/process_services.py"
+                      ]
+                    },
+                    "build_production_capability_runtime": {
+                      "allowed_paths": [
+                        "host_brain/composition/process_services.py"
+                      ],
+                      "count": 1,
+                      "paths": [
+                        "host_brain/composition/process_services.py"
+                      ]
+                    }
+                  }
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "3": {
+                "evidence": {
+                  "large_file_inventory": [
+                    {
+                      "classification": "cohesive",
+                      "lines": 6257,
+                      "path": "host_brain/pentest/tools/tool_executors.py",
+                      "rationale": "adapters implement one phase-scoped executor protocol and own no orchestration state",
+                      "responsibility": "pentest tool executor adapter catalog",
+                      "source_sha256": "sha256:3041e7bd3b595b6151e5ccbac8f4aa1c6fb3b5a576d0244cdf806e935bb98ef0"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 4495,
+                      "path": "host_brain/pentest/action_policy.py",
+                      "rationale": "all entries are pure admission rules under one policy authority",
+                      "responsibility": "pentest action admission policy",
+                      "source_sha256": "sha256:7e31932bc28fdd5591ad40d86fe5e0e914bcfdda2f4404821710e01169ae8741"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 4422,
+                      "path": "host_brain/persona/surface_memory_recall.py",
+                      "rationale": "recall evidence selection remains read-only and owns no persistence or transport",
+                      "responsibility": "surface memory recall planning",
+                      "source_sha256": "sha256:abda114155a92181a467fafbbf4a143fb3be2fd847554de5ed9d8e5860ee57f8"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 4158,
+                      "path": "host_brain/persistence/task_repository.py",
+                      "rationale": "SQL mappings and transactional task projections are one persistence boundary",
+                      "responsibility": "canonical task persistence repository",
+                      "source_sha256": "sha256:0c9c492add4ee105b6c76d6c64df61910781e883dd876dd7df89ad9e226b220c"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 4012,
+                      "path": "host_brain/tribe/thalamus_agent.py",
+                      "rationale": "the module owns one tribe-agent routing responsibility and has no independent persistence authority",
+                      "responsibility": "thalamus routing agent",
+                      "source_sha256": "sha256:0585dbec30dc365398d3c0734e090ed182ac15f1ec3dbff6234c1c3adfe6996e"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 3758,
+                      "path": "host_brain/bio_ops/capabilities.py",
+                      "rationale": "capability implementations share one bio-operations protocol and own no independent scheduler",
+                      "responsibility": "bio-operations capability catalog",
+                      "source_sha256": "sha256:f4b914f778e952a1aea9fcfb7f4945d0c83d26759379b604541b61a8a51775b0"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 3344,
+                      "path": "host_brain/app/obs_routes_core.py",
+                      "rationale": "all handlers are projection-only query adapters and own no writer or background runtime",
+                      "responsibility": "legacy-shaped read-only observability route catalog",
+                      "source_sha256": "sha256:0c8acf3bef72be4658630b0b423180aab0ad205228cbd588b42dfb8694446ef9"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 3220,
+                      "path": "host_brain/pentest/autonomous_kernel.py",
+                      "rationale": "the kernel owns one governed pentest decision loop and delegates execution to secure tool ports",
+                      "responsibility": "pentest autonomous decision kernel",
+                      "source_sha256": "sha256:a780570e2d28711ddb3095b112edfa8fee18606420511c2656077e0f14f5fd82"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 3114,
+                      "path": "edge_client/runtime/voice_pipeline.py",
+                      "rationale": "ASR-to-TTS state is isolated inside the standalone Edge runtime",
+                      "responsibility": "Edge voice pipeline",
+                      "source_sha256": "sha256:d01a0811528c2c11cd19189504d6d028128ec9e1424f186b6e9f580a94454b07"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 3100,
+                      "path": "edge_client/actuators/tts_engine.py",
+                      "rationale": "provider adapters implement one Edge-owned speech actuator protocol",
+                      "responsibility": "Edge TTS actuator",
+                      "source_sha256": "sha256:c14a03fd901939247d537fd85a2ff0a22e98dc307028bfd84de449ba3bca7957"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2865,
+                      "path": "host_brain/persistence/scheduler_repository.py",
+                      "rationale": "scheduler journal, lease and outbox transactions share one repository boundary",
+                      "responsibility": "canonical scheduler persistence repository",
+                      "source_sha256": "sha256:c77a808bdb2fad80cf6541d87ef8693e07180a32f476cc2dbd937fa8edf31ae0"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2755,
+                      "path": "host_brain/persona/surface_runtime.py",
+                      "rationale": "the module coordinates one read-only persona presentation pipeline and owns no durable writer",
+                      "responsibility": "persona surface runtime",
+                      "source_sha256": "sha256:272347e0b67077692a3c5410916377f72f7d70dcdb014b22b7752a476fe14262"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2728,
+                      "path": "edge_client/app/fastapi_app.py",
+                      "rationale": "the file contains Edge-owned protocol routes wired to one runtime composition and no Host implementation",
+                      "responsibility": "standalone Edge HTTP adapter",
+                      "source_sha256": "sha256:2be266a637ee1a22f993b6384dfdf2d490fc77b7095416b26c73e89b7cbcb3ec"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2683,
+                      "path": "host_brain/persistence/life_memory_repository.py",
+                      "rationale": "life-memory event and projection SQL is isolated behind one repository",
+                      "responsibility": "canonical life-memory persistence repository",
+                      "source_sha256": "sha256:166dfff0b887f21f7e50c43e95352ea56dbbc22c11804438a41d8e4b191be1d1"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2603,
+                      "path": "edge_client/actuators/vts_driver.py",
+                      "rationale": "VTS session and command handling remain inside one physical-output adapter",
+                      "responsibility": "Edge VTS actuator",
+                      "source_sha256": "sha256:ae3e688b35c8d5b0c3b3ddb50cf7de82c42e0c9f0a0a0bad55f45f8e50d6fbb5"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2554,
+                      "path": "host_brain/memory/life_memory/store.py",
+                      "rationale": "the adapter exposes one memory store protocol and delegates durable transactions to canonical persistence",
+                      "responsibility": "life-memory typed store adapter",
+                      "source_sha256": "sha256:13d329f9097773de1549c8399c8820731c3edff1e575e0daeeaf3f211a029db4"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2496,
+                      "path": "host_brain/skills/impl/system_executor.py",
+                      "rationale": "system operations implement one skill executor protocol behind capability and Governor authority",
+                      "responsibility": "governed system skill executor",
+                      "source_sha256": "sha256:00f45fa2328c87fd4af7fabf6066a5bb75b876c953804667eff8f159e5b0ba69"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2382,
+                      "path": "edge_client/senses/asr.py",
+                      "rationale": "provider adapters implement one Edge-owned speech sensor protocol",
+                      "responsibility": "Edge ASR sensor",
+                      "source_sha256": "sha256:678116167b88c986d44aeecafa742db25a5daef336908cdacde85e292dcd83af"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2371,
+                      "path": "host_brain/integrations/llm_helpers.py",
+                      "rationale": "provider-neutral request and response normalization remains one integration-layer responsibility",
+                      "responsibility": "LLM provider protocol helpers",
+                      "source_sha256": "sha256:3ecb9c17b41a5dbe9092b08a66a2baec3b54a263a01bb9b5f7c73e5646faef2a"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2340,
+                      "path": "host_brain/pentest/kali_bridge.py",
+                      "rationale": "transport, parsing and error mapping implement one external Kali execution port",
+                      "responsibility": "Kali tool bridge adapter",
+                      "source_sha256": "sha256:2fbbd76be85e61fd171bf0b7c4b5fe3762e789c06a008dced11cfef00d838d38"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2339,
+                      "path": "host_brain/memory/life_memory/semantic.py",
+                      "rationale": "semantic extraction and scoring form one memory-domain projection with no direct surface authority",
+                      "responsibility": "life-memory semantic projection",
+                      "source_sha256": "sha256:7537c8727661eea6023bb8d22d5050c18d80934ca08403ad2946226049e31cfb"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2333,
+                      "path": "host_brain/memory/canon_apply_service.py",
+                      "rationale": "all canon mutation validation and apply authority is intentionally centralized",
+                      "responsibility": "world-canon authorized apply service",
+                      "source_sha256": "sha256:9f7fa51bdbbedb866575b5cdefa1daa8d04db219f8492afc23e534985fa1872d"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2198,
+                      "path": "host_brain/persistence/gateway_transport_repository.py",
+                      "rationale": "transport journal, outbox and receipt transactions form one persistence unit",
+                      "responsibility": "durable gateway transport repository",
+                      "source_sha256": "sha256:ae6fcaaf79b40dfd0ae5765c4adda74d9894ff58928b4654c05c8371beea3dff"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2172,
+                      "path": "host_brain/persona/reply_plan.py",
+                      "rationale": "reply candidates and presentation policy form one pure planning unit",
+                      "responsibility": "deterministic reply-plan construction",
+                      "source_sha256": "sha256:2c9ba5c49838f58078f938130439a7f8c690a60237686ffa1068e209514f0891"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 2076,
+                      "path": "host_brain/app/obs_routes_life_body.py",
+                      "rationale": "all handlers adapt the canonical life-body projection without owning state mutation",
+                      "responsibility": "read-only life-body observability routes",
+                      "source_sha256": "sha256:1b3c5595a3cf12994f1b857beee3d3b580ad2a218c02ad30e70aa1adde231d92"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1935,
+                      "path": "host_brain/tribe/limbic_agent.py",
+                      "rationale": "the module owns one tribe-agent appraisal responsibility and emits typed proposals only",
+                      "responsibility": "limbic agent policy",
+                      "source_sha256": "sha256:0fd8cca17ef10e87c13f69e8764637089a1a90116cbef3380356055afc25ca96"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1913,
+                      "path": "host_brain/persona/surface/candidate_scoring.py",
+                      "rationale": "all functions implement deterministic scoring under one presentation policy",
+                      "responsibility": "pure surface candidate scoring",
+                      "source_sha256": "sha256:8f64568be6c6735979d6706b89c41a05417b08494dc1b8d5f6995767c167fa48"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1810,
+                      "path": "host_brain/persistence/life_command_repository.py",
+                      "rationale": "life command journal and fenced aggregate state share one transaction boundary",
+                      "responsibility": "canonical life command repository",
+                      "source_sha256": "sha256:321ab9cc07366dfb981e8039869fb6ce5334f6f60763f1f70904781b09680299"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1747,
+                      "path": "host_brain/persistence/experience_repository.py",
+                      "rationale": "experience journal and projections are a single persistence boundary",
+                      "responsibility": "canonical experience repository",
+                      "source_sha256": "sha256:dcbdfd373d5d1e8a1401b24430702e21406943ca75f046414fd253caef5060df"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1695,
+                      "path": "host_brain/pentest/agent/cognitive_engine.py",
+                      "rationale": "the module performs one security-domain planning responsibility without direct tool authority",
+                      "responsibility": "pentest cognitive planning engine",
+                      "source_sha256": "sha256:76a8a7aca6881227bd803e7269ec2f89acdecd5024efd9f1598b611ae7c6d2df"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1692,
+                      "path": "host_brain/agent_runtime/lightnovel_deep_reviewer.py",
+                      "rationale": "the module performs one domain-specific evidence review pipeline without owning runtime composition",
+                      "responsibility": "light-novel evidence review",
+                      "source_sha256": "sha256:ad4b3d0dd9e5f591addd223eaece7a1d345f9bcfc9bb09e4100ce1b49bc5a725"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1685,
+                      "path": "host_brain/app/surface_reply_preprocessor.py",
+                      "rationale": "the module performs deterministic reply normalization before the single surface response boundary",
+                      "responsibility": "surface reply preprocessing",
+                      "source_sha256": "sha256:9af8e15cc3182d08638a11114b330e51962ac8101ab71742029c1df31f729822"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1664,
+                      "path": "host_brain/memory/life_memory/utils.py",
+                      "rationale": "the module contains deterministic memory-domain transforms and owns no service or connection",
+                      "responsibility": "pure life-memory normalization helpers",
+                      "source_sha256": "sha256:477523bd1d31ebe79805862f85908968a4c7adf0755a0b8d5ca7f37edf264477"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1631,
+                      "path": "host_brain/persona/galgame_text_contract.py",
+                      "rationale": "the module defines and validates one presentation contract without runtime state ownership",
+                      "responsibility": "declarative galgame text contract",
+                      "source_sha256": "sha256:4418866ba13759f8efb96e2ceea7cdae08f7f5a927412dccd3bf1e8f8fd06c48"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1627,
+                      "path": "host_brain/observability/degradation_state.py",
+                      "rationale": "all transitions belong to one deterministic degradation-state aggregate",
+                      "responsibility": "dependency degradation state machine",
+                      "source_sha256": "sha256:0bda23bf4934f9d2a5905f3f763bfc9484d2291d6dd6d0548954855fbf344823"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1605,
+                      "path": "host_brain/tribe/prefrontal_agent.py",
+                      "rationale": "the module owns one tribe-agent planning responsibility and emits typed proposals only",
+                      "responsibility": "prefrontal agent policy",
+                      "source_sha256": "sha256:b102fc770c55ef45a15ba6a5242a3d448dc5eb8038f1f87a364bde78785d00c7"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1597,
+                      "path": "host_brain/integrations/codex_cli_provider.py",
+                      "rationale": "provider process invocation and response parsing implement one external model-provider port",
+                      "responsibility": "Codex CLI provider adapter",
+                      "source_sha256": "sha256:133347c90b6a1e31ec0b120aff02b5d9196dd1eba00656e40649b08b1ac5fd09"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1587,
+                      "path": "host_brain/persona/surface/scene_constants.py",
+                      "rationale": "the file is declarative constants without runtime authority",
+                      "responsibility": "immutable scene policy data",
+                      "source_sha256": "sha256:4e76371262bdd4c4ff3c23857f1641adbedca57f6f9d4afc719c572d8a23a7a5"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1578,
+                      "path": "host_brain/release/identity_snapshot.py",
+                      "rationale": "identity migration evidence is a single release-domain artifact",
+                      "responsibility": "release identity snapshot generation",
+                      "source_sha256": "sha256:a5da40f41ac8c9d8f6a90e443354308a4454282bb7de1ce0bc597d32734394b6"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1513,
+                      "path": "host_brain/channels/mateengine.py",
+                      "rationale": "the module implements one versioned channel transport and delegates authority to canonical ingress",
+                      "responsibility": "MateEngine channel adapter",
+                      "source_sha256": "sha256:1e73beaec5aab2e2d8b218af2889e3548a12fce859bfb3b48970d639db6329d5"
+                    },
+                    {
+                      "classification": "cohesive",
+                      "lines": 1507,
+                      "path": "host_brain/persona/proactive_voice.py",
+                      "rationale": "voice candidate construction is pure planning and delegates physical output to the durable outbox",
+                      "responsibility": "proactive voice planning",
+                      "source_sha256": "sha256:ff9eeeb741f7701048abadf5d6113b0822ba45bffd48227adf361b0486372a2f"
+                    }
+                  ],
+                  "mixed_inventory_count": 0,
+                  "new_mixed_over_800_lines": [],
+                  "new_over_800_lines": [],
+                  "policy_entry_count": 43
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "4": {
+                "evidence": {
+                  "anchors": [
+                    "host_brain/task_runtime/coordinator.py",
+                    "host_brain/orchestration/governor_grant.py",
+                    "tests/unit/test_aw04_governor_grant_binding.py",
+                    "tests/unit/test_aw02_governed_task_coordinator.py"
+                  ],
+                  "legacy_authority_hits": []
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "5": {
+                "evidence": {
+                  "contract_ref": "tests/contract/test_nle_verification_gate_contract.py",
+                  "policy_ref": "host_brain/agent_runtime/verification_policy.py"
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "6": {
+                "evidence": {
+                  "anchors": [
+                    "host_brain/observability/projection_store.py",
+                    "host_brain/app/observability_runtime/projection_daemon.py",
+                    "host_brain/audit/migrations/0082_operator_query_projection.sql",
+                    "host_brain/audit/migrations/0083_host_embodiment_outbox.sql",
+                    "edge_client/gateway/migrations/0001_embodiment_transport.sql",
+                    "tests/integration/test_aw07_query_projection_rebuild_reconcile.py"
+                  ],
+                  "projection_daemon_start_sites": [
+                    "host_brain/app/obs_fastapi_app.py"
+                  ]
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "7": {
+                "evidence": {
+                  "outbox_anchors": [
+                    "host_brain/persistence/life_command_repository.py",
+                    "host_brain/persistence/scheduler_repository.py",
+                    "host_brain/persistence/gateway_transport_repository.py"
+                  ],
+                  "surface_build_write_calls": [],
+                  "surface_sqlite_imports": []
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "8": {
+                "evidence": {
+                  "anchors": [
+                    "host_brain/pentest/knowledge_store.py",
+                    "host_brain/memory/canon_apply_service.py",
+                    "tests/contract/test_pentest_knowledge_store_contract.py"
+                  ],
+                  "chat_private_imports": []
+                },
+                "issues": [],
+                "status": "PASS"
+              },
+              "9": {
+                "evidence": {
+                  "anchors": [
+                    "host_brain/observability/secure_command_ingress.py",
+                    "host_brain/observability/command_http.py",
+                    "host_brain/composition/command_ingress.py",
+                    "edge_client/gateway/webhook_security.py",
+                    "tests/security/test_secure_ingress_identity_contract.py"
+                  ],
+                  "control_tokens": [
+                    "principal",
+                    "scope",
+                    "signature",
+                    "rate",
+                    "idempot",
+                    "audit"
+                  ]
+                },
+                "issues": [],
+                "status": "PASS"
+              }
+            },
+            "policy_ref": "configs/release/core_architecture_policy.json",
+            "policy_sha256": "sha256:45892dcf2d139f300fc45a75ad45c20072beff41ebd7c59a99ba4aff7feb7e3c",
+            "schema_version": "natsume.core-architecture-static-receipt.v1",
+            "status": "PASS"
+          },
+          "exit_code": 0,
+          "finished_at": "2026-07-13T09:20:38.534713+00:00",
+          "log_ref": "docs/50_release/core/runs/aw08-core-final-20260713/architecture_static_gates.attempt-1.log",
+          "stage_id": "architecture_static_gates",
+          "started_at": "2026-07-13T09:20:19.471385+00:00",
+          "status": "PASS"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "-m",
+            "not hw and not prod_env and not runtime_probe and not docker"
+          ],
+          "detail": "command returned non-zero",
+          "duration_ms": 1068844,
+          "evidence": {},
+          "exit_code": 1,
+          "finished_at": "2026-07-13T09:38:27.382580+00:00",
+          "log_ref": "docs/50_release/core/runs/aw08-core-final-20260713/offline_pytest.attempt-1.log",
+          "stage_id": "offline_pytest",
+          "started_at": "2026-07-13T09:20:38.539712+00:00",
+          "status": "FAIL"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/unit/test_aw04_governor_grant_binding.py",
+            "tests/contract/test_nle_verification_gate_contract.py",
+            "tests/unit/test_aw02_governed_task_coordinator.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.388582+00:00",
+          "log_ref": null,
+          "stage_id": "authority_lineage_contracts",
+          "started_at": "2026-07-13T09:38:27.388582+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_nle_canonical_contracts.py",
+            "tests/contract/test_nle_task_store_contract.py",
+            "tests/contract/test_nle_runtime_event_contract.py",
+            "tests/contract/test_nle_operator_read_model_contract.py",
+            "tests/contract/test_aw06c_edge_transport_contract.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.393581+00:00",
+          "log_ref": null,
+          "stage_id": "contract_schema_contracts",
+          "started_at": "2026-07-13T09:38:27.393581+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/unit/test_aw07_query_projection_spine.py",
+            "tests/contract/test_obs_query_only_boundary.py",
+            "tests/unit/test_aw02_governed_scheduler_runtime.py",
+            "tests/unit/test_aw04_app_life_boundary.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.398582+00:00",
+          "log_ref": null,
+          "stage_id": "state_outbox_contracts",
+          "started_at": "2026-07-13T09:38:27.398582+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_pentest_knowledge_store_contract.py",
+            "tests/contract/test_aw03_pentest_knowledge_repository.py",
+            "tests/security/test_secure_ingress_identity_contract.py",
+            "tests/security/test_obs_secure_command_ingress.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.403586+00:00",
+          "log_ref": null,
+          "stage_id": "namespace_security_contracts",
+          "started_at": "2026-07-13T09:38:27.403586+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_aw03_global_sqlite_boundary.py",
+            "tests/contract/test_aw03_observability_named_query_boundary.py",
+            "tests/contract/test_aw03_secure_ingress_repository_boundary.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.407585+00:00",
+          "log_ref": null,
+          "stage_id": "persistence_boundary_contracts",
+          "started_at": "2026-07-13T09:38:27.407585+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_task0490_skill_supply_chain_migration_contract.py",
+            "tests/security/test_skill_supply_chain.py",
+            "tests/security/test_skill_supply_chain_quarantine.py",
+            "tests/contract/test_sandbox_contract.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.412586+00:00",
+          "log_ref": null,
+          "stage_id": "service_bundle_contracts",
+          "started_at": "2026-07-13T09:38:27.412586+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_obs_query_only_boundary.py",
+            "tests/contract/test_aw07_operator_query_privacy_contract.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.418092+00:00",
+          "log_ref": null,
+          "stage_id": "operator_query_contracts",
+          "started_at": "2026-07-13T09:38:27.418092+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/e2e/test_task0495_m48b_p0_golden_fault_matrix.py",
+            "tests/contract/test_replay_tool_contract.py",
+            "tests/contract/test_nle_identity_snapshot_contract.py",
+            "tests/integration/test_dialogue_state_repeat_identity.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.423098+00:00",
+          "log_ref": null,
+          "stage_id": "golden_replay_chaos_identity",
+          "started_at": "2026-07-13T09:38:27.423098+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "npm",
+            "run",
+            "check:operator-client"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.428100+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_generated_client",
+          "started_at": "2026-07-13T09:38:27.428100+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "npm",
+            "run",
+            "typecheck"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.432096+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_typecheck",
+          "started_at": "2026-07-13T09:38:27.432096+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "npm",
+            "run",
+            "test:operator-client"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.437097+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_operator_client_tests",
+          "started_at": "2026-07-13T09:38:27.437097+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "npm",
+            "run",
+            "test:read-model"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.443098+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_read_model_tests",
+          "started_at": "2026-07-13T09:38:27.443098+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "npm",
+            "run",
+            "build"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.448097+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_build",
+          "started_at": "2026-07-13T09:38:27.448097+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.453098+00:00",
+          "log_ref": null,
+          "stage_id": "monitor_interaction_smoke",
+          "started_at": "2026-07-13T09:38:27.453098+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/contract/test_aw06_edge_standalone_package.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.458098+00:00",
+          "log_ref": null,
+          "stage_id": "edge_standalone",
+          "started_at": "2026-07-13T09:38:27.458098+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.463097+00:00",
+          "log_ref": null,
+          "stage_id": "migration_backup_restore",
+          "started_at": "2026-07-13T09:38:27.463097+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.468095+00:00",
+          "log_ref": null,
+          "stage_id": "isolated_runtime_http_drill",
+          "started_at": "2026-07-13T09:38:27.468095+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.473097+00:00",
+          "log_ref": null,
+          "stage_id": "rollback_drill",
+          "started_at": "2026-07-13T09:38:27.473097+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/security"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.478097+00:00",
+          "log_ref": null,
+          "stage_id": "security_smoke",
+          "started_at": "2026-07-13T09:38:27.478097+00:00",
+          "status": "SKIPPED"
+        },
+        {
+          "command": [
+            "C:\\Program Files\\Python311\\python.exe",
+            "-m",
+            "pytest",
+            "tests/integration/test_performance_budget.py",
+            "tests/contract/test_perf_baseline_contract.py",
+            "tests/contract/test_timeline_perf_contract.py"
+          ],
+          "detail": "skipped after an earlier acceptance failure",
+          "duration_ms": 0,
+          "evidence": {},
+          "exit_code": null,
+          "finished_at": "2026-07-13T09:38:27.483096+00:00",
+          "log_ref": null,
+          "stage_id": "performance_smoke",
+          "started_at": "2026-07-13T09:38:27.483096+00:00",
+          "status": "SKIPPED"
+        }
+      ],
+      "started_at": "2026-07-13T09:20:19.437383+00:00",
+      "status": "FAIL"
+    }
+  ],
+  "resume_started_at": "2026-07-13T10:57:43.341533+00:00",
+  "resumed_from_source_commit": "3ff5757e62b4883d31c965a2c40ce5ed6a3b9666",
+  "retired_paths": {
+    "remaining_paths": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS"
+  },
+  "run_id": "aw08-core-final-20260713",
+  "schema_version": "natsume.core-release-acceptance-receipt.v2",
+  "skipped_stage_count": 20,
+  "source_commit": "5614df4fcdf2ba2d0be0969cc0ff3f10e34f1c9a",
+  "stage_count": 22,
+  "stage_source_commits": {
+    "architecture_static_gates": "5614df4fcdf2ba2d0be0969cc0ff3f10e34f1c9a",
+    "offline_pytest": "5614df4fcdf2ba2d0be0969cc0ff3f10e34f1c9a"
+  },
+  "stages": [
+    {
+      "command": [],
+      "detail": "internal acceptance stage passed",
+      "duration_ms": 23968,
+      "evidence": {
+        "failed_gates": [],
+        "gate_results": {
+          "1": {
+            "evidence": {
+              "edge_finding_count": 0,
+              "edge_violation_count": 0,
+              "layer_edges": {
+                "app": [
+                  "application",
+                  "composition",
+                  "contracts",
+                  "domain",
+                  "persistence"
+                ],
+                "application": [
+                  "contracts",
+                  "domain",
+                  "persistence"
+                ],
+                "composition": [
+                  "application",
+                  "contracts",
+                  "domain",
+                  "persistence"
+                ],
+                "contracts": [],
+                "domain": [
+                  "contracts"
+                ],
+                "edge": [
+                  "contracts"
+                ],
+                "persistence": [
+                  "contracts",
+                  "domain"
+                ]
+              },
+              "reverse_imports": [],
+              "strongly_connected_components": []
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "10": {
+            "evidence": {
+              "authorized_repository_connection_hits": [
+                "edge_client/gateway/migration_runner.py:16: sqlite3.connect",
+                "edge_client/persistence/sqlite.py:18: sqlite3.connect",
+                "edge_client/services/wx_db_service.py:531: sqlite3.connect",
+                "host_brain/audit/migration_runner.py:132: sqlite3.connect",
+                "host_brain/audit/migration_runner.py:489: sqlite3.connect",
+                "host_brain/audit/sqlite_ledger.py:187: sqlite3.connect",
+                "host_brain/observability/projection_store.py:103: sqlite3.connect",
+                "host_brain/persistence/agent_execution_repository.py:90: sqlite3.connect",
+                "host_brain/persistence/bond_fallback_repository.py:403: sqlite3.connect",
+                "host_brain/persistence/bond_fallback_repository.py:116: sqlite3.connect",
+                "host_brain/persistence/bond_history_repository.py:49: sqlite3.connect",
+                "host_brain/persistence/canon_apply_repository.py:175: sqlite3.connect",
+                "host_brain/persistence/canon_repository.py:180: sqlite3.connect",
+                "host_brain/persistence/capability_execution_repository.py:26: sqlite3.connect",
+                "host_brain/persistence/context_memory_repository.py:140: sqlite3.connect",
+                "host_brain/persistence/context_preference_repository.py:134: sqlite3.connect",
+                "host_brain/persistence/context_repository.py:171: sqlite3.connect",
+                "host_brain/persistence/embodiment_outbox_repository.py:29: sqlite3.connect",
+                "host_brain/persistence/emotion_timeline_query_repository.py:53: sqlite3.connect",
+                "host_brain/persistence/experience_repository.py:272: sqlite3.connect",
+                "host_brain/persistence/full_text_repository.py:67: sqlite3.connect",
+                "host_brain/persistence/full_text_repository.py:44: sqlite3.connect",
+                "host_brain/persistence/gateway_transport_repository.py:506: sqlite3.connect",
+                "host_brain/persistence/graph_evidence_repository.py:291: sqlite3.connect",
+                "host_brain/persistence/graph_evidence_repository.py:196: sqlite3.connect",
+                "host_brain/persistence/host_command_repository.py:130: sqlite3.connect",
+                "host_brain/persistence/life_body_query_repository.py:107: sqlite3.connect",
+                "host_brain/persistence/life_command_repository.py:158: sqlite3.connect",
+                "host_brain/persistence/life_memory_repository.py:216: sqlite3.connect",
+                "host_brain/persistence/markdown_kb_repository.py:23: sqlite3.connect",
+                "host_brain/persistence/nvd_cache_repository.py:217: sqlite3.connect",
+                "host_brain/persistence/nvd_cache_repository.py:158: sqlite3.connect",
+                "host_brain/persistence/pentest_ingress_authority_repository.py:93: sqlite3.connect",
+                "host_brain/persistence/pentest_knowledge_repository.py:180: sqlite3.connect",
+                "host_brain/persistence/pentest_knowledge_repository.py:150: sqlite3.connect",
+                "host_brain/persistence/pentest_run_repository.py:260: sqlite3.connect",
+                "host_brain/persistence/rate_limit_repository.py:61: sqlite3.connect",
+                "host_brain/persistence/rate_limit_repository.py:30: sqlite3.connect",
+                "host_brain/persistence/response_feedback_repository.py:78: sqlite3.connect",
+                "host_brain/persistence/review_repository.py:179: sqlite3.connect",
+                "host_brain/persistence/runtime_event_repository.py:196: sqlite3.connect",
+                "host_brain/persistence/runtime_read_repository.py:485: sqlite3.connect",
+                "host_brain/persistence/scheduler_repository.py:213: sqlite3.connect",
+                "host_brain/persistence/secure_ingress_repository.py:136: sqlite3.connect",
+                "host_brain/persistence/sqlite_backup.py:145: sqlite3.connect",
+                "host_brain/persistence/sqlite_backup.py:235: sqlite3.connect",
+                "host_brain/persistence/sqlite_backup.py:240: sqlite3.connect",
+                "host_brain/persistence/sqlite_backup.py:344: sqlite3.connect",
+                "host_brain/persistence/sqlite_backup.py:349: sqlite3.connect",
+                "host_brain/persistence/supply_chain_repository.py:264: sqlite3.connect",
+                "host_brain/persistence/task_repository.py:528: sqlite3.connect",
+                "host_brain/persistence/token_usage_query_repository.py:50: sqlite3.connect",
+                "host_brain/persistence/tool_registry_repository.py:429: sqlite3.connect",
+                "host_brain/persistence/tool_registry_repository.py:123: sqlite3.connect",
+                "host_brain/persistence/vts_mapping_repository.py:456: sqlite3.connect",
+                "host_brain/persistence/vts_mapping_repository.py:101: sqlite3.connect",
+                "host_brain/persistence/world_model_query_repository.py:116: sqlite3.connect"
+              ],
+              "explicit_connection_authorities": [
+                "edge_client/services/wx_db_service.py",
+                "host_brain/observability/projection_store.py"
+              ],
+              "inline_ddl_hits": [],
+              "private_connection_hits": []
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "11": {
+            "evidence": {
+              "service_constructors": {
+                "CapabilityBroker": {
+                  "allowed_paths": [
+                    "host_brain/capability_plane/production_composition.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/capability_plane/production_composition.py"
+                  ]
+                },
+                "IntentDecisionEngine": {
+                  "allowed_paths": [
+                    "host_brain/composition/process_runtime_services.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/composition/process_runtime_services.py"
+                  ]
+                },
+                "ModelAttemptService": {
+                  "allowed_paths": [
+                    "host_brain/model_runtime/composition.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/model_runtime/composition.py"
+                  ]
+                },
+                "ToolBroker": {
+                  "allowed_paths": [
+                    "host_brain/composition/process_runtime_services.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/composition/process_runtime_services.py"
+                  ]
+                }
+              },
+              "supply_chain_anchors": [
+                "host_brain/skills/supply_chain.py",
+                "tests/security/test_skill_supply_chain_quarantine.py",
+                "tests/contract/test_sandbox_contract.py"
+              ]
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "12": {
+            "evidence": {
+              "edge_to_host_imports": [],
+              "edge_transport_migration": "edge_client/gateway/migrations/0001_embodiment_transport.sql",
+              "receipt_contract": "natsume_contracts/edge/embodiment_v1.py"
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "13": {
+            "evidence": {
+              "generated_client_paths": [
+                "host_brain/app/monitor_ui/src/shared/api/generated/operator-command.openapi.json",
+                "host_brain/app/monitor_ui/src/shared/api/generated/operatorCommandClient.ts",
+                "host_brain/app/monitor_ui/src/shared/api/operatorCommandGateway.js"
+              ],
+              "query_contracts": [
+                "tests/contract/test_obs_query_only_boundary.py",
+                "tests/contract/test_aw07_operator_query_privacy_contract.py"
+              ]
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "14": {
+            "evidence": {
+              "production_hits": [],
+              "production_symbol_hits": [],
+              "retired_flags": [
+                "HOST_CANONICAL_PLANNER_ADAPTER_ENABLED",
+                "HOST_OBS_COMMAND_RELOCATION_MODE",
+                "HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED",
+                "HOST_TASK_RUNTIME_MODE",
+                "HOST_TASK_RUNTIME_SHADOW_OWNER",
+                "HOST_TASK_RUNTIME_CANARY_PERCENT",
+                "HOST_TASK_RUNTIME_KILL_SWITCH",
+                "HOST_PENTEST_KNOWLEDGE_MODE",
+                "HOST_PENTEST_LEGACY_CANON_ROOT",
+                "EDGE_WECHAT_UIA_BRIDGE_AUTO_START"
+              ],
+              "retired_symbols": [
+                "LegacyKernelAdapter",
+                "AGENT_ID_PENTEST_ATTACK",
+                "AGENT_PENTEST_ATTACK",
+                "PENTEST_ATTACK_AGENT_HANDLER_ID"
+              ]
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "2": {
+            "evidence": {
+              "capability_broker_paths": [
+                "host_brain/capability_plane/production_composition.py"
+              ],
+              "composition_calls": {
+                "build_default_production_model_runtime": {
+                  "allowed_paths": [
+                    "host_brain/composition/process_services.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/composition/process_services.py"
+                  ]
+                },
+                "build_production_capability_runtime": {
+                  "allowed_paths": [
+                    "host_brain/composition/process_services.py"
+                  ],
+                  "count": 1,
+                  "paths": [
+                    "host_brain/composition/process_services.py"
+                  ]
+                }
+              }
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "3": {
+            "evidence": {
+              "large_file_inventory": [
+                {
+                  "classification": "cohesive",
+                  "lines": 6257,
+                  "path": "host_brain/pentest/tools/tool_executors.py",
+                  "rationale": "adapters implement one phase-scoped executor protocol and own no orchestration state",
+                  "responsibility": "pentest tool executor adapter catalog",
+                  "source_sha256": "sha256:3041e7bd3b595b6151e5ccbac8f4aa1c6fb3b5a576d0244cdf806e935bb98ef0"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 4495,
+                  "path": "host_brain/pentest/action_policy.py",
+                  "rationale": "all entries are pure admission rules under one policy authority",
+                  "responsibility": "pentest action admission policy",
+                  "source_sha256": "sha256:7e31932bc28fdd5591ad40d86fe5e0e914bcfdda2f4404821710e01169ae8741"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 4422,
+                  "path": "host_brain/persona/surface_memory_recall.py",
+                  "rationale": "recall evidence selection remains read-only and owns no persistence or transport",
+                  "responsibility": "surface memory recall planning",
+                  "source_sha256": "sha256:abda114155a92181a467fafbbf4a143fb3be2fd847554de5ed9d8e5860ee57f8"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 4158,
+                  "path": "host_brain/persistence/task_repository.py",
+                  "rationale": "SQL mappings and transactional task projections are one persistence boundary",
+                  "responsibility": "canonical task persistence repository",
+                  "source_sha256": "sha256:0c9c492add4ee105b6c76d6c64df61910781e883dd876dd7df89ad9e226b220c"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 4012,
+                  "path": "host_brain/tribe/thalamus_agent.py",
+                  "rationale": "the module owns one tribe-agent routing responsibility and has no independent persistence authority",
+                  "responsibility": "thalamus routing agent",
+                  "source_sha256": "sha256:0585dbec30dc365398d3c0734e090ed182ac15f1ec3dbff6234c1c3adfe6996e"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 3758,
+                  "path": "host_brain/bio_ops/capabilities.py",
+                  "rationale": "capability implementations share one bio-operations protocol and own no independent scheduler",
+                  "responsibility": "bio-operations capability catalog",
+                  "source_sha256": "sha256:f4b914f778e952a1aea9fcfb7f4945d0c83d26759379b604541b61a8a51775b0"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 3344,
+                  "path": "host_brain/app/obs_routes_core.py",
+                  "rationale": "all handlers are projection-only query adapters and own no writer or background runtime",
+                  "responsibility": "legacy-shaped read-only observability route catalog",
+                  "source_sha256": "sha256:0c8acf3bef72be4658630b0b423180aab0ad205228cbd588b42dfb8694446ef9"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 3220,
+                  "path": "host_brain/pentest/autonomous_kernel.py",
+                  "rationale": "the kernel owns one governed pentest decision loop and delegates execution to secure tool ports",
+                  "responsibility": "pentest autonomous decision kernel",
+                  "source_sha256": "sha256:a780570e2d28711ddb3095b112edfa8fee18606420511c2656077e0f14f5fd82"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 3114,
+                  "path": "edge_client/runtime/voice_pipeline.py",
+                  "rationale": "ASR-to-TTS state is isolated inside the standalone Edge runtime",
+                  "responsibility": "Edge voice pipeline",
+                  "source_sha256": "sha256:d01a0811528c2c11cd19189504d6d028128ec9e1424f186b6e9f580a94454b07"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 3100,
+                  "path": "edge_client/actuators/tts_engine.py",
+                  "rationale": "provider adapters implement one Edge-owned speech actuator protocol",
+                  "responsibility": "Edge TTS actuator",
+                  "source_sha256": "sha256:c14a03fd901939247d537fd85a2ff0a22e98dc307028bfd84de449ba3bca7957"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2865,
+                  "path": "host_brain/persistence/scheduler_repository.py",
+                  "rationale": "scheduler journal, lease and outbox transactions share one repository boundary",
+                  "responsibility": "canonical scheduler persistence repository",
+                  "source_sha256": "sha256:c77a808bdb2fad80cf6541d87ef8693e07180a32f476cc2dbd937fa8edf31ae0"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2755,
+                  "path": "host_brain/persona/surface_runtime.py",
+                  "rationale": "the module coordinates one read-only persona presentation pipeline and owns no durable writer",
+                  "responsibility": "persona surface runtime",
+                  "source_sha256": "sha256:272347e0b67077692a3c5410916377f72f7d70dcdb014b22b7752a476fe14262"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2728,
+                  "path": "edge_client/app/fastapi_app.py",
+                  "rationale": "the file contains Edge-owned protocol routes wired to one runtime composition and no Host implementation",
+                  "responsibility": "standalone Edge HTTP adapter",
+                  "source_sha256": "sha256:2be266a637ee1a22f993b6384dfdf2d490fc77b7095416b26c73e89b7cbcb3ec"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2683,
+                  "path": "host_brain/persistence/life_memory_repository.py",
+                  "rationale": "life-memory event and projection SQL is isolated behind one repository",
+                  "responsibility": "canonical life-memory persistence repository",
+                  "source_sha256": "sha256:166dfff0b887f21f7e50c43e95352ea56dbbc22c11804438a41d8e4b191be1d1"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2603,
+                  "path": "edge_client/actuators/vts_driver.py",
+                  "rationale": "VTS session and command handling remain inside one physical-output adapter",
+                  "responsibility": "Edge VTS actuator",
+                  "source_sha256": "sha256:ae3e688b35c8d5b0c3b3ddb50cf7de82c42e0c9f0a0a0bad55f45f8e50d6fbb5"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2554,
+                  "path": "host_brain/memory/life_memory/store.py",
+                  "rationale": "the adapter exposes one memory store protocol and delegates durable transactions to canonical persistence",
+                  "responsibility": "life-memory typed store adapter",
+                  "source_sha256": "sha256:13d329f9097773de1549c8399c8820731c3edff1e575e0daeeaf3f211a029db4"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2496,
+                  "path": "host_brain/skills/impl/system_executor.py",
+                  "rationale": "system operations implement one skill executor protocol behind capability and Governor authority",
+                  "responsibility": "governed system skill executor",
+                  "source_sha256": "sha256:00f45fa2328c87fd4af7fabf6066a5bb75b876c953804667eff8f159e5b0ba69"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2382,
+                  "path": "edge_client/senses/asr.py",
+                  "rationale": "provider adapters implement one Edge-owned speech sensor protocol",
+                  "responsibility": "Edge ASR sensor",
+                  "source_sha256": "sha256:678116167b88c986d44aeecafa742db25a5daef336908cdacde85e292dcd83af"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2371,
+                  "path": "host_brain/integrations/llm_helpers.py",
+                  "rationale": "provider-neutral request and response normalization remains one integration-layer responsibility",
+                  "responsibility": "LLM provider protocol helpers",
+                  "source_sha256": "sha256:3ecb9c17b41a5dbe9092b08a66a2baec3b54a263a01bb9b5f7c73e5646faef2a"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2340,
+                  "path": "host_brain/pentest/kali_bridge.py",
+                  "rationale": "transport, parsing and error mapping implement one external Kali execution port",
+                  "responsibility": "Kali tool bridge adapter",
+                  "source_sha256": "sha256:2fbbd76be85e61fd171bf0b7c4b5fe3762e789c06a008dced11cfef00d838d38"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2339,
+                  "path": "host_brain/memory/life_memory/semantic.py",
+                  "rationale": "semantic extraction and scoring form one memory-domain projection with no direct surface authority",
+                  "responsibility": "life-memory semantic projection",
+                  "source_sha256": "sha256:7537c8727661eea6023bb8d22d5050c18d80934ca08403ad2946226049e31cfb"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2333,
+                  "path": "host_brain/memory/canon_apply_service.py",
+                  "rationale": "all canon mutation validation and apply authority is intentionally centralized",
+                  "responsibility": "world-canon authorized apply service",
+                  "source_sha256": "sha256:9f7fa51bdbbedb866575b5cdefa1daa8d04db219f8492afc23e534985fa1872d"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2198,
+                  "path": "host_brain/persistence/gateway_transport_repository.py",
+                  "rationale": "transport journal, outbox and receipt transactions form one persistence unit",
+                  "responsibility": "durable gateway transport repository",
+                  "source_sha256": "sha256:ae6fcaaf79b40dfd0ae5765c4adda74d9894ff58928b4654c05c8371beea3dff"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2172,
+                  "path": "host_brain/persona/reply_plan.py",
+                  "rationale": "reply candidates and presentation policy form one pure planning unit",
+                  "responsibility": "deterministic reply-plan construction",
+                  "source_sha256": "sha256:2c9ba5c49838f58078f938130439a7f8c690a60237686ffa1068e209514f0891"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 2076,
+                  "path": "host_brain/app/obs_routes_life_body.py",
+                  "rationale": "all handlers adapt the canonical life-body projection without owning state mutation",
+                  "responsibility": "read-only life-body observability routes",
+                  "source_sha256": "sha256:1b3c5595a3cf12994f1b857beee3d3b580ad2a218c02ad30e70aa1adde231d92"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1935,
+                  "path": "host_brain/tribe/limbic_agent.py",
+                  "rationale": "the module owns one tribe-agent appraisal responsibility and emits typed proposals only",
+                  "responsibility": "limbic agent policy",
+                  "source_sha256": "sha256:0fd8cca17ef10e87c13f69e8764637089a1a90116cbef3380356055afc25ca96"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1913,
+                  "path": "host_brain/persona/surface/candidate_scoring.py",
+                  "rationale": "all functions implement deterministic scoring under one presentation policy",
+                  "responsibility": "pure surface candidate scoring",
+                  "source_sha256": "sha256:8f64568be6c6735979d6706b89c41a05417b08494dc1b8d5f6995767c167fa48"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1810,
+                  "path": "host_brain/persistence/life_command_repository.py",
+                  "rationale": "life command journal and fenced aggregate state share one transaction boundary",
+                  "responsibility": "canonical life command repository",
+                  "source_sha256": "sha256:321ab9cc07366dfb981e8039869fb6ce5334f6f60763f1f70904781b09680299"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1747,
+                  "path": "host_brain/persistence/experience_repository.py",
+                  "rationale": "experience journal and projections are a single persistence boundary",
+                  "responsibility": "canonical experience repository",
+                  "source_sha256": "sha256:dcbdfd373d5d1e8a1401b24430702e21406943ca75f046414fd253caef5060df"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1695,
+                  "path": "host_brain/pentest/agent/cognitive_engine.py",
+                  "rationale": "the module performs one security-domain planning responsibility without direct tool authority",
+                  "responsibility": "pentest cognitive planning engine",
+                  "source_sha256": "sha256:76a8a7aca6881227bd803e7269ec2f89acdecd5024efd9f1598b611ae7c6d2df"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1692,
+                  "path": "host_brain/agent_runtime/lightnovel_deep_reviewer.py",
+                  "rationale": "the module performs one domain-specific evidence review pipeline without owning runtime composition",
+                  "responsibility": "light-novel evidence review",
+                  "source_sha256": "sha256:ad4b3d0dd9e5f591addd223eaece7a1d345f9bcfc9bb09e4100ce1b49bc5a725"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1685,
+                  "path": "host_brain/app/surface_reply_preprocessor.py",
+                  "rationale": "the module performs deterministic reply normalization before the single surface response boundary",
+                  "responsibility": "surface reply preprocessing",
+                  "source_sha256": "sha256:9af8e15cc3182d08638a11114b330e51962ac8101ab71742029c1df31f729822"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1664,
+                  "path": "host_brain/memory/life_memory/utils.py",
+                  "rationale": "the module contains deterministic memory-domain transforms and owns no service or connection",
+                  "responsibility": "pure life-memory normalization helpers",
+                  "source_sha256": "sha256:477523bd1d31ebe79805862f85908968a4c7adf0755a0b8d5ca7f37edf264477"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1631,
+                  "path": "host_brain/persona/galgame_text_contract.py",
+                  "rationale": "the module defines and validates one presentation contract without runtime state ownership",
+                  "responsibility": "declarative galgame text contract",
+                  "source_sha256": "sha256:4418866ba13759f8efb96e2ceea7cdae08f7f5a927412dccd3bf1e8f8fd06c48"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1627,
+                  "path": "host_brain/observability/degradation_state.py",
+                  "rationale": "all transitions belong to one deterministic degradation-state aggregate",
+                  "responsibility": "dependency degradation state machine",
+                  "source_sha256": "sha256:0bda23bf4934f9d2a5905f3f763bfc9484d2291d6dd6d0548954855fbf344823"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1605,
+                  "path": "host_brain/tribe/prefrontal_agent.py",
+                  "rationale": "the module owns one tribe-agent planning responsibility and emits typed proposals only",
+                  "responsibility": "prefrontal agent policy",
+                  "source_sha256": "sha256:b102fc770c55ef45a15ba6a5242a3d448dc5eb8038f1f87a364bde78785d00c7"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1597,
+                  "path": "host_brain/integrations/codex_cli_provider.py",
+                  "rationale": "provider process invocation and response parsing implement one external model-provider port",
+                  "responsibility": "Codex CLI provider adapter",
+                  "source_sha256": "sha256:133347c90b6a1e31ec0b120aff02b5d9196dd1eba00656e40649b08b1ac5fd09"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1587,
+                  "path": "host_brain/persona/surface/scene_constants.py",
+                  "rationale": "the file is declarative constants without runtime authority",
+                  "responsibility": "immutable scene policy data",
+                  "source_sha256": "sha256:4e76371262bdd4c4ff3c23857f1641adbedca57f6f9d4afc719c572d8a23a7a5"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1578,
+                  "path": "host_brain/release/identity_snapshot.py",
+                  "rationale": "identity migration evidence is a single release-domain artifact",
+                  "responsibility": "release identity snapshot generation",
+                  "source_sha256": "sha256:a5da40f41ac8c9d8f6a90e443354308a4454282bb7de1ce0bc597d32734394b6"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1513,
+                  "path": "host_brain/channels/mateengine.py",
+                  "rationale": "the module implements one versioned channel transport and delegates authority to canonical ingress",
+                  "responsibility": "MateEngine channel adapter",
+                  "source_sha256": "sha256:1e73beaec5aab2e2d8b218af2889e3548a12fce859bfb3b48970d639db6329d5"
+                },
+                {
+                  "classification": "cohesive",
+                  "lines": 1507,
+                  "path": "host_brain/persona/proactive_voice.py",
+                  "rationale": "voice candidate construction is pure planning and delegates physical output to the durable outbox",
+                  "responsibility": "proactive voice planning",
+                  "source_sha256": "sha256:ff9eeeb741f7701048abadf5d6113b0822ba45bffd48227adf361b0486372a2f"
+                }
+              ],
+              "mixed_inventory_count": 0,
+              "new_mixed_over_800_lines": [],
+              "new_over_800_lines": [],
+              "policy_entry_count": 43
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "4": {
+            "evidence": {
+              "anchors": [
+                "host_brain/task_runtime/coordinator.py",
+                "host_brain/orchestration/governor_grant.py",
+                "tests/unit/test_aw04_governor_grant_binding.py",
+                "tests/unit/test_aw02_governed_task_coordinator.py"
+              ],
+              "legacy_authority_hits": []
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "5": {
+            "evidence": {
+              "contract_ref": "tests/contract/test_nle_verification_gate_contract.py",
+              "policy_ref": "host_brain/agent_runtime/verification_policy.py"
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "6": {
+            "evidence": {
+              "anchors": [
+                "host_brain/observability/projection_store.py",
+                "host_brain/app/observability_runtime/projection_daemon.py",
+                "host_brain/audit/migrations/0082_operator_query_projection.sql",
+                "host_brain/audit/migrations/0083_host_embodiment_outbox.sql",
+                "edge_client/gateway/migrations/0001_embodiment_transport.sql",
+                "tests/integration/test_aw07_query_projection_rebuild_reconcile.py"
+              ],
+              "projection_daemon_start_sites": [
+                "host_brain/app/obs_fastapi_app.py"
+              ]
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "7": {
+            "evidence": {
+              "outbox_anchors": [
+                "host_brain/persistence/life_command_repository.py",
+                "host_brain/persistence/scheduler_repository.py",
+                "host_brain/persistence/gateway_transport_repository.py"
+              ],
+              "surface_build_write_calls": [],
+              "surface_sqlite_imports": []
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "8": {
+            "evidence": {
+              "anchors": [
+                "host_brain/pentest/knowledge_store.py",
+                "host_brain/memory/canon_apply_service.py",
+                "tests/contract/test_pentest_knowledge_store_contract.py"
+              ],
+              "chat_private_imports": []
+            },
+            "issues": [],
+            "status": "PASS"
+          },
+          "9": {
+            "evidence": {
+              "anchors": [
+                "host_brain/observability/secure_command_ingress.py",
+                "host_brain/observability/command_http.py",
+                "host_brain/composition/command_ingress.py",
+                "edge_client/gateway/webhook_security.py",
+                "tests/security/test_secure_ingress_identity_contract.py"
+              ],
+              "control_tokens": [
+                "principal",
+                "scope",
+                "signature",
+                "rate",
+                "idempot",
+                "audit"
+              ]
+            },
+            "issues": [],
+            "status": "PASS"
+          }
+        },
+        "policy_ref": "configs/release/core_architecture_policy.json",
+        "policy_sha256": "sha256:45892dcf2d139f300fc45a75ad45c20072beff41ebd7c59a99ba4aff7feb7e3c",
+        "schema_version": "natsume.core-architecture-static-receipt.v1",
+        "status": "PASS"
+      },
+      "exit_code": 0,
+      "finished_at": "2026-07-13T10:58:07.315534+00:00",
+      "log_ref": "docs/50_release/core/runs/aw08-core-final-20260713/architecture_static_gates.attempt-2.log",
+      "stage_id": "architecture_static_gates",
+      "started_at": "2026-07-13T10:57:43.348047+00:00",
+      "status": "PASS"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "-m",
+        "not hw and not prod_env and not runtime_probe and not docker"
+      ],
+      "detail": "command returned non-zero",
+      "duration_ms": 1249827,
+      "evidence": {},
+      "exit_code": 1,
+      "finished_at": "2026-07-13T11:18:57.154775+00:00",
+      "log_ref": "docs/50_release/core/runs/aw08-core-final-20260713/offline_pytest.attempt-2.log",
+      "stage_id": "offline_pytest",
+      "started_at": "2026-07-13T10:58:07.324712+00:00",
+      "status": "FAIL"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_aw04_governor_grant_binding.py",
+        "tests/contract/test_nle_verification_gate_contract.py",
+        "tests/unit/test_aw02_governed_task_coordinator.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.167027+00:00",
+      "log_ref": null,
+      "stage_id": "authority_lineage_contracts",
+      "started_at": "2026-07-13T11:18:57.167027+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_nle_canonical_contracts.py",
+        "tests/contract/test_nle_task_store_contract.py",
+        "tests/contract/test_nle_runtime_event_contract.py",
+        "tests/contract/test_nle_operator_read_model_contract.py",
+        "tests/contract/test_aw06c_edge_transport_contract.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.177531+00:00",
+      "log_ref": null,
+      "stage_id": "contract_schema_contracts",
+      "started_at": "2026-07-13T11:18:57.177531+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_aw07_query_projection_spine.py",
+        "tests/contract/test_obs_query_only_boundary.py",
+        "tests/unit/test_aw02_governed_scheduler_runtime.py",
+        "tests/unit/test_aw04_app_life_boundary.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.187543+00:00",
+      "log_ref": null,
+      "stage_id": "state_outbox_contracts",
+      "started_at": "2026-07-13T11:18:57.187543+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_pentest_knowledge_store_contract.py",
+        "tests/contract/test_aw03_pentest_knowledge_repository.py",
+        "tests/security/test_secure_ingress_identity_contract.py",
+        "tests/security/test_obs_secure_command_ingress.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.197051+00:00",
+      "log_ref": null,
+      "stage_id": "namespace_security_contracts",
+      "started_at": "2026-07-13T11:18:57.197051+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_aw03_global_sqlite_boundary.py",
+        "tests/contract/test_aw03_observability_named_query_boundary.py",
+        "tests/contract/test_aw03_secure_ingress_repository_boundary.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.207255+00:00",
+      "log_ref": null,
+      "stage_id": "persistence_boundary_contracts",
+      "started_at": "2026-07-13T11:18:57.207255+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_task0490_skill_supply_chain_migration_contract.py",
+        "tests/security/test_skill_supply_chain.py",
+        "tests/security/test_skill_supply_chain_quarantine.py",
+        "tests/contract/test_sandbox_contract.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.216761+00:00",
+      "log_ref": null,
+      "stage_id": "service_bundle_contracts",
+      "started_at": "2026-07-13T11:18:57.216761+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_obs_query_only_boundary.py",
+        "tests/contract/test_aw07_operator_query_privacy_contract.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.225886+00:00",
+      "log_ref": null,
+      "stage_id": "operator_query_contracts",
+      "started_at": "2026-07-13T11:18:57.225886+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/e2e/test_task0495_m48b_p0_golden_fault_matrix.py",
+        "tests/contract/test_replay_tool_contract.py",
+        "tests/contract/test_nle_identity_snapshot_contract.py",
+        "tests/integration/test_dialogue_state_repeat_identity.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.235075+00:00",
+      "log_ref": null,
+      "stage_id": "golden_replay_chaos_identity",
+      "started_at": "2026-07-13T11:18:57.235075+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "check:operator-client"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.245586+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_generated_client",
+      "started_at": "2026-07-13T11:18:57.245586+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.255094+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_typecheck",
+      "started_at": "2026-07-13T11:18:57.255094+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "test:operator-client"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.262358+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_operator_client_tests",
+      "started_at": "2026-07-13T11:18:57.262358+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "test:read-model"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.270871+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_read_model_tests",
+      "started_at": "2026-07-13T11:18:57.270871+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.277870+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_build",
+      "started_at": "2026-07-13T11:18:57.277870+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.285378+00:00",
+      "log_ref": null,
+      "stage_id": "monitor_interaction_smoke",
+      "started_at": "2026-07-13T11:18:57.285378+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/contract/test_aw06_edge_standalone_package.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.295034+00:00",
+      "log_ref": null,
+      "stage_id": "edge_standalone",
+      "started_at": "2026-07-13T11:18:57.295034+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.304070+00:00",
+      "log_ref": null,
+      "stage_id": "migration_backup_restore",
+      "started_at": "2026-07-13T11:18:57.304070+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.313087+00:00",
+      "log_ref": null,
+      "stage_id": "isolated_runtime_http_drill",
+      "started_at": "2026-07-13T11:18:57.313087+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.322595+00:00",
+      "log_ref": null,
+      "stage_id": "rollback_drill",
+      "started_at": "2026-07-13T11:18:57.322595+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/security"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.331105+00:00",
+      "log_ref": null,
+      "stage_id": "security_smoke",
+      "started_at": "2026-07-13T11:18:57.331105+00:00",
+      "status": "SKIPPED"
+    },
+    {
+      "command": [
+        "C:\\Program Files\\Python311\\python.exe",
+        "-m",
+        "pytest",
+        "tests/integration/test_performance_budget.py",
+        "tests/contract/test_perf_baseline_contract.py",
+        "tests/contract/test_timeline_perf_contract.py"
+      ],
+      "detail": "skipped after a failure in this explicit resume attempt",
+      "duration_ms": 0,
+      "evidence": {},
+      "exit_code": null,
+      "finished_at": "2026-07-13T11:18:57.340105+00:00",
+      "log_ref": null,
+      "stage_id": "performance_smoke",
+      "started_at": "2026-07-13T11:18:57.340105+00:00",
+      "status": "SKIPPED"
+    }
+  ],
+  "started_at": "2026-07-13T09:20:19.437383+00:00",
+  "status": "FAIL"
+}

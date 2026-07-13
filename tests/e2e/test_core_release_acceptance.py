@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,8 +13,11 @@ from tools.run_core_release import (
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_SKIPPED,
+    _default_stage_runner,
     _evaluate_architecture_gates,
+    _resolve_subprocess_command,
     _run_isolated_migration_backup_restore,
+    _run_monitor_ui_interaction_smoke,
     _run_rollback_drill,
     build_acceptance_plan,
     main,
@@ -95,6 +99,111 @@ def test_core_release_plan_is_complete_and_has_one_repository_wide_pytest() -> N
     interaction = next(stage for stage in plan if stage.stage_id == "monitor_interaction_smoke")
     assert interaction.kind == "internal"
     assert "real isolated Obs process" in interaction.description
+
+
+def test_subprocess_command_resolves_windows_npm_shim_and_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    npm_cmd = tmp_path / "npm.CMD"
+    observed: list[tuple[str, str | None]] = []
+
+    def fake_which(executable: str, *, path: str | None = None) -> str | None:
+        observed.append((executable, path))
+        return str(npm_cmd) if executable == "npm" else None
+
+    monkeypatch.setattr("tools.run_core_release.shutil.which", fake_which)
+    resolved = _resolve_subprocess_command(
+        ("npm", "run", "build"),
+        environment={"PATH": "test-path"},
+    )
+
+    assert resolved == (str(npm_cmd.resolve()), "run", "build")
+    assert observed == [("npm", "test-path")]
+    with pytest.raises(FileNotFoundError, match="could not be resolved"):
+        _resolve_subprocess_command(("missing-tool",), environment={"PATH": "test-path"})
+
+
+def test_command_stage_launches_resolved_executable_and_records_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    npm_cmd = tmp_path / "npm.CMD"
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        "tools.run_core_release.shutil.which",
+        lambda _executable, *, path=None: str(npm_cmd),
+    )
+
+    def fake_run(command: list[str], **_kwargs):
+        launched.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("tools.run_core_release.subprocess.run", fake_run)
+    stage = AcceptanceStage("monitor_build", "command", ("npm", "run", "build"))
+    outcome = _default_stage_runner(stage, tmp_path, run_dir, "npm-resolution-test")
+
+    assert outcome.status == STATUS_PASS
+    assert launched == [[str(npm_cmd.resolve()), "run", "build"]]
+    resolution = dict((outcome.evidence or {})["executable_resolution"])
+    assert resolution == {
+        "method": "shutil.which",
+        "requested_executable": "npm",
+        "resolved_executable": str(npm_cmd.resolve()),
+    }
+
+
+def test_monitor_interaction_smoke_resolves_npm_exec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "host_brain/app/monitor_ui").mkdir(parents=True)
+    npm_cmd = tmp_path / "npm.CMD"
+    resolved_requests: list[tuple[str, ...]] = []
+    launched: list[list[str]] = []
+
+    class FakeProcess:
+        pid = 1234
+        returncode: int | None = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            return self.returncode
+
+    def fake_resolve(command, *, environment=None):  # noqa: ANN001, ARG001
+        resolved_requests.append(tuple(command))
+        return (str(npm_cmd.resolve()), *(str(value) for value in command[1:]))
+
+    monkeypatch.setattr("tools.run_core_release._reserve_loopback_port", lambda: 19001)
+    monkeypatch.setattr("tools.run_core_release.subprocess.Popen", lambda *_args, **_kwargs: FakeProcess())
+    monkeypatch.setattr(
+        "tools.run_core_release._wait_for_http_json",
+        lambda *_args, **_kwargs: {
+            "status_code": 200,
+            "payload": {"projection": {"schema_version": "test.v1"}},
+        },
+    )
+    monkeypatch.setattr("tools.run_core_release._resolve_subprocess_command", fake_resolve)
+
+    def fake_run(command: list[str], **_kwargs):
+        launched.append(command)
+        return SimpleNamespace(returncode=0, stdout="passed", stderr="")
+
+    monkeypatch.setattr("tools.run_core_release.subprocess.run", fake_run)
+    result = _run_monitor_ui_interaction_smoke(root=tmp_path, run_id="npm-interaction-test")
+
+    assert resolved_requests == [
+        ("npm", "exec", "playwright", "--", "test", "e2e/core-release-real-interaction.spec.js")
+    ]
+    assert launched[0][0] == str(npm_cmd.resolve())
+    assert result["npm_executable_resolution"]["resolved_executable"] == str(npm_cmd.resolve())
 
 
 def test_acceptance_is_fail_fast_and_never_automatically_retries(tmp_path: Path) -> None:

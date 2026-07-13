@@ -1059,6 +1059,25 @@ def read_aw08_state(root: str | Path) -> str | None:
     return str(match.group(1)).strip() if match else None
 
 
+def _resolve_subprocess_command(
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Resolve an executable before launch, including Windows ``.cmd`` shims."""
+
+    if not command or not str(command[0]).strip():
+        raise ValueError("acceptance subprocess command has no executable")
+    requested = str(command[0]).strip()
+    search_path = None if environment is None else environment.get("PATH")
+    resolved = shutil.which(requested, path=search_path)
+    if not resolved:
+        raise FileNotFoundError(
+            f"acceptance executable could not be resolved with shutil.which: {requested}"
+        )
+    return (str(Path(resolved).resolve()), *(str(argument) for argument in command[1:]))
+
+
 def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run_id: str) -> StageOutcome:
     started_at = _utc_now()
     started = time.monotonic()
@@ -1128,10 +1147,29 @@ def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run
         }
     )
     print(f"[core-release:{run_id}] START {stage.stage_id}", flush=True)
+    resolution_evidence: dict[str, Any] = {
+        "method": "shutil.which",
+        "requested_executable": str(stage.command[0]),
+        "resolved_executable": None,
+    }
     try:
+        resolved_command = _resolve_subprocess_command(
+            stage.command,
+            environment=environment,
+        )
+        resolution_evidence["resolved_executable"] = resolved_command[0]
         with log_path.open("w", encoding="utf-8", newline="\n") as log:
+            log.write(
+                json.dumps(
+                    {"executable_resolution": resolution_evidence},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            log.flush()
             completed = subprocess.run(
-                list(stage.command),
+                list(resolved_command),
                 cwd=cwd,
                 env=environment,
                 stdout=log,
@@ -1154,9 +1192,19 @@ def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run
             exit_code=int(completed.returncode),
             log_ref=_repo_ref(root, log_path),
             detail=detail,
+            evidence={"executable_resolution": resolution_evidence},
         )
     except BaseException as exc:
-        _atomic_write_text(log_path, f"{type(exc).__name__}: {exc}\n")
+        resolution_evidence["error"] = f"{type(exc).__name__}: {exc}"
+        _atomic_write_text(
+            log_path,
+            json.dumps(
+                {"executable_resolution": resolution_evidence},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+        )
         return _outcome(
             stage,
             status=STATUS_FAIL,
@@ -1165,6 +1213,7 @@ def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run
             exit_code=None,
             log_ref=_repo_ref(root, log_path),
             detail=f"command could not start: {type(exc).__name__}: {exc}",
+            evidence={"executable_resolution": resolution_evidence},
         )
 
 
@@ -2055,8 +2104,20 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
             )
             try:
                 health = _wait_for_http_json(f"{obs_url}/health", process=process, timeout_s=75)
+                npm_requested_command = (
+                    "npm",
+                    "exec",
+                    "playwright",
+                    "--",
+                    "test",
+                    "e2e/core-release-real-interaction.spec.js",
+                )
+                npm_resolved_command = _resolve_subprocess_command(
+                    npm_requested_command,
+                    environment=environment,
+                )
                 completed = subprocess.run(
-                    ["npm", "exec", "playwright", "--", "test", "e2e/core-release-real-interaction.spec.js"],
+                    list(npm_resolved_command),
                     cwd=monitor,
                     env=environment,
                     capture_output=True,
@@ -2085,6 +2146,11 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
             "monitor_preview_port": ui_port,
             "playwright_exit_code": int(completed.returncode),
             "playwright_output_sha256": f"sha256:{hashlib.sha256(output.encode()).hexdigest()}",
+            "npm_executable_resolution": {
+                "method": "shutil.which",
+                "requested_executable": npm_requested_command[0],
+                "resolved_executable": npm_resolved_command[0],
+            },
             "api_stubs_used": False,
         }
 
