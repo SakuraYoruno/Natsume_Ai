@@ -176,8 +176,10 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
 
     try:
         from host_brain.app.settings.persistence import get_persistence_settings
+        from host_brain.input_runtime.settings import get_input_settings
 
         get_persistence_settings.cache_clear()
+        get_input_settings.cache_clear()
     except Exception:
         pass
 
