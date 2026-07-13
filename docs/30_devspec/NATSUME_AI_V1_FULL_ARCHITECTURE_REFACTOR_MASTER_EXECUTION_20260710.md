@@ -3,11 +3,11 @@
 
 # Natsume AI V1 完整架构重构执行合同（Architecture Waves v2）
 
-版本：v2.0
-日期：2026-07-12
-状态：`ACTIVE_ARCHITECTURE_EXECUTION`
+版本：v2.1
+日期：2026-07-13
+状态：`CORE_RELEASE_DONE`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-07 已完成，AW-08 已进入 `CODE_COMPLETE`，等待唯一一次 Program Acceptance
+当前代码基线：`codex/m48-integration`，AW-00～AW-08 全部 `DONE`；Core Release Program Acceptance 22/22 stages `PASS`，Final Architecture Gate 1～15 全部 `PASS`，验收源提交 `d59f1e4b38ef2289bd741e90666927d9f3d19505`
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -291,7 +291,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-08：兼容层退役与 Core Release
 
-状态：`CODE_COMPLETE`
+状态：`DONE`
 
 目标：在单一生产架构成立后删除全部旧 authority，完成核心架构的唯一完整验收和可回滚发布。Evolution Lab、Skill Compiler、Counterfactual、Knowledge OS 与 Identity Migration 的新增能力移到 Core Release 之后的独立 Follow-up Goal，不能反向阻塞核心架构封板。
 
@@ -309,7 +309,10 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 - Core 收口提交为 `1,061 files changed / 47,869 insertions / 94,908 deletions`，其中删除文件 `277` 个，production/tool 路径删除 `194` 个；compatibility registry 为 `active=0 / usage=0`，retired path remaining 为 0。
 - Slice / readiness 证据：Pentest `93 passed` 与 autonomous planner `56 passed`；Input explicit-port contract `5 passed`、ASGI `142` routes；最终精确回归 `16 passed`。全仓 collect-only 首次只发现 4 个陈旧 import，相关 12 个节点修复后 `12 collected`；`compileall`、`git diff --check` 和目标层 reverse-dependency audit（violations=[]）通过。
 - Final Architecture 静态 Gate 1～14 独立评估全部 `PASS`；隔离临时数据库 ASGI lifecycle smoke 为 `142 routes / health=200 / required routes missing=[]`。全仓历史业务域仍存在一个 27-package SCC，不冒充“全仓无环”；Gate 1 约束的目标层双向依赖与 Edge→Host 实现导入均为 0。
-- Program Acceptance 尚未执行；下一步只运行一次完整离线、真实隔离 HTTP/UI/Edge、migration/backup/restore、security/performance 与 rollback drill，结果决定 `DONE` 或精确修复。
+- Program Acceptance 已完成：唯一 run id `aw08-core-final-20260713` 的最终提交为 `d59f1e4b38ef2289bd741e90666927d9f3d19505`，22/22 stage `PASS`，每个 `stage_source_commit` 均绑定该提交；`resume_count=5`、`automatic_retry_count=0`，所有失败尝试和日志均保留在同一 run 目录，未把失败手工改写为通过。
+- 最终离线全量为 `8264 passed / 8 skipped / 126 deselected / 0 failed / 0 errors`（23 分钟内完成）；Final Architecture 静态 Gate 1～14 全部 `PASS`。前序 fail-fast 尝试暴露并修复了测试账本所有权与 settings cache 污染、Windows `npm.cmd` 启动、Async Life lease heartbeat 的 event-loop/shared-executor 饥饿，以及 Obs standalone composition/world-root 缺口。
+- 真实发布验证全部通过：generated client drift、TypeScript、Operator/read-model tests、Monitor production build 与无 stub 浏览器交互；Edge standalone；migration asset `68`、latest `0083`、backup/restore integrity=`ok`；Obs 同库冷启动 `2` 次、migration head `83`、database integrity=`ok`；rollback drill；security `355 passed / 2 environment skips`；performance `37 passed`。
+- 最终签名回执：`docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json`；根回执：`docs/50_release/core/ACCEPTANCE_RECEIPT.json`。Core Release Manifest、SBOM 与 Rollback Matrix 已冻结，核心架构不再保持 `CODE_COMPLETE` 或 `PROGRAM_ACCEPTANCE` 中间状态。
 
 状态流：`IN_PROGRESS → CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`。代码删除、manifest 和本地构建完成后进入 `CODE_COMPLETE`；随后只运行一次完整离线套件、真实隔离环境 smoke、迁移/恢复、性能/安全和 rollback drill。通过第 9 节 Final Architecture Gate 后才进入 `DONE`。只有外部环境尚不可用时使用 `ACCEPTANCE_PENDING_EXTERNAL`，不得保持代码波 `IN_PROGRESS` 或重复已通过的本地全量验证。
 
@@ -428,6 +431,8 @@ AW-08 只有在以下全部成立时才完成：
 14. compatibility facade、旧 writer/runtime/scheduler/flag 和 dead fallback usage=0 并已删除。
 15. 完整离线套件、golden/replay/chaos/security/performance、真实隔离 smoke、identity regression、migration/restore 和 rollback drill 一次通过。
 
+最终结果（2026-07-13）：Gate 1～15 全部满足；Program Acceptance 回执状态为 `PASS`，AW-08 与本执行合同进入 `DONE`。
+
 任何失败都必须对应真实代码、数据或环境缺口。不得用新增文档、任务编号或批准状态替代 Gate。
 
 ---
@@ -463,8 +468,8 @@ AW-08 只有在以下全部成立时才完成：
 | AW-05 | `DONE` | ModelAttempt/Prompt/Route、Capability Broker、durable Skill/MCP authority 与三类 Domain Pack 已完成 production cutover；无 P0/P1 |
 | AW-06 | `DONE` | Edge/Host 显式实现导入归零，设备单 authority、durable lease/fence/receipt 与 reconnect no-replay 已切流；无 P0/P1 |
 | AW-07 | `DONE` | durable projection/lease/fence/rebuild、Query auth/privacy、generated BFF command client 已切流；无 P0/P1 |
-| AW-08 | `CODE_COMPLETE` | compatibility facade、旧 writer/runtime/scheduler/flag、Pentest 旁路与生成污染已删除；静态 Gate 1～14 PASS，等待唯一一次 Program Acceptance |
+| AW-08 | `DONE` | compatibility facade、旧 authority/Pentest 旁路与生成污染已删除；Program Acceptance 22/22 stages PASS，最终回执绑定 `d59f1e4b` |
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-08 的立即执行顺序：按 `Model/Prompt → Life/Memory/Evidence → Capability/Agent/Task → Edge/Gateway → Obs/release hygiene` 五个删除包并行；每个 facade 先以 production reference scan 证明 usage=0，再删除实现、re-export、flag 和 dead fallback。所有删除汇合后生成唯一 Core Release Manifest/SBOM/Rollback Matrix，进入 `CODE_COMPLETE`，随后只执行一次 Program Acceptance。
+AW-08 已按 `Model/Prompt → Life/Memory/Evidence → Capability/Agent/Task → Edge/Gateway → Obs/release hygiene` 完成五个删除包和 production reference scan；Core Release Manifest/SBOM/Rollback Matrix 及 Program Acceptance 回执已冻结。后续工作只进入独立 Evolution Follow-up Goal，不得重新引入已退休 authority 或绕过已封板的 contracts/governance/persistence。

@@ -1,142 +1,480 @@
 {
   "acceptance": {
-    "result_ref": "",
-    "run_id": ""
+    "result_ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json",
+    "run_id": "aw08-core-final-20260713"
   },
   "architecture_gates": [
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:1",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=1",
+          "status": "PASS"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=1"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=1",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone"
       ],
       "gate": 1,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "package dependency and Edge boundary"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:2",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=2",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=2"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=2"
       ],
       "gate": 2,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "single composition root and app truth boundary"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:3",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=3",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=3"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=3"
       ],
       "gate": 3,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "mixed-responsibility production file limits"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:4",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=4",
+          "status": "PASS"
+        },
+        {
+          "id": "authority_lineage_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=4"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=4",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
       ],
       "gate": 4,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "single grant, lineage and side-effect receipt"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:5",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=5",
+          "status": "PASS"
+        },
+        {
+          "id": "authority_lineage_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=5"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=5",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=authority_lineage_contracts"
       ],
       "gate": 5,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "verification commit guard"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:6",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=6",
+          "status": "PASS"
+        },
+        {
+          "id": "state_outbox_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=6"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=6",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
       ],
       "gate": 6,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "single writer and rebuildable projections"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:7",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=7",
+          "status": "PASS"
+        },
+        {
+          "id": "state_outbox_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=7"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=7",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=state_outbox_contracts"
       ],
       "gate": 7,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "zero-write surface and durable outbox"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:8",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=8",
+          "status": "PASS"
+        },
+        {
+          "id": "namespace_security_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=8"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=8",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts"
       ],
       "gate": 8,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "knowledge namespace and promotion boundary"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:9",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=9",
+          "status": "PASS"
+        },
+        {
+          "id": "namespace_security_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=9"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=9",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=namespace_security_contracts"
       ],
       "gate": 9,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "authenticated and audited write ingress"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:10",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=10",
+          "status": "PASS"
+        },
+        {
+          "id": "persistence_boundary_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=persistence_boundary_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "migration_backup_restore",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=10"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=10",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=persistence_boundary_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore"
       ],
       "gate": 10,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "migration-only DDL and canonical persistence"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:11",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=11",
+          "status": "PASS"
+        },
+        {
+          "id": "service_bundle_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=service_bundle_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=11"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=11",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=service_bundle_contracts"
       ],
       "gate": 11,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "single production services and signed bundle supply chain"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:12",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=12",
+          "status": "PASS"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "PASS"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=12"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=12",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts"
       ],
       "gate": 12,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "standalone Edge and unique physical-output authority"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:13",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=13",
+          "status": "PASS"
+        },
+        {
+          "id": "operator_query_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=operator_query_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "monitor_generated_client",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_generated_client",
+          "status": "PASS"
+        },
+        {
+          "id": "monitor_interaction_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=13"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=13",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=operator_query_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_generated_client",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke"
       ],
       "gate": 13,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "pure Operator query and generated UI client"
     },
     {
+      "evidence": [
+        {
+          "id": "architecture_static_gates:14",
+          "kind": "static_gate",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=14",
+          "status": "PASS"
+        },
+        {
+          "id": "compatibility_registry_empty",
+          "kind": "check",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=compatibility_registry_empty",
+          "status": "PASS"
+        },
+        {
+          "id": "retired_paths_absent",
+          "kind": "check",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=retired_paths_absent",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=14"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=architecture_static_gates&gate=14",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=compatibility_registry_empty",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#check=retired_paths_absent"
       ],
       "gate": 14,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "retired compatibility authorities"
     },
     {
+      "evidence": [
+        {
+          "id": "offline_pytest",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=offline_pytest",
+          "status": "PASS"
+        },
+        {
+          "id": "contract_schema_contracts",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+          "status": "PASS"
+        },
+        {
+          "id": "golden_replay_chaos_identity",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=golden_replay_chaos_identity",
+          "status": "PASS"
+        },
+        {
+          "id": "isolated_runtime_http_drill",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=isolated_runtime_http_drill",
+          "status": "PASS"
+        },
+        {
+          "id": "migration_backup_restore",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+          "status": "PASS"
+        },
+        {
+          "id": "rollback_drill",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=rollback_drill",
+          "status": "PASS"
+        },
+        {
+          "id": "security_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=security_smoke",
+          "status": "PASS"
+        },
+        {
+          "id": "performance_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=performance_smoke",
+          "status": "PASS"
+        },
+        {
+          "id": "edge_standalone",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+          "status": "PASS"
+        },
+        {
+          "id": "monitor_interaction_smoke",
+          "kind": "stage",
+          "ref": "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke",
+          "status": "PASS"
+        }
+      ],
       "evidence_refs": [
-        "docs/50_release/core/PREPARE_RECEIPT.json#gate=15"
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=offline_pytest",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=contract_schema_contracts",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=golden_replay_chaos_identity",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=isolated_runtime_http_drill",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=migration_backup_restore",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=rollback_drill",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=security_smoke",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=performance_smoke",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=edge_standalone",
+        "docs/50_release/core/runs/aw08-core-final-20260713/acceptance_receipt.json#stage=monitor_interaction_smoke"
       ],
       "gate": 15,
-      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
-      "status": "PENDING",
+      "issues": [],
+      "run_id": "aw08-core-final-20260713",
+      "status": "PASS",
       "title": "complete program acceptance"
     }
   ],
@@ -417,7 +755,7 @@
       }
     },
     "release_acceptance": {
-      "digest": "sha256:b481aa1392ef30c28ceca3c7c8f3c4f6e201d8d7cdff6cefc2e27c8efa2bde72",
+      "digest": "sha256:7659dac9f2294fd3a13b05d3d9c2a14ec5e98006d7703460d0831d3a8de8afaf",
       "file_count": 7,
       "files": {
         "configs/release/core_architecture_policy.json": "sha256:45892dcf2d139f300fc45a75ad45c20072beff41ebd7c59a99ba4aff7feb7e3c",
@@ -425,8 +763,8 @@
         "host_brain/app/monitor_ui/playwright.config.js": "sha256:b3bb0fa026e611245b79098c675b1fe92ac2f6ba4ef81410826fb574d8ee05a4",
         "host_brain/app/monitor_ui/vite.config.js": "sha256:15c6af49ba810f655890a0bf7261dca602d275ef1929ffeb262560246fb1159c",
         "tests/contract/test_core_release_manifest_contract.py": "sha256:6b6ffd6689207c5410f579dddd57fd5e6a4ab1e8c95d4daac9c7dd5d942a3f62",
-        "tests/e2e/test_core_release_acceptance.py": "sha256:a4fd831cd1057e821e0d0c0758048abed3d18a3522e733019d1e839615d33a4a",
-        "tools/run_core_release.py": "sha256:9e560216aea993f7451e9bb0669a44c702097d9242c99ca991ff06c9b1dfb4a3"
+        "tests/e2e/test_core_release_acceptance.py": "sha256:76532ff67852f7c9f7582791c56ac94131e0ba9d6170f88649fd0130a331f366",
+        "tools/run_core_release.py": "sha256:d3d27f419f23fe168a16e6425841597cd73bb736aaf71b20da4f2cf9eb05e302"
       }
     }
   },
@@ -443,14 +781,14 @@
     "operator_query": "natsume.operator-query.v1",
     "query_projection": "Natsume.operator.query_projection.v1"
   },
-  "generated_at": "2026-07-13T09:19:42.346000+00:00",
+  "generated_at": "2026-07-13T13:29:42.724000+00:00",
   "git": {
-    "commit": "296593755a094add05d6e4f9219c08bae61744a6",
+    "commit": "d59f1e4b38ef2289bd741e90666927d9f3d19505",
     "dirty_paths": []
   },
   "migration_head": "host_brain/audit/migrations/0083_host_embodiment_outbox.sql",
   "release_id": "natsume-ai-v1-core",
-  "release_status": "DRAFT",
+  "release_status": "PROGRAM_ACCEPTANCE_PASS",
   "retired_paths": {
     "remaining_paths": [],
     "schema_version": "natsume.compatibility-registry.v1",
@@ -459,5 +797,5 @@
   "rollback_matrix_ref": "docs/50_release/core/CORE_ROLLBACK_MATRIX.json",
   "sbom_ref": "docs/50_release/core/SBOM.cdx.json",
   "schema_version": "natsume.core-release-manifest.v1",
-  "ts_ms": 1783934382346
+  "ts_ms": 1783949382724
 }
