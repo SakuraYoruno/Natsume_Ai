@@ -44,7 +44,7 @@ class _FailOnUnexpectedHttpClient:
 
 
 def test_probe_host_uses_lightweight_health_url() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _MockClient()
     with patch.object(heartbeat, "_get_http_client", return_value=client):
@@ -71,7 +71,7 @@ class _OllamaProbeClient:
 
 
 def test_probe_ollama_local_reports_loaded_model_as_up() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _OllamaProbeClient(loaded=True)
     with patch.object(heartbeat, "_get_http_client", return_value=client):
@@ -84,7 +84,7 @@ def test_probe_ollama_local_reports_loaded_model_as_up() -> None:
 
 
 def test_probe_ollama_local_reports_installed_but_not_loaded_as_degraded() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _OllamaProbeClient(loaded=False)
     with patch.object(heartbeat, "_get_http_client", return_value=client):
@@ -95,7 +95,7 @@ def test_probe_ollama_local_reports_installed_but_not_loaded_as_degraded() -> No
 
 
 def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _MockClient()
     with (
@@ -117,14 +117,14 @@ def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
 
 
 def test_local_ollama_keepalive_flag_is_forced_off() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     with patch.dict("os.environ", {"HOST_LOCAL_LLM_KEEPALIVE_ENABLED": "true"}, clear=False):
         assert heartbeat._is_local_ollama_keepalive_enabled() is False
 
 
 def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _FailOnUnexpectedHttpClient()
     with (
@@ -143,7 +143,7 @@ def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
 
 
 def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     client = _FailOnUnexpectedHttpClient()
     with (
@@ -170,7 +170,7 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
 
 
 def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     class FakeResourceManager:
         def assess_background_task(self, **kwargs):
@@ -185,7 +185,7 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
         heartbeat._cache.clear()
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_resource_manager",
+        "host_brain.composition.process_services.get_resource_manager",
         lambda create_if_missing=False: FakeResourceManager(),
     )
     with (
@@ -215,7 +215,7 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
 
 
 def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signal() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     now_ts = int(time.time() * 1000)
     edge_result = {
@@ -244,7 +244,7 @@ def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signa
 
 
 def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     probe = {
         "available": True,

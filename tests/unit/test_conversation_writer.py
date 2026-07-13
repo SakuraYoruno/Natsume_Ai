@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.conversation import TurnStore
-from host_brain.conversation.writer import record_assistant_turn, record_user_turn
+from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
+from host_brain.composition.process_service_container import get_process_service_container
+from host_brain.persistence.context_repository import ContextRepository
 
 
-def test_record_turn_writers_soft_fail_and_persist(monkeypatch) -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    monkeypatch.setattr("host_brain.app.dependencies._conversation_turn_store", store, raising=False)
+def _install_ledger(monkeypatch) -> tuple[SQLiteLedger, ContextRepository]:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    repository = ContextRepository.from_ledger(ledger)
+    container = get_process_service_container()
+    monkeypatch.setattr(container, "ledger", ledger)
+    monkeypatch.setattr(container, "conversation_turn_store", repository)
+    return ledger, repository
+
+
+def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch) -> None:
+    _ledger, repository = _install_ledger(monkeypatch)
 
     record_user_turn(
         request_id="req-user",
@@ -26,15 +35,17 @@ def test_record_turn_writers_soft_fail_and_persist(monkeypatch) -> None:
         lang="zh",
     )
 
-    turns = store.query_recent(session_id="sess", limit=10)
-    assert [(turn.role, turn.content) for turn in turns] == [("user", "你好"), ("assistant", "我是夏目蓝。")]
+    turns = repository.query_recent_turns(session_id="sess", limit=10)
+    assert [(turn["role"], turn["content"]) for turn in turns] == [
+        ("user", "你好"),
+        ("assistant", "我是夏目蓝。"),
+    ]
 
 
 def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> None:
-    store = TurnStore(SQLiteLedger(":memory:", check_same_thread=False))
-    monkeypatch.setattr("host_brain.app.dependencies._conversation_turn_store", store, raising=False)
+    _ledger, repository = _install_ledger(monkeypatch)
 
-    record_user_turn(
+    first = record_user_turn(
         request_id="req-same",
         session_id="sess",
         person_id="p1",
@@ -42,16 +53,18 @@ def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> No
         ts_ms=1000,
         lang="zh",
     )
-    record_user_turn(
+    replay = record_user_turn(
         request_id="req-same",
         session_id="sess",
         person_id="p1",
         content="你好",
-        ts_ms=1001,
+        ts_ms=1000,
         lang="zh",
     )
 
-    turns = store.query_recent(session_id="sess", limit=10)
+    turns = repository.query_recent_turns(session_id="sess", limit=10)
+    assert first["status"] == "OK"
+    assert replay["status"] == "SKIPPED"
     assert len(turns) == 1
-    assert turns[0].role == "user"
-    assert turns[0].request_id == "req-same"
+    assert turns[0]["role"] == "user"
+    assert turns[0]["request_id"] == "req-same"

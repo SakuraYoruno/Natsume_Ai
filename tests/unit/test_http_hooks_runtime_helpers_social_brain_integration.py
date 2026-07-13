@@ -4,12 +4,14 @@ import logging
 import sqlite3
 from types import SimpleNamespace
 
-from host_brain.app import dependencies
-from host_brain.app.http_hooks_runtime_helpers import (
-    _build_llm_generator,
-    _build_scheduler_narrative_llm_generator,
-    _load_recent_dream_snippet,
-    build_digital_life_runtime_snapshot,
+from host_brain.composition import process_services as dependencies
+from host_brain.app.lifecycle_runtime_composition import (
+    build_lifecycle_runtime_application_ports,
+)
+from host_brain.lifecycle_runtime.life_jobs import _build_llm_generator, _load_recent_dream_snippet
+from host_brain.lifecycle_runtime.scheduler_handlers import _build_scheduler_narrative_llm_generator
+from host_brain.lifecycle_runtime.runtime_snapshot import build_digital_life_runtime_snapshot
+from host_brain.lifecycle_runtime.proactive_dispatch import (
     run_proactive_intent_dispatch,
 )
 from host_brain.model_runtime import (
@@ -72,19 +74,19 @@ def test_run_proactive_dispatch_rejects_unvalidated_scheduler_authority(monkeypa
         _fake_execute_proactive_talk,
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_topics",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_topics",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_diary_snippet",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_diary_snippet",
         lambda: "",
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._load_recent_dream_snippet",
+        "host_brain.lifecycle_runtime.proactive_dispatch._load_recent_dream_snippet",
         lambda **_kwargs: "",
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_llm_generator",
+        "host_brain.lifecycle_runtime.proactive_dispatch._build_llm_generator",
         lambda **_kwargs: None,
     )
 
@@ -98,6 +100,7 @@ def test_run_proactive_dispatch_rejects_unvalidated_scheduler_authority(monkeypa
             "attempt_id": "forged-attempt",
             "args": {},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.social"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
@@ -142,6 +145,7 @@ def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_schedul
                 "workflow_owner": "natsume",
             },
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.codex_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
@@ -174,7 +178,7 @@ def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) 
         lambda: _FakeSocialBrain(),
     )
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_scheduler_narrative_llm_generator",
+        "host_brain.lifecycle_runtime.scheduler_handlers._build_scheduler_narrative_llm_generator",
         lambda **_kwargs: (lambda _input: {"narrative": "日记", "content": "日记"}),
     )
     monkeypatch.setattr(
@@ -191,6 +195,7 @@ def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) 
             "sys_mode": "normal",
             "args": {"base_dir": "runtime/diary"},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.diary_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
@@ -210,7 +215,7 @@ def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monk
         return {"status": "EXECUTED", "reason_code": None, "manifest": {"dream_id": "dream-test"}}
 
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers._build_scheduler_narrative_llm_generator",
+        "host_brain.lifecycle_runtime.scheduler_handlers._build_scheduler_narrative_llm_generator",
         lambda **_kwargs: (lambda _input: {"narrative": "梦", "content": "梦"}),
     )
     monkeypatch.setattr(
@@ -227,6 +232,7 @@ def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monk
             "sys_mode": "sleep",
             "args": {"max_episodic_entries": 20, "idle_threshold_ms": 90 * 60 * 1000},
         },
+        ports=build_lifecycle_runtime_application_ports(),
         logger=logging.getLogger("tests.runtime.dream_scheduler"),
         get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
         retention_policy=None,
@@ -248,6 +254,7 @@ def test_scheduler_narrative_generator_uses_canonical_model_attempt() -> None:
     route = _install_model_runtime(_complete)
     try:
         generator = _build_scheduler_narrative_llm_generator(
+            ports=build_lifecycle_runtime_application_ports(),
             logger=logging.getLogger("tests.scheduler_narrative_attempt"),
         )
         result = generator(
@@ -279,6 +286,7 @@ def test_proactive_scheduler_generator_uses_canonical_model_attempt() -> None:
     route = _install_model_runtime(_complete)
     try:
         generator = _build_llm_generator(
+            ports=build_lifecycle_runtime_application_ports(),
             logger=logging.getLogger("tests.proactive_attempt"),
             recent_topics=["记忆系统"],
             diary_snippet="写了日记",
@@ -383,7 +391,7 @@ def test_runtime_snapshot_uses_social_brain_bond_snapshot(monkeypatch) -> None:
         lambda: _FakeSocialBrain(),
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_hard_state",
+        "host_brain.composition.process_services.get_hard_state",
         lambda: _FakeHardState(),
     )
     monkeypatch.setattr(
@@ -391,7 +399,10 @@ def test_runtime_snapshot_uses_social_brain_bond_snapshot(monkeypatch) -> None:
         lambda: "persona-user-001",
     )
 
-    snapshot = build_digital_life_runtime_snapshot(current_topic="hello")
+    snapshot = build_digital_life_runtime_snapshot(
+        ports=build_lifecycle_runtime_application_ports(),
+        current_topic="hello",
+    )
 
     assert snapshot["bond_state"]["current_stage"] == "FRIEND"
     assert snapshot["bond_summary"]["stage"] == "FRIEND"

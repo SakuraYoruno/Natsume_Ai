@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from host_brain.app.obs_routes_core import _now_ms
-from host_brain.observability.live_source_projection import (
+from host_brain.app.observability_runtime.live_source_projection import (
     PROACTIVE_AUTONOMY_KIND,
     PROACTIVE_AUTONOMY_MAX_AGE_MS,
     read_operator_live_projection,
@@ -34,7 +34,12 @@ def _compact_project(project: Any) -> dict[str, Any]:
     }
 
 
-def build_proactive_autonomy_snapshot(ledger: Any, person_id: str = "default") -> dict[str, Any]:
+def build_proactive_autonomy_snapshot(
+    ledger: Any,
+    person_id: str = "default",
+    *,
+    life_snapshot_reader: Any,
+) -> dict[str, Any]:
     """聚合主动自主性快照（纯读 life-state，失败优雅降级）。"""
     now = _now_ms()
     resolved = str(person_id or "default")
@@ -54,20 +59,23 @@ def build_proactive_autonomy_snapshot(ledger: Any, person_id: str = "default") -
             _project_nudge_pull,
             compute_proactive_readiness,
         )
-        from host_brain.app.life_application_boundary import read_life_snapshot
-        from host_brain.runtime.autonomous_self import get_reach_out_calibration
+        from host_brain.digital_life.application_boundary import read_life_snapshot
+        from host_brain.digital_life.policy import resolve_reach_out_calibration
 
         # ``ledger`` remains for the public compatibility seam; the injected
         # reader owns canonical snapshot selection and never initializes state.
         _ = ledger
-        life_snapshot = read_life_snapshot(resolved)
+        life_snapshot = read_life_snapshot(
+            resolved,
+            reader=life_snapshot_reader,
+        )
         state = dict(life_snapshot.get("state") or {})
         if int(life_snapshot.get("version") or 0) <= 0:
             return snapshot
         weather = dict(state.get("inner_weather") or {}) if isinstance(state.get("inner_weather"), dict) else {}
         growth = dict(state.get("self_growth") or {}) if isinstance(state.get("self_growth"), dict) else {}
         active_projects = list(growth.get("active_projects") or state.get("self_projects") or [])
-        calibration = get_reach_out_calibration(state)
+        calibration = resolve_reach_out_calibration(state)
         readiness = compute_proactive_readiness(
             reach_out_bias=float(weather.get("reach_out_bias") or 0.0),
             active_projects=active_projects,

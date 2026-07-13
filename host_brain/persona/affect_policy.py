@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from host_brain.app.context.affect_state import AffectStateBlock
-from host_brain.app.context.drive_state import DriveStateBlock
-from host_brain.app.context.relationship_state import RelationshipStateBlock
+from host_brain.persona.context.affect_state import AffectStateBlock
+from host_brain.persona.context.drive_state import DriveStateBlock
+from host_brain.persona.context.relationship_state import RelationshipStateBlock
 
 
 def _clamp(value: float, *, low: float = 0.0, high: float = 1.0) -> float:

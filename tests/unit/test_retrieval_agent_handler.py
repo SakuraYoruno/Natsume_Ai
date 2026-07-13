@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from host_brain.app.agents.agent_registry import AGENT_ID_RETRIEVAL
+from host_brain.agent_runtime.agent_registry import AGENT_ID_RETRIEVAL
 from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler
 
 
@@ -341,7 +341,7 @@ def test_agent_id_retrieval_constant():
 
 def test_agent_id_retrieval_in_allowlist():
     """AGENT_ID_RETRIEVAL 已加入 AGENT_ALLOWLIST。"""
-    from host_brain.app.agents.agent_registry import AGENT_ALLOWLIST
+    from host_brain.agent_runtime.agent_registry import AGENT_ALLOWLIST
     assert AGENT_ID_RETRIEVAL in AGENT_ALLOWLIST
 
 

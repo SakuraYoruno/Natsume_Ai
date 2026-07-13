@@ -73,7 +73,7 @@ def test_dependencies_assemble_vad_timeline_from_public_canonical_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import host_brain.app.dependencies as dependencies
+    import host_brain.composition.process_services as dependencies
     import host_brain.core.ids as core_ids
 
     db_path = _avatar_db(
@@ -93,8 +93,8 @@ def test_dependencies_assemble_vad_timeline_from_public_canonical_path(
                 raise AssertionError("private ledger persistence was accessed")
             raise AttributeError(name)
 
-    previous = dependencies._emotion_timeline
-    dependencies._emotion_timeline = None
+    previous = dependencies.get_process_service_container().emotion_timeline
+    dependencies.get_process_service_container().emotion_timeline = None
     monkeypatch.setattr(dependencies, "get_ledger", lambda: PublicLedgerReference())
     monkeypatch.setattr(core_ids, "now_ms", lambda: NOW)
     try:
@@ -114,20 +114,20 @@ def test_dependencies_assemble_vad_timeline_from_public_canonical_path(
         assert timeline.entries[2].arousal == 0.0
         assert all(entry.source == "restored_from_log" for entry in timeline.entries)
     finally:
-        dependencies._emotion_timeline = previous
+        dependencies.get_process_service_container().emotion_timeline = previous
 
 
 def test_dependencies_fail_soft_to_empty_singleton_on_query_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import host_brain.app.dependencies as dependencies
+    import host_brain.composition.process_services as dependencies
 
     class MissingLedgerReference:
         canonical_db_path = str(tmp_path / "missing.sqlite3")
 
-    previous = dependencies._emotion_timeline
-    dependencies._emotion_timeline = None
+    previous = dependencies.get_process_service_container().emotion_timeline
+    dependencies.get_process_service_container().emotion_timeline = None
     monkeypatch.setattr(dependencies, "get_ledger", lambda: MissingLedgerReference())
     try:
         timeline = dependencies.get_emotion_timeline()
@@ -135,11 +135,11 @@ def test_dependencies_fail_soft_to_empty_singleton_on_query_failure(
         assert timeline.entries == []
         assert dependencies.get_emotion_timeline() is timeline
     finally:
-        dependencies._emotion_timeline = previous
+        dependencies.get_process_service_container().emotion_timeline = previous
 
 
 def test_dependencies_emotion_timeline_has_no_sqlite_or_private_path_access() -> None:
-    path = ROOT / "host_brain" / "app" / "dependencies.py"
+    path = ROOT / "host_brain" / "composition" / "process_environment.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     function = next(

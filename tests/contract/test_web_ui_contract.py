@@ -74,14 +74,14 @@ def client(monkeypatch):
 # ---------------------------------------------------------------------------
 
 class TestMonitorStaticBundle:
-    """Monitor 静态包由 nginx 直接 serve，测试只检查构建产物。"""
+    """Monitor 静态包由 release build 生成，仓库只冻结构建输入。"""
 
     def test_monitor_bundle_contains_spa_mount(self):
-        """React SPA bundle 存在，hostmain 不负责 HTTP serve。"""
+        """React SPA 源入口存在，hostmain 不负责 HTTP serve。"""
         from pathlib import Path
 
         project_root = Path(__file__).resolve().parents[2]
-        spa_index = project_root / "host_brain" / "app" / "static" / "monitor" / "index.html"
+        spa_index = project_root / "host_brain" / "app" / "monitor_ui" / "index.html"
         body = spa_index.read_text(encoding="utf-8-sig")
         assert "<title>" in body or '<div id="root">' in body
 

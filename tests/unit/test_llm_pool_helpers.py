@@ -18,7 +18,7 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
     ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
 
     calls: list[tuple[str, str]] = []
 
@@ -87,7 +87,7 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
     ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
 
     async def _fake_astream(**kwargs):
         provider_name = str(kwargs.get("provider_name") or "")

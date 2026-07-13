@@ -19,7 +19,7 @@ from typing import Any, Mapping, Protocol
 from urllib.parse import urlparse
 
 from host_brain.app.prompt_builder import extract_langchain_content_text
-from host_brain.app.prompt_specs import resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
@@ -746,10 +746,12 @@ class OpenAICompatMultimodalBackend:
 
     def _invoke_model(self, *, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import MULTIMODAL_OBSERVER_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         result = complete_compiled_prompt_sync(
+            attempt_service=get_model_attempt_service(),
             prompt_id=MULTIMODAL_OBSERVER_PROMPT_ID,
             request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
             scene_type="MULTIMODAL",

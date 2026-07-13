@@ -9,7 +9,18 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
+    LIFE_AGGREGATE_CLAIM_BUSY,
+    LIFE_AGGREGATE_CLAIM_FENCED,
+    LIFE_COMMAND_BASELINE_REQUIRED,
+    LIFE_COMMAND_CLAIM_BUSY,
+    LIFE_COMMAND_CLAIM_FENCED,
+    LIFE_COMMAND_DURABLE_DATA_INVALID,
+    LIFE_COMMAND_IDEMPOTENCY_CONFLICT,
+    LIFE_COMMAND_INVALID,
+    LIFE_COMMAND_SCHEMA_NOT_READY,
+    LIFE_DELIVERY_CLAIM_FENCED,
+    LIFE_PROJECTION_CLAIM_FENCED,
     LifeAggregateClaim,
     LifeCommand,
     LifeCommandClaim,
@@ -25,22 +36,11 @@ from host_brain.digital_life.contracts import (
     LifeProjectionMessage,
     LifeProjectionReceipt,
     LifeSnapshot,
+    LifeCommandRepositoryError,
     canonical_json,
     digest_json,
 )
 
-
-LIFE_COMMAND_SCHEMA_NOT_READY = "LIFE_COMMAND_SCHEMA_NOT_READY"
-LIFE_COMMAND_INVALID = "LIFE_COMMAND_INVALID"
-LIFE_COMMAND_IDEMPOTENCY_CONFLICT = "LIFE_COMMAND_IDEMPOTENCY_CONFLICT"
-LIFE_COMMAND_CLAIM_BUSY = "LIFE_COMMAND_CLAIM_BUSY"
-LIFE_COMMAND_CLAIM_FENCED = "LIFE_COMMAND_CLAIM_FENCED"
-LIFE_COMMAND_DURABLE_DATA_INVALID = "LIFE_COMMAND_DURABLE_DATA_INVALID"
-LIFE_COMMAND_BASELINE_REQUIRED = "LIFE_COMMAND_BASELINE_REQUIRED"
-LIFE_AGGREGATE_CLAIM_BUSY = "LIFE_AGGREGATE_CLAIM_BUSY"
-LIFE_AGGREGATE_CLAIM_FENCED = "LIFE_AGGREGATE_CLAIM_FENCED"
-LIFE_DELIVERY_CLAIM_FENCED = "LIFE_DELIVERY_CLAIM_FENCED"
-LIFE_PROJECTION_CLAIM_FENCED = "LIFE_PROJECTION_CLAIM_FENCED"
 
 LIFE_COMMAND_MIGRATION_ASSET_KEY = "0079#life_command_foundation"
 LIFE_COMMAND_MIGRATION_SHA256 = (
@@ -119,13 +119,6 @@ _REQUIRED_COLUMNS = {
         }
     ),
 }
-
-
-class LifeCommandRepositoryError(RuntimeError):
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or LIFE_COMMAND_INVALID)
-        self.detail = str(detail or "Digital Life persistence failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
 
 
 class LifeCommandRepository:

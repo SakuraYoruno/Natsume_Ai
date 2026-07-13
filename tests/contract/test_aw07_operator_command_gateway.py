@@ -18,10 +18,10 @@ from host_brain.observability.command_ports import (
     ObsCommandEnvelope,
     bind_server_authority,
 )
-from host_brain.observability.domain_command_ports import (
+from host_brain.app.observability_runtime.domain_command_ports import (
     build_default_obs_domain_command_registry,
 )
-from host_brain.observability import domain_command_ports
+from host_brain.app.observability_runtime import domain_command_ports
 from host_brain.observability.operator_command_gateway import (
     bind_operator_command_runtime,
 )

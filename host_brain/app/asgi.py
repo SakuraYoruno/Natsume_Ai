@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Protocol
+from functools import partial
+from typing import Any, Callable, Protocol
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,7 @@ from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_re
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
-from host_brain.app.dependencies import (
+from host_brain.composition.process_services import (
     get_ledger,
     get_intent_engine,
     get_episodic_store,
@@ -30,16 +31,29 @@ from host_brain.app.dependencies import (
     get_token_service,
     get_tool_broker,
     get_tool_catalog,
+    get_model_attempt_service,
+    get_prompt_registry,
+    get_capability_broker,
+    get_life_snapshot_reader,
 )
 from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.http_hooks import runtime_lifespan
-from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch
+from host_brain.app.lifecycle_runtime_composition import (
+    build_lifecycle_runtime_application_ports,
+)
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.app.process_service_wiring import configure_process_service_ports
+from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
 from host_brain.app.governed_task_adapter import (
     GovernedHostRuntime,
     build_governed_host_runtime,
 )
+from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+from host_brain.app.production_authority import verify_durable_production_authority
 from host_brain.app.internal_agent_ingress import InternalAgentIngress
 from host_brain.app.internal_task_runtime import (
     GovernedInternalRuntime,
@@ -54,8 +68,9 @@ from host_brain.app.settings import (
 )
 from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.core.ids import now_ms
-from host_brain.composition.security_services import (
+from host_brain.app.security_services_composition import (
     ProcessSecurityServiceContainer,
     SecurityServiceContainerCloseError,
     build_process_security_service_container,
@@ -72,6 +87,7 @@ from host_brain.composition.memory import (
     ProcessMemoryContainer,
     build_process_memory_container,
 )
+from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.scheduler import (
     ProcessSchedulerContainer,
@@ -113,21 +129,10 @@ def _compose_life_command_authority(
 ) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
     """Resolve the frozen Digital Life command boundary at process startup."""
 
-    from host_brain.digital_life.reader import LifeSnapshotReader  # noqa: PLC0415
-    from host_brain.digital_life.service import LifeCommandService  # noqa: PLC0415
-    from host_brain.app import life_application_boundary  # noqa: PLC0415
-    from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
-        LifeCommandRepository,
-    )
-
-    repository = LifeCommandRepository.from_ledger(ledger)
-    service = LifeCommandService(repository)
-    service.adopt_all_legacy_projections(adopted_at_ms=now_ms())
-    reader = LifeSnapshotReader(repository)
-    life_application_boundary.set_life_application_providers(
-        command_service_provider=lambda: service,
-        snapshot_reader_provider=lambda: reader,
-    )
+    container = build_process_life_container(ledger=ledger, adopted_at_ms=now_ms())
+    PROCESS_LIFE_PROVIDER.install(container)
+    service = container.command_service
+    reader = container.snapshot_reader
     return service, reader
 
 
@@ -156,13 +161,7 @@ def _compose_life_dispatchers(ledger: Any) -> tuple[Any, Any]:
 
 
 def _reset_life_command_authority() -> None:
-    from host_brain.app import life_application_boundary  # noqa: PLC0415
-
-    life_application_boundary.set_life_application_providers(
-        command_service_provider=None,
-        snapshot_reader_provider=None,
-    )
-    life_application_boundary.reset_life_application_cache()
+    PROCESS_LIFE_PROVIDER.clear()
 
 
 def _submit_life_tick_command(
@@ -175,7 +174,7 @@ def _submit_life_tick_command(
 ) -> dict[str, Any]:
     """Translate one governed scheduler occurrence into one Life command."""
 
-    from host_brain.digital_life.contracts import LifeCommand  # noqa: PLC0415
+    from natsume_contracts.life import LifeCommand  # noqa: PLC0415
 
     intent = dict(definition.intent_template)
     args = dict(intent.get("args") or {})
@@ -245,9 +244,11 @@ def _submit_life_tick_command(
 
 
 def resolve_bond_engine():
-    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+    from host_brain.composition.process_services import (  # noqa: PLC0415
+        get_bond_stage_engine,
+    )
 
-    return get_social_brain_agent().resolve_stage_engine()
+    return get_bond_stage_engine()
 
 
 def schedule_immune_gate_audit(
@@ -265,11 +266,16 @@ def schedule_immune_gate_audit(
     )
 
 
-async def edge_events_endpoint(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
+async def edge_events_endpoint(
+    request_body: EdgeEventsRequest,
+    *,
+    input_runtime_ports: InputRuntimeApplicationPorts,
+) -> EdgeEventsResponse:
     return await handle_edge_events_route(
         request_body=request_body,
         get_ledger=get_ledger,
         logger=logger,
+        input_dispatcher=partial(_dispatch_to_graph, ports=input_runtime_ports),
     )
 
 
@@ -335,6 +341,26 @@ def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
             ),
             resource_profile={
                 "resource_class": "life_io",
+                "uses_llm": False,
+                "uses_gpu": False,
+            },
+        ),
+        SchedulerTaskConfig(
+            task_id="embodiment_outbox_periodic",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 1},
+            intent_template={
+                "skill_name": "embodiment_outbox_dispatch",
+                "args": {"limit": 100},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.HIGH,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            max_consecutive_failures=3,
+            description="Dispatch the canonical Host physical-command outbox",
+            resource_profile={
+                "resource_class": "embodiment_io",
                 "uses_llm": False,
                 "uses_gpu": False,
             },
@@ -489,6 +515,12 @@ def _scheduler_handler_result(value: Any) -> dict[str, Any]:
 
 
 def create_app() -> FastAPI:
+    from host_brain.app.tribe_composition import configure_tribe_application_ports
+
+    configure_tribe_application_ports()
+    configure_process_service_ports()
+    lifecycle_runtime_ports = build_lifecycle_runtime_application_ports()
+    input_runtime_ports = build_input_runtime_application_ports()
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service
     # locator and no app-state lookup inside the API registry.
@@ -506,6 +538,10 @@ def create_app() -> FastAPI:
         tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort] | None
     ) = None
     life_dispatchers: tuple[Any, Any] | None = None
+    embodiment_outbox: Any | None = None
+    embodiment_dispatcher: Any | None = None
+    embodiment_outbox_unbind: Callable[[], None] | None = None
+    embodiment_audit_unsubscribe: Callable[[], None] | None = None
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
@@ -565,6 +601,16 @@ def create_app() -> FastAPI:
             handle_chat_fn=handle_chat_with_runtime,
         )
 
+    async def edge_events_endpoint_with_runtime(
+        request_body: EdgeEventsRequest,
+    ) -> EdgeEventsResponse:
+        # Keep the FastAPI signature to one request body. ``functools.partial``
+        # exposes the bound ports dataclass as a second body parameter.
+        return await edge_events_endpoint(
+            request_body,
+            input_runtime_ports=input_runtime_ports,
+        )
+
     def obs_command_ingress_provider():
         current = security_container
         composition = (
@@ -602,9 +648,12 @@ def create_app() -> FastAPI:
         nonlocal internal_agent_ingress, scheduler_container
         nonlocal canon_container
         nonlocal life_command_authority, life_dispatchers
+        nonlocal embodiment_outbox, embodiment_dispatcher
+        nonlocal embodiment_outbox_unbind, embodiment_audit_unsubscribe
         async with runtime_lifespan(
             get_ledger=get_ledger,
             logger=logger,
+            lifecycle_ports=lifecycle_runtime_ports,
             canon_service_provider=canon_service_provider,
         ):
             security: ProcessSecurityServiceContainer | None = None
@@ -642,10 +691,37 @@ def create_app() -> FastAPI:
                         getattr(ledger, "canonical_db_path", "") or ""
                     ),
                 )
+                from host_brain.channels.embodiment import (  # noqa: PLC0415
+                    bind_embodiment_outbox_authority,
+                    build_embodiment_receipt_audit_observer,
+                    register_embodiment_receipt_observer,
+                )
+                from host_brain.channels.embodiment_outbox import (  # noqa: PLC0415
+                    DurableEmbodimentOutbox,
+                    EmbodimentOutboxDispatcher,
+                )
+                from host_brain.persistence.embodiment_outbox_repository import (  # noqa: PLC0415
+                    EmbodimentOutboxRepository,
+                )
+
+                embodiment_repository = EmbodimentOutboxRepository(
+                    task_runtime.canonical_db_path
+                )
+                embodiment_outbox = DurableEmbodimentOutbox(embodiment_repository)
+                embodiment_dispatcher = EmbodimentOutboxDispatcher(
+                    embodiment_repository,
+                    worker_id="host-embodiment-dispatcher",
+                )
+                embodiment_outbox_unbind = bind_embodiment_outbox_authority(
+                    embodiment_outbox
+                )
+                embodiment_audit_unsubscribe = register_embodiment_receipt_observer(
+                    build_embodiment_receipt_audit_observer(ledger.log_voice_event)
+                )
                 canon = build_process_canon_container(
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
-                    world_root=get_persistence_settings().world_canon_root,
+                    world_root=get_persistence_settings().world_canon_root.resolve(),
                 )
                 # Startup reconciliation is a production composition action;
                 # the legacy HTTP lifespan no longer constructs this writer.
@@ -680,7 +756,6 @@ def create_app() -> FastAPI:
                 set_memory_service_container(memory)
                 canonical_owner = (
                     runtime_settings.task_runtime_canonical_owner
-                    or runtime_settings.task_runtime_shadow_owner
                     or "host-task-runtime"
                 )
                 governed_runtime = build_governed_host_runtime(
@@ -688,33 +763,22 @@ def create_app() -> FastAPI:
                     ledger=ledger,
                     skill_registry=get_skill_registry(),
                     token_service=get_token_service(),
-                    runtime_router=CanonicalRuntimeRouter(
-                        mode=runtime_settings.task_runtime_mode,
-                        canary_percent=(
-                            runtime_settings.task_runtime_canary_percent
-                        ),
-                        kill_switch=runtime_settings.task_runtime_kill_switch,
-                        canonical_owner=canonical_owner,
-                        # The process composition is the canonical worker
-                        # owner; request payloads cannot self-confirm it.
-                        confirmed_owner=canonical_owner,
-                    ),
+                    capability_broker=get_capability_broker(),
+                    model_attempt_service=ApplicationModelAttemptServicePort(),
+                    production_authority_verifier=verify_durable_production_authority,
+                    runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
                 )
                 internal_runtime = build_governed_internal_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
                     result_repository=task_runtime.agent_result_repository,
-                    runtime_router=CanonicalRuntimeRouter(
-                        mode=runtime_settings.task_runtime_mode,
-                        canary_percent=(
-                            runtime_settings.task_runtime_canary_percent
-                        ),
-                        kill_switch=runtime_settings.task_runtime_kill_switch,
-                        canonical_owner=canonical_owner,
-                        confirmed_owner=canonical_owner,
-                    ),
+                    runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
+                    canonical_executor=AgentRuntimeExecutor(
+                        model_attempt_service=get_model_attempt_service(),
+                        prompt_registry=get_prompt_registry(),
+                    ),
                 )
 
                 try:
@@ -754,8 +818,10 @@ def create_app() -> FastAPI:
                     result = await asyncio.to_thread(
                         run_proactive_intent_dispatch,
                         intent,
+                        ports=lifecycle_runtime_ports,
                         logger=logger,
                         get_ledger=get_ledger,
+                        life_snapshot_reader=get_life_snapshot_reader,
                         retention_policy=None,
                         ui_pusher=scheduler_ui_pusher,
                     )
@@ -837,6 +903,15 @@ def create_app() -> FastAPI:
                         "delivery": delivery.as_dict(),
                     }
 
+                async def embodiment_io_scheduler_handler(**_: Any) -> dict[str, Any]:
+                    if embodiment_dispatcher is None:
+                        return {
+                            "status": "FAILED",
+                            "reason_code": "EMBODIMENT_DISPATCHER_UNAVAILABLE",
+                        }
+                    batch = await embodiment_dispatcher.dispatch_pending_async(limit=100)
+                    return batch.as_dict()
+
                 def scheduler_current_mode() -> str:
                     return str(get_hard_state().sys_mode or "normal")
 
@@ -883,15 +958,7 @@ def create_app() -> FastAPI:
                     evaluator=command_ingress.evaluator,
                     claim_result_store=command_ingress.store,
                     intent_engine=get_intent_engine(),
-                    runtime_router=CanonicalRuntimeRouter(
-                        mode=runtime_settings.task_runtime_mode,
-                        canary_percent=(
-                            runtime_settings.task_runtime_canary_percent
-                        ),
-                        kill_switch=runtime_settings.task_runtime_kill_switch,
-                        canonical_owner=canonical_owner,
-                        confirmed_owner=canonical_owner,
-                    ),
+                    runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
                     current_mode=scheduler_current_mode,
                     resource_gate=scheduler_resource_gate,
@@ -899,6 +966,7 @@ def create_app() -> FastAPI:
                     task_handlers={
                         "life_command": life_tick_scheduler_handler,
                         "life_io": life_io_scheduler_handler,
+                        "embodiment_io": embodiment_io_scheduler_handler,
                         "distillation_engine": distillation_scheduler_handler,
                         "security_immune": security_immune_scheduler_handler,
                         "agent_immune": agent_immune_scheduler_handler,
@@ -907,6 +975,7 @@ def create_app() -> FastAPI:
                     seed_worker_keys={
                         "life_tick": "life_command",
                         "life_io_dispatch_periodic": "life_io",
+                        "embodiment_outbox_periodic": "embodiment_io",
                         "distillation_engine_periodic": "distillation_engine",
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
@@ -990,6 +1059,14 @@ def create_app() -> FastAPI:
                         _reset_life_command_authority()
                         life_command_authority = None
                         life_dispatchers = None
+                        if embodiment_outbox_unbind is not None:
+                            embodiment_outbox_unbind()
+                            embodiment_outbox_unbind = None
+                        if embodiment_audit_unsubscribe is not None:
+                            embodiment_audit_unsubscribe()
+                            embodiment_audit_unsubscribe = None
+                        embodiment_outbox = None
+                        embodiment_dispatcher = None
                         set_memory_service_container(None)
                         if memory is not None:
                             memory.close()
@@ -1025,7 +1102,7 @@ def create_app() -> FastAPI:
         get_tool_catalog=get_tool_catalog,
         get_bond_engine=resolve_bond_engine,
         chat_endpoint=chat_endpoint_with_runtime,
-        edge_events_endpoint=edge_events_endpoint,
+        edge_events_endpoint=edge_events_endpoint_with_runtime,
         root_endpoint=root_endpoint,
         obs_command_ingress_provider=obs_command_ingress_provider,
         pentest_secure_run_composition_provider=(
@@ -1044,6 +1121,7 @@ def create_app() -> FastAPI:
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
         canon_service_provider=canon_service_provider,
+        input_runtime_ports=input_runtime_ports,
     )
     application.state.security_service_container = None
     application.state.command_ingress_container = None
@@ -1054,6 +1132,8 @@ def create_app() -> FastAPI:
     application.state.governed_scheduler_runtime = None
     application.state.scheduler_container = None
     application.state.canon_container = None
+    application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
+    application.state.input_runtime_ports = input_runtime_ports
     application.state.task_runtime_container_provider = (
         task_runtime_container_provider
     )

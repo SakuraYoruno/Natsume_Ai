@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
 from host_brain.governor.action_arbiter import (
     ACTION_ARBITER_SCHEMA_VERSION,
     ARBITER_ALLOW,
@@ -18,8 +19,8 @@ from host_brain.governor.action_preview import (
 )
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
-from host_brain.app.surface_main_chain_adapter import _surface_scene_guardrails
-from host_brain.app.executive_runtime_core import _execute_skill
+from host_brain.surface_runtime.eligibility import _surface_scene_guardrails
+from host_brain.executive_runtime.skill_execution import _execute_skill
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.persona.proactive_voice import (
     SCENE_MORNING_GREET,
@@ -400,10 +401,11 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(m
         expires_at_ms=now + 120_000,
     )
     monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_token_service", lambda: token_service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_skill_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_token_service", lambda: token_service)
 
     kwargs = {
+        "ports": build_executive_runtime_application_ports(),
         "request_body": {},
         "request_id": "req_exec_bound_1",
         "session_id": envelope["session_id"],

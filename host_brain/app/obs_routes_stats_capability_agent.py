@@ -35,11 +35,11 @@ from host_brain.app.obs_routes_core import (
     _now_ms,
     _safe_json,
 )
-from host_brain.observability.capability_stats_projection import (
+from host_brain.app.observability_runtime.capability_stats_projection import (
     filter_forge_candidates,
     read_capability_forge_projection,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -65,7 +65,7 @@ def get_semantic_recall_stats():
     """Ref #103: 语义召回器统计端点。"""
     now = _now_ms()
     try:
-        from host_brain.app.dependencies import get_semantic_recaller
+        from host_brain.composition.process_services import get_semantic_recaller
         recaller = get_semantic_recaller()
         mock_doc_count = len(getattr(recaller, "_mock_store", []))
         return SemanticRecallStatsResponse(
@@ -457,7 +457,7 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
     episodic_write_provider = cfg_provider
     if not episodic_write_model_id or not episodic_write_provider:
         try:
-            import host_brain.app.dependencies as _deps
+            import host_brain.composition.process_services as _deps
             episodic_store = _deps.get_episodic_store()
             if not episodic_write_model_id:
                 episodic_write_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
@@ -719,7 +719,7 @@ def get_capability_gap_forge_candidates(limit: int = Query(20, ge=1, le=200), mi
 
 @router.post("/capability-gaps/forge-proposals/preview", response_model=CapabilityForgePreviewResponse)
 def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> CapabilityForgePreviewResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     candidate = get_capability_forge_service().resolve_candidate(body.candidate_key)
     if candidate is None:
         raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND", "detail": "No forge candidate or hotspot is currently available"})
@@ -731,7 +731,7 @@ def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> Ca
 
 
 def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     try:
         proposal = get_capability_forge_service().create_proposal(session_id=body.session_id, proposer=body.proposer, candidate_key=body.candidate_key, canary_traffic_percent=body.canary_traffic_percent)
     except ValueError as exc:
@@ -774,7 +774,7 @@ def get_capability_forge_proposal(proposal_id: str) -> CapabilityForgeProposalRe
 
 
 def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApproveRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     stage = str(body.target_stage or "").strip().lower()
     if stage not in {"shadow", "canary", "full"}:
         raise HTTPException(status_code=422, detail={"reason_code": "CAPABILITY_FORGE_INVALID_STAGE", "detail": "target_stage must be shadow/canary/full"})
@@ -790,7 +790,7 @@ def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApp
 
 
 def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRollbackRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     try:
         proposal = get_capability_forge_service().rollback(proposal_id=proposal_id, operator=body.operator, reason=body.reason)
     except KeyError:
@@ -801,7 +801,7 @@ def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRo
 
 
 def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> CapabilityForgeRuntimeMatchResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     decision = get_capability_forge_service().get_runtime_route_override(request_id=body.request_id, suggested_family=body.suggested_family, missing_capability_tags=body.missing_capability_tags, reason_code=body.reason_code)
     return CapabilityForgeRuntimeMatchResponse(timestamp=_now_ms(), decision=dict(decision))
 

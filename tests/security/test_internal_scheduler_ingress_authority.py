@@ -25,6 +25,10 @@ from host_brain.scheduler.command_ingress import (
     SchedulerClockSigningContext,
     SchedulerCommandIngress,
 )
+from host_brain.persistence.secure_ingress_repository import (
+    SECURE_INGRESS_MIGRATION_SHA256,
+    SQLiteSecureIngressStore,
+)
 from host_brain.secure_ingress import (
     SECURE_INGRESS_ENFORCE_REQUIRED,
     CredentialVerifierRegistry,
@@ -33,14 +37,12 @@ from host_brain.secure_ingress import (
     IngressReasonCode,
     IngressSurface,
     M48B_P0_SURFACE_POLICIES,
-    SQLiteSecureIngressStore,
     SecureIngressAuthorityEvaluator,
     SecureIngressMode,
     SecureIngressService,
     build_hmac_sha256_signature,
     build_surface_request,
 )
-from host_brain.secure_ingress.store import SECURE_INGRESS_MIGRATION_SHA256
 
 
 NOW = 1_900_000_000_000

@@ -21,7 +21,7 @@ def _build_memory_exec_context(
     intent_id: str,
     emotion_context: dict[str, Any],
 ) -> dict[str, Any]:
-    from host_brain.app.dependencies import get_episodic_store, get_semantic_recaller  # noqa: PLC0415
+    from host_brain.composition.process_services import get_episodic_store, get_semantic_recaller  # noqa: PLC0415
 
     try:
         episodic_store = get_episodic_store()

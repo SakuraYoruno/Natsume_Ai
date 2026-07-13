@@ -376,7 +376,7 @@ def _stream_chat_sse(*, url: str, payload: JsonDict, timeout_sec: float) -> Json
 
 
 def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: int, validation_scenario: str) -> JsonDict:
-    from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+    from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
     from host_brain.memory.life_memory import (  # noqa: PLC0415
         EVIDENCE_SCHEDULER_EVENT,
         EVIDENCE_TOOL_RESULT,

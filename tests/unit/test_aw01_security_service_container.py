@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-import host_brain.composition.security_services as container_module
-from host_brain.composition.security_services import (
+import host_brain.app.security_services_composition as container_module
+from host_brain.app.security_services_composition import (
     ProcessSecurityServiceContainer,
     SECURITY_SERVICE_CANONICAL_DB_PATH_MISMATCH,
     SECURITY_SERVICE_PROCESS_SCOPE_VIOLATION,
@@ -16,14 +16,11 @@ from host_brain.composition.security_services import (
     build_process_security_service_container,
 )
 from host_brain.governor.tokens import TokenService
-from host_brain.observability.command_composition import (
+from host_brain.app.observability_runtime.command_composition import (
     OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED,
     ObsCommandComposition,
 )
 from host_brain.observability.command_ports import ObsCommandPortRegistry
-from host_brain.observability.command_relocation import (
-    ObsCommandRelocationMode,
-)
 from host_brain.pentest.production_runtime import (
     PENTEST_EXECUTOR_DISABLED,
     PentestSecureRunComposition,
@@ -77,7 +74,6 @@ def _obs_composition(
         effective_mode=(
             SecureIngressMode.ENFORCE if enabled else SecureIngressMode.OFF
         ),
-        relocation_mode=ObsCommandRelocationMode.QUERY_ONLY,
         global_mode=SecureIngressMode.ENFORCE,
         reason_code=(
             "OBS_COMMAND_COMPOSITION_ENFORCE"

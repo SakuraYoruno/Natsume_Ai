@@ -12,14 +12,14 @@ from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
@@ -157,9 +157,8 @@ class _AgentWorker:
 
 
 class _AgentWorkerResolver:
-    def __init__(self, *, canonical: _AgentWorker, legacy: _AgentWorker) -> None:
+    def __init__(self, *, canonical: _AgentWorker) -> None:
         self._canonical = canonical
-        self._legacy = legacy
 
     def resolve(self, *, executor: str, worker_route: str) -> _AgentWorker:
         if str(worker_route or "").strip() != INTERNAL_AGENT_WORKER_ROUTE:
@@ -170,8 +169,6 @@ class _AgentWorkerResolver:
         selected = str(executor or "").strip().lower()
         if selected == "canonical":
             return self._canonical
-        if selected == "legacy":
-            return self._legacy
         raise GovernedInternalRuntimeError(
             INTERNAL_RUNTIME_AUTHORITY_INVALID,
             f"unsupported internal executor: {executor}",
@@ -559,26 +556,17 @@ def build_governed_internal_runtime(
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     canonical_executor: AgentRuntimeExecutor | None = None,
-    legacy_executor: AgentRuntimeExecutor | None = None,
 ) -> GovernedInternalRuntime:
     canonical_worker = _AgentWorker(
         executor=canonical_executor or AgentRuntimeExecutor(),
         result_repository=result_repository,
         executor_name="canonical",
     )
-    legacy_worker = _AgentWorker(
-        executor=legacy_executor or AgentRuntimeExecutor(),
-        result_repository=result_repository,
-        executor_name="legacy",
-    )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
-        worker_resolver=_AgentWorkerResolver(
-            canonical=canonical_worker,
-            legacy=legacy_worker,
-        ),
+        worker_resolver=_AgentWorkerResolver(canonical=canonical_worker),
         verifier=_AgentResultVerifier(result_repository),
         acceptance=_AgentResultAcceptance(),
         projection_reader=_AgentProjectionReader(result_repository),

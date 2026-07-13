@@ -12,7 +12,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.mcp.tool_registry import ToolMeta
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.pentest.agent.tool_registry import ToolDescriptor
-from host_brain.app.agents.agent_contract import AgentRuntime
+from host_brain.agent_runtime.agent_contract import AgentRuntime
 from host_brain.skills.capability_scorecard import (
     CapabilityEvaluationEvidence,
     adapt_agent_mode_risk,
@@ -349,7 +349,7 @@ def test_t_nle_18_federated_provider_reads_all_real_sources_without_mutation() -
 def test_t_nle_18_production_composition_injects_live_scorecard_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
 
     registry = SkillRegistry()
     registry.register(
@@ -363,13 +363,13 @@ def test_t_nle_18_production_composition_injects_live_scorecard_provider(
         )
     )
     monkeypatch.setenv("HOST_CAPABILITY_MATURITY_POLICY_ENABLED", "true")
-    monkeypatch.setattr(dependencies, "_skill_registry", registry)
-    monkeypatch.setattr(dependencies, "_mcp_tool_registry", None)
-    monkeypatch.setattr(dependencies, "_capability_scorecard_provider", None)
-    monkeypatch.setattr(dependencies, "_intent_engine", None)
-    monkeypatch.setattr(dependencies, "_ledger", SQLiteLedger(":memory:"))
-    monkeypatch.setattr(dependencies, "_token_service", None)
-    monkeypatch.setattr(dependencies, "_policy_cache", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "skill_registry", registry)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "mcp_tool_registry", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "capability_scorecard_provider", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "intent_engine", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", SQLiteLedger(":memory:"))
+    monkeypatch.setattr(dependencies.get_process_service_container(), "token_service", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "policy_cache", None)
     monkeypatch.setattr(dependencies, "_sync_mcp_skills_into_registry", lambda _: None)
 
     engine = dependencies.get_intent_engine()

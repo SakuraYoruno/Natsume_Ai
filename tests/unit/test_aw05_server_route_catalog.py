@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import inspect
 
+from host_brain.composition.process_services import get_model_route_catalog
+import host_brain.app.route_catalog_runtime as route_runtime
 from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime,
     resolve_subagent_llm_runtime,
     resolve_surface_reply_llm_runtime,
 )
 from host_brain.model_runtime.route_catalog import ServerRouteCatalog
+from host_brain.model_runtime.production_composition import (
+    get_default_production_route_catalog,
+)
 
 
 def test_route_catalog_is_secret_free_and_credential_independent(monkeypatch) -> None:  # noqa: ANN001
@@ -87,3 +92,10 @@ def test_production_route_policy_has_no_app_or_legacy_provider_import() -> None:
         "host_brain.app.provider_factory",
     ):
         assert forbidden not in source
+
+
+def test_runtime_projection_uses_composition_owned_catalog() -> None:
+    catalog = get_default_production_route_catalog()
+
+    assert get_model_route_catalog() is catalog
+    assert "ServerRouteCatalog(" not in inspect.getsource(route_runtime)

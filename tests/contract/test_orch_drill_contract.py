@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     ORCH_DEPENDENCY_UNAVAILABLE,

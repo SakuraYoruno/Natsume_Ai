@@ -219,29 +219,6 @@ def test_build_cortex_prompt_can_skip_reply_contract_prompt(monkeypatch) -> None
     assert runtime_payload["reply_plan"]["reply_contract"] == "这轮不是第一次问身份，用短确认回应，不要完整自报。"
 
 
-def test_build_cortex_prompt_can_use_legacy_reply_contract_prompt(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_CHAT_LEGACY_REPLY_CONTRACT_PROMPT", "true")
-    with patch(
-        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
-        return_value=_plane(),
-    ), patch(
-        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
-        return_value=_compiled_soul(),
-    ):
-        messages, _gen_params, _runtime_payload = build_cortex_prompt(
-            user_message="你是谁",
-            render_target_lang="zh",
-            person_id="p1",
-            session_id="sess",
-            request_id="req",
-            include_runtime_payload=True,
-        )
-
-    assert "【本轮目标】" in messages[0]["content"]
-    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" in messages[0]["content"]
-    assert "【本轮状态标签】" not in messages[0]["content"]
-
-
 def test_build_cortex_prompt_uses_full_soul_for_short_text_chat() -> None:
     plane = _plane()
     plane.conversation_interpretation = SimpleNamespace(

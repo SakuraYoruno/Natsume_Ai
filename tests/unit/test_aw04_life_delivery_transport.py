@@ -7,7 +7,7 @@ import pytest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.life_delivery_transport import LifeDeliveryTransport
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeDeliveryStatus,
     LifeOutboxMessage,
@@ -123,7 +123,7 @@ def test_gateway_delivery_uses_outbox_key_for_transport_idempotency(monkeypatch)
         return {"success": True}
 
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         _post_gateway_reply,
     )
     message = _message(
@@ -200,7 +200,7 @@ def test_transport_level_failure_raises_for_outbox_retry(monkeypatch) -> None:
         return {"success": False, "reason_code": "EDGE_UNAVAILABLE"}
 
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_proactive_push",
+        "host_brain.channels.edge_transport.submit_proactive_push",
         _post_proactive_push,
     )
     with pytest.raises(RuntimeError, match="EDGE_UNAVAILABLE"):
@@ -221,7 +221,7 @@ def test_invalid_durable_grant_fails_before_any_transport_side_effect(
         return {"success": True}
 
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         _post_gateway_reply,
     )
     invalid = LifeDeliveryAuthorization(
@@ -254,7 +254,7 @@ def test_surface_grant_cannot_be_retyped_for_proactive_delivery(monkeypatch) -> 
         return {"success": True}
 
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         _post_gateway_reply,
     )
 
@@ -279,7 +279,7 @@ def test_http_delivery_requires_exact_bound_payload_before_side_effect(monkeypat
         calls.append(kwargs)
         return {"success": True}
 
-    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply)
+    monkeypatch.setattr("host_brain.channels.edge_transport.submit_gateway_reply", _post_gateway_reply)
     payload = {
         "platform": "qq",
         "conversation_id": "c-1",
@@ -326,7 +326,7 @@ def test_transport_binding_failures_happen_before_side_effect(monkeypatch, failu
         calls.append(kwargs)
         return {"success": True}
 
-    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply)
+    monkeypatch.setattr("host_brain.channels.edge_transport.submit_gateway_reply", _post_gateway_reply)
     decision = (
         {"decision": "APPROVE", "intent_id": "ordinary", "ts_ms": 123}
         if failure == "ordinary"
@@ -367,7 +367,7 @@ def test_real_scheduler_intent_binds_service_principal_and_life_person(monkeypat
         calls.append(kwargs)
         return {"success": True}
 
-    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply)
+    monkeypatch.setattr("host_brain.channels.edge_transport.submit_gateway_reply", _post_gateway_reply)
     occurrence = type(
         "Occurrence",
         (),

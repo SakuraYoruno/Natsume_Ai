@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 
+def _catalog():
+    # Lazy import avoids the app dependency/graph-builder import cycle while
+    # still consuming the exact catalog installed by production composition.
+    from host_brain.composition.process_services import get_model_route_catalog  # noqa: PLC0415
 
-_CATALOG = ServerRouteCatalog()
+    return get_model_route_catalog()
 
 
 def _project(route: dict[str, Any], *, cloud: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -32,8 +35,9 @@ def resolve_host_llm_runtime(
 ) -> dict[str, Any]:
     del rollout_key
     scene = str(scene_type or "CHAT").strip().upper() or "CHAT"
-    route = _CATALOG.resolve(scene_type=scene, cognitive_tier="B", prompt_id="")
-    cloud = _CATALOG.resolve(scene_type="MULTIMODAL", cognitive_tier="B", prompt_id="")
+    catalog = _catalog()
+    route = catalog.resolve(scene_type=scene, cognitive_tier="B", prompt_id="")
+    cloud = catalog.resolve(scene_type="MULTIMODAL", cognitive_tier="B", prompt_id="")
     return _project(route, cloud=cloud)
 
 
@@ -47,7 +51,7 @@ async def resolve_host_llm_runtime_async(
 
 def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict[str, Any]:
     del base_runtime
-    route = _CATALOG.resolve(
+    route = _catalog().resolve(
         scene_type="CHAT_SURFACE",
         cognitive_tier="B",
         prompt_id="surface.main_chain.live.text",
@@ -57,7 +61,7 @@ def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict[str, Any]:
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict[str, Any]:
     del base_runtime
-    route = _CATALOG.resolve(
+    route = _catalog().resolve(
         scene_type="EXEC_INTENT",
         cognitive_tier="C",
         prompt_id="thalamus.intent_router.v1",
@@ -67,7 +71,7 @@ def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict[str, Any
 
 def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict[str, Any]:
     del base_runtime
-    route = _CATALOG.resolve(
+    route = _catalog().resolve(
         scene_type="SUBAGENT",
         cognitive_tier="B",
         prompt_id="agent.subagent.gateway.text",

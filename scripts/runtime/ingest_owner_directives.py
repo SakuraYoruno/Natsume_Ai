@@ -18,7 +18,8 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.observability_persist import persist_owner_directive_memory  # noqa: E402
 from host_brain.audit.sqlite_ledger import SQLiteLedger  # noqa: E402
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore  # noqa: E402
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator  # noqa: E402
+from host_brain.memory.life_memory.store import LifeMemoryStore  # noqa: E402
 
 
 DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"

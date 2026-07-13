@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.skills import executor_registry as registry_module
 from host_brain.skills.executor_registry import (
@@ -77,17 +77,20 @@ def _durable_token_authority(
 
 
 @pytest.fixture(autouse=True)
-def _isolated_capability_journal(monkeypatch):  # noqa: ANN001, ANN201
-    monkeypatch.setenv("NATSUME_AUDIT_DB", ":memory:")
+def _isolated_capability_journal(monkeypatch, tmp_path: Path):  # noqa: ANN001, ANN201
+    # The production Capability journal deliberately rejects transient SQLite
+    # databases.  Keep this contract test isolated with a real durable file
+    # instead of weakening the production composition to accept ``:memory:``.
+    monkeypatch.setenv("NATSUME_AUDIT_DB", str(tmp_path / "aw05-authority.sqlite3"))
     get_persistence_settings.cache_clear()
-    dependencies._ledger = None  # noqa: SLF001
-    registry_module._SKILL_CAPABILITY_BROKER = None  # noqa: SLF001
+    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
+    dependencies.get_process_service_container().capability_runtime_composition = None  # noqa: SLF001
     yield
-    ledger = dependencies._ledger  # noqa: SLF001
+    dependencies.reset_capability_runtime_composition()
+    ledger = dependencies.get_process_service_container().ledger  # noqa: SLF001
     if ledger is not None:
         ledger.close()
-    dependencies._ledger = None  # noqa: SLF001
-    registry_module._SKILL_CAPABILITY_BROKER = None  # noqa: SLF001
+    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
     get_persistence_settings.cache_clear()
 
 
@@ -111,7 +114,7 @@ def test_public_executor_dispatch_rejects_forged_payload_authority_before_adapte
                 "attempt_id": "forged-attempt",
             },
         },
-    })
+    }, capability_broker=dependencies.get_capability_broker())
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
     assert calls == []
@@ -144,7 +147,11 @@ def test_validated_token_authority_is_request_bound_and_payload_claims_are_strip
         request_id=request_id,
         skill_id="notify_user",
     )
-    result = dispatch_executor_payload(payload, authority=authority)
+    result = dispatch_executor_payload(
+        payload,
+        authority=authority,
+        capability_broker=dependencies.get_capability_broker(),
+    )
 
     assert result["status"] == "EXECUTED"
     assert result["capability_receipt"]["status"] == "SUCCEEDED"
@@ -178,6 +185,7 @@ def test_governed_authority_requires_exact_command_request_attempt_principal_tar
                 "lease_id": "lease-real",
                 "fencing_token": 1,
             },
+            durable_ledger=dependencies.get_ledger(),
             validated_by="test.governed_adapter",
         )
 
@@ -193,7 +201,11 @@ def test_bound_authority_is_sealed_immutable_and_unknown_executor_fails_closed()
     )
     with pytest.raises(TypeError, match="immutable"):
         authority.target_id = "forged"  # type: ignore[misc]
-    result = dispatch_executor_payload(payload, authority=authority)
+    result = dispatch_executor_payload(
+        payload,
+        authority=authority,
+        capability_broker=dependencies.get_capability_broker(),
+    )
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "CAPABILITY_NOT_REGISTERED"
 
@@ -218,7 +230,7 @@ def test_arbitrary_nonempty_approval_token_cannot_self_sign_authority() -> None:
 
 def _governed_authority_for_durable_test(tmp_path: Path):  # noqa: ANN201
     ledger = SQLiteLedger(db_path=tmp_path / "authority.sqlite3", check_same_thread=False)
-    dependencies._ledger = ledger  # noqa: SLF001
+    dependencies.get_process_service_container().ledger = ledger  # noqa: SLF001
     payload = {"tool": "codex_production", "work_order": {"work_order_id": "wo-bound"}}
     authority = bind_validated_skill_authority(
         payload=payload,
@@ -333,26 +345,3 @@ def test_unchecked_registry_dispatch_has_one_production_callsite() -> None:
         if "._dispatch_unchecked(" in source_path.read_text(encoding="utf-8"):
             hits.append(str(source_path.relative_to(root)))
     assert hits == []
-
-
-def test_legacy_plan_graph_skill_route_fails_closed_without_running_executor(
-    monkeypatch,
-) -> None:  # noqa: ANN001
-    from host_brain.app.plan_graph import _task_route_node
-
-    calls: list[dict] = []
-    monkeypatch.setitem(
-        registry_module._BUILTIN_EXECUTOR_REGISTRY._executors,  # noqa: SLF001
-        "notification",
-        lambda payload: calls.append(dict(payload)) or {"status": "EXECUTED"},
-    )
-    outcome = _task_route_node({
-        "request_id": _request_id("plan-graph"),
-        "session_id": "session-plan-graph",
-        "task_description": "must not execute",
-        "route_type": "skill",
-        "target_id": "notification",
-        "task_index": 0,
-    })
-    assert outcome["success"] is False
-    assert calls == []

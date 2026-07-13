@@ -8,14 +8,14 @@ durable ``IN_DOUBT`` receipt and requires reconciliation instead of execution.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import time
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Mapping
+
+from edge_client.persistence.sqlite import EdgeSqliteDatabase
 
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_COMMAND_CONFLICT,
@@ -70,7 +70,8 @@ class SQLiteEdgeEmbodimentStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._clock = clock or (lambda: int(time.time() * 1000))
         self._timeout_ms = max(1, int(timeout_ms))
-        self._initialize()
+        self._database = EdgeSqliteDatabase(self.db_path, timeout_ms=self._timeout_ms)
+        self._verify_schema()
 
     def now_ms(self) -> int:
         value = int(self._clock())
@@ -78,81 +79,25 @@ class SQLiteEdgeEmbodimentStore:
             raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_CLOCK_INVALID")
         return value
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(
-            str(self.db_path),
-            timeout=self._timeout_ms / 1000.0,
-            isolation_level=None,
-        )
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = FULL")
-        conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
-        return conn
+    def _connect(self):  # noqa: ANN202
+        return self._database.connection()
 
-    @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
-        conn = self._connect()
+    def _transaction(self):  # noqa: ANN202
+        return self._database.transaction()
+
+    def _verify_schema(self) -> None:
         try:
-            conn.execute("BEGIN IMMEDIATE")
-            yield conn
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
-    def _initialize(self) -> None:
-        with self._transaction() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS edge_transport_schema (
-                    component TEXT PRIMARY KEY,
-                    schema_version INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS edge_session_lease (
-                    session_id TEXT PRIMARY KEY,
-                    lease_id TEXT NOT NULL UNIQUE,
-                    owner_id TEXT NOT NULL,
-                    fencing_token INTEGER NOT NULL CHECK (fencing_token >= 1),
-                    issued_at_ms INTEGER NOT NULL,
-                    expires_at_ms INTEGER NOT NULL,
-                    updated_at_ms INTEGER NOT NULL,
-                    CHECK (expires_at_ms > issued_at_ms)
-                );
-                CREATE TABLE IF NOT EXISTS edge_embodiment_command (
-                    command_id TEXT PRIMARY KEY,
-                    idempotency_key TEXT NOT NULL UNIQUE,
-                    command_digest TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    lease_id TEXT NOT NULL,
-                    fencing_token INTEGER NOT NULL CHECK (fencing_token >= 1),
-                    status TEXT NOT NULL CHECK (
-                        status IN ('DISPATCHING', 'APPLIED', 'REJECTED', 'IN_DOUBT')
-                    ),
-                    receipt_json TEXT,
-                    receipt_sha256 TEXT,
-                    created_at_ms INTEGER NOT NULL,
-                    updated_at_ms INTEGER NOT NULL,
-                    completed_at_ms INTEGER,
-                    FOREIGN KEY (session_id) REFERENCES edge_session_lease(session_id)
-                );
-                CREATE INDEX IF NOT EXISTS ix_edge_embodiment_status
-                    ON edge_embodiment_command(status, updated_at_ms);
-                """
-            )
-            row = conn.execute(
-                "SELECT schema_version FROM edge_transport_schema WHERE component = ?",
-                ("embodiment",),
-            ).fetchone()
-            if row is not None and int(row["schema_version"]) != EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION:
-                raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_SCHEMA_DRIFT")
-            conn.execute(
-                "INSERT OR IGNORE INTO edge_transport_schema(component, schema_version) VALUES (?, ?)",
-                ("embodiment", EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION),
-            )
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT schema_version FROM edge_transport_schema WHERE component = ?",
+                    ("embodiment",),
+                ).fetchone()
+        except Exception as exc:
+            raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_MIGRATION_REQUIRED") from exc
+        if row is None:
+            raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_MIGRATION_REQUIRED")
+        if int(row["schema_version"]) != EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION:
+            raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_SCHEMA_DRIFT")
 
     def open_session(
         self,

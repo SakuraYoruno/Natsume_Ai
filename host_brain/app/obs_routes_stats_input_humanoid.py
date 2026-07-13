@@ -29,7 +29,7 @@ from host_brain.app.obs_routes_core import (
     _now_ms,
     _safe_json,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 

@@ -20,10 +20,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
+from host_brain.model_runtime.prompt_contract import (
+    resolve_prompt_contract_text,
 )
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 
 _logger = logging.getLogger("Natsume.interaction_pattern_analyzer")
 
@@ -41,7 +41,7 @@ DEFAULT_LOOKBACK_DAYS = 7
 MAX_SUGGESTION_DELTA = 0.03
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_spec_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -66,7 +66,7 @@ def _mapping_text(
 
 
 def _get_pattern_analysis_prompt_template() -> str:
-    return resolve_prompt_template_text("interaction_pattern_analyzer.analysis_prompt")
+    return resolve_prompt_contract_text("interaction_pattern_analyzer.analysis_prompt")
 
 # 关键词规则归纳（LLM 不可用时的降级方案）
 _KEYWORD_TRAIT_RULES: list[tuple[list[str], str, float]] = [

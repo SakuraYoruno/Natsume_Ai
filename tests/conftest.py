@@ -10,6 +10,10 @@ import sys
 
 import pytest
 
+from host_brain.app.process_service_wiring import configure_process_service_ports
+
+configure_process_service_ports()
+
 
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_action_planner.py",
@@ -40,12 +44,10 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_motive_runtime_background.py",
     "test_persona_engine_phase1.py",
     "test_persona_phase4.py",
-    "test_plan_graph_templates.py",
     "test_proactive_voice_templates.py",
     "test_prompt_builder_emotion_binding_templates.py",
     "test_prompt_builder_helpers_extra.py",
     "test_prompt_context_emotion_pulse_templates.py",
-    "test_provider_factory_templates.py",
     "test_react_loop_templates.py",
     "test_repair_agent_handler.py",
     "test_self_model_helpers_extra.py",
@@ -64,46 +66,22 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
     """Best-effort singleton/runtime reset to reduce cross-test contamination."""
 
     try:
-        import host_brain.app.dependencies as dep
+        import host_brain.composition.process_services as dep
 
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None
-        dep._bond_stage_engine = None
-        dep._retrieval_pipeline = None
-        dep._retrieval_orchestrator = None
-        dep._obs_metrics_collector = None
-        dep._graph_runtime = None
-        dep._main_chain = None
-        dep._routing_matrix = None
-        dep._memory_guard = None
-        dep._state_arbiter = None
-        dep._state_write_arbiter = None
-        dep._distillation_engine = None
-        dep._semantic_recaller = None
-        dep._context_compressor = None
-        dep._emotion_timeline = None
-        dep._tool_catalog = None
-        dep._tool_broker = None
-        dep._mcp_tool_broker = None
-        dep._shared_memory_index = None
-        dep._milestone_tracker = None
-        dep._bond_dynamics_writer = None
-        dep._hard_state = None
-        dep._activity_monitor_ref = None
-
-        mcp_registry = getattr(dep, "_mcp_tool_registry", None)
+        container = dep.get_process_service_container()
+        capability_composition = container.capability_runtime_composition
+        if capability_composition is not None:
+            with contextlib.suppress(Exception):
+                capability_composition.broker.close()
+        mcp_registry = container.mcp_tool_registry
         if mcp_registry is not None:
             with contextlib.suppress(Exception):
                 mcp_registry.close()
-        dep._mcp_tool_registry = None
-
-        bond_queue = getattr(dep, "_bond_update_queue", None)
+        bond_queue = container.bond_update_queue
         if bond_queue is not None:
             with contextlib.suppress(Exception):
                 bond_queue.shutdown()
-        dep._bond_update_queue = None
+        container.clear_service_references()
     except Exception:
         pass
 
@@ -170,14 +148,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         body_sense = sys.modules.get("host_brain.persona.body_sense")
         if body_sense is not None:
             body_sense._GLOBAL_BODY_SENSE = None
-
-        silence = sys.modules.get("host_brain.persona.emotional_silence")
-        if silence is not None:
-            silence._GLOBAL_SILENCE_ENGINE = None
-
-        inner_world = sys.modules.get("host_brain.persona.inner_world")
-        if inner_world is not None:
-            inner_world._global_inner_world = None
 
         drift_detector = sys.modules.get("host_brain.persona.drift_detector")
         if drift_detector is not None:

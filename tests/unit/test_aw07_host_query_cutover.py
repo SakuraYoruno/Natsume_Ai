@@ -18,7 +18,7 @@ class _EmptyProjectionStore:
 
 
 def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import digital_life_routes
     from host_brain.app import health_routes
     from host_brain.app import memory_routes

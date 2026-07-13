@@ -125,9 +125,9 @@ def _build_sessions_response(
     window_minutes: int,
     keyword: Optional[str],
 ) -> SessionsResponse:
-    from host_brain.observability.session_query import SessionQueryService
+    from host_brain.app.observability_runtime.session_query import SessionQueryService
     if ledger is None:
-        from host_brain.app.dependencies import get_query_projection_store
+        from host_brain.composition.process_services import get_query_projection_store
 
         svc = SessionQueryService(None, projection_store=get_query_projection_store())
     else:

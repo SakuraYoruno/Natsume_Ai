@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
 class PeripheralAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """T-110：外周神经系统 Agent 骨架。
 
     负责接收情绪状态变化（EMOTION_STATE_CHANGED）和免疫拦截（IMMUNE_BLOCK）信号，
@@ -52,7 +54,7 @@ class PeripheralAgent:
         - GATE_STATE_CHANGED / PLATFORM_MUTE_CHANGED：接收 edge 门控与静音状态变更
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
@@ -389,10 +391,10 @@ class PeripheralAgent:
             if not _active_platforms:
                 return None
 
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("peripheral_agent.context_analysis") or {}
+            _tpl = resolve_prompt_contract_json("peripheral_agent.context_analysis") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -407,6 +409,7 @@ class PeripheralAgent:
                 mute_status=str(_mute_state.get("muted") or False),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="peripheral_context_analysis",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,

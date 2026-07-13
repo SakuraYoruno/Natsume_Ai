@@ -2,7 +2,7 @@ from .base_agent import EdgeTribeAgentDescriptor
 from .channel_agent import ChannelAgent
 from .edge_tribe_bridge import EdgeTribeBridge
 from .peripheral_agent import PeripheralAgent
-from .registry import build_edge_tribe_bridge, EdgeTribeRegistry, get_edge_tribe_registry
+from .registry import EdgeTribeRegistry
 from .somatic_agent import SomaticAgent
 from .voice_agent import VoiceAgent
 
@@ -14,6 +14,4 @@ __all__ = [
     "PeripheralAgent",
     "SomaticAgent",
     "VoiceAgent",
-    "build_edge_tribe_bridge",
-    "get_edge_tribe_registry",
 ]

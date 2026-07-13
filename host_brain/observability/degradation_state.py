@@ -1215,7 +1215,7 @@ def _build_global_degradation_state_machine() -> DegradationStateMachine:
         machine._last_durable_error = f"{type(exc).__name__}: {exc}"  # noqa: SLF001
         return machine
     try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+        from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
         bus = get_tribe_event_bus()
     except Exception:

@@ -6,6 +6,7 @@ errors.  They are never converted to an empty prompt.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from string import Formatter
 import threading
@@ -70,6 +71,7 @@ class _PromptDefinition:
     info: PromptDefinitionInfo
     message_templates: tuple[PromptMessage, ...] | None = None
     renderer: PromptRenderer | None = None
+    compilation_source: Any | None = None
 
 
 def _required_text(value: Any, *, field_name: str) -> str:
@@ -239,6 +241,7 @@ class PromptRegistry:
         cache_policy: CachePolicy | Mapping[str, Any] | None = None,
         required_variables: Iterable[str] = (),
         metadata: Mapping[str, Any] | None = None,
+        compilation_source: Any | None = None,
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
         templates = _message_templates_from_static(content)
@@ -254,6 +257,7 @@ class PromptRegistry:
             metadata=metadata,
             message_templates=templates,
             renderer=None,
+            compilation_source=compilation_source,
             replace_existing=replace_existing,
         )
 
@@ -267,6 +271,7 @@ class PromptRegistry:
         cache_policy: CachePolicy | Mapping[str, Any] | None = None,
         required_variables: Iterable[str] = (),
         metadata: Mapping[str, Any] | None = None,
+        compilation_source: Any | None = None,
         replace_existing: bool = False,
     ) -> PromptDefinitionInfo:
         if not callable(renderer):
@@ -282,6 +287,7 @@ class PromptRegistry:
             metadata=metadata,
             message_templates=None,
             renderer=renderer,
+            compilation_source=compilation_source,
             replace_existing=replace_existing,
         )
 
@@ -297,6 +303,7 @@ class PromptRegistry:
         metadata: Mapping[str, Any] | None,
         message_templates: tuple[PromptMessage, ...] | None,
         renderer: PromptRenderer | None,
+        compilation_source: Any | None,
         replace_existing: bool,
     ) -> PromptDefinitionInfo:
         normalized_id = _required_text(prompt_id, field_name="prompt_id")
@@ -314,6 +321,7 @@ class PromptRegistry:
             info=info,
             message_templates=message_templates,
             renderer=renderer,
+            compilation_source=deepcopy(compilation_source),
         )
         with self._lock:
             if normalized_id in self._definitions and not replace_existing:
@@ -434,6 +442,25 @@ class PromptRegistry:
         if definition is None:
             raise UnknownPromptError(f"unknown prompt: {normalized_id}")
         return definition.info
+
+    def compilation_source(self, prompt_id: str) -> Any:
+        """Return an immutable snapshot of a registered prompt compiler source.
+
+        Production PromptSpecs are registered with their exact code-side source
+        so domain compilers do not need a second template store.  Unknown ids
+        and definitions without a compiler source are programming errors.
+        """
+
+        normalized_id = str(prompt_id or "").strip()
+        with self._lock:
+            definition = self._definitions.get(normalized_id)
+        if definition is None:
+            raise UnknownPromptError(f"unknown prompt: {normalized_id}")
+        if definition.compilation_source is None:
+            raise PromptSchemaError(
+                f"prompt has no registered compilation source: {normalized_id}"
+            )
+        return deepcopy(definition.compilation_source)
 
     def list_definitions(self) -> tuple[PromptDefinitionInfo, ...]:
         with self._lock:

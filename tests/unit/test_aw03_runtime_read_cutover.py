@@ -9,19 +9,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.http_hooks_runtime_helpers import (
-    _fetch_ledger_rows_by_time,
+from host_brain.lifecycle_runtime.scheduler_handlers import _fetch_ledger_rows_by_time
+from host_brain.lifecycle_runtime.life_jobs import (
     _load_last_interaction_ts,
     _load_recent_dream_snippet,
     _load_recent_memory_write_topics,
     _load_recent_topics,
 )
 from host_brain.app.settings import PersistenceSettings
-from host_brain.app.surface_main_chain_adapter import (
+from host_brain.surface_runtime.quality_guards import (
     _load_recent_surface_dream_text,
     _surface_recent_conversation_window_facts,
-    _surface_recent_user_fact_texts,
 )
+from host_brain.surface_runtime.life_context import _surface_recent_user_fact_texts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 
 
@@ -92,7 +92,8 @@ def runtime_db(runtime_schema_template: Path, tmp_path: Path) -> Path:
 def test_app_giants_have_no_sqlite_connection_private_path_or_raw_sql() -> None:
     for relative in (
         "host_brain/app/surface_main_chain_adapter.py",
-        "host_brain/app/http_hooks_runtime_helpers.py",
+        "host_brain/surface_runtime/life_context.py",
+        "host_brain/surface_runtime/quality_guards.py",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8")
         lowered = source.lower()
@@ -102,17 +103,23 @@ def test_app_giants_have_no_sqlite_connection_private_path_or_raw_sql() -> None:
         assert ".execute(" not in source
         assert "create table" not in lowered
         assert not re.search(r"\bselect\s+.+\s+from\b", lowered)
-        assert "RuntimeReadRepository" in source
+    surface_read_sources = "\n".join(
+        (ROOT / relative).read_text(encoding="utf-8")
+        for relative in (
+            "host_brain/surface_runtime/life_context.py",
+            "host_brain/surface_runtime/quality_guards.py",
+        )
+    )
+    assert "RuntimeReadRepository" in surface_read_sources
 
 
 def test_surface_fact_and_request_window_reads_use_typed_persistence_settings(
     runtime_db: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    surface_runtime_ports_factory,
 ) -> None:
     settings = PersistenceSettings(canonical_db_path=str(runtime_db))
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_persistence_settings",
-        lambda: settings,
+    ports = surface_runtime_ports_factory(
+        get_persistence_settings=lambda: settings,
     )
     agent_input = SimpleNamespace(
         person_id="person",
@@ -120,7 +127,7 @@ def test_surface_fact_and_request_window_reads_use_typed_persistence_settings(
         request_id="current",
     )
 
-    assert _surface_recent_user_fact_texts(agent_input) == [
+    assert _surface_recent_user_fact_texts(agent_input, ports=ports) == [
         "用户事实：项目事实：alpha",
         "用户事实：记住 beta",
     ]
@@ -143,27 +150,30 @@ def test_legacy_audit_path_env_is_normalized_by_typed_settings(
 
 def test_surface_conversation_and_dream_reads_remain_fail_soft(
     runtime_db: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    surface_runtime_ports_factory,
 ) -> None:
     ledger = SimpleNamespace(canonical_db_path=str(runtime_db))
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    ports = surface_runtime_ports_factory(get_ledger=lambda: ledger)
 
     facts = _surface_recent_conversation_window_facts(
-        SimpleNamespace(session_id="session", request_id="current")
+        SimpleNamespace(session_id="session", request_id="current"),
+        ports=ports,
     )
     assert "用户: 项目事实：alpha" in facts[1]
     assert "Natsume(主动消息): 主动承接" in facts[1]
     assert "记住 beta" not in facts[1]
-    assert _load_recent_surface_dream_text() == "夜车和海风"
+    assert _load_recent_surface_dream_text(ports=ports) == "夜车和海风"
 
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_ledger",
-        lambda: SimpleNamespace(canonical_db_path=str(runtime_db.parent / "missing.sqlite3")),
+    missing_ports = surface_runtime_ports_factory(
+        get_ledger=lambda: SimpleNamespace(
+            canonical_db_path=str(runtime_db.parent / "missing.sqlite3")
+        ),
     )
     assert _surface_recent_conversation_window_facts(
-        SimpleNamespace(session_id="session", request_id="current")
+        SimpleNamespace(session_id="session", request_id="current"),
+        ports=missing_ports,
     ) == ()
-    assert _load_recent_surface_dream_text() == ""
+    assert _load_recent_surface_dream_text(ports=missing_ports) == ""
 
 
 def test_http_hook_semantic_wrappers_keep_existing_api(runtime_db: Path) -> None:

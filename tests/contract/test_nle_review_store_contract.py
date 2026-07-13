@@ -6,13 +6,13 @@ import sqlite3
 
 import pytest
 
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
     ReviewResumePhase,
     ReviewStatus,
     ReviewType,
 )
-from host_brain.agent_runtime.review_store import (
+from host_brain.persistence.review_repository import (
     REVIEW_RESUME_ALREADY_CONSUMED,
     REVIEW_STORE_SCHEMA_NOT_READY,
     REVIEW_TOKEN_EXPIRED,
@@ -20,7 +20,7 @@ from host_brain.agent_runtime.review_store import (
     ReviewStore,
     ReviewStoreError,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy, WorkspaceResolution
 
 

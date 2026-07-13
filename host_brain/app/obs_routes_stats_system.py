@@ -16,19 +16,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.observability.health_device_projection import (
+from host_brain.app.observability_runtime.health_device_projection import (
     DEVICE_MAX_AGE_MS,
     DEVICE_STATUS_KIND,
     read_projection_payload,
 )
-from host_brain.observability.remaining_query_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
     CHECKPOINT_INDEX_KEY,
     CHECKPOINT_INDEX_KIND,
     CHECKPOINT_KIND,
     read,
     response_meta,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -64,7 +64,7 @@ async def get_avatar_state():
     """Read the durable avatar projection without issuing a device command."""
     now = _now_ms()
     try:
-        from host_brain.app.dependencies import get_query_projection_store  # noqa: PLC0415
+        from host_brain.composition.process_services import get_query_projection_store  # noqa: PLC0415
 
         payload, meta = read_projection_payload(
             get_query_projection_store(),
@@ -133,9 +133,9 @@ async def post_avatar_behavior_control(body: AvatarBehaviorRequest):
     """Apply a safe high-level avatar behavior from monitor controls."""
     now = _now_ms()
     try:
-        from host_brain.channels.edge_rpc_client import post_avatar_behavior  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_avatar_behavior  # noqa: PLC0415
 
-        result = await post_avatar_behavior(
+        result = await submit_avatar_behavior(
             behavior_id=body.behavior_id,
             emotion_tag=body.emotion_tag,
             body_action_id=body.body_action_id,

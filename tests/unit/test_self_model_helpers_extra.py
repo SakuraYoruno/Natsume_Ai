@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 import host_brain.persona.self_model as sm
-from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 @dataclass
@@ -17,22 +14,6 @@ class _Record:
 class _BondState:
     current_stage: str = "FRIEND"
     event_count: int = 0
-
-
-def _install_store(monkeypatch, template_id: str, content: dict) -> PromptTemplateStore:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        template_id,
-        content=json.dumps(content, ensure_ascii=False),
-        enabled=True,
-    )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
-    return store
 
 
 def test_compute_emotional_stability_accounts_for_flip_count_and_negative_duration() -> None:

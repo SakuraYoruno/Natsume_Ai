@@ -16,7 +16,7 @@ from host_brain.agent_runtime.browser_researcher import execute_browser_research
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.lightnovel_epub_builder import execute_lightnovel_epub_work_order
 from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.pentest.agent.attack_planner import AttackPlanner
 from host_brain.capability_plane.contracts import CapabilityGrant, CapabilityRequest
 
@@ -29,15 +29,6 @@ from .research_browser import build_research_browser_pack
 
 
 TaskHandler = Callable[[Mapping[str, Any]], Any]
-
-
-class _LazyModelAttemptServicePort:
-    """Resolve the canonical singleton only when a model-backed Pack runs."""
-
-    def complete_sync(self, request):  # noqa: ANN001, ANN201
-        from host_brain.app.dependencies import get_model_attempt_service  # noqa: PLC0415
-
-        return get_model_attempt_service().complete_sync(request)
 
 
 class ProductionDomainTaskPort(DomainTaskPort):
@@ -74,7 +65,7 @@ class ProductionDomainPackRuntime:
 def build_production_domain_pack_runtime(
     *,
     capability_broker: Any,
-    model_attempt_service: Any = None,
+    model_attempt_service: Any,
     lightnovel_recommender_handler_provider: Callable[[], Callable[..., dict[str, Any]]],
     lifecycle_task_handlers: Mapping[str, TaskHandler] | None = None,
 ) -> ProductionDomainPackRuntime:
@@ -121,7 +112,11 @@ def build_production_domain_pack_runtime(
 
     def _agent(payload: Mapping[str, Any]) -> dict[str, Any]:
         order, store, _run_dir = _decode(payload)
-        return AgentRuntimeExecutor(artifact_store=store).execute(order)
+        return AgentRuntimeExecutor(
+            artifact_store=store,
+            model_attempt_service=model_attempt_service,
+            prompt_registry=getattr(model_attempt_service, "prompt_registry", None),
+        ).execute(order)
 
     def _pentest_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
         order, _store, _run_dir = _decode(payload)
@@ -165,9 +160,7 @@ def build_production_domain_pack_runtime(
         registry=registry,
         ports=DomainPackPlatformPorts(
             capability_broker=capability_broker,
-            model_attempt_service=(
-                model_attempt_service or _LazyModelAttemptServicePort()
-            ),
+            model_attempt_service=model_attempt_service,
             task_port=task_port,
         ),
     )

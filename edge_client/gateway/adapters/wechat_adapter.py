@@ -384,11 +384,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _bridge_backend() -> str:
         backend = str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4") or "wxautox4").strip().lower() or "wxautox4"
-        if backend == "uia":
-            logger.warning(
-                "WeChatAdapter: legacy EDGE_WECHAT_BRIDGE_BACKEND=uia is no longer supported; falling back to wxautox4"
-            )
-            return "wxautox4"
         if backend in {"wxautox4", "external"}:
             return backend
         return "wxautox4"

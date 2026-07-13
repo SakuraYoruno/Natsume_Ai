@@ -14,7 +14,7 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import sqlite3
 
 from host_brain.audit.ledger_constants import (
@@ -172,12 +172,14 @@ class SQLiteLedger(
         check_same_thread: bool = True,
         wal_config: WalConfig | None = None,
         initialize_schema: bool = True,
+        life_audit_anchor_writer: Callable[..., Any] | None = None,
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
         self._write_lock = threading.RLock()  # RLock allows re-entrant acquisition within transaction()
         self._wal_status: str = "UNKNOWN"
         self._wal_degradation_reason: str | None = None
+        self._life_audit_anchor_writer = life_audit_anchor_writer
 
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -583,10 +585,11 @@ class SQLiteLedger(
         meta = dict(metadata or {})
         if not summary and not str(status or "").strip() and not str(reason_code or "").strip():
             return
+        writer = self._life_audit_anchor_writer
+        if writer is None:
+            return
         try:
-            from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-            LifeMemoryStore(ledger=self).write_background_episode(
+            writer(
                 event_source=source,
                 event_id=str(event_id or "").strip() or None,
                 request_id=str(request_id or "").strip() or None,

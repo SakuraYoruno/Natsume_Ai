@@ -18,6 +18,7 @@ from natsume_contracts.identity import (
 )
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.secure_ingress import (
     CredentialVerifierRegistry,
     FileEmergencyAuditSink,
@@ -25,7 +26,6 @@ from host_brain.secure_ingress import (
     SecureIngressAdapter,
     SecureIngressMode,
     SecureIngressService,
-    SQLiteSecureIngressStore,
     build_hmac_sha256_signature,
 )
 from host_brain.skills.signed_intake_composition import (

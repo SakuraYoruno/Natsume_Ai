@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 

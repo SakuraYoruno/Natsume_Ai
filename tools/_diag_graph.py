@@ -28,7 +28,7 @@ if env_path.exists():
 
 from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
-from host_brain.app.dependencies import get_graph_runtime
+from host_brain.composition.process_services import get_graph_runtime
 from host_brain.app.graph_config_builder import CHAT_GRAPH_NODE_ORDER, build_chat_graph_config, resolve_host_llm_runtime
 from host_brain.app.prompt_builder import infer_render_target_lang
 from host_brain.integrations.llm_helpers import PROVIDER_GEMINI

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.input_routes import _build_gateway_multimodal_placeholder_text
+from host_brain.input_runtime.contracts_and_normalization import _build_gateway_multimodal_placeholder_text
 
 
 def test_gateway_multimodal_placeholder_keeps_media_social_neutral() -> None:

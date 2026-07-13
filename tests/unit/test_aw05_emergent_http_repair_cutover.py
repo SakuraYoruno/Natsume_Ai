@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.app.handlers import repair_agent_handler
 from host_brain.model_runtime import (
     EMERGENT_GROWTH_PATTERN_PROMPT_ID,
@@ -181,7 +181,7 @@ def test_emergent_growth_replaces_legacy_callable_with_canonical_port(
         "host_brain.tribe.prefrontal_agent.get_prefrontal_agent",
         lambda: _Prefrontal(),
     )
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: object())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: object())
 
     def _legacy_callable(_prompt):  # noqa: ANN001
         raise AssertionError("legacy callable used")

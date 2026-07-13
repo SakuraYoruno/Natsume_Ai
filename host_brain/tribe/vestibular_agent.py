@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -25,6 +26,7 @@ def _bounded_int_env(name: str, *, default: int, min_value: int, max_value: int)
 
 @dataclass(slots=True)
 class VestibularAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="vestibular_agent",
@@ -46,7 +48,7 @@ class VestibularAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("MODE_TRANSITION", self._on_mode_transition)
@@ -240,10 +242,10 @@ class VestibularAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.vestibular_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("vestibular_agent.stability_assessment") or {}
+            _tpl = resolve_prompt_contract_json("vestibular_agent.stability_assessment") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -256,6 +258,7 @@ class VestibularAgent:
                 emotion_volatility=round(float(emotion_volatility), 3),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="vestibular_stability_assessment",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,

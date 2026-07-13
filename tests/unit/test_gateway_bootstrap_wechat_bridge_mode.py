@@ -91,16 +91,6 @@ class _FakeManagedServer:
         self.thread.join(timeout=timeout_s)
 
 
-class _FakeRouter:
-    def __init__(self, reporter, voice_asr=None) -> None:  # noqa: ANN001
-        self.reporter = reporter
-        self.bridge = None
-        self.voice_asr = voice_asr
-
-    def set_tribe_bridge(self, bridge) -> None:  # noqa: ANN001
-        self.bridge = bridge
-
-
 class _FakeBridge:
     def __init__(self) -> None:
         self.events: list[dict[str, object]] = []
@@ -108,6 +98,17 @@ class _FakeBridge:
     def publish_event(self, **kwargs):  # noqa: ANN003
         self.events.append(dict(kwargs))
         return {"ok": True}
+
+
+def _start_gateway(
+    config: GatewayConfig,
+    *,
+    tribe_bridge: _FakeBridge | None = None,
+) -> GatewayInstance:
+    return start_gateway(
+        config,
+        tribe_bridge=tribe_bridge or _FakeBridge(),
+    )
 
 
 class _FakeQQAdapter:
@@ -151,11 +152,10 @@ class _FakeTransportStore:
 
 @pytest.fixture(autouse=True)
 def _safe_gateway_env(monkeypatch):  # noqa: ANN001
-    monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "LEGACY_DRAIN")
+    monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "DURABLE")
     monkeypatch.delenv("EDGE_GATEWAY_ACCEPT_NEW_INTAKE", raising=False)
-    monkeypatch.delenv("EDGE_GATEWAY_ACCEPT_NEW_HTTP", raising=False)
-    monkeypatch.delenv("EDGE_GATEWAY_HOST_HMAC_SECRET", raising=False)
-    monkeypatch.delenv("EDGE_GATEWAY_REPLY_HMAC_SECRET", raising=False)
+    monkeypatch.setenv("EDGE_GATEWAY_HOST_HMAC_SECRET", "host-ingress-secret")
+    monkeypatch.setenv("EDGE_GATEWAY_REPLY_HMAC_SECRET", "reply-ingress-secret")
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "false")
     _FakeThread.created.clear()
     _FakeManagedServer.instances.clear()
@@ -164,6 +164,10 @@ def _safe_gateway_env(monkeypatch):  # noqa: ANN001
     monkeypatch.setattr(
         "edge_client.gateway.bootstrap._ManagedUvicornServer",
         _FakeManagedServer,
+    )
+    monkeypatch.setattr(
+        "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
+        _FakeTransportStore,
     )
 
 
@@ -179,12 +183,10 @@ def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> 
 
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
-    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", lambda reporter, voice_asr=None: object())
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",
-        lambda *, router, normalizer, adapters, outbound, **kwargs: captured.update({
-            "router": router,
+        lambda *, normalizer, adapters, outbound, **kwargs: captured.update({
             "normalizer": normalizer,
             "adapters": adapters,
             "outbound": outbound,
@@ -193,7 +195,7 @@ def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> 
     )
     monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
 
-    instance = start_gateway(
+    instance = _start_gateway(
         GatewayConfig(
             host_url="http://127.0.0.1:18080",
             gateway_port=19000,
@@ -225,23 +227,23 @@ def test_start_gateway_emits_platform_connected_and_disconnected(monkeypatch) ->
     bridge = _FakeBridge()
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
-    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr("edge_client.gateway.adapters.qq_adapter.QQAdapter", _FakeQQAdapter)
-    monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", lambda: bridge)
     monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",
-        lambda *, router, normalizer, adapters, outbound, **_kwargs: object(),
+        lambda *, normalizer, adapters, outbound, **_kwargs: object(),
     )
     monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
 
-    instance = start_gateway(
+    instance = _start_gateway(
         GatewayConfig(
             host_url="http://127.0.0.1:18080",
             gateway_port=19000,
             enabled_platforms=("qq",),
             qq_onebot_api_base="http://127.0.0.1:5700",
-        )
+            hmac_key="generic-internal-secret",
+        ),
+        tribe_bridge=bridge,
     )
 
     event_types = [str(item.get("event_type")) for item in bridge.events]
@@ -257,22 +259,21 @@ def test_start_gateway_emits_platform_disconnected_when_config_missing(monkeypat
     bridge = _FakeBridge()
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
-    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
-    monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", lambda: bridge)
     monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",
-        lambda *, router, normalizer, adapters, outbound, **_kwargs: object(),
+        lambda *, normalizer, adapters, outbound, **_kwargs: object(),
     )
     monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
 
-    instance = start_gateway(
+    instance = _start_gateway(
         GatewayConfig(
             host_url="http://127.0.0.1:18080",
             gateway_port=19000,
             enabled_platforms=("qq",),
             qq_onebot_api_base=None,
-        )
+        ),
+        tribe_bridge=bridge,
     )
 
     event_types = [str(item.get("event_type")) for item in bridge.events]
@@ -290,9 +291,7 @@ def _patch_durable_bootstrap(monkeypatch, *, app_factory=None) -> None:  # noqa:
         "dedicated-wechat-callback-secret",
     )
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
-    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
-    monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", _FakeBridge)
     monkeypatch.setattr(
         "edge_client.gateway.bootstrap._TRANSPORT_STORE_FACTORY",
         _FakeTransportStore,
@@ -304,18 +303,18 @@ def _patch_durable_bootstrap(monkeypatch, *, app_factory=None) -> None:  # noqa:
     monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
 
 
-def test_durable_intake_kill_switch_keeps_worker_and_reports_drained(monkeypatch) -> None:
+def test_durable_intake_kill_switch_keeps_worker_without_legacy_drain(monkeypatch) -> None:
     _patch_durable_bootstrap(monkeypatch)
     monkeypatch.setenv("EDGE_GATEWAY_ACCEPT_NEW_INTAKE", "false")
 
-    instance = start_gateway(GatewayConfig(enabled_platforms=()))
+    instance = _start_gateway(GatewayConfig(enabled_platforms=()))
 
     names = [thread.name for thread in _FakeThread.created if thread.started]
     assert "gateway-durable-delivery" in names
     assert "gateway-server" in names
     assert instance.delivery_runtime.delivery_enabled is True
     assert instance.delivery_runtime.intake_enabled is False
-    assert instance.delivery_runtime.stats()["drained"] is True
+    assert "drained" not in instance.delivery_runtime.stats()
     assert _FakeReporter.instances[-1].retry_started is False
     server = _FakeManagedServer.instances[-1]
     instance.stop()
@@ -328,7 +327,7 @@ def test_verifier_preflight_fails_before_any_background_component(monkeypatch) -
     monkeypatch.setattr("edge_client.gateway.adapters.qq_adapter.QQAdapter", _FakeQQAdapter)
 
     with pytest.raises(RuntimeError, match="GW_INTERNAL_WEBHOOK_SECRET_MISSING"):
-        start_gateway(GatewayConfig(
+        _start_gateway(GatewayConfig(
             enabled_platforms=("qq",),
             qq_onebot_api_base="http://127.0.0.1:5700",
             hmac_key=None,
@@ -339,13 +338,13 @@ def test_verifier_preflight_fails_before_any_background_component(monkeypatch) -
     assert _FakeReporter.instances[-1].retry_started is False
 
 
-def test_shadow_requires_reply_verifier_secret_before_background_start(monkeypatch) -> None:
+def test_retired_mode_still_requires_durable_reply_secret_before_start(monkeypatch) -> None:
     _patch_durable_bootstrap(monkeypatch)
     monkeypatch.setenv("EDGE_GATEWAY_TRANSPORT_MODE", "SHADOW")
     monkeypatch.delenv("EDGE_GATEWAY_REPLY_HMAC_SECRET", raising=False)
 
     with pytest.raises(RuntimeError, match="GW_REPLY_INGRESS_SECRET_MISSING"):
-        start_gateway(GatewayConfig(enabled_platforms=()))
+        _start_gateway(GatewayConfig(enabled_platforms=()))
 
     assert _FakeThread.created == []
     assert _FakeTransportStore.instances == []
@@ -364,7 +363,7 @@ def test_schema_preflight_fails_before_any_background_component(monkeypatch) -> 
     )
 
     with pytest.raises(RuntimeError, match="schema drift"):
-        start_gateway(GatewayConfig(enabled_platforms=()))
+        _start_gateway(GatewayConfig(enabled_platforms=()))
 
     assert _FakeThread.created == []
     assert _FakeReporter.instances[-1].retry_started is False
@@ -382,14 +381,14 @@ def test_startup_activation_failure_cleans_started_components(monkeypatch) -> No
     )
 
     with pytest.raises(RuntimeError, match="server thread failed"):
-        start_gateway(GatewayConfig(enabled_platforms=()))
+        _start_gateway(GatewayConfig(enabled_platforms=()))
 
     assert not any(
         thread.name == "gateway-durable-delivery"
         for thread in _FakeThread.created
     )
     assert _ExplodingServer.instances[-1].stopped is True
-    assert _FakeReporter.instances[-1].retry_stopped is True
+    assert _FakeReporter.instances[-1].retry_stopped is False
 
 
 def test_wechat_db_watcher_commits_to_0059_without_legacy_reporter(monkeypatch) -> None:
@@ -442,7 +441,7 @@ def test_wechat_db_watcher_commits_to_0059_without_legacy_reporter(monkeypatch) 
     monkeypatch.setattr("edge_client.gateway.adapters.wechat_adapter.WeChatAdapter", _WxAdapter)
     monkeypatch.setattr("edge_client.services.wx_watcher.WxDbWatcher", _Watcher)
 
-    instance = start_gateway(GatewayConfig(
+    instance = _start_gateway(GatewayConfig(
         enabled_platforms=("wechat",),
         wx_decrypt_output_dir="D:/fake-decrypt",
         hmac_key="internal-webhook-secret",
@@ -512,7 +511,7 @@ def test_telegram_listener_commits_to_0059_without_legacy_reporter(monkeypatch) 
         _TelegramAdapter,
     )
 
-    instance = start_gateway(GatewayConfig(
+    instance = _start_gateway(GatewayConfig(
         enabled_platforms=("telegram",),
         telegram_api_id=123,
         telegram_api_hash="api-hash",
@@ -560,7 +559,7 @@ def test_telegram_durable_drain_connects_for_egress_without_listener(monkeypatch
         _TelegramAdapter,
     )
 
-    instance = start_gateway(GatewayConfig(
+    instance = _start_gateway(GatewayConfig(
         enabled_platforms=("telegram",),
         telegram_api_id=123,
         telegram_api_hash="api-hash",

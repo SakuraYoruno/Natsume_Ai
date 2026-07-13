@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.capability_plane.broker import CapabilityBroker
+from host_brain.capability_plane.policies import DescriptorCapabilityPolicy
 from host_brain.governor.tokens import TokenService
 from host_brain.core.errors import (
     MCP_PROVIDER_UNAVAILABLE,
@@ -163,6 +165,7 @@ class TestMCPBrokerContract(unittest.TestCase):
         self.token_service = TokenService()
         self.broker = MCPToolBroker(
             registry=self.registry,
+            capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
             ledger=self.ledger,
             token_service=self.token_service,
         )

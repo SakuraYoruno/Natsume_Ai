@@ -28,7 +28,6 @@ from edge_client.gateway.delivery_runtime import (
 )
 from edge_client.gateway.normalizer import MessageNormalizer
 from edge_client.gateway.outbound import OutboundDispatcher
-from edge_client.gateway.router import GatewayRouter
 from edge_client.gateway.server import create_gateway_app
 from edge_client.gateway.webhook_security import (
     INTERNAL_NONCE_HEADER,
@@ -38,11 +37,12 @@ from edge_client.gateway.webhook_security import (
     VerifierRegistry,
     build_internal_signature,
 )
-from host_brain.app import dependencies, input_routes
-from host_brain.app.input_routes import router as host_input_router
+from host_brain.composition import process_services as dependencies
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.input_runtime import ingress as input_ingress
+from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.eventing.gateway_transport import SQLiteGatewayTransportStore
-from host_brain.runtime import life_continuity
+from host_brain.persistence.gateway_transport_repository import SQLiteGatewayTransportStore
 from host_brain.secure_ingress import (
     IngressReasonCode,
     IngressSurface,
@@ -193,7 +193,7 @@ def run_gateway_host_golden(
         json.dumps({key_id: secret}, separators=(",", ":")),
     )
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_evaluate_immune_gate_for_input",
         lambda **_kwargs: {
             "decision": "ALLOW",
@@ -224,14 +224,13 @@ def run_gateway_host_golden(
             },
         )
 
-    monkeypatch.setattr(input_routes, "_dispatch_to_graph", _record_dispatch)
-    monkeypatch.setattr(input_routes, "_get_ledger_safe", lambda: None)
+    monkeypatch.setattr(input_ingress, "_dispatch_to_graph", _record_dispatch)
+    monkeypatch.setattr(input_ingress, "_get_ledger_safe", lambda **_kwargs: None)
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_record_feedback_for_latest_persona_reply",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(life_continuity, "advance_inner_life_to_now", lambda **_kwargs: {})
     monkeypatch.setattr(dependencies, "notify_user_interaction", lambda: None)
     monkeypatch.setattr(input_reporter_module.time, "time", lambda: now_ms / 1_000)
 
@@ -239,7 +238,6 @@ def run_gateway_host_golden(
         host_url="http://host.task0495.invalid",
         hmac_key=secret,
         timeout_s=1.0,
-        cache_file=None,
         secure_principal_id=principal_id,
         secure_tenant_id=tenant_id,
         secure_key_id=key_id,
@@ -265,7 +263,6 @@ def run_gateway_host_golden(
         now_ms_fn=lambda: now_ms,
     )
     gateway_app = create_gateway_app(
-        router=GatewayRouter(reporter),
         normalizer=MessageNormalizer(),
         adapters={"qq": adapter},
         outbound=outbound,
@@ -274,7 +271,11 @@ def run_gateway_host_golden(
         reply_verifiers=VerifierRegistry(()),
     )
     host_app = FastAPI()
-    host_app.include_router(host_input_router)
+    host_app.include_router(
+        create_input_router(
+            application_ports=build_input_runtime_application_ports(),
+        )
+    )
 
     raw_event = json.dumps(
         {

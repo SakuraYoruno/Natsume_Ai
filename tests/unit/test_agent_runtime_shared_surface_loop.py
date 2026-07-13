@@ -1,25 +1,20 @@
 ﻿from __future__ import annotations
 
 from typing import Any
+import pytest
 
-from host_brain.app.agent_runtime_shared import (
-    _detect_recent_turn_query_role,
+from host_brain.agent_runtime.contextual_answers import (
     _maybe_build_contextual_memory_answer,
     _maybe_build_contextual_session_answer,
     _maybe_build_contextual_style_answer,
     _memory_recall_plan_should_bypass_direct_status_fastlane,
-    _normalize_retrieval_summary_for_audit,
-    _needs_selection_followup_retrieval_budget,
+)
+from host_brain.observability.runtime_audit import _normalize_retrieval_summary_for_audit
+from host_brain.agent_runtime.fastpaths import _needs_selection_followup_retrieval_budget
+from host_brain.persona.session_hooks import (
     _resolve_selection_followup_retrieval_timeout_seconds,
-    _maybe_build_recent_turn_answer,
     _run_surface_persona_session_end_sync,
 )
-
-
-def test_recent_turn_query_role_handles_where_we_left_off() -> None:
-    assert _detect_recent_turn_query_role("刚才说到哪了") == "both"
-    assert _detect_recent_turn_query_role("刚刚聊到哪了") == "both"
-    assert _detect_recent_turn_query_role("你刚刚说了什么") == "assistant"
 
 
 def test_memory_recall_plan_bypasses_recent_turn_fastlane_for_evidence_and_correction() -> None:
@@ -297,6 +292,7 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     assert "facts" not in trace
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_builds_direct_recap_and_skips_current_query(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -316,6 +312,7 @@ def test_recent_turn_answer_builds_direct_recap_and_skips_current_query(monkeypa
     assert answer == "你刚才说：「这次主链效果怎么样，短句回答」；我回：「当前任务状态为 RUNNING。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_handles_assistant_just_said_query(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -334,6 +331,7 @@ def test_recent_turn_answer_handles_assistant_just_said_query(monkeypatch) -> No
     assert answer == "我上一句回的是：「收到，我继续看路由边界。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_skips_low_info_turns_for_where_we_left_off(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -354,6 +352,7 @@ def test_recent_turn_answer_skips_low_info_turns_for_where_we_left_off(monkeypat
     assert answer == "你刚才说：「这次主链效果怎么样，短句回答」；我回：「当前任务状态为 RUNNING。」。"
 
 
+@pytest.mark.skip(reason="legacy recent-turn direct route retired")
 def test_recent_turn_answer_handles_only_low_info_context_without_model(monkeypatch) -> None:
     monkeypatch.setenv("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", "true")
 
@@ -713,4 +712,3 @@ def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     assert result["person_id"] == "canon-user"
     assert result["emotion_tag"] == "SAD"
     assert result["inner_world"]["anticipation_topics"] == ["我有点难受"]
-

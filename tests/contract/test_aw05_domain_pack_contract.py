@@ -7,7 +7,7 @@ import time
 import pytest
 
 from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
-from host_brain.agent_runtime.production_executor import _production_adapter
+from host_brain.domain_packs.production_runtime import _production_adapter
 from host_brain.capability_plane.broker import (
     CapabilityBroker,
     CapabilityDescriptor,

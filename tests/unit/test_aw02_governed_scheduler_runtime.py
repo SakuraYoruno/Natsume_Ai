@@ -8,11 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_store import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
@@ -37,7 +38,6 @@ from host_brain.scheduler.worker_registry import (
     SchedulerWorkerRegistry,
     SchedulerWorkerResolver,
 )
-from host_brain.secure_ingress import SQLiteSecureIngressStore
 
 
 NOW = 1_800_000_000_000
@@ -232,12 +232,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
             task_runtime_container=infrastructure,
             ledger=ledger,
             result_repository=results,
-            runtime_router=CanonicalRuntimeRouter(
-                mode="canonical",
-                canary_percent=100,
-                canonical_owner="scheduler-owner",
-                confirmed_owner="scheduler-owner",
-            ),
+            runtime_router=CanonicalRuntimeRouter(),
             worker_registry=handlers,
             owner_id="scheduler-owner",
         )
@@ -488,7 +483,7 @@ def test_scheduler_contract_rejects_raw_secrets_but_allows_budget_tokens() -> No
         )
 
 
-def test_executor_assignment_selects_distinct_scheduler_workers() -> None:
+def test_executor_assignment_selects_only_canonical_scheduler_worker() -> None:
     repository = SimpleNamespace()
     canonical = GovernedSchedulerWorker(
         handlers=SchedulerWorkerRegistry(default_handler=lambda **_: {"status": "OK"}),
@@ -496,18 +491,10 @@ def test_executor_assignment_selects_distinct_scheduler_workers() -> None:
         occurrence_repository=repository,
         result_repository=repository,
     )
-    legacy = GovernedSchedulerWorker(
-        handlers=SchedulerWorkerRegistry(default_handler=lambda **_: {"status": "OK"}),
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-    )
-    resolver = SchedulerWorkerResolver(
-        canonical_worker=canonical,
-        legacy_worker=legacy,
-    )
+    resolver = SchedulerWorkerResolver(canonical_worker=canonical)
     assert resolver.resolve(executor="canonical", worker_route="scheduler_production") is canonical
-    assert resolver.resolve(executor="legacy", worker_route="scheduler_production") is legacy
+    with pytest.raises(SchedulerWorkerError):
+        resolver.resolve(executor="legacy", worker_route="scheduler_production")
 
     strict = SchedulerWorkerRegistry(default_handler=lambda **_: {"status": "OK"})
     assert callable(strict.resolve(worker_key="scheduler_production", task_id="dynamic"))
@@ -517,7 +504,7 @@ def test_executor_assignment_selects_distinct_scheduler_workers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_executor_assignment_invokes_distinct_real_handlers() -> None:
+async def test_executor_assignment_invokes_canonical_real_handler() -> None:
     calls: list[str] = []
     authority = {
         "request_id": "request-worker-selection",
@@ -575,24 +562,13 @@ async def test_executor_assignment_invokes_distinct_real_handlers() -> None:
 
     canonical_registry = SchedulerWorkerRegistry()
     canonical_registry.register("intent_dispatch", handler("canonical"))
-    legacy_registry = SchedulerWorkerRegistry()
-    legacy_registry.register("intent_dispatch", handler("legacy"))
     canonical = GovernedSchedulerWorker(
         handlers=canonical_registry,
         definition_repository=repository,
         occurrence_repository=repository,
         result_repository=repository,
     )
-    legacy = GovernedSchedulerWorker(
-        handlers=legacy_registry,
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-    )
-    resolver = SchedulerWorkerResolver(
-        canonical_worker=canonical,
-        legacy_worker=legacy,
-    )
+    resolver = SchedulerWorkerResolver(canonical_worker=canonical)
     command = SimpleNamespace(
         input_ref=occurrence["occurrence_id"],
         request_id=authority["request_id"],
@@ -605,21 +581,17 @@ async def test_executor_assignment_invokes_distinct_real_handlers() -> None:
     )
     context = {"probe": True}
 
-    for executor in ("canonical", "legacy"):
-        worker = resolver.resolve(
-            executor=executor,
-            worker_route="scheduler_production",
+    worker = resolver.resolve(executor="canonical", worker_route="scheduler_production")
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=work_order,
+            execution_context=context,
         )
-        events = [
-            event
-            async for event in worker.execute_stream(
-                command=command,
-                work_order=work_order,
-                execution_context=context,
-            )
-        ]
-        assert events[-1]["result"]["summary"] == executor
-    assert calls == ["canonical", "legacy"]
+    ]
+    assert events[-1]["result"]["summary"] == "canonical"
+    assert calls == ["canonical"]
 
     repository.worker_key = "unknown_worker"
     command.target_id = "unknown_worker"
@@ -634,4 +606,4 @@ async def test_executor_assignment_invokes_distinct_real_handlers() -> None:
     assert failed[-1]["decision"] == "REJECT"
     assert failed[-1]["result"]["status"] == "FAILED"
     assert failed[-1]["result"]["reason_code"] == SCHEDULER_HANDLER_NOT_REGISTERED
-    assert calls == ["canonical", "legacy"]
+    assert calls == ["canonical"]

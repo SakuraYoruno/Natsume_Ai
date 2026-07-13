@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from host_brain.capability_plane.broker import CapabilityBroker
+from host_brain.capability_plane.policies import DescriptorCapabilityPolicy
 from host_brain.governor.action_arbiter import (
     ARBITER_BLOCK,
     arbitrate_action,
@@ -122,7 +124,10 @@ def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
         called += 1
         return {"should_not": "execute"}
 
-    broker = MCPToolBroker(registry=registry)
+    broker = MCPToolBroker(
+        registry=registry,
+        capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
+    )
     broker.register_handler("pentest", "execute_exploit", handler)
     result = broker.call(
         provider_id="pentest",
@@ -134,4 +139,3 @@ def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
     assert result.success is False
     assert result.reason_code == "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
     assert called == 0
-

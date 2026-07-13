@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -44,7 +44,7 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     )
     proposal_id = seeded["proposal_id"]
     baseline = service.list_proposals(limit=20)
-    monkeypatch.setattr("host_brain.app.dependencies.get_capability_forge_service", lambda: service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_capability_forge_service", lambda: service)
     monkeypatch.setattr(
         "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection",
         lambda: (

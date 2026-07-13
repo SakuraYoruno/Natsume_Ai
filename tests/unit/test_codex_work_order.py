@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 
 def test_codex_work_order_from_mapping_defaults_and_validates() -> None:

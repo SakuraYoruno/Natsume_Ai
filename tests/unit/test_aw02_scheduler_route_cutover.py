@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.app.router_registry import register_host_routers
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
 def test_both_scheduler_prefixes_use_one_service_with_explicit_authority() -> None:
@@ -36,6 +37,7 @@ def test_both_scheduler_prefixes_use_one_service_with_explicit_authority() -> No
     app = FastAPI()
     register_host_routers(
         app,
+        input_runtime_ports=build_input_runtime_application_ports(),
         scheduler_command_ingress_provider=Ingress,
         scheduler_command_service_provider=lambda: service,
     )
@@ -52,4 +54,3 @@ def test_both_scheduler_prefixes_use_one_service_with_explicit_authority() -> No
     assert len(service.calls) == 2
     assert all(call["authority"] is authority for call in service.calls)
     assert all(call["payload"] == {"reason": "operator"} for call in service.calls)
-

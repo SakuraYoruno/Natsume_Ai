@@ -5,20 +5,19 @@ from typing import Any
 
 import pytest
 
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import GovernedCommandApplication
 from host_brain.task_runtime import GovernedTaskCoordinator
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
     HostCommandSurface,
     TaskExecutor,
-    TaskRuntimeMode,
     build_host_command,
 )
 
@@ -314,18 +313,13 @@ def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
         operation_fingerprint="2" * 64,
         created_at_ms=1,
     )
-    mode = TaskRuntimeMode.CANONICAL if executor is TaskExecutor.CANONICAL else TaskRuntimeMode.LEGACY
     assignment = ExecutorAssignment(
         work_order_id=work_order.work_order_id,
         executor=executor,
-        mode=mode,
         assignment_id=f"runtime-assignment://{work_order.work_order_id}/{executor.value}",
         assigned_at_ms=1,
-        canary_percent=100 if executor is TaskExecutor.CANONICAL else 0,
-        canary_selected=executor is TaskExecutor.CANONICAL,
-        kill_switch_active=False,
         is_new_task=True,
-        reason_code="RUNTIME_NEW_TASK_CANONICAL" if executor is TaskExecutor.CANONICAL else "RUNTIME_NEW_TASK_LEGACY",
+        reason_code="RUNTIME_NEW_TASK_CANONICAL",
     )
     return command, work_order, assignment, graph
 
@@ -378,8 +372,8 @@ async def test_canonical_assignment_drives_full_durable_happy_path_and_single_co
 
 
 @pytest.mark.asyncio
-async def test_legacy_assignment_is_selected_but_failed_verification_never_emits_commit() -> None:
-    command, work_order, assignment, graph = _contracts(executor=TaskExecutor.LEGACY)
+async def test_failed_verification_never_emits_commit() -> None:
+    command, work_order, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
     calls: list[str] = []
     app = _application(graph=graph, calls=calls, verification_status="FAIL")
 
@@ -396,8 +390,8 @@ async def test_legacy_assignment_is_selected_but_failed_verification_never_emits
     assert [event["phase"] for event in events] == ["RENDER", "TERMINAL"]
     assert events[-1]["decision"] == "REJECT"
     assert events[-1]["execution_receipt"]["status"] == "VERIFICATION_FAILED"
-    assert "resolve:legacy:executive_runtime" in calls
-    assert "worker:legacy" in calls
+    assert "resolve:canonical:executive_runtime" in calls
+    assert "worker:canonical" in calls
     assert calls.index("operation:COMMITTED") < calls.index("node:VERIFICATION_FAILED")
     assert calls[-2:] == ["graph:FAILED", "publish:200"]
 

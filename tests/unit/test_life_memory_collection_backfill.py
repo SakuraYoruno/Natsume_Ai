@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from scripts.runtime.backfill_life_memory_collections import run_collection_backfill
 from scripts.runtime.backfill_life_collection_canonical_entities import run_canonical_backfill
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report

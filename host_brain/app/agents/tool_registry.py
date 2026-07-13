@@ -14,8 +14,9 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from host_brain.tools.contracts import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -24,25 +25,6 @@ logger = logging.getLogger(__name__)
 # ToolSpec：工具规格定义
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ToolSpec:
-    """工具规格定义。"""
-    tool_id: str
-    display_name: str
-    description: str
-    parameters: dict[str, Any]          # JSON Schema 格式的参数定义
-    has_side_effects: bool = False       # True = 有副作用（写操作），需要 allow_side_effects=True
-    executor: Callable[..., Any] | None = field(default=None, repr=False)
-
-    def to_llm_schema(self) -> dict[str, Any]:
-        """转换为 LLM function calling 格式的 schema。"""
-        return {
-            "name": self.tool_id,
-            "description": self.description,
-            "parameters": self.parameters,
-        }
-
-
 # ---------------------------------------------------------------------------
 # 内部工具：语义召回器（延迟获取，避免循环导入）
 # ---------------------------------------------------------------------------
@@ -50,7 +32,7 @@ class ToolSpec:
 def _get_semantic_recaller():
     """延迟获取 SemanticRecaller 单例，避免循环导入。"""
     try:
-        from host_brain.app.dependencies import get_semantic_recaller  # noqa: PLC0415
+        from host_brain.composition.process_services import get_semantic_recaller  # noqa: PLC0415
         return get_semantic_recaller()
     except Exception as exc:
         logger.warning("tool_registry: 无法获取 SemanticRecaller，降级为 mock: %s", exc)
@@ -600,7 +582,7 @@ def _tool_list_skills(args: dict[str, Any]) -> dict[str, Any]:
     limit = max(1, min(limit, 120))
 
     try:
-        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+        from host_brain.composition.process_services import get_skill_registry  # noqa: PLC0415
 
         registry = get_skill_registry()
         metas = list(registry.all())
@@ -699,9 +681,13 @@ def _tool_run_skill(args: dict[str, Any]) -> dict[str, Any]:
         governor_result.setdefault("decision", "APPROVE")
 
     try:
-        from host_brain.app.executive_runtime_core import _execute_skill  # noqa: PLC0415
+        from host_brain.app.runtime_port_wiring import (  # noqa: PLC0415
+            build_executive_runtime_application_ports,
+        )
+        from host_brain.executive_runtime.skill_execution import _execute_skill  # noqa: PLC0415
 
         outcome = _execute_skill(
+            ports=build_executive_runtime_application_ports(),
             request_body={"args": skill_args},
             request_id=request_id,
             session_id=session_id,
@@ -1148,33 +1134,10 @@ _AGENT_TOOLS: dict[str, list[str]] = {
     ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
     "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
-    "pentest_agent":   [],  # 由 _ensure_pentest_tools_registered() 动态注册
+    # Pentest application dispatch is planning-only.  Effects are server-owned
+    # by SecurePentestExecutionService and are never generic ReAct tools.
+    "pentest_agent":   [],
 }
-
-# ---- Pentest 工具延迟注册 ----
-
-_PENTEST_TOOLS_REGISTERED = False
-
-
-def _ensure_pentest_tools_registered() -> None:
-    """延迟注册 pentest 工具到 _TOOL_REGISTRY 和 _AGENT_TOOLS。"""
-    global _PENTEST_TOOLS_REGISTERED
-    if _PENTEST_TOOLS_REGISTERED:
-        return
-    _PENTEST_TOOLS_REGISTERED = True
-
-    try:
-        from host_brain.pentest.tools.tool_specs import PENTEST_TOOL_SPECS, PENTEST_TOOL_IDS  # noqa: PLC0415
-        from host_brain.pentest.tools.tool_executors import EXECUTOR_MAP  # noqa: PLC0415
-    except ImportError:
-        return
-
-    for tool_id, spec in PENTEST_TOOL_SPECS.items():
-        if spec.executor is None and tool_id in EXECUTOR_MAP:
-            spec.executor = EXECUTOR_MAP[tool_id]
-        _TOOL_REGISTRY[tool_id] = spec
-
-    _AGENT_TOOLS["pentest_agent"] = list(PENTEST_TOOL_IDS)
 
 
 _INTENT_AGENT_ID = "intent_agent"
@@ -1274,10 +1237,6 @@ def get_tools_for_agent(
         可用工具列表
     """
     normalized_agent_id = str(agent_id or "").strip()
-
-    # pentest_agent: 延迟注册工具
-    if normalized_agent_id == "pentest_agent":
-        _ensure_pentest_tools_registered()
 
     # catalog 路径（动态工具发现，推荐路径）
     if catalog is not None:

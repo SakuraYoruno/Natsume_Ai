@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.agent_runtime import AgentRuntimeExecutor
+from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 

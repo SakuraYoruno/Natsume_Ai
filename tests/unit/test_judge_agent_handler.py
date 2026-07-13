@@ -1,4 +1,4 @@
-﻿"""P14 单元测试：judge_agent_handler ReAct 化。
+"""P14 单元测试：judge_agent_handler ReAct 化。
 
 验收标准覆盖：
   - 3.1：judge_agent_handler 走 ReAct 路径，react_scratchpad 非 None，
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from host_brain.app.agents.agent_registry import AGENT_ID_JUDGE
+from host_brain.agent_runtime.agent_registry import AGENT_ID_JUDGE
 from host_brain.app.agents.tool_registry import (
     ToolSpec,
     execute_tool,

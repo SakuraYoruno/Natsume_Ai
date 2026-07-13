@@ -15,7 +15,8 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.distillation import MemoryDistillationEngine, resolve_memory_distillation_codex_model
 from host_brain.memory.episodic import EpisodicStore
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.core.prompt_context import (
     validate_prompt_context,
     build_semantic_slot,

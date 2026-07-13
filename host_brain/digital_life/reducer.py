@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeCommand,
     LifeCommandPreview,
     LifeDeliveryIntent,

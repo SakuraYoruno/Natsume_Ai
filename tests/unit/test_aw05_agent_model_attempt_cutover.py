@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from host_brain.agent_runtime.agent_executor import AgentExecutor
 from host_brain.agent_runtime.agent_prompt import (
@@ -9,8 +10,8 @@ from host_brain.agent_runtime.agent_prompt import (
     AGENT_REACT_PROMPT_ID,
     SUBAGENT_GATEWAY_PROMPT_ID,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
-from host_brain.app.agent_runtime_shared import _SubAgentGatewayAdapter
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.agent_runtime.subagent_gateway import _SubAgentGatewayAdapter
 from host_brain.model_runtime import (
     InMemoryAttemptAuditRepository,
     ModelAttemptService,
@@ -81,8 +82,8 @@ def test_agent_executor_uses_one_request_with_service_owned_semantic_retry(
         ]
     )
     service = _service(registry, adapter)
-    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
     order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-aw05-agent",
@@ -93,7 +94,10 @@ def test_agent_executor_uses_one_request_with_service_owned_semantic_retry(
         }
     )
 
-    result = AgentExecutor().execute(order, workspace=tmp_path)
+    result = AgentExecutor(
+        model_attempt_service=service,
+        prompt_registry=registry,
+    ).execute(order, workspace=tmp_path)
 
     assert result.status == "EXECUTED"
     assert result.result_text == "canonical agent result"
@@ -113,14 +117,18 @@ def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypat
     registry = build_live_production_prompt_registry()
     adapter = _ScriptedAdapter(["sub-agent canonical output"])
     service = _service(registry, adapter)
-    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
     gateway = _SubAgentGatewayAdapter(
         provider_name="gemini",
         model_id="legacy-model-must-not-route",
         api_key="secret-must-not-be-retained",
         timeout_ms=4_000,
         base_url_override="https://legacy.invalid",
+        application_ports=SimpleNamespace(
+            prompt_registry=lambda: registry,
+            model_attempt_service=lambda: service,
+        ),
     )
 
     result = gateway.complete([{"role": "user", "content": "do bounded work"}])

@@ -14,7 +14,6 @@ import concurrent.futures
 import json
 import logging
 import os
-import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -38,7 +37,7 @@ from host_brain.observability.api_models import (
     TribeEventsResponse,
 )
 
-from host_brain.observability.projection_runtime import (
+from host_brain.app.observability_runtime.projection_runtime import (
     TRACE_FEED_INDEX_KEY,
     TRACE_FEED_KIND,
     TRACE_KIND,
@@ -48,11 +47,7 @@ from host_brain.observability.projection_runtime import (
     projection_meta,
     trace_source,
 )
-from host_brain.observability.projection_daemon import (
-    register_projection_job,
-    start_projection_jobs,
-    stop_projection_jobs,
-)
+from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 logger = logging.getLogger("Natsume.obs")
@@ -77,35 +72,9 @@ _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimu
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
-_TRACE_FEED_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_trace_feed_warm_enabled
-)
-_TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 30000.0, minimum=500.0)), 500)
-_TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 45000.0, minimum=1000.0)), 1000)
-_TRACE_FEED_WARM_STALE_FALLBACK_MS = max(
-    int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_FALLBACK_MS", 300000.0, minimum=1000.0)),
-    int(_TRACE_FEED_WARM_STALE_MS),
-)
-_TRACE_FEED_WARM_FULL_REFRESH_MS = max(
-    int(_env_float("HOST_OBS_TRACE_FEED_WARM_FULL_REFRESH_MS", 120000.0, minimum=1000.0)),
-    int(_TRACE_FEED_WARM_INTERVAL_MS),
-)
-_TRACE_FEED_WARM_LIMIT = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_LIMIT", 6.0, minimum=1.0)), 1)
-_TRACE_FEED_WARM_WINDOW_MINUTES = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_WINDOW_MINUTES", 1440.0, minimum=1.0)), 1)
-_TRACE_FEED_WARM_ACTIVE_WITHIN_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_ACTIVE_WITHIN_MS", 60000.0, minimum=1000.0)), 1000)
-_trace_feed_warm_thread: threading.Thread | None = None
-_trace_feed_warm_stop = threading.Event()
-_trace_feed_warm_lock = threading.Lock()
-_trace_feed_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-    "session_signature": None,
-}
+TRACE_FEED_DEFAULT_LIMIT = 6
+TRACE_FEED_DEFAULT_WINDOW_MINUTES = 1440
+TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS = 60_000
 
 
 # ---------------------------------------------------------------------------
@@ -212,299 +181,6 @@ def _get_trace_builders():
     )
 
 
-def _clone_trace_live_feed_snapshot(snapshot: TraceLiveFeedSnapshot) -> TraceLiveFeedSnapshot:
-    if hasattr(snapshot, "model_copy"):
-        return snapshot.model_copy(deep=True)
-    return snapshot.copy(deep=True)
-
-
-def _build_trace_live_feed_snapshot_sync(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-) -> TraceLiveFeedSnapshot:
-    (_, __, _build_trace_live_feed_snapshot, *___) = _get_trace_builders()
-    return _build_trace_live_feed_snapshot(
-        _get_ledger(),
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
-    )
-
-
-def _trace_feed_session_terminal(status: Any) -> bool:
-    return _normalize_trace_status(status, default="UNKNOWN") in {"OK", "FAIL", "REJECTED"}
-
-
-def _trace_feed_session_signature(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-) -> tuple[tuple[str, int, str, int], ...]:
-    from host_brain.app.obs_routes_core import (  # noqa: PLC0415
-        _build_sessions_response,
-        _dedup_sessions_by_content,
-    )
-
-    fetch_size = min(int(limit) * 3, 36)
-    sessions_response = _build_sessions_response(
-        _get_ledger(),
-        page=1,
-        page_size=fetch_size,
-        status=None,
-        window_minutes=int(window_minutes),
-        keyword=keyword,
-    )
-    sessions = _dedup_sessions_by_content(sessions_response.items)[: int(limit)]
-    if not str(keyword or "").strip():
-        active_cutoff_ms = _now_ms() - max(0, int(active_within_ms))
-        sessions = [
-            session
-            for session in sessions
-            if int(getattr(session, "ts_ms", 0) or 0) >= active_cutoff_ms
-            or not _trace_feed_session_terminal(getattr(session, "status", None))
-        ]
-    signature: list[tuple[str, int, str, int]] = []
-    for session in sessions:
-        request_id = str(getattr(session, "request_id", "") or "").strip()
-        if not request_id:
-            continue
-        try:
-            latency_ms = int(getattr(session, "total_latency_ms", -1) or -1)
-        except (TypeError, ValueError):
-            latency_ms = -1
-        signature.append(
-            (
-                request_id,
-                int(getattr(session, "ts_ms", 0) or 0),
-                _normalize_trace_status(getattr(session, "status", None), default="UNKNOWN"),
-                latency_ms,
-            )
-        )
-    return tuple(signature)
-
-
-def _store_trace_feed_warm_snapshot(
-    snapshot: TraceLiveFeedSnapshot,
-    *,
-    started_at: int,
-    session_signature: tuple[tuple[str, int, str, int], ...] | None,
-    last_duration_ms: int | None = None,
-) -> None:
-    with _trace_feed_warm_lock:
-        _trace_feed_warm_state["value"] = _clone_trace_live_feed_snapshot(snapshot)
-        _trace_feed_warm_state["updated_ts_ms"] = _now_ms()
-        _trace_feed_warm_state["last_duration_ms"] = (
-            max(0, int(last_duration_ms))
-            if last_duration_ms is not None
-            else max(0, _now_ms() - started_at)
-        )
-        _trace_feed_warm_state["last_error"] = None
-        _trace_feed_warm_state["session_signature"] = session_signature
-
-
-def _refresh_trace_feed_warm_once() -> None:
-    started_at = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="trace_feed")
-        if deferred:
-            with _trace_feed_warm_lock:
-                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
-                _trace_feed_warm_state["last_duration_ms"] = 0
-            return
-        acquired, reason = try_acquire_obs_warm_slot(task_name="trace_feed")
-        if not acquired:
-            with _trace_feed_warm_lock:
-                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
-                _trace_feed_warm_state["last_duration_ms"] = 0
-            return
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        session_signature: tuple[tuple[str, int, str, int], ...] | None = None
-        try:
-            session_signature = _trace_feed_session_signature(
-                limit=_TRACE_FEED_WARM_LIMIT,
-                window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
-                keyword=None,
-                active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
-            )
-        except Exception as exc:
-            logger.debug("trace feed warm session preflight failed: %s", exc)
-            session_signature = None
-
-        if session_signature == ():
-            _store_trace_feed_warm_snapshot(
-                TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms()),
-                started_at=started_at,
-                session_signature=session_signature,
-                last_duration_ms=0,
-            )
-            return
-
-        if session_signature is not None:
-            with _trace_feed_warm_lock:
-                previous_signature = _trace_feed_warm_state.get("session_signature")
-                previous_value = _trace_feed_warm_state.get("value")
-                previous_updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-            if (
-                previous_value is not None
-                and previous_signature == session_signature
-                and previous_updated_ts_ms > 0
-                and _now_ms() - previous_updated_ts_ms < _TRACE_FEED_WARM_FULL_REFRESH_MS
-            ):
-                _store_trace_feed_warm_snapshot(
-                    _clone_trace_live_feed_snapshot(previous_value),
-                    started_at=started_at,
-                    session_signature=session_signature,
-                    last_duration_ms=0,
-                )
-                return
-
-        snapshot = _build_trace_live_feed_snapshot_sync(
-            limit=_TRACE_FEED_WARM_LIMIT,
-            window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
-            keyword=None,
-            active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
-        )
-    except Exception as exc:
-        with _trace_feed_warm_lock:
-            _trace_feed_warm_state["last_error"] = str(exc)[:200]
-            _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        logger.warning("trace feed warm refresh degraded: %s", exc)
-        return
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-    _store_trace_feed_warm_snapshot(
-        snapshot,
-        started_at=started_at,
-        session_signature=session_signature,
-    )
-
-
-def _trace_feed_warm_loop() -> None:
-    while not _trace_feed_warm_stop.is_set():
-        _refresh_trace_feed_warm_once()
-        wait_seconds = max(float(_TRACE_FEED_WARM_INTERVAL_MS) / 1000.0, 0.25)
-        _trace_feed_warm_stop.wait(wait_seconds)
-
-
-def start_trace_feed_warm_cache() -> dict[str, Any]:
-    """Start the single durable projection authority.
-
-    The legacy trace warm-cache loop is intentionally not started.  Query
-    handlers read the durable projection store, so a second process-local
-    refresher would be both wasted work and a competing read authority.
-    """
-    start_projection_jobs(interval_ms=5000)
-    try:
-        from host_brain.observability.projection_runtime import configure_embodiment_receipt_projection
-
-        configure_embodiment_receipt_projection()
-    except Exception as exc:
-        logger.warning("embodiment receipt projection startup failed: %s", exc)
-    return {**get_trace_feed_warm_status(), "authority": "projection_daemon"}
-
-
-def stop_trace_feed_warm_cache() -> dict[str, Any]:
-    global _trace_feed_warm_thread
-    # Defensive cleanup for processes upgraded from the legacy implementation;
-    # new processes never create this thread.
-    _trace_feed_warm_stop.set()
-    thread = _trace_feed_warm_thread
-    if thread is not None:
-        thread.join(timeout=2.0)
-    _trace_feed_warm_thread = None
-    stop_projection_jobs()
-    try:
-        from host_brain.observability.projection_runtime import stop_embodiment_receipt_projection
-
-        stop_embodiment_receipt_projection()
-    except Exception as exc:
-        logger.debug("embodiment receipt projection shutdown failed: %s", exc)
-    return get_trace_feed_warm_status()
-
-
-def get_trace_feed_warm_status() -> dict[str, Any]:
-    with _trace_feed_warm_lock:
-        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
-        has_value = _trace_feed_warm_state.get("value") is not None
-        last_duration_ms = int(_trace_feed_warm_state.get("last_duration_ms") or 0)
-        last_error = str(_trace_feed_warm_state.get("last_error") or "").strip() or None
-    running = _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive()
-    return {
-        "enabled": bool(_TRACE_FEED_WARM_ENABLED),
-        "running": bool(running),
-        "has_value": bool(has_value),
-        "updated_ts_ms": updated_ts_ms or None,
-        "age_ms": age_ms,
-        "interval_ms": int(_TRACE_FEED_WARM_INTERVAL_MS),
-        "stale_after_ms": int(_TRACE_FEED_WARM_STALE_MS),
-        "full_refresh_ms": int(_TRACE_FEED_WARM_FULL_REFRESH_MS),
-        "last_duration_ms": last_duration_ms,
-        "last_error": last_error,
-        "limit": int(_TRACE_FEED_WARM_LIMIT),
-        "window_minutes": int(_TRACE_FEED_WARM_WINDOW_MINUTES),
-        "active_within_ms": int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS),
-    }
-
-
-def _get_warmed_trace_feed_snapshot(
-    *,
-    limit: int,
-    window_minutes: int,
-    keyword: Optional[str],
-    active_within_ms: int,
-    allow_stale_ms: int | None = None,
-) -> TraceLiveFeedSnapshot | None:
-    if not _TRACE_FEED_WARM_ENABLED:
-        return None
-    if str(keyword or "").strip():
-        return None
-    if int(limit) != int(_TRACE_FEED_WARM_LIMIT):
-        return None
-    if int(window_minutes) != int(_TRACE_FEED_WARM_WINDOW_MINUTES):
-        return None
-    if int(active_within_ms) != int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS):
-        return None
-
-    with _trace_feed_warm_lock:
-        value = _trace_feed_warm_state.get("value")
-        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
-
-    if value is None or updated_ts_ms <= 0:
-        return None
-    max_age_ms = int(allow_stale_ms) if allow_stale_ms is not None else int(_TRACE_FEED_WARM_STALE_MS)
-    if max(0, _now_ms() - updated_ts_ms) > max_age_ms:
-        return None
-    return _clone_trace_live_feed_snapshot(value)
-
-
-def _trace_feed_should_defer_build() -> tuple[bool, str]:
-    try:
-        from host_brain.app.obs_resource_guard import should_defer_obs_warm_refresh  # noqa: PLC0415
-
-        return should_defer_obs_warm_refresh(task_name="trace_feed_live")
-    except Exception:
-        return False, ""
-
-
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
@@ -512,7 +188,7 @@ def _trace_feed_should_defer_build() -> tuple[bool, str]:
 async def get_trace(request_id: str):
     """Read one durable Trace projection; this path never invokes source builders."""
 
-    from host_brain.app.dependencies import get_query_projection_store
+    from host_brain.composition.process_services import get_query_projection_store
 
     document = get_query_projection_store().get(TRACE_KIND, request_id)
     meta = projection_meta(TRACE_KIND, request_id, document, max_age_ms=15000)
@@ -539,7 +215,7 @@ async def get_trace(request_id: str):
 def refresh_trace_query_projections() -> dict[str, int]:
     """Background-only Trace journal scan and projection refresh."""
 
-    from host_brain.app.dependencies import get_query_projection_store
+    from host_brain.composition.process_services import get_query_projection_store
 
     ledger = _get_ledger()
     store = get_query_projection_store()
@@ -568,11 +244,13 @@ def refresh_trace_query_projections() -> dict[str, int]:
     refreshed = 0
     failed = 0
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
+        from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+            GraphEvidenceRepository,
+        )
 
-        evidence_plane = get_evidence_plane()
+        evidence_repository = GraphEvidenceRepository.from_ledger(ledger)
     except Exception:
-        evidence_plane = None
+        evidence_repository = None
     for request_id, source_cursor in sorted(request_cursors.items()):
         try:
             current = store.get(TRACE_KIND, request_id)
@@ -605,9 +283,9 @@ def refresh_trace_query_projections() -> dict[str, int]:
                     state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
                     detail=f"{type(exc).__name__}: {exc}",
                 )
-        if evidence_plane is not None:
+        if evidence_repository is not None:
             try:
-                stream_rows = evidence_plane.query_stream_events(request_id=request_id)
+                stream_rows = evidence_repository.list_stream_events(request_id=request_id)
             except Exception:
                 stream_rows = []
             stream_events = [
@@ -714,7 +392,7 @@ register_projection_job("trace", refresh_trace_query_projections)
 def get_trace_stream_events(request_id: str):
     """Read the durable stream-event projection without EvidencePlane access."""
 
-    from host_brain.app.dependencies import get_query_projection_store
+    from host_brain.composition.process_services import get_query_projection_store
 
     document = get_query_projection_store().get(TRACE_STREAM_KIND, request_id)
     meta = projection_meta(TRACE_STREAM_KIND, request_id, document, max_age_ms=15000)
@@ -734,12 +412,12 @@ def get_trace_stream_events(request_id: str):
 # ---------------------------------------------------------------------------
 @router.get("/trace-feed/snapshot", response_model=TraceLiveFeedSnapshot)
 def get_trace_live_feed_snapshot(
-    limit: int = Query(_TRACE_FEED_WARM_LIMIT, ge=1, le=12),
-    window_minutes: int = Query(_TRACE_FEED_WARM_WINDOW_MINUTES, ge=1, le=10080),
-    active_within_ms: int = Query(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
+    limit: int = Query(TRACE_FEED_DEFAULT_LIMIT, ge=1, le=12),
+    window_minutes: int = Query(TRACE_FEED_DEFAULT_WINDOW_MINUTES, ge=1, le=10080),
+    active_within_ms: int = Query(TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
     keyword: Optional[str] = Query(None),
 ):
-    from host_brain.app.dependencies import get_query_projection_store
+    from host_brain.composition.process_services import get_query_projection_store
 
     document = get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
     meta = projection_meta(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY, document, max_age_ms=15000)
@@ -860,7 +538,7 @@ def get_tribe_events(
 ):
     """Read and filter the durable Tribe-event projection."""
 
-    from host_brain.app.dependencies import get_query_projection_store
+    from host_brain.composition.process_services import get_query_projection_store
 
     document = get_query_projection_store().get(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY)
     meta = projection_meta(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY, document, max_age_ms=15000)

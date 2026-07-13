@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-import host_brain.app.dependencies as deps
+import host_brain.composition.process_services as deps
 from host_brain.memory.chroma_client import (
     CHROMA_STATUS_UP,
     PersistentChromaClient,

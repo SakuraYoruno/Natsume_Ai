@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.agent_execution_repository import (
     AGENT_EXECUTION_MIGRATION_ASSET_KEY,
@@ -27,7 +27,6 @@ from natsume_contracts.task import (
     ExecutorAssignment,
     HostCommandSurface,
     TaskExecutor,
-    TaskRuntimeMode,
     build_host_command,
 )
 
@@ -80,12 +79,8 @@ def _admitted_db(tmp_path: Path) -> tuple[Path, str, str]:
     assignment = ExecutorAssignment(
         work_order_id=work_order.work_order_id,
         executor=TaskExecutor.CANONICAL,
-        mode=TaskRuntimeMode.CANONICAL,
         assignment_id="runtime-assignment://work-order-agent-result/canonical",
         assigned_at_ms=NOW,
-        canary_percent=100,
-        canary_selected=True,
-        kill_switch_active=False,
         is_new_task=True,
         reason_code="RUNTIME_NEW_TASK_CANONICAL",
     )

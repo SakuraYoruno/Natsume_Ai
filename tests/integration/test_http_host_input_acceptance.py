@@ -19,11 +19,11 @@ def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
 
 def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         _allow_input_immune_gate,
     )
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_host_gateway_ingress",
+        "host_brain.input_runtime.ingress._evaluate_host_gateway_ingress",
         lambda **_kwargs: HostGatewayIngressOutcome(
             allowed=True,
             duplicate=False,
@@ -37,7 +37,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
         ),
     )
     monkeypatch.setattr(
-        "host_brain.app.input_routes._complete_host_gateway_ingress",
+        "host_brain.input_runtime.contracts_and_normalization._complete_host_gateway_ingress",
         lambda **_kwargs: True,
     )
     return TestClient(host_app, raise_server_exceptions=False)
@@ -45,7 +45,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
 
 def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -76,7 +76,7 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
 
 def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -108,7 +108,7 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
 
 def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -134,7 +134,7 @@ def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatc
 
 def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -166,10 +166,10 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
 
 def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
     client = _build_client(monkeypatch)
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
     try:

@@ -16,14 +16,14 @@ import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping
 
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
     ReviewResumePhase,
     ReviewStatus,
     validate_review_transition,
 )
 from host_brain.core.ids import now_ms
-from host_brain.governor.tokens import (
+from host_brain.contracts.agent_runtime.review_token_contract import (
     ReviewTokenService,
     review_resume_token_digest,
 )

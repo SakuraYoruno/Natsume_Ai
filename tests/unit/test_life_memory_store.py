@@ -11,9 +11,6 @@ from host_brain.memory.life_memory import (
     EPISODE_ACTION,
     EPISODE_PERCEPTION,
     EPISODE_REFLECTION,
-    LifeMemoryConsolidator,
-    MemorySleepReplayTask,
-    LifeMemoryStore,
     RETENTION_COLD,
     RETENTION_GONE,
     RETENTION_WARM,
@@ -21,6 +18,9 @@ from host_brain.memory.life_memory import (
     TRUTH_NARRATIVE_ONLY,
     TRUTH_SUPPRESSED,
 )
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.sleep import MemorySleepReplayTask
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 def test_same_chat_request_creates_one_life_episode_with_many_evidence() -> None:
@@ -65,7 +65,13 @@ def test_same_chat_request_creates_one_life_episode_with_many_evidence() -> None
 
 def test_voice_gateway_anchor_binds_person_and_message_ref(monkeypatch) -> None:
     monkeypatch.setenv("HOST_DEFAULT_USER_ID", "owner")
-    ledger = SQLiteLedger(db_path=":memory:")
+    def _write_anchor(**anchor) -> None:
+        LifeMemoryStore(ledger=ledger).write_background_episode(**anchor)
+
+    ledger = SQLiteLedger(
+        db_path=":memory:",
+        life_audit_anchor_writer=_write_anchor,
+    )
     try:
         ledger.log_voice_event(
             {

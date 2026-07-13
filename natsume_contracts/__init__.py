@@ -30,7 +30,6 @@ from .task import (
     TaskContractError,
     TaskContractReasonCode,
     TaskExecutor,
-    TaskRuntimeMode,
     build_host_command,
 )
 
@@ -55,7 +54,6 @@ __all__ = [
     "TaskContractError",
     "TaskContractReasonCode",
     "TaskExecutor",
-    "TaskRuntimeMode",
     "build_host_command",
     "match_scopes",
     "parse_identity_envelope",

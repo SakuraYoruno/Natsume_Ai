@@ -205,7 +205,7 @@ def apply_surface_emotion_bond_flow(
     }
 
     if queue is None:
-        from host_brain.app.dependencies import get_bond_update_queue  # noqa: PLC0415
+        from host_brain.composition.process_services import get_bond_update_queue  # noqa: PLC0415
 
         queue = get_bond_update_queue()
     queue_result = dict(queue.enqueue(payload) or {})

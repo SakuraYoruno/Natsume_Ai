@@ -40,7 +40,7 @@ def test_search_hub_skills_route_returns_remote_entries(monkeypatch) -> None:
 def test_remove_hub_skill_route_refreshes_registry_on_success(monkeypatch) -> None:
     called = {'refresh': 0}
     monkeypatch.setattr(tool_routes, 'remove_hub_skill', lambda skill_name: SimpleNamespace(success=True, name=skill_name, detail='removed', error=None))
-    monkeypatch.setattr('host_brain.app.dependencies.refresh_skill_registry', lambda: called.__setitem__('refresh', called['refresh'] + 1) or None)
+    monkeypatch.setattr('host_brain.composition.process_services.refresh_skill_registry', lambda: called.__setitem__('refresh', called['refresh'] + 1) or None)
 
     response = __import__('asyncio').run(tool_routes.remove_hub_skill_route('demo_skill'))
 

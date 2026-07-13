@@ -87,9 +87,9 @@ _DURATION_DEFAULT = "一起走过很久了"
 
 def _load_bond_narrative_llm_templates() -> dict[str, Any]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-        raw = resolve_prompt_template_json_merged("bond_narrative.llm_rewrite.prompt")
+        raw = resolve_prompt_contract_json("bond_narrative.llm_rewrite.prompt")
         return dict(raw) if isinstance(raw, Mapping) else {}
     except Exception:
         return {}
@@ -317,12 +317,14 @@ class BondNarrativeLayer:
         max_items: int = MAX_NARRATIVE_ITEMS,
         use_llm: bool = False,
         llm_timeout_ms: int = 2500,
+        model_attempt_service: Any = None,
     ) -> None:
         self._memory_index = memory_index
         self._milestone_tracker = milestone_tracker
         self._max_items = int(max_items)
         self._use_llm = bool(use_llm)
         self._llm_timeout_ms = max(800, int(llm_timeout_ms))
+        self._model_attempt_service = model_attempt_service
 
     def build_narrative(
         self,
@@ -474,6 +476,7 @@ class BondNarrativeLayer:
                 items_json=json.dumps(payload, ensure_ascii=False),
             )
             result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
                 prompt_id=BOND_NARRATIVE_REWRITE_PROMPT_ID,
                 request_id=f"bond-narrative::{_now_ms()}",
                 scene_type="BOND_NARRATIVE",

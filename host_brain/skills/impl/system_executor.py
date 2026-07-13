@@ -161,6 +161,7 @@ def _execute_system_info(payload: dict[str, Any], context: dict[str, Any] | None
         result["runtime_vitals"] = _build_runtime_vitals(
             resource_snapshot=result,
             include_gateway_status=include_gateway_status,
+            context=context,
         )
 
     _logger.info("系统信息获取完成")
@@ -171,11 +172,16 @@ def _build_runtime_vitals(
     *,
     resource_snapshot: Mapping[str, Any],
     include_gateway_status: bool,
+    context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _ensure_runtime_env_loaded()
     ts_ms = int(time.time() * 1000)
-    edge_probe = _collect_edge_rpc_health_snapshot()
-    service_health = _build_service_health_snapshot(edge_probe=edge_probe, ts_ms=ts_ms)
+    edge_probe = _collect_edge_rpc_health_snapshot(context=context)
+    service_health = _build_service_health_snapshot(
+        edge_probe=edge_probe,
+        ts_ms=ts_ms,
+        context=context,
+    )
     edge_components = _extract_edge_component_statuses(edge_probe)
     gateway = _collect_gateway_runtime_status() if include_gateway_status else _gateway_status_skipped()
     resources = _assess_resource_pressure(resource_snapshot)
@@ -278,11 +284,14 @@ def _ensure_runtime_env_loaded() -> None:
         _logger.debug("runtime env lazy load skipped: %s", exc)
 
 
-def _collect_edge_rpc_health_snapshot() -> dict[str, Any]:
+def _collect_edge_rpc_health_snapshot(
+    *, context: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     try:
-        from host_brain.app.startup import probe_edge_rpc_health  # noqa: PLC0415
-
-        probe = _run_async_sync(probe_edge_rpc_health)
+        probe_provider = (context or {}).get("edge_rpc_health_probe")
+        if not callable(probe_provider):
+            raise RuntimeError("EDGE_RPC_HEALTH_PROBE_NOT_COMPOSED")
+        probe = _run_async_sync(probe_provider)
         return dict(probe or {}) if isinstance(probe, Mapping) else {}
     except Exception as exc:
         return {
@@ -293,29 +302,17 @@ def _collect_edge_rpc_health_snapshot() -> dict[str, Any]:
         }
 
 
-def _build_service_health_snapshot(*, edge_probe: Mapping[str, Any], ts_ms: int) -> dict[str, Any]:
+def _build_service_health_snapshot(
+    *,
+    edge_probe: Mapping[str, Any],
+    ts_ms: int,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     try:
-        from host_brain.app.config import build_host_runtime_statuses, load_host_config  # noqa: PLC0415
-        from host_brain.app.main import build_service_health_report  # noqa: PLC0415
-        from host_brain.app.startup import build_edge_dependency_probe_statuses  # noqa: PLC0415
-
-        runtime_statuses: dict[str, Any] = {}
-        host_result = load_host_config()
-        if host_result.success and host_result.config is not None:
-            runtime_statuses.update(build_host_runtime_statuses(host_result.config))
-        else:
-            runtime_statuses["host.audit.sqlite_ledger"] = {
-                "available": False,
-                "unavailable_kind": "dependency",
-                "detail": f"host config unavailable: {host_result.reason_code}",
-            }
-        runtime_statuses.update(build_edge_dependency_probe_statuses(edge_probe))
-        report = build_service_health_report(
-            runtime_statuses=runtime_statuses,
-            request_id=f"system_vitals_{ts_ms}",
-            ledger=None,
-            ts_ms=ts_ms,
-        )
+        builder = (context or {}).get("service_health_snapshot_builder")
+        if not callable(builder):
+            raise RuntimeError("SERVICE_HEALTH_SNAPSHOT_BUILDER_NOT_COMPOSED")
+        report = builder(edge_probe=dict(edge_probe), ts_ms=ts_ms)
         summary = dict(report.get("summary") or {})
         return {
             "overall_status": summary.get("overall_status"),
@@ -2156,12 +2153,12 @@ def _execute_resource_release(payload: dict[str, Any], context: dict[str, Any] |
 
 
 def _execute_resource_manager_status(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
-    _ = context
     create_if_missing = bool(payload.get("create_if_missing", False))
     try:
-        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
-
-        manager = get_resource_manager(create_if_missing=create_if_missing)
+        provider = (context or {}).get("resource_manager_provider")
+        if not callable(provider):
+            raise RuntimeError("RESOURCE_MANAGER_PROVIDER_NOT_COMPOSED")
+        manager = provider(create_if_missing=create_if_missing)
         if manager is None:
             return {
                 "success": True,

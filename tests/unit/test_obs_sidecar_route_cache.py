@@ -69,7 +69,7 @@ def test_webui_search_requests_never_falls_back_to_ledger(monkeypatch) -> None:
     ledger = _SearchLedger()
     monkeypatch.setattr("host_brain.app.web_ui.get_ledger", lambda: ledger)
     monkeypatch.setattr(
-        "host_brain.app.dependencies.peek_query_projection_store",
+        "host_brain.composition.process_services.peek_query_projection_store",
         lambda: None,
     )
 

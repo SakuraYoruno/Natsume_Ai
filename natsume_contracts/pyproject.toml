@@ -14,6 +14,7 @@ packages = [
   "natsume_contracts",
   "natsume_contracts.edge",
   "natsume_contracts.identity",
+  "natsume_contracts.life",
   "natsume_contracts.task",
 ]
 package-dir = {natsume_contracts = "."}

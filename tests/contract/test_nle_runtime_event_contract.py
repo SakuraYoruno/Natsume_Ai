@@ -5,13 +5,13 @@ import sqlite3
 
 import pytest
 
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.task_store import (
+from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
     build_outbox_payload_ref,

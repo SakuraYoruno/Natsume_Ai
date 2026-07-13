@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import os
 import threading
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_KIND_AVATAR,
@@ -37,8 +38,7 @@ from natsume_contracts.edge.v1 import new_request_id, now_ms
 
 _logger = logging.getLogger("Natsume.embodiment")
 _AUTHORITY_REF = "authority://host/device-command-author"
-_port_override: EmbodimentCommandPort | None = None
-_pending_tasks: set[asyncio.Task[EmbodimentReceipt]] = set()
+_durable_outbox_authority: "EmbodimentOutboxPort | None" = None
 _transport_lease: EdgeSessionLease | None = None
 _transport_lease_state_lock = threading.Lock()
 _receipt_observers: set[
@@ -54,12 +54,56 @@ class _TransportLeaseUnavailable(RuntimeError):
         super().__init__(self.reason_code)
 
 
+@dataclass(frozen=True, slots=True)
+class EmbodimentOutboxAck:
+    outbox_id: str
+    command_id: str
+    idempotency_key: str
+    status: str = "PENDING"
+    reason_code: str | None = None
+    detail: str = "embodiment command committed to durable Host outbox"
+
+    @property
+    def success(self) -> bool:
+        return self.status == "PENDING"
+
+    @property
+    def accepted(self) -> bool:
+        return self.success
+
+    @property
+    def event(self) -> dict[str, Any]:
+        return {"outbox_id": self.outbox_id, "durable": True}
+
+    @property
+    def latency_ms(self) -> int:
+        return 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "natsume.host.embodiment-outbox-ack.v1",
+            "outbox_id": self.outbox_id,
+            "command_id": self.command_id,
+            "idempotency_key": self.idempotency_key,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "accepted": self.accepted,
+            "success": self.success,
+            "event": self.event,
+        }
+
+
+class EmbodimentOutboxPort(Protocol):
+    def enqueue(self, command: EmbodimentCommand) -> EmbodimentOutboxAck: ...
+
+
 class EdgeRpcEmbodimentCommandPort:
     async def submit(self, command: EmbodimentCommand) -> EmbodimentReceipt:
-        from host_brain.channels.edge_rpc_client import _post_to_edge  # noqa: PLC0415
+        from host_brain.channels.edge_transport import submit_edge_request  # noqa: PLC0415
 
         try:
-            lease = await _get_transport_lease(_post_to_edge)
+            lease = await _get_transport_lease(submit_edge_request)
         except _TransportLeaseUnavailable as exc:
             return EmbodimentReceipt(
                 command_id=command.command_id,
@@ -73,11 +117,11 @@ class EdgeRpcEmbodimentCommandPort:
                 event={"external_side_effects": False},
             )
         leased_command = bind_command_to_lease(command, lease)
-        result = await _post_to_edge(
+        result = await submit_edge_request(
             path="/v1/edge/embodiment",
             payload=leased_command.as_dict(),
             request_id=leased_command.request_id,
-            request_timeout_ms=max(1000, leased_command.deadline_ms - now_ms()),
+            timeout_ms=max(1000, leased_command.deadline_ms - now_ms()),
         )
         event = dict(result.event or {})
         receipt_payload = event.get("receipt")
@@ -137,7 +181,7 @@ async def _get_transport_lease(post_to_edge: Any) -> EdgeSessionLease:
             path="/v1/edge/embodiment/session",
             payload=payload,
             request_id=new_request_id(),
-            request_timeout_ms=5_000,
+            timeout_ms=5_000,
         )
         if not bool(getattr(result, "success", False)):
             reason = str(getattr(result, "reason_code", "") or "EDGE_EMBODIMENT_LEASE_UNAVAILABLE")
@@ -148,7 +192,7 @@ async def _get_transport_lease(post_to_edge: Any) -> EdgeSessionLease:
                     path="/v1/edge/embodiment/session",
                     payload={"session_id": session_id, "owner_id": owner_id, "ttl_ms": ttl_ms},
                     request_id=new_request_id(),
-                    request_timeout_ms=5_000,
+                    timeout_ms=5_000,
                 )
             if not bool(getattr(result, "success", False)):
                 raise _TransportLeaseUnavailable(
@@ -208,9 +252,24 @@ def reset_embodiment_transport_session() -> None:
     _transport_lease = None
 
 
-def configure_embodiment_command_port(port: EmbodimentCommandPort | None) -> None:
-    global _port_override
-    _port_override = port
+def bind_embodiment_outbox_authority(
+    port: EmbodimentOutboxPort,
+) -> Callable[[], None]:
+    """Bind the single durable writer for one application lifecycle."""
+
+    global _durable_outbox_authority
+    if port is None or not callable(getattr(port, "enqueue", None)):
+        raise TypeError("embodiment outbox authority must expose enqueue(command)")
+    if _durable_outbox_authority is not None:
+        raise RuntimeError("EMBODIMENT_OUTBOX_AUTHORITY_ALREADY_BOUND")
+    _durable_outbox_authority = port
+
+    def unbind() -> None:
+        global _durable_outbox_authority
+        if _durable_outbox_authority is port:
+            _durable_outbox_authority = None
+
+    return unbind
 
 
 def register_embodiment_receipt_observer(
@@ -246,7 +305,20 @@ def _publish_embodiment_receipt(
             observer(command, receipt)
         except Exception as exc:  # pragma: no cover - observer isolation
             _logger.warning("Embodiment receipt observer failed: %s", exc)
-    _append_durable_receipt_fact(command, receipt)
+
+
+def build_embodiment_receipt_audit_observer(
+    writer: Callable[[Mapping[str, Any]], None],
+) -> Callable[[EmbodimentCommand, EmbodimentReceipt], None]:
+    """Bind the durable audit sink at composition without module-global state."""
+
+    if not callable(writer):
+        raise TypeError("embodiment receipt audit writer must be callable")
+
+    def observe(command: EmbodimentCommand, receipt: EmbodimentReceipt) -> None:
+        _append_durable_receipt_fact(command, receipt, writer=writer)
+
+    return observe
 
 
 _PUBLIC_RECEIPT_EVENT_FIELDS = frozenset(
@@ -273,19 +345,18 @@ def _public_receipt_detail(value: Any) -> str:
 def _append_durable_receipt_fact(
     command: EmbodimentCommand,
     receipt: EmbodimentReceipt,
+    *,
+    writer: Callable[[Mapping[str, Any]], None],
 ) -> None:
     """Append a secret-free cross-process receipt fact to the shared ledger."""
-
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-
         public_event = {
             str(key): value
             for key, value in dict(receipt.event or {}).items()
             if str(key) in _PUBLIC_RECEIPT_EVENT_FIELDS
             and isinstance(value, (str, int, float, bool, type(None)))
         }
-        get_ledger().log_voice_event(
+        writer(
             {
                 "request_id": command.request_id,
                 "event_type": f"EMBODIMENT_RECEIPT_{command.kind.upper()}",
@@ -346,44 +417,78 @@ def build_host_embodiment_command(
     )
 
 
-async def submit_embodiment_command(command: EmbodimentCommand) -> EmbodimentReceipt:
-    port = _port_override or EdgeRpcEmbodimentCommandPort()
+async def submit_embodiment_command(
+    command: EmbodimentCommand,
+    *,
+    command_port: EmbodimentCommandPort | None = None,
+) -> EmbodimentReceipt:
+    port = command_port or EdgeRpcEmbodimentCommandPort()
     receipt = await port.submit(command)
     _publish_embodiment_receipt(command, receipt)
     return receipt
 
 
-def queue_embodiment_command(command: EmbodimentCommand) -> EmbodimentReceipt:
-    """Submit from synchronous Host call sites without executing a device effect."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(submit_embodiment_command(command))
-    task = loop.create_task(submit_embodiment_command(command))
-    _pending_tasks.add(task)
-    task.add_done_callback(_on_submission_done)
-    return EmbodimentReceipt(
-        command_id=command.command_id,
-        idempotency_key=command.idempotency_key,
-        accepted=True,
-        status="QUEUED",
-        reason_code=None,
-        detail="embodiment command queued for Edge authority",
-        received_at_ms=now_ms(),
-        event={"request_id": command.request_id, "kind": command.kind, "action": command.action},
-    )
+def queue_embodiment_command(command: EmbodimentCommand) -> EmbodimentOutboxAck:
+    """Commit from synchronous Host call sites to the canonical durable outbox."""
+
+    if _durable_outbox_authority is None:
+        raise RuntimeError("EMBODIMENT_OUTBOX_NOT_CONFIGURED")
+    return _durable_outbox_authority.enqueue(command)
 
 
-async def submit_voice_command(*, action: str = "speak", payload: Mapping[str, Any], **meta: Any) -> EmbodimentReceipt:
+async def submit_voice_command(
+    *,
+    action: str = "speak",
+    payload: Mapping[str, Any],
+    command_port: EmbodimentCommandPort | None = None,
+    **meta: Any,
+) -> EmbodimentReceipt:
     return await submit_embodiment_command(
-        build_host_embodiment_command(kind=EMBODIMENT_KIND_VOICE, action=action, payload=payload, **meta)
+        build_host_embodiment_command(kind=EMBODIMENT_KIND_VOICE, action=action, payload=payload, **meta),
+        command_port=command_port,
     )
 
 
-async def submit_avatar_command(*, action: str, payload: Mapping[str, Any], **meta: Any) -> EmbodimentReceipt:
+async def submit_avatar_command(
+    *,
+    action: str,
+    payload: Mapping[str, Any],
+    command_port: EmbodimentCommandPort | None = None,
+    **meta: Any,
+) -> EmbodimentReceipt:
     return await submit_embodiment_command(
-        build_host_embodiment_command(kind=EMBODIMENT_KIND_AVATAR, action=action, payload=payload, **meta)
+        build_host_embodiment_command(kind=EMBODIMENT_KIND_AVATAR, action=action, payload=payload, **meta),
+        command_port=command_port,
     )
+
+
+async def submit_avatar_behavior(
+    *,
+    behavior_id: str,
+    emotion_tag: str | None = None,
+    body_action_id: str | None = None,
+    emotion_intensity: float | None = None,
+    duration_s: float | None = None,
+    talk_state: str | None = None,
+    source: str | None = None,
+    **meta: Any,
+) -> EmbodimentReceipt:
+    """Submit one high-level avatar behavior to the Edge-owned actuator."""
+
+    payload: dict[str, Any] = {"behavior_id": str(behavior_id or "").strip().lower()}
+    for key, value, normalizer in (
+        ("emotion_tag", emotion_tag, lambda item: str(item).strip().upper()),
+        ("body_action_id", body_action_id, lambda item: str(item).strip().lower()),
+        ("talk_state", talk_state, lambda item: str(item).strip().lower()),
+        ("source", source, lambda item: str(item).strip()),
+    ):
+        if value is not None and str(value).strip():
+            payload[key] = normalizer(value)
+    if emotion_intensity is not None:
+        payload["emotion_intensity"] = float(emotion_intensity)
+    if duration_s is not None:
+        payload["duration_s"] = float(duration_s)
+    return await submit_avatar_command(action="behavior", payload=payload, **meta)
 
 
 def queue_mateengine_command(*, action: str, payload: Mapping[str, Any], **meta: Any) -> EmbodimentReceipt:
@@ -398,9 +503,16 @@ def queue_desktop_command(*, action: str, payload: Mapping[str, Any], **meta: An
     )
 
 
-async def submit_desktop_command(*, action: str, payload: Mapping[str, Any], **meta: Any) -> EmbodimentReceipt:
+async def submit_desktop_command(
+    *,
+    action: str,
+    payload: Mapping[str, Any],
+    command_port: EmbodimentCommandPort | None = None,
+    **meta: Any,
+) -> EmbodimentReceipt:
     return await submit_embodiment_command(
-        build_host_embodiment_command(kind=EMBODIMENT_KIND_DESKTOP, action=action, payload=payload, **meta)
+        build_host_embodiment_command(kind=EMBODIMENT_KIND_DESKTOP, action=action, payload=payload, **meta),
+        command_port=command_port,
     )
 
 
@@ -414,25 +526,12 @@ def _default_idempotency_key(
     return f"{request_id}:{str(kind).lower()}:{str(action).lower()}:{digest}"
 
 
-def _on_submission_done(task: asyncio.Task[EmbodimentReceipt]) -> None:
-    _pending_tasks.discard(task)
-    try:
-        receipt = task.result()
-    except Exception as exc:  # pragma: no cover - fire-and-forget observer
-        _logger.warning("Edge embodiment command submission failed: %s", exc)
-        return
-    if not receipt.accepted:
-        _logger.warning(
-            "Edge rejected embodiment command command_id=%s reason=%s",
-            receipt.command_id,
-            receipt.reason_code,
-        )
-
-
 __all__ = [
-    "EdgeRpcEmbodimentCommandPort", "configure_embodiment_command_port",
+    "EdgeRpcEmbodimentCommandPort", "EmbodimentOutboxAck", "EmbodimentOutboxPort",
+    "bind_embodiment_outbox_authority", "build_embodiment_receipt_audit_observer",
     "build_host_embodiment_command", "submit_embodiment_command",
     "queue_embodiment_command", "submit_voice_command", "submit_avatar_command",
+    "submit_avatar_behavior",
     "queue_mateengine_command", "queue_desktop_command", "submit_desktop_command",
     "reset_embodiment_transport_session", "register_embodiment_receipt_observer",
 ]

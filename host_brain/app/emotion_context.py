@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.core.metabolism import (
     build_governance_snapshot,
     build_hard_snapshot,
@@ -104,12 +104,12 @@ _last_diary_flush_ts: int = 0
 
 
 def _load_profile_hint_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotion_context.user_profile_hints")
+    raw = resolve_prompt_contract_json("emotion_context.user_profile_hints")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _load_inner_monologue_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotion_context.inner_monologue_texts")
+    raw = resolve_prompt_contract_json("emotion_context.inner_monologue_texts")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

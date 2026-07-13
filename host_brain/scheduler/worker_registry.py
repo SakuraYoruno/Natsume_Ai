@@ -250,14 +250,12 @@ class SchedulerWorkerResolver:
         self,
         *,
         canonical_worker: GovernedSchedulerWorker,
-        legacy_worker: GovernedSchedulerWorker | None = None,
     ) -> None:
         self._canonical = canonical_worker
-        self._legacy = legacy_worker
 
     def resolve(self, *, executor: str, worker_route: str) -> GovernedSchedulerWorker:
         executor_name = str(executor or "").strip().lower()
-        if executor_name not in {"canonical", "legacy"}:
+        if executor_name != "canonical":
             raise SchedulerWorkerError(
                 SCHEDULER_HANDLER_NOT_REGISTERED,
                 "scheduler executor assignment is invalid",
@@ -267,14 +265,7 @@ class SchedulerWorkerResolver:
                 SCHEDULER_HANDLER_NOT_REGISTERED,
                 "scheduler worker route is not registered",
             )
-        if executor_name == "canonical":
-            return self._canonical
-        if self._legacy is None:
-            raise SchedulerWorkerError(
-                SCHEDULER_HANDLER_NOT_REGISTERED,
-                "legacy scheduler executor is not configured",
-            )
-        return self._legacy
+        return self._canonical
 
 
 class SchedulerProjectionReader:

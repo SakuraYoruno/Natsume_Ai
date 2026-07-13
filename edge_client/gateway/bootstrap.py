@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from natsume_contracts.edge.v1 import GatewayTransportStoreFactory
+from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge
 
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
 
@@ -70,42 +71,6 @@ def _resolve_input_report_timeout_s() -> float:
             raw,
         )
         return 15.0
-
-
-def _resolve_input_report_max_retry() -> int:
-    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_MAX_RETRY") or "").strip()
-    if not raw:
-        return 8640
-    try:
-        return max(1, int(raw))
-    except (TypeError, ValueError):
-        logger.warning(
-            "Gateway: invalid EDGE_GATEWAY_INPUT_REPORT_MAX_RETRY=%r, fallback to 8640",
-            raw,
-        )
-        return 8640
-
-
-def _resolve_input_report_retry_interval_s() -> float:
-    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_RETRY_INTERVAL_S") or "").strip()
-    if not raw:
-        return 10.0
-    try:
-        return max(1.0, float(raw))
-    except (TypeError, ValueError):
-        logger.warning(
-            "Gateway: invalid EDGE_GATEWAY_INPUT_REPORT_RETRY_INTERVAL_S=%r, fallback to 10s",
-            raw,
-        )
-        return 10.0
-
-
-def _resolve_input_report_cache_file() -> str:
-    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_CACHE_FILE") or "").strip()
-    if raw:
-        return raw
-    repo_root = Path(__file__).resolve().parents[2]
-    return str((repo_root / "runtime" / "edge" / "gateway_input_retry_queue.json").resolve())
 
 
 def _resolve_gateway_transport_db_path() -> str:
@@ -506,11 +471,6 @@ class GatewayInstance:
                 except Exception as exc:
                     logger.debug("Gateway: platform_disconnected emit degraded: %s", exc)
             self.connected_platforms.clear()
-        if self.reporter is not None:
-            try:
-                self.reporter.stop_retry_loop()
-            except Exception as exc:
-                logger.warning("Gateway: 停止 reporter retry loop 异常: %s", exc)
         if (
             self.wechat_bridge_watchdog is not None
             and self.wechat_bridge_watchdog.is_alive()
@@ -541,11 +501,6 @@ def _parse_bool_env(raw: str | None, *, default: bool = False) -> bool:
 def _wechat_bridge_backend() -> str:
     """Return the configured WeChat bridge backend after removing UIA support."""
     backend = str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND") or "wxautox4").strip().lower() or "wxautox4"
-    if backend == "uia":
-        logger.warning(
-            "Gateway: legacy EDGE_WECHAT_BRIDGE_BACKEND=uia is no longer supported; falling back to wxautox4"
-        )
-        return "wxautox4"
     if backend in {"wxautox4", "external"}:
         return backend
     if backend:
@@ -564,13 +519,6 @@ def _wechat_bridge_enabled() -> bool:
 def _should_auto_start_wechat_bridge() -> bool:
     """Check whether bootstrap should auto-launch the WeChat bridge subprocess."""
     raw = os.environ.get("EDGE_WECHAT_BRIDGE_AUTO_START", "").strip().lower()
-    if not raw:
-        legacy_raw = os.environ.get("EDGE_WECHAT_UIA_BRIDGE_AUTO_START", "").strip().lower()
-        if legacy_raw:
-            logger.warning(
-                "Gateway: EDGE_WECHAT_UIA_BRIDGE_AUTO_START is deprecated; use EDGE_WECHAT_BRIDGE_AUTO_START"
-            )
-            raw = legacy_raw
     if raw in {"0", "false", "no", "off"}:
         return False
     # Default to True when bridge mode is enabled
@@ -656,15 +604,15 @@ def _start_wechat_bridge_process(instance: GatewayInstance) -> bool:
 def start_gateway(
     config: GatewayConfig,
     *,
+    tribe_bridge: EdgeTribeBridge,
     transport_store_factory: GatewayTransportStoreFactory | None = None,
 ) -> GatewayInstance:
-    """组装并启动 Unified Message Gateway。"""
+    """组装并启动 Unified Message Gateway with the runtime-owned bridge."""
 
     from edge_client.channels.input_reporter import EdgeInputReporter
     from edge_client.gateway.models import Platform
     from edge_client.gateway.normalizer import MessageNormalizer
     from edge_client.gateway.outbound import OutboundDispatcher
-    from edge_client.gateway.router import GatewayRouter
     from edge_client.gateway.server import create_gateway_app
     from edge_client.gateway.delivery_runtime import (
         GatewayDeliveryRuntime,
@@ -680,9 +628,7 @@ def start_gateway(
         VerifierRegistry,
         WeComWebhookVerifier,
     )
-    from edge_client.gateway.voice_asr import GatewayVoiceAsr
     from edge_client.tribe.peripheral_agent import PeripheralAgent
-    from edge_client.tribe.registry import build_edge_tribe_bridge
 
     instance = GatewayInstance()
     enabled_platforms = _normalize_platforms(config.enabled_platforms)
@@ -698,33 +644,12 @@ def start_gateway(
         host_url=config.host_url,
         hmac_key=gateway_host_hmac_secret,
         timeout_s=_resolve_input_report_timeout_s(),
-        max_retry=_resolve_input_report_max_retry(),
-        retry_interval_s=_resolve_input_report_retry_interval_s(),
-        cache_file=_resolve_input_report_cache_file(),
     )
     instance.reporter = reporter
 
-    tribe_bridge = None
-    try:
-        tribe_bridge = build_edge_tribe_bridge()
-    except Exception as exc:  # pragma: no cover - non-blocking sidecar
-        logger.debug("Gateway: tribe bridge build degraded: %s", exc)
     instance.peripheral_agent = PeripheralAgent(bridge=tribe_bridge)
 
     normalizer = MessageNormalizer()
-    gateway_voice_asr = GatewayVoiceAsr()
-    router = GatewayRouter(
-        reporter,
-        voice_asr=(gateway_voice_asr if gateway_voice_asr.enabled else None),
-    )
-    if gateway_voice_asr.enabled:
-        logger.info("Gateway: voice-message ASR trigger enabled")
-    else:
-        logger.info("Gateway: voice-message ASR trigger disabled")
-    try:
-        router.set_tribe_bridge(tribe_bridge)
-    except Exception as exc:  # pragma: no cover - non-blocking sidecar
-        logger.debug("Gateway: tribe bridge init degraded: %s", exc)
     outbound = OutboundDispatcher()
     adapters: dict[str, Any] = {}
     pending_platform_events: list[tuple[str, str, str | None]] = []
@@ -1057,42 +982,39 @@ def start_gateway(
         ),
     ))
 
-    if transport_mode in {GatewayTransportMode.SHADOW, GatewayTransportMode.DURABLE}:
-        if not str(gateway_reply_hmac_secret or "").strip():
-            raise RuntimeError("GW_REPLY_INGRESS_SECRET_MISSING")
-        missing_verifiers = sorted(set(adapters) - set(webhook_verifiers.platforms))
-        if missing_verifiers:
-            raise RuntimeError(
-                "GW_VERIFIER_PREFLIGHT_FAILED:" + ",".join(missing_verifiers)
-            )
-        internal_platforms = {Platform.QQ.value, Platform.TELEGRAM.value}
-        if internal_platforms.intersection(adapters) and not str(config.hmac_key or "").strip():
-            raise RuntimeError("GW_INTERNAL_WEBHOOK_SECRET_MISSING")
-        if Platform.LINE.value in adapters and not str(config.line_channel_secret or "").strip():
-            raise RuntimeError("GW_LINE_WEBHOOK_SECRET_MISSING")
-        if Platform.FEISHU.value in adapters and (
-            not str(config.feishu_encrypt_key or "").strip()
-            or not str(config.feishu_verification_token or "").strip()
-        ):
-            raise RuntimeError("GW_FEISHU_WEBHOOK_SECRET_MISSING")
-        if Platform.WECOM.value in adapters and (
-            not str(config.wecom_token or "").strip()
-            or not str(config.wecom_encoding_aes_key or "").strip()
-            or not str(config.wecom_corp_id or "").strip()
-        ):
-            raise RuntimeError("GW_WECOM_WEBHOOK_SECRET_MISSING")
-
-    transport_store = None
-    if transport_mode is GatewayTransportMode.DURABLE:
-        if not str(gateway_host_hmac_secret or "").strip():
-            raise RuntimeError("GW_HOST_INGRESS_SECRET_MISSING")
-        resolved_store_factory = transport_store_factory or _TRANSPORT_STORE_FACTORY
-        if resolved_store_factory is None:
-            raise RuntimeError("GW_TRANSPORT_STORE_FACTORY_MISSING")
-        transport_store = resolved_store_factory(
-            _resolve_gateway_transport_db_path(),
-            verify_schema=True,
+    if not str(gateway_reply_hmac_secret or "").strip():
+        raise RuntimeError("GW_REPLY_INGRESS_SECRET_MISSING")
+    missing_verifiers = sorted(set(adapters) - set(webhook_verifiers.platforms))
+    if missing_verifiers:
+        raise RuntimeError(
+            "GW_VERIFIER_PREFLIGHT_FAILED:" + ",".join(missing_verifiers)
         )
+    internal_platforms = {Platform.QQ.value, Platform.TELEGRAM.value}
+    if internal_platforms.intersection(adapters) and not str(config.hmac_key or "").strip():
+        raise RuntimeError("GW_INTERNAL_WEBHOOK_SECRET_MISSING")
+    if Platform.LINE.value in adapters and not str(config.line_channel_secret or "").strip():
+        raise RuntimeError("GW_LINE_WEBHOOK_SECRET_MISSING")
+    if Platform.FEISHU.value in adapters and (
+        not str(config.feishu_encrypt_key or "").strip()
+        or not str(config.feishu_verification_token or "").strip()
+    ):
+        raise RuntimeError("GW_FEISHU_WEBHOOK_SECRET_MISSING")
+    if Platform.WECOM.value in adapters and (
+        not str(config.wecom_token or "").strip()
+        or not str(config.wecom_encoding_aes_key or "").strip()
+        or not str(config.wecom_corp_id or "").strip()
+    ):
+        raise RuntimeError("GW_WECOM_WEBHOOK_SECRET_MISSING")
+
+    if not str(gateway_host_hmac_secret or "").strip():
+        raise RuntimeError("GW_HOST_INGRESS_SECRET_MISSING")
+    resolved_store_factory = transport_store_factory or _TRANSPORT_STORE_FACTORY
+    if resolved_store_factory is None:
+        raise RuntimeError("GW_TRANSPORT_STORE_FACTORY_MISSING")
+    transport_store = resolved_store_factory(
+        _resolve_gateway_transport_db_path(),
+        verify_schema=True,
+    )
     delivery_runtime = GatewayDeliveryRuntime(
         mode=transport_mode,
         store=transport_store,
@@ -1106,7 +1028,6 @@ def start_gateway(
     instance.delivery_runtime = delivery_runtime
 
     app_kwargs: dict[str, Any] = {
-        "router": router,
         "normalizer": normalizer,
         "adapters": adapters,
         "outbound": outbound,
@@ -1162,10 +1083,6 @@ def start_gateway(
             )
 
         delivery_runtime.start()
-
-        # LEGACY_DRAIN owns only the pre-existing reporter compatibility queue.
-        if transport_mode is GatewayTransportMode.LEGACY_DRAIN:
-            reporter.start_retry_loop()
 
         # New intake producers start only after delivery is ready.
         if pending_refresher is not None and delivery_runtime.intake_enabled:

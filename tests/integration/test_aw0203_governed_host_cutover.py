@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import time
 
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime import production_executor
-from host_brain.app import dependencies
-from host_brain.agent_runtime.task_store import DurableTaskStore
+from host_brain.domain_packs import production_runtime as production_executor
+from host_brain.composition import process_services as dependencies
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.app.governed_task_adapter import build_governed_host_runtime
+from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+from host_brain.app.production_authority import verify_durable_production_authority
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.governor.decision import IntentDecisionEngine
+from host_brain.governor.tokens import TokenService
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
-from host_brain.persistence import HostCommandRepository
+from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
-from host_brain.skills import executor_registry
 from host_brain.skills.executor_registry import (
     _verify_durable_governed_authority,
     bind_validated_skill_authority,
@@ -34,65 +38,55 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     assert migrated.success is True, migrated.as_dict()
 
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
-    monkeypatch.setattr(dependencies, "_ledger", ledger)
-    monkeypatch.setattr(executor_registry, "_SKILL_CAPABILITY_BROKER", None)
-    monkeypatch.setattr(production_executor, "_PRODUCTION_CAPABILITY_BROKER", None)
-    monkeypatch.setattr(production_executor, "_PRODUCTION_DOMAIN_PACK_RUNTIME", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", ledger)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "capability_runtime_composition", None)
     runtime = None
     try:
         request_id = "request-aw0203-cutover"
         session_id = "session-aw0203-cutover"
-        ts_ms = 1_800_000_000_000
+        ts_ms = int(time.time() * 1000)
+        registry = build_agent_runtime_skill_registry()
+        token_service = TokenService(
+            approval_ttl_ms=120_000,
+            confirm_ttl_ms=120_000,
+            undo_ttl_ms=120_000,
+        )
+        intent_engine = IntentDecisionEngine(
+            ledger=ledger,
+            token_service=token_service,
+            registry=registry,
+        )
         intent = {
             "schema_version": "Natsume.intent.v1",
             "id": "intent-aw0203-cutover",
+            "ts_ms": ts_ms,
             "session_id": session_id,
             "seq": 1,
             "nonce": "nonce-aw0203-cutover",
+            "type": "query",
+            "action": "agent_memory_curator",
+            "target": "host",
             "route": "skill",
             "target_id": "agent_memory_curator",
             "task": "curate the admitted memory candidates",
+            "person_id": "person-aw0203",
+            "principal_id": "person-aw0203",
             "args": {
                 "task": "curate the admitted memory candidates",
                 "artifacts_root": str(tmp_path / "production-runs"),
-                "start_background": True,
             },
         }
-        ledger.log_intent(
-            {
-                "request_id": request_id,
-                "intent_id": intent["id"],
-                "session_id": session_id,
-                "seq": 1,
-                "ts_ms": ts_ms,
-                "nonce": intent["nonce"],
-                "parse_stage": "STRICT",
-                "normalized_json": intent,
-                "proposer_node_id": "integration",
-                "model_snapshot": "integration",
-                "prompt_profile_id": "integration",
-                "tool_visibility_hash": "",
-                "proposed_intent_draft_json": intent,
-                "lint_result": "",
-            }
+        governor = intent_engine.evaluate_intent(
+            raw_intent=intent,
+            request_id=request_id,
+            current_ms=ts_ms,
+            governance_snapshot={"trust_level": 100, "energy_level": 100},
         )
-        governor = {
-            "request_id": request_id,
-            "intent_id": intent["id"],
-            "decision": "APPROVE",
-            "reason_code": None,
-            "rule_trace": [],
-            "tokens": {},
-            "snapshot_refs": {},
-            "stage": "S_INTENT_OK",
-            "ts_ms": ts_ms,
-        }
-        ledger.log_governor(governor)
+        assert governor["decision"] == "APPROVE", governor
 
         calls: list[str] = []
-        registry = build_agent_runtime_skill_registry()
 
-        def governed_worker(_order, *, store, run_dir):  # noqa: ANN001, ARG001
+        def governed_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
             calls.append("production-worker-finished")
             return {
                 "status": "EXECUTED",
@@ -102,16 +96,8 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             }
 
         monkeypatch.setattr(
-            "host_brain.agent_runtime.production_executor._execute_worker",
+            "host_brain.domain_packs.production_runtime._execute_worker",
             governed_worker,
-        )
-        monkeypatch.setattr(
-            "host_brain.agent_runtime.production_executor._start_background_job",
-            lambda **_kwargs: pytest.fail("governed production must not start a daemon"),
-        )
-        monkeypatch.setattr(
-            "host_brain.agent_runtime.production_executor._persist_production_job_memory",
-            lambda **_kwargs: None,
         )
         task_store = DurableTaskStore(db_path)
         event_store = RuntimeEventStore(db_path)
@@ -124,13 +110,11 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             task_runtime_container=infrastructure,
             ledger=ledger,
             skill_registry=registry,
-            token_service=object(),
-            runtime_router=CanonicalRuntimeRouter(
-                mode="canonical",
-                canary_percent=100,
-                canonical_owner="integration-owner",
-                confirmed_owner="integration-owner",
-            ),
+            token_service=token_service,
+            capability_broker=dependencies.get_capability_broker(),
+            model_attempt_service=ApplicationModelAttemptServicePort(),
+            production_authority_verifier=verify_durable_production_authority,
+            runtime_router=CanonicalRuntimeRouter(),
             owner_id="integration-owner",
         )
         await runtime.activate()
@@ -221,4 +205,5 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     finally:
         if runtime is not None:
             await runtime.aclose()
+        dependencies.reset_capability_runtime_composition()
         ledger.close()

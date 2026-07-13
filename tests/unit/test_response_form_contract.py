@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.response_form_contract import (
+from host_brain.persona.response_form_contract import (
     ResponseFormClass,
     classify_response_form,
     derive_render_profile_for_response_form,

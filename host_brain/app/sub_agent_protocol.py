@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_context import (
     ContextEnvelopeError,
     build_agent_context_envelope,
@@ -70,10 +70,9 @@ AGENT_INTENT = "intent_agent"
 AGENT_VISION = "vision_agent"
 AGENT_REPAIR = "repair_agent"
 AGENT_PENTEST = "pentest_agent"
-AGENT_PENTEST_ATTACK = "pentest_attack_agent"
 
 ALL_AGENT_IDS: frozenset[str] = frozenset({
-    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST, AGENT_PENTEST_ATTACK,
+    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST,
 })
 
 # 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
@@ -82,6 +81,7 @@ AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_INTENT: "执行专家：理解用户的执行意图，调用工具完成实际操作（文件/网络/系统）",
     AGENT_VISION: "视觉分析：分析图片/截图内容，提取 UI 元素信息",
     AGENT_REPAIR: "环境修复专家：当缺少浏览器/依赖/运行环境时，尝试自动安装并恢复执行能力",
+    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
 }
 
 
@@ -90,7 +90,7 @@ AGENT_CAPABILITIES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -115,8 +115,7 @@ _DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_INTENT: "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
     AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
     AGENT_REPAIR: "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
-    AGENT_PENTEST: "渗透测试专家：PTES 六阶段框架（被动侦察→主动侦察→漏洞评估→漏洞利用→后渗透→报告）",
-    AGENT_PENTEST_ATTACK: "渗透攻击专家：全链路自主攻击（侦察→打点→提权→横移→域控→持久化），执行完整攻击链不限于测试",
+    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
 }
 
 
@@ -186,7 +185,7 @@ def resolve_sub_agent_registry_entry(agent_id: str) -> SubAgentRegistryEntry:
                 capability=str(payload.get("capability") or "").strip(),
                 default_timeout_ms=int(payload.get("default_timeout_ms") or 30_000),
             )
-    from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+    from host_brain.contracts.agent_runtime.contract_errors import (  # noqa: PLC0415
         SUB_AGENT_ADAPTER_INVALID,
         ContractViolation,
     )
@@ -219,7 +218,7 @@ def build_sub_agent_request_from_child_work_order(
         SubAgentSpec,
         validate_planner_target_binding,
     )
-    from host_brain.agent_runtime.work_order import WorkOrderV3  # noqa: PLC0415
+    from host_brain.contracts.agent_runtime.work_order import WorkOrderV3  # noqa: PLC0415
 
     child = (
         child_work_order
@@ -230,7 +229,7 @@ def build_sub_agent_request_from_child_work_order(
     )
     entry = resolve_sub_agent_registry_entry(agent_id)
     if not entry.capability:
-        from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+        from host_brain.contracts.agent_runtime.contract_errors import (  # noqa: PLC0415
             SUB_AGENT_ADAPTER_INVALID,
             ContractViolation,
         )
@@ -326,8 +325,6 @@ class SubAgentDispatcher:
         try:
             from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler
             self._handler_map[AGENT_PENTEST] = pentest_agent_handler
-            from host_brain.app.handlers.pentest_attack_agent_handler import pentest_attack_agent_handler
-            self._handler_map[AGENT_PENTEST_ATTACK] = pentest_attack_agent_handler
         except ImportError:
             pass
 
@@ -365,16 +362,20 @@ class SubAgentDispatcher:
                 resolve_host_llm_runtime_async,
                 resolve_subagent_llm_runtime,
             )
-            from host_brain.app.agent_runtime_shared import (  # noqa: PLC0415
+            from host_brain.agent_runtime.subagent_gateway import (  # noqa: PLC0415
                 _build_subagent_gateway_from_runtime,
             )
+            from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
 
             base_runtime = await resolve_host_llm_runtime_async(
                 rollout_key=str(req.session_id or req.request_id or req.agent_id),
                 scene_type="EXEC_INTENT",
             )
             subagent_runtime = resolve_subagent_llm_runtime(base_runtime=dict(base_runtime or {}))
-            gateway = _build_subagent_gateway_from_runtime(subagent_runtime)
+            gateway = _build_subagent_gateway_from_runtime(
+                subagent_runtime,
+                application_ports=AGENT_RUNTIME_PORTS,
+            )
             if gateway is None:
                 return
             context["gateway"] = gateway
@@ -591,7 +592,7 @@ class SubAgentDispatcher:
     def _log_dispatch(self, req: SubAgentRequest, resp: SubAgentResponse) -> None:
         """将子 Agent 调度结果写入 skill_exec_log 供链路追踪。"""
         try:
-            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+            from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
             ledger = get_ledger()
             result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
             raw_result = str(resp.result or resp.error or "").strip()

@@ -9,15 +9,15 @@ from host_brain.app.chat_runtime_input import (
 )
 from host_brain.conversation import conversation_max_turns
 
-from .affect_state import AffectStateBlock, resolve_affect_state
-from .conversation_interpretation import ConversationInterpretation, interpret_conversation
-from .drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
+from host_brain.persona.context.conversation_interpretation import ConversationInterpretation, interpret_conversation
+from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state
 from .interaction_state import InteractionState, build_interaction_state
-from .interaction_thread import InteractionThreadState, resolve_interaction_thread
-from .perception_packet import PerceptionPacket, build_perception_packet
-from .relationship_state import RelationshipStateBlock, resolve_relationship_state
-from .tactic_ledger import TacticLedgerBlock
-from .topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.interaction_thread import InteractionThreadState, resolve_interaction_thread
+from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet
+from host_brain.persona.context.relationship_state import RelationshipStateBlock, resolve_relationship_state
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 @dataclass(frozen=True)
@@ -139,7 +139,7 @@ class ContextAssembler:
         history_max_turns: int | None = None,
         allow_older_summary: bool = True,
     ) -> PromptContextPlaneV5:
-        from host_brain.app.dependencies import (  # noqa: PLC0415
+        from host_brain.composition.process_services import (  # noqa: PLC0415
             get_conversation_history,
             get_session_tactic_ledger_store,
             get_conversation_turn_store,
@@ -203,7 +203,7 @@ class ContextAssembler:
             )
             current_request_turn = None
             try:
-                current_request_turn = get_conversation_turn_store().find_by_request(
+                current_request_turn = get_conversation_turn_store().find_turn(
                     session_id=session_id,
                     request_id=request_id,
                     role="user",
@@ -215,7 +215,7 @@ class ContextAssembler:
                 max_turns=resolved_history_max_turns,
                 exclude_request_id=request_id,
                 before_turn_index=(
-                    int(current_request_turn.turn_index)
+                    int(current_request_turn.get("turn_index") or 0)
                     if current_request_turn is not None
                     else None
                 ),
@@ -247,7 +247,7 @@ class ContextAssembler:
             )
             try:
                 if current_request_turn is not None:
-                    current_turn_index = int(current_request_turn.turn_index)
+                    current_turn_index = int(current_request_turn.get("turn_index") or 0)
                 else:
                     current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
             except Exception:

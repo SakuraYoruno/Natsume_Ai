@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from host_brain.app.context.conversation_interpretation import ConversationInterpretation
-from host_brain.app.context.relationship_state import RelationshipStateBlock
-from host_brain.app.reply_modality_router import ReplyModalityRouter
+from host_brain.persona.context.conversation_interpretation import ConversationInterpretation
+from host_brain.persona.context.relationship_state import RelationshipStateBlock
+from host_brain.persona.reply_modality_router import ReplyModalityRouter
 
 
 def test_router_routes_pure_sticker_social_input_to_media_action() -> None:

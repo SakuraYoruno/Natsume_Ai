@@ -21,15 +21,18 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("Natsume_AUDIT_DB", ":memory:")
     monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(tmp_path / "world"))
 
-    # 重置模块级单例，确保 fixture 隔离
     import host_brain.app.canon_routes as cr
-    cr._canon_store = None
-    cr._ledger_provider = None
-
+    from host_brain.audit.migration_runner import SQLiteMigrationRunner
     from host_brain.audit.sqlite_ledger import SQLiteLedger
+    from host_brain.composition.canon import build_process_canon_container
     from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
 
-    ledger = SQLiteLedger(db_path=":memory:")
+    db_path = tmp_path / "canon-hotwords.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="canon-hotwords-contract",
+    )
+    assert migrated.success, migrated.as_dict()
+    ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
     store = WorldCanonStore(world_root=str(tmp_path / "world"), ledger=ledger)
 
     # 预置两个 active 文档
@@ -52,11 +55,14 @@ def client(tmp_path, monkeypatch):
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
 
-    # 注入 store 和 ledger 到 canon_routes
-    cr._canon_store = store
-    cr.set_ledger_provider(lambda: ledger)
-
     from host_brain.app.asgi import app
+    container = build_process_canon_container(
+        ledger=ledger,
+        canonical_db_path=db_path,
+        world_root=tmp_path / "world",
+    )
+    container.application.sync_startup(import_legacy=False)
+    cr.set_canon_service_provider(lambda: container.application)
     return TestClient(app)
 
 

@@ -10,6 +10,7 @@ from edge_client.gateway.embodiment_runtime import (
     EdgeEmbodimentTransportError,
     SQLiteEdgeEmbodimentStore,
 )
+from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
 from edge_client.app.fastapi_app import (
     _handle_embodiment_command,
     _handle_embodiment_session,
@@ -39,7 +40,12 @@ class _Clock:
 
 
 def _store(tmp_path, clock: _Clock) -> SQLiteEdgeEmbodimentStore:
-    return SQLiteEdgeEmbodimentStore(tmp_path / "edge-transport.sqlite3", clock=clock)
+    return _migrated_store(tmp_path / "edge-transport.sqlite3", clock=clock)
+
+
+def _migrated_store(db_path, *, clock: _Clock) -> SQLiteEdgeEmbodimentStore:
+    apply_edge_gateway_migrations(db_path)
+    return SQLiteEdgeEmbodimentStore(db_path, clock=clock)
 
 
 def _command(lease, *, key: str = "idem-1", deadline_ms: int = 50_000, payload=None):
@@ -96,7 +102,7 @@ def test_session_reconnect_requires_exact_lease_and_rotates_fence_after_expiry(t
 def test_receipt_survives_process_reopen_and_replay_never_reexecutes(tmp_path) -> None:
     clock = _Clock()
     db_path = tmp_path / "edge-transport.sqlite3"
-    store = SQLiteEdgeEmbodimentStore(db_path, clock=clock)
+    store = _migrated_store(db_path, clock=clock)
     lease = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
     command = _command(lease)
     calls: list[str] = []
@@ -109,7 +115,7 @@ def test_receipt_survives_process_reopen_and_replay_never_reexecutes(tmp_path) -
             "detail": "applied",
         },
     )
-    reopened = DurableEmbodimentRuntime(SQLiteEdgeEmbodimentStore(db_path, clock=clock))
+    reopened = DurableEmbodimentRuntime(_migrated_store(db_path, clock=clock))
     duplicate = reopened.execute(
         command,
         lambda item: calls.append(f"duplicate:{item.command_id}") or {"success": True},
@@ -138,17 +144,17 @@ def test_same_idempotency_key_with_different_payload_fails_closed(tmp_path) -> N
 def test_dispatching_command_is_in_doubt_after_reconnect_and_never_replayed(tmp_path) -> None:
     clock = _Clock()
     db_path = tmp_path / "edge-transport.sqlite3"
-    store = SQLiteEdgeEmbodimentStore(db_path, clock=clock)
+    store = _migrated_store(db_path, clock=clock)
     lease = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
     command = _command(lease)
     assert store.claim_command(command).execute is True
 
     calls: list[str] = []
-    first = DurableEmbodimentRuntime(SQLiteEdgeEmbodimentStore(db_path, clock=clock)).execute(
+    first = DurableEmbodimentRuntime(_migrated_store(db_path, clock=clock)).execute(
         command, lambda item: calls.append(item.command_id) or {"success": True}
     )
     clock.value += 50
-    second = DurableEmbodimentRuntime(SQLiteEdgeEmbodimentStore(db_path, clock=clock)).execute(
+    second = DurableEmbodimentRuntime(_migrated_store(db_path, clock=clock)).execute(
         command, lambda item: calls.append(item.command_id) or {"success": True}
     )
 

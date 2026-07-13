@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 
-from host_brain.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.app.startup_snapshot import build_startup_snapshot
 from host_brain.persona.drift_detector import StyleFingerprint
 from host_brain.release.identity_snapshot import (

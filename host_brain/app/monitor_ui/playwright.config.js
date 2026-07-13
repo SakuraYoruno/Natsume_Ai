@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 const baseURL = process.env.MONITOR_UI_BASE_URL || 'http://127.0.0.1:4173/monitor/'
 const browserChannel = process.env.MONITOR_UI_PLAYWRIGHT_CHANNEL ?? 'chrome'
 const shouldStartPreview = process.env.MONITOR_UI_SKIP_WEB_SERVER !== '1'
+const previewPort = Number(process.env.MONITOR_UI_PREVIEW_PORT || 4173)
 
 export default defineConfig({
   testDir: './e2e',
@@ -22,7 +23,7 @@ export default defineConfig({
   },
   webServer: shouldStartPreview
     ? {
-        command: 'npm run preview -- --host 127.0.0.1 --port 4173',
+        command: `npm run preview -- --host 127.0.0.1 --port ${previewPort}`,
         url: baseURL,
         reuseExistingServer: true,
         timeout: 30_000,

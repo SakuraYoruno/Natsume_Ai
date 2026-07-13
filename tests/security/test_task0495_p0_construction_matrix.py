@@ -26,7 +26,7 @@ from edge_client.gateway.webhook_security import (
     VerifierRegistry,
     WebhookVerificationError,
 )
-from host_brain.observability import command_composition as obs_composition
+from host_brain.app.observability_runtime import command_composition as obs_composition
 from host_brain.pentest.lab_isolation import PentestEffectAction
 from host_brain.pentest.secure_execution import (
     EffectState,
@@ -39,7 +39,7 @@ from host_brain.pentest.secure_run import (
 )
 from host_brain.skills.supply_chain import SupplyChainActivationMode
 from host_brain.skills.supply_chain_service import SkillSupplyChainService
-from host_brain.skills.supply_chain_store import BundleKind
+from host_brain.persistence.supply_chain_repository import BundleKind
 from tests.fixtures.m48b_p0_validation import (
     M48BForbiddenIOAttempt,
     M48B_P0_ISOLATED_ONLY,
@@ -258,7 +258,6 @@ def test_obs_store_constructor_fault_returns_disabled_no_writer(
     with run.no_real_io_guard():
         composition = obs_composition.build_obs_command_composition(
             env={
-                "HOST_OBS_COMMAND_RELOCATION_MODE": "QUERY_ONLY",
                 "HOST_SECURE_INGRESS_MODE": "ENFORCE",
                 "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON": json.dumps(
                     {"task0495.obs.key": harness.test_secret}

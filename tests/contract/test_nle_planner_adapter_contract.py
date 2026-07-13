@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
-import json
-from types import SimpleNamespace
 
 import pytest
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     PLAN_CYCLE,
     SUB_AGENT_ADAPTER_INVALID,
     SUB_AGENT_LINEAGE_INVALID,
@@ -26,12 +24,9 @@ from host_brain.agent_runtime.planner_adapter import (
     build_planner_shadow_comparison,
     validate_same_graph_revision,
 )
-from host_brain.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.agents.planning_agent import PlanStep, StepStatus, TaskPlan
-from host_brain.app.executive_runtime_core import _execute_skill_dag
-from host_brain.app.plan_graph import prepare_existing_plan_graph_state, run_plan_graph
-from host_brain.app.settings.core import CoreSettings
-from host_brain.app.skill_dag_planner import (
+from host_brain.executive_runtime.skill_dag import (
     SkillDagNode,
     SkillDagPlan,
     build_skill_dag_plan,
@@ -42,7 +37,6 @@ from host_brain.app.sub_agent_protocol import (
     build_sub_agent_request_from_child_work_order,
     get_sub_agent_registry_view,
 )
-from host_brain.pentest.utils.entropy import extract_secrets
 
 
 def _node(
@@ -362,17 +356,6 @@ def test_t_nle_05_child_work_order_is_the_only_canonical_sub_agent_request_sourc
         session_id="session-1",
     )
     canonical_request = request.context["canonical_sub_agent_request"]
-    plan_graph_state = prepare_existing_plan_graph_state(
-        plan=plan,
-        parent_work_order=parent,
-        request_id="parent-request",
-        session_id="session-1",
-        person_id="person-1",
-        user_message="execute",
-    )
-    shadow_delegate = next(
-        task for task in plan_graph_state["sub_tasks"] if task["node_id"] == "delegate"
-    )
 
     assert child.root_work_order_id == parent.root_work_order_id
     assert child.parent_work_order_id == parent.work_order_id
@@ -382,11 +365,6 @@ def test_t_nle_05_child_work_order_is_the_only_canonical_sub_agent_request_sourc
     assert canonical_request["child_work_order"]["task_node_id"] == "delegate"
     assert canonical_request["context_refs"] == list(child.input_refs)
     assert request.context["child_work_order"]["parent_work_order_id"] == "wo-root"
-    assert shadow_delegate["child_work_order_projection"]["task_graph_id"] == (
-        plan.identity.graph_id
-    )
-    assert shadow_delegate["sub_agent_request_projection"]["agent_id"] == "intent_agent"
-    assert "task" not in shadow_delegate["sub_agent_request_projection"]
 
 
 def test_t_nle_05_root_work_order_cannot_be_projected_as_sub_agent_request() -> None:
@@ -408,167 +386,6 @@ def test_t_nle_05_sub_agent_registry_view_is_deterministic_and_read_only() -> No
     assert agent_ids == sorted(ALL_AGENT_IDS)
     assert len(agent_ids) == len(set(agent_ids))
     assert all(entry["capability"] for entry in view["agents"])
-
-
-def test_t_nle_05_plan_graph_state_consumes_existing_plan_without_second_id() -> None:
-    plan = adapt_skill_dag_plan(
-        _dag(_node("a"), _node("b", dependencies=("a",))),
-        identity=_identity(),
-    )
-    state = prepare_existing_plan_graph_state(
-        plan=plan,
-        parent_work_order=_parent_work_order(),
-        request_id="request-1",
-        session_id="session-1",
-        person_id="person-1",
-        user_message="execute",
-    )
-
-    assert state["graph_id"] == plan.identity.graph_id
-    assert state["graph_revision"] == plan.identity.revision
-    assert state["execution_batches"] == [["a"], ["b"]]
-    assert state["plan_trace"][0]["replanned"] is False
-    assert state["sub_tasks"][1]["dependency_refs"]
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_plan_graph_shadows_existing_revision_without_side_effects(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    plan = adapt_skill_dag_plan(
-        _dag(
-            _node("a"),
-            _node("b", dependencies=("a",)),
-            _node("c", dependencies=("a",)),
-        ),
-        identity=_identity(),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph._task_route_node",
-        lambda state: (_ for _ in ()).throw(AssertionError("shadow dispatched work")),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph._synthesize_node",
-        lambda state: (_ for _ in ()).throw(AssertionError("shadow called the model")),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph.get_plan_graph",
-        lambda: (_ for _ in ()).throw(AssertionError("legacy planner must not run")),
-    )
-
-    result = await run_plan_graph(
-        request_id="request-1",
-        session_id="session-1",
-        person_id="person-1",
-        user_message="execute",
-        canonical_plan=plan,
-        parent_work_order=_parent_work_order(),
-        canonical_planner_enabled=True,
-    )
-
-    assert result["success"] is False
-    assert result["graph_id"] == plan.identity.graph_id
-    assert result["graph_revision"] == plan.identity.revision
-    assert result["planner_shadow_comparison"]["compatible"] is True
-    assert result["shadow_only"] is True
-    assert result["external_side_effect_count"] == 0
-    assert result["task_results"] == []
-    assert result["reason_code"] == "CANONICAL_PLANNER_SHADOW_ONLY"
-    dependent_tasks = [task for task in result["sub_tasks"] if task["depends_on"]]
-    assert all("artifact://task-result/" in task["dependency_context"] for task in dependent_tasks)
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_plan_graph_adapts_upstream_skill_dag_without_replanning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    upstream = _dag(_node("a"), plan_id="upstream-graph-id")
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph._task_route_node",
-        lambda state: (_ for _ in ()).throw(AssertionError("shadow dispatched work")),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph.get_plan_graph",
-        lambda: (_ for _ in ()).throw(AssertionError("PlanningAgent must not run")),
-    )
-
-    result = await run_plan_graph(
-        request_id="upstream-request",
-        session_id="session-1",
-        person_id="person-1",
-        user_message="execute upstream",
-        upstream_plan=upstream,
-        parent_work_order=_parent_work_order(),
-        canonical_planner_enabled=True,
-    )
-
-    assert result["success"] is False
-    assert result["graph_id"] == upstream.plan_id
-    assert result["graph_revision"] == _parent_work_order().graph_revision
-    assert result["canonical_plan_input"]["source_plan_id"] == upstream.plan_id
-    assert result["plan_trace"][0]["replanned"] is False
-    assert result["shadow_only"] is True
-    assert result["external_side_effect_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_feature_flag_off_preserves_legacy_plan_graph(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    canonical = adapt_skill_dag_plan(_dag(_node("a")), identity=_identity())
-    calls: list[dict[str, object]] = []
-
-    class LegacyGraph:
-        def invoke(self, state, config):
-            calls.append({"state": state, "config": config})
-            return {
-                **state,
-                "final_answer": "legacy",
-                "failed": False,
-            }
-
-    monkeypatch.setattr("host_brain.app.plan_graph.get_plan_graph", lambda: LegacyGraph())
-
-    result = await run_plan_graph(
-        request_id="legacy-request",
-        session_id="legacy-session",
-        person_id="legacy-person",
-        user_message="legacy",
-        canonical_plan=canonical,
-        canonical_planner_enabled=False,
-    )
-
-    assert result["success"] is True
-    assert result["final_answer"] == "legacy"
-    assert len(calls) == 1
-    assert calls[0]["state"]["graph_id"] == ""
-    assert "canonical_plan_input" not in result
-
-
-def test_t_nle_05_canonical_planner_feature_flag_defaults_off() -> None:
-    assert CoreSettings.model_fields["canonical_planner_adapter_enabled"].default is False
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_canonical_mode_without_upstream_plan_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph.get_plan_graph",
-        lambda: (_ for _ in ()).throw(AssertionError("second planner must not run")),
-    )
-
-    result = await run_plan_graph(
-        request_id="missing-plan",
-        session_id="session",
-        person_id="person",
-        user_message="execute",
-        canonical_planner_enabled=True,
-    )
-
-    assert result["success"] is False
-    assert result["reason_code"] == TASK_GRAPH_INVALID
-    assert "second planning is forbidden" in result["final_answer"]
 
 
 def test_t_nle_05_canonical_payload_round_trip_preserves_revision_and_refs() -> None:
@@ -792,100 +609,3 @@ def test_t_nle_05_needs_input_status_fails_closed_with_stable_reason(
 
     assert error.value.reason_code == PLANNER_NEEDS_INPUT
     assert "requires user input" in error.value.detail
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_shadow_result_contains_no_raw_work_order_secrets() -> None:
-    plan = adapt_skill_dag_plan(
-        _dag(_node("delegate", route="delegate", target_id="intent_agent")),
-        identity=_identity(),
-    )
-    parent = _parent_work_order()
-    parent.input_pack = {
-        "user_request": "TOP_SECRET_REQUEST",
-        "api_key": "AKIAABCDEFGHIJKLMNOP",
-    }
-    parent.metadata = {
-        **parent.metadata,
-        "private_memory": "PRIVATE_THOUGHT_FIXTURE",
-    }
-    parent.validate()
-
-    result = await run_plan_graph(
-        request_id="secret-shadow",
-        session_id="session",
-        person_id="person",
-        user_message="execute",
-        canonical_plan=plan,
-        parent_work_order=parent,
-        canonical_planner_enabled=True,
-    )
-    serialized = json.dumps(result, ensure_ascii=False, sort_keys=True)
-
-    assert result["shadow_only"] is True
-    assert result["external_side_effect_count"] == 0
-    assert "AKIAABCDEFGHIJKLMNOP" not in serialized
-    assert "PRIVATE_THOUGHT_FIXTURE" not in serialized
-    assert "TOP_SECRET_REQUEST" not in serialized
-    assert "input_pack" not in serialized
-    assert "metadata" not in serialized
-    assert extract_secrets(serialized) == []
-    assert result["canonical_plan_input"]["plan_digest"].startswith("sha256:")
-
-
-@pytest.mark.asyncio
-async def test_t_nle_05_executive_shadow_payload_remains_secret_free(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "AKIAABCDEFGHIJKLMNOP"
-    source = build_skill_dag_plan(
-        plan_id="executive-shadow",
-        parallel_window=1,
-        steps=[
-            {
-                "step_index": 1,
-                "node_id": "delegate",
-                "route": "delegate",
-                "target_id": "intent_agent",
-                "description": "delegate",
-                "task_description": f"sensitive task {secret}",
-                "allow_parallel": False,
-            }
-        ],
-    )
-    parent = _parent_work_order()
-    parent.input_pack = {
-        "user_request": "TOP_SECRET_EXECUTIVE_REQUEST",
-        "api_key": secret,
-    }
-    parent.validate()
-    monkeypatch.setattr(
-        "host_brain.app.plan_graph.canonical_planner_adapter_enabled",
-        lambda _explicit=None: True,
-    )
-
-    outcome, metadata = await _execute_skill_dag(
-        plan=source,
-        request_body={},
-        request_id="executive-secret-shadow",
-        session_id="session",
-        person_id="person",
-        intent_id="intent",
-        governor_result={},
-        intent_draft={
-            "canonical_work_order": parent.to_dict(),
-            "user_message": "TOP_SECRET_EXECUTIVE_REQUEST",
-        },
-        emotion_context={},
-        render_target_lang="zh-CN",
-    )
-    serialized = json.dumps(
-        {"payload": outcome.payload, "metadata": metadata},
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-
-    assert metadata["engine"] == "canonical_planner_shadow"
-    assert secret not in serialized
-    assert "TOP_SECRET_EXECUTIVE_REQUEST" not in serialized
-    assert extract_secrets(serialized) == []

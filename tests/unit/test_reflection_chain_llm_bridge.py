@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     REFLECTION_EVALUATE_PROMPT_ID,
     CallableProviderAdapter,
@@ -97,7 +97,10 @@ def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) 
     )
     dependencies.reset_model_runtime_composition(composition)
     try:
-        chain = rc.ReflectionChain(use_llm=True)
+        chain = rc.ReflectionChain(
+            use_llm=True,
+            model_attempt_service=dependencies.get_model_attempt_service(),
+        )
         result = chain.revise(
             user_message="我今天真的有点撑不住了",
             ai_response="嗯。",

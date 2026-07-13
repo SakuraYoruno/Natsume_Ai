@@ -2,8 +2,8 @@
 
 The store is deliberately not a scheduler.  It persists the contracts frozen by
 TASK-0466 and provides transactional compare-and-swap, attempt ownership,
-leases, recovery, business idempotency, budgets, and an outbox.  Legacy
-``AgentJobRegistry`` remains the read authority during this shadow phase.
+leases, recovery, business idempotency, budgets, and an outbox.  The canonical
+TaskGraph repository is the sole task state authority.
 
 Schema creation is owned by the central audit migration catalog.  This module
 never creates tables inline and fails closed unless the 0052 base and 0054
@@ -35,18 +35,18 @@ except ImportError:  # pragma: no cover - exercised through dependency fail-clos
     _Ed25519InvalidSignature = None
     _Ed25519PublicKey = None
 
-from host_brain.agent_runtime.budget_policy import (
+from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
     BudgetReservation,
     BudgetReservationStatus,
     validate_budget_transition,
 )
-from host_brain.agent_runtime.acceptance_judge import (
+from host_brain.contracts.agent_runtime.acceptance_judge import (
     AcceptanceGate,
     AcceptanceJudgement,
 )
-from host_brain.agent_runtime.contract_errors import ContractViolation
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
@@ -54,7 +54,7 @@ from host_brain.agent_runtime.task_graph import (
     validate_task_graph_transition,
     validate_task_node_transition,
 )
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.contracts.agent_runtime.verification_contract import (
     VerificationGate,
     VerificationResult,
 )
@@ -2986,214 +2986,6 @@ class DurableTaskStore:
             self._require_cas(cursor, subject=f"Outbox {outbox_id}")
             return _outbox_record(self._require_outbox(conn, outbox_id))
 
-    # -- Legacy AgentJobRegistry shadow --------------------------------------------
-
-    def mirror_legacy_job(
-        self,
-        job: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        if not isinstance(job, Mapping):
-            raise TaskStoreError(TASK_STORE_INVALID, "legacy job must be a mapping")
-        raw_job = dict(job)
-        job_id = str(raw_job.get("job_id") or "").strip()
-        if not job_id:
-            raise TaskStoreError(TASK_STORE_INVALID, "legacy job_id is required")
-        snapshot = _legacy_job_projection(raw_job)
-        ts_ms = self._now()
-        graph_id = f"legacy-agent-job::{job_id}"
-        write_outbox = True
-        with self._transaction() as conn:
-            existing = conn.execute(
-                """
-                SELECT * FROM task_runtime_graph
-                WHERE source_kind = 'LEGACY_AGENT_JOB' AND source_ref = ?
-                """,
-                (job_id,),
-            ).fetchone()
-            if existing is None:
-                work_order = raw_job.get("work_order")
-                work_order_data = dict(work_order) if isinstance(work_order, Mapping) else {}
-                root_work_order_id = str(work_order_data.get("work_order_id") or job_id).strip()
-                node = TaskNode(
-                    node_id="legacy-job",
-                    dependencies=(),
-                    route="legacy:agent-job",
-                    input_refs=(),
-                    output_contract={"type": "legacy_shadow"},
-                    retry_policy={},
-                    risk_level=1,
-                    acceptance_criteria=(),
-                    status=TaskNodeStatus.CREATED,
-                    status_version=0,
-                )
-                graph = TaskGraph(
-                    graph_id=graph_id,
-                    root_work_order_id=root_work_order_id,
-                    revision=1,
-                    planner_ref="legacy://AgentJobRegistry",
-                    status=TaskGraphStatus.CREATED,
-                    created_at=int(raw_job.get("created_at_ms") or ts_ms),
-                    nodes=(node,),
-                )
-                graph.validate()
-                conn.execute(
-                    """
-                    INSERT INTO task_runtime_graph(
-                        graph_id, revision, root_work_order_id, planner_ref, status,
-                        status_version, graph_json, source_kind, source_ref,
-                        legacy_snapshot_json, created_ts_ms, updated_ts_ms
-                    ) VALUES (?, 1, ?, ?, 'CREATED', 0, ?, 'LEGACY_AGENT_JOB', ?, ?, ?, ?)
-                    """,
-                    (
-                        graph_id,
-                        root_work_order_id,
-                        graph.planner_ref,
-                        _dumps(graph.to_dict()),
-                        job_id,
-                        _dumps(snapshot),
-                        ts_ms,
-                        ts_ms,
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO task_runtime_node(
-                        graph_id, graph_revision, node_id, status, status_version,
-                        node_json, cancellation_requested_ts_ms, created_ts_ms, updated_ts_ms
-                    ) VALUES (?, 1, 'legacy-job', 'CREATED', 0, ?, NULL, ?, ?)
-                    """,
-                    (graph_id, _dumps(node.to_dict()), ts_ms, ts_ms),
-                )
-                next_version = 0
-                event_type = "LEGACY_JOB_SHADOW_CREATED"
-            else:
-                node_rows = conn.execute(
-                    """
-                    SELECT * FROM task_runtime_node
-                    WHERE graph_id = ? AND graph_revision = 1
-                    ORDER BY node_id
-                    """,
-                    (graph_id,),
-                ).fetchall()
-                _graph_record(existing, node_rows)
-                durable_snapshot = _validated_legacy_snapshot(
-                    existing["legacy_snapshot_json"],
-                    expected_job_id=job_id,
-                )
-                incoming_updated_at = int(snapshot["updated_at_ms"])
-                durable_updated_at = int(durable_snapshot["updated_at_ms"])
-                if incoming_updated_at < durable_updated_at:
-                    raise TaskStoreError(
-                        TASK_STORE_CAS_CONFLICT,
-                        "legacy shadow rejected an out-of-order older snapshot: "
-                        f"incoming={incoming_updated_at}, durable={durable_updated_at}",
-                    )
-                if incoming_updated_at == durable_updated_at:
-                    if _payload_digest(snapshot) != _payload_digest(durable_snapshot):
-                        raise TaskStoreError(
-                            TASK_STORE_CAS_CONFLICT,
-                            "legacy shadow has conflicting content at the same updated_at_ms",
-                        )
-                    write_outbox = False
-                    next_version = int(existing["status_version"])
-                    event_type = ""
-                else:
-                    expected_version = int(existing["status_version"])
-                    cursor = conn.execute(
-                        """
-                        UPDATE task_runtime_graph
-                        SET legacy_snapshot_json = ?, status_version = status_version + 1,
-                            updated_ts_ms = ?
-                        WHERE graph_id = ? AND revision = 1 AND status_version = ?
-                        """,
-                        (_dumps(snapshot), ts_ms, graph_id, expected_version),
-                    )
-                    self._require_cas(cursor, subject=f"legacy shadow {job_id}")
-                    next_version = expected_version + 1
-                    event_type = "LEGACY_JOB_SHADOW_UPDATED"
-            if write_outbox:
-                self._insert_outbox(
-                    conn,
-                    OutboxMessage.create(
-                        aggregate_type="LEGACY_AGENT_JOB_SHADOW",
-                        aggregate_id=job_id,
-                        aggregate_version=next_version,
-                        event_type=event_type,
-                        payload_ref=build_outbox_payload_ref(
-                            aggregate_type="LEGACY_AGENT_JOB_SHADOW",
-                            aggregate_id=job_id,
-                            aggregate_version=next_version,
-                        ),
-                        idempotency_key=f"legacy-shadow:{job_id}:{next_version}",
-                    ),
-                    ts_ms=ts_ms,
-                    expected_aggregate=("LEGACY_AGENT_JOB_SHADOW", job_id, next_version),
-                    expected_event_type=event_type,
-                    expected_attempt_id=None,
-                )
-        shadow = self.get_legacy_job_shadow(job_id)
-        assert shadow is not None
-        return shadow
-
-    def get_legacy_job_shadow(self, job_id: str) -> dict[str, Any] | None:
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT * FROM task_runtime_graph
-                WHERE source_kind = 'LEGACY_AGENT_JOB' AND source_ref = ?
-                """,
-                (str(job_id),),
-            ).fetchone()
-            if row is None:
-                return None
-            return {
-                "job": _validated_legacy_snapshot(
-                    row["legacy_snapshot_json"],
-                    expected_job_id=str(row["source_ref"] or ""),
-                ),
-                "graph_id": str(row["graph_id"]),
-                "revision": int(row["revision"]),
-                "shadow_version": int(row["status_version"]),
-                "updated_at_ms": int(row["updated_ts_ms"]),
-            }
-        finally:
-            conn.close()
-
-    def reconcile_legacy_job(
-        self,
-        job_id: str,
-        legacy_job: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        if legacy_job is not None and not isinstance(legacy_job, Mapping):
-            raise TaskStoreError(TASK_STORE_INVALID, "legacy job must be a mapping or null")
-        legacy = _legacy_job_projection(legacy_job) if isinstance(legacy_job, Mapping) else None
-        shadow = self.get_legacy_job_shadow(job_id)
-        durable = dict(shadow["job"]) if shadow is not None else None
-        if legacy is None and durable is None:
-            classification = "BOTH_MISSING"
-            differences: list[str] = []
-        elif legacy is None:
-            classification = "LEGACY_MISSING"
-            differences = ["job"]
-        elif durable is None:
-            classification = "DURABLE_SHADOW_MISSING"
-            differences = ["job"]
-        else:
-            keys = sorted(set(legacy) | set(durable))
-            differences = [key for key in keys if legacy.get(key) != durable.get(key)]
-            classification = "MATCH" if not differences else "FIELD_MISMATCH"
-        return {
-            "job_id": str(job_id),
-            "authority": "LEGACY",
-            "classification": classification,
-            "match": classification == "MATCH",
-            "differences": differences,
-            "legacy": legacy,
-            "durable_shadow": durable,
-            "shadow_version": shadow.get("shadow_version") if shadow else None,
-        }
-
     # -- Internal row helpers -------------------------------------------------------
 
     def _insert_outbox(
@@ -4207,27 +3999,19 @@ def _graph_record(graph_row: sqlite3.Row, node_rows: list[sqlite3.Row]) -> dict[
             )
     source_kind = str(graph_row["source_kind"])
     raw_legacy_snapshot = graph_row["legacy_snapshot_json"]
-    if source_kind == "CANONICAL":
-        if raw_legacy_snapshot is not None:
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                "canonical TaskGraph cannot contain a legacy snapshot",
-            )
-        legacy_snapshot = None
-    elif source_kind == "LEGACY_AGENT_JOB":
-        legacy_snapshot = _validated_legacy_snapshot(
-            raw_legacy_snapshot,
-            expected_job_id=str(graph_row["source_ref"] or ""),
-        )
-    else:
+    if source_kind != "CANONICAL":
         raise TaskStoreError(
             TASK_STORE_DURABLE_DATA_INVALID,
             f"unsupported durable graph source_kind: {source_kind}",
         )
+    if raw_legacy_snapshot is not None:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "canonical TaskGraph cannot contain a retired legacy snapshot",
+        )
     record.pop("graph_json")
     record.pop("legacy_snapshot_json")
     record["graph"] = graph_payload
-    record["legacy_snapshot"] = legacy_snapshot
     record["nodes"] = node_records
     return record
 
@@ -4323,154 +4107,6 @@ def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
         ) from exc
     record["evidence_refs"] = evidence_refs
     return record
-
-
-_LEGACY_SHADOW_SCHEMA_VERSION = "Natsume.agent.legacy_job_shadow.v1"
-_SHA256_REF_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-
-def _legacy_job_projection(job: Mapping[str, Any]) -> dict[str, Any]:
-    """Project legacy jobs without persisting task bodies or private reasoning.
-
-    Shadow reconciliation needs stable facts, not a second copy of user input,
-    prompts, result bodies, or chain-of-thought-like fields.  Payloads are
-    represented by deterministic digests only.
-    """
-
-    if not isinstance(job, Mapping):
-        raise TaskStoreError(TASK_STORE_INVALID, "legacy job must be a mapping")
-    data = dict(job)
-    work_order = data.get("work_order")
-    if not isinstance(work_order, Mapping):
-        raise TaskStoreError(TASK_STORE_INVALID, "legacy work_order must be a mapping")
-    work_order_data = dict(work_order)
-    result = data.get("result")
-    if result is not None and not isinstance(result, Mapping):
-        raise TaskStoreError(TASK_STORE_INVALID, "legacy result must be a mapping or null")
-    result_data = dict(result) if isinstance(result, Mapping) else {}
-    try:
-        created_at_ms = int(data["created_at_ms"])
-        updated_at_ms = int(data["updated_at_ms"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            "legacy created_at_ms and updated_at_ms must be integers",
-        ) from exc
-    job_id = str(data.get("job_id") or "").strip()
-    kind = str(data.get("kind") or "").strip()
-    status = str(data.get("status") or "").strip()
-    if not job_id or not kind or not status or created_at_ms < 0 or updated_at_ms < created_at_ms:
-        raise TaskStoreError(
-            TASK_STORE_INVALID,
-            "legacy job identity/status/timestamps are invalid",
-        )
-    projection = {
-        "schema_version": _LEGACY_SHADOW_SCHEMA_VERSION,
-        "job_id": job_id,
-        "kind": kind,
-        "status": status,
-        "work_order_id": str(work_order_data.get("work_order_id") or ""),
-        "work_order_schema_version": str(work_order_data.get("schema_version") or ""),
-        "work_order_digest": _payload_digest(work_order_data),
-        "result_status": str(result_data.get("status") or ""),
-        "result_reason_code": str(result_data.get("reason_code") or ""),
-        "result_digest": _payload_digest(result_data) if result is not None else "",
-        "created_at_ms": created_at_ms,
-        "updated_at_ms": updated_at_ms,
-    }
-    return _validate_legacy_projection(projection)
-
-
-def _validate_legacy_projection(
-    projection: dict[str, Any],
-    *,
-    expected_job_id: str | None = None,
-) -> dict[str, Any]:
-    required_keys = {
-        "schema_version",
-        "job_id",
-        "kind",
-        "status",
-        "work_order_id",
-        "work_order_schema_version",
-        "work_order_digest",
-        "result_status",
-        "result_reason_code",
-        "result_digest",
-        "created_at_ms",
-        "updated_at_ms",
-    }
-    if set(projection) != required_keys:
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow projection fields do not match its frozen schema",
-        )
-    if projection.get("schema_version") != _LEGACY_SHADOW_SCHEMA_VERSION:
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow schema_version is invalid",
-        )
-    for key in (
-        "job_id",
-        "kind",
-        "status",
-        "work_order_id",
-        "work_order_schema_version",
-        "result_status",
-        "result_reason_code",
-        "result_digest",
-    ):
-        if not isinstance(projection.get(key), str):
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                f"legacy shadow {key} must be a string",
-            )
-    if not projection["job_id"] or not projection["kind"] or not projection["status"]:
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow job_id, kind, and status are required",
-        )
-    if expected_job_id is not None and projection["job_id"] != str(expected_job_id):
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow job_id does not match source_ref",
-        )
-    if not _SHA256_REF_PATTERN.fullmatch(str(projection["work_order_digest"])):
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow work_order_digest is invalid",
-        )
-    result_digest = str(projection["result_digest"])
-    if result_digest and not _SHA256_REF_PATTERN.fullmatch(result_digest):
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow result_digest is invalid",
-        )
-    for key in ("created_at_ms", "updated_at_ms"):
-        value = projection.get(key)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                f"legacy shadow {key} must be a non-negative integer",
-            )
-    if int(projection["updated_at_ms"]) < int(projection["created_at_ms"]):
-        raise TaskStoreError(
-            TASK_STORE_DURABLE_DATA_INVALID,
-            "legacy shadow updated_at_ms cannot precede created_at_ms",
-        )
-    return dict(projection)
-
-
-def _validated_legacy_snapshot(value: Any, *, expected_job_id: str) -> dict[str, Any]:
-    return _validate_legacy_projection(
-        _loads_object(value, field_name="task_runtime_graph.legacy_snapshot_json"),
-        expected_job_id=expected_job_id,
-    )
-
-
-def _payload_digest(value: Mapping[str, Any]) -> str:
-    canonical = _dumps(dict(value or {}))
-    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 def _legacy_receipt_digest(value: Any) -> str:

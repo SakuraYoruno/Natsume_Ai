@@ -207,7 +207,7 @@ TASK-0488 后的 HTTP Webhook 主链：
   → POST /v1/host/input
   → TASK-0487 Host Secure Ingress + durable claim
   → input_routes 后续主链
-  → edge_rpc_client.post_gateway_reply()
+  → edge_transport.submit_gateway_reply()
   → signed POST /v1/gateway/reply
   → 0059 gateway_transport_outbox
   → OutboundDispatcher.prepare_payload()（零副作用冻结/选 adapter）
@@ -217,13 +217,10 @@ TASK-0488 后的 HTTP Webhook 主链：
   → adapter-confirmation ACK；不确定副作用入 DLQ 且禁止自动重发
 ```
 
-`EDGE_GATEWAY_TRANSPORT_MODE` 默认 `LEGACY_DRAIN`：拒绝新 HTTP intake，
-只排空旧兼容重试队列；`SHADOW` 只执行 raw-body 认证验证，不持久化、
-不返回 durable ACK，也不启动副作用 worker；只有 `DURABLE` 执行持久化和
-Host/平台投递。非法 mode 回退 `LEGACY_DRAIN`。
+`EDGE_GATEWAY_TRANSPORT_MODE` 只接受 `DURABLE`；缺省、历史值和非法值都收敛到
+`DURABLE`，不存在 legacy queue 或 shadow ACK 路径。
 `EDGE_GATEWAY_ACCEPT_NEW_INTAKE=false` 可同时停止 HTTP、DB watcher 与 Telegram
-新输入，DURABLE worker 继续排空；仅在 `pending=0`、无 claimed 且
-`reconciliation_required=false` 后切换 `LEGACY_DRAIN`。凭据、verifier 与 0059
+新输入，DURABLE worker 继续处理已提交记录。凭据、verifier 与 0059
 schema 在任何 producer/worker 前完成 preflight；HTTP bind/readiness 或 Telegram
 连接失败会逆序停止 server、producer、平台连接与 worker，禁止 orphan runtime。
 Inbox/outbox 以业务幂等键、tenant/principal、payload digest、ordering key、
@@ -234,8 +231,8 @@ operator ref，原记录原位恢复，不能创建第二身份。
 明文原始 body。LINE 使用 exact raw-body HMAC；飞书和企微在运行装配中默认完成认证解密；
 QQ、WeChat HTTP bridge、Telegram 以及 Host reply 使用 Natsume internal raw-body
 HMAC。Host reply 使用独立密钥，禁止回退通用 Edge RPC key。DURABLE 下 DB watcher /
-MTProto 等非 HTTP 入口与 HTTP 共用 0059 inbox，不再写 legacy reporter cache；
-`LEGACY_DRAIN` 仅排空已存在的兼容队列。共享 channel SDK 与 composition port
+MTProto 等非 HTTP 入口与 HTTP 共用 0059 inbox；`EdgeInputReporter` 只执行一次
+冻结字节投递，不拥有本地 cache、retry thread 或第二 DLQ。共享 channel SDK 与 composition port
 由 `TASK-0592` 收口；Edge 对 Host Store/签名实现的临时导入由 `TASK-0493`、
 `TASK-0584` 移除，禁止复制 Store 形成第二真相源。
 
@@ -248,11 +245,11 @@ message ID/receipt；provider receipt 对账由 `TASK-0592` 移除。Gateway pro
 关键文件：
 - `edge_client/gateway/server.py` — Gateway 服务入口。
 - `edge_client/gateway/webhook_security.py` — 平台 raw-body 验签与认证解密。
-- `edge_client/gateway/delivery_runtime.py` — durable worker 和切流 mode。
+- `edge_client/gateway/delivery_runtime.py` — durable worker 与唯一 transport owner。
 - `host_brain/eventing/gateway_transport.py` — 0059 inbox/outbox/attempt 唯一 Store。
 - `edge_client/gateway/adapters/` — 各平台适配器。
-- `edge_client/gateway/router.py` — 非 HTTP 兼容消息路由。
-- `host_brain/channels/edge_rpc_client.py` — Host → Edge/Gateway 推送。
+- `host_brain/channels/edge_transport.py` — typed Host → Edge/Gateway HMAC transport。
+- `host_brain/channels/edge_rpc_client.py` — 仅剩待 Obs 清理包删除的 avatar facade。
 
 ---
 

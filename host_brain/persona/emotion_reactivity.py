@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.model_attempt_port import complete_compiled_model_sync
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
+from host_brain.model_runtime.trace import model_attempt_result_trace
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime import EMOTION_REACTIVITY_PROMPT_ID
 from host_brain.persona.personality_traits import PersonalityTraits
 
@@ -65,7 +66,7 @@ _SUSTAINED_NEGATIVE_COMPANION = "sustained_negative"
 
 
 def _load_reactivity_llm_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotion_reactivity.llm_hint.prompt")
+    raw = resolve_prompt_contract_json("emotion_reactivity.llm_hint.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -302,6 +303,7 @@ def render_reactivity_hint(
     render_target_lang: str = "zh",
     timeout_ms: int = 1800,
     model_attempt_sink: dict[str, Any] | None = None,
+    model_attempt_service: Any = None,
 ) -> str:
     templates = _load_reactivity_llm_templates()
     if not templates:
@@ -333,7 +335,10 @@ def render_reactivity_hint(
             "请输出 JSON：{{\"reactivity_hint\":\"...\"}}"
         )
     try:
-        completion = complete_compiled_model_sync(
+        if model_attempt_service is None:
+            return ""
+        completion = complete_compiled_prompt_sync(
+            attempt_service=model_attempt_service,
             prompt_id=EMOTION_REACTIVITY_PROMPT_ID,
             messages=(
                 {"role": "system", "content": system_prompt},
@@ -362,11 +367,11 @@ def render_reactivity_hint(
         return ""
     if model_attempt_sink is not None:
         model_attempt_sink.clear()
-        model_attempt_sink.update(dict(completion.trace))
+        model_attempt_sink.update(model_attempt_result_trace(completion))
     if not completion.success:
         return ""
     try:
-        parsed = json.loads(completion.content)
+        parsed = json.loads(str(completion.content or ""))
     except Exception:
         return ""
     return str(parsed.get("reactivity_hint") or "").strip()

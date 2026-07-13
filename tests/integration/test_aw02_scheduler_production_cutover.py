@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_store import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.command_ingress import (
@@ -147,12 +147,7 @@ async def test_clock_to_task_runtime_to_durable_result_is_one_real_chain(
         evaluator=command_ingress.evaluator,
         claim_result_store=command_ingress.store,
         intent_engine=intent_engine,
-        runtime_router=CanonicalRuntimeRouter(
-            mode="canonical",
-            canary_percent=100,
-            canonical_owner="scheduler-integration-owner",
-            confirmed_owner="scheduler-integration-owner",
-        ),
+        runtime_router=CanonicalRuntimeRouter(),
         owner_id="scheduler-integration-owner",
         current_mode=lambda: "normal",
         default_handler=worker,

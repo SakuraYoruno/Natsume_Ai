@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-import os
 from typing import Any, Callable, Iterable, Mapping
-from urllib.parse import urlparse
 
 from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
 from host_brain.model_runtime.provider_adapters import (
@@ -135,68 +133,6 @@ def build_production_provider_registry(
     return ProviderAdapterRegistry(_build_adapter(binding) for binding in resolved)
 
 
-def _default_credential_resolver(provider: str) -> str | None:
-    """Resolve a secret behind the adapter without mutating process env."""
-
-    normalized = (
-        "openai"
-        if str(provider).strip().lower() == "openai_compatible"
-        else str(provider or "").strip().lower()
-    )
-    try:
-        from host_brain.app import config as host_config  # noqa: PLC0415
-        from host_brain.core.key_profiles import resolve_secret_from_profiles  # noqa: PLC0415
-
-        profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
-            env=os.environ,
-            key_profiles=None,
-            secret_store=None,
-            node_id=None,
-            current_epoch=None,
-        )
-        resolved = resolve_secret_from_profiles(
-            provider=normalized,
-            node_id=node_id,
-            scope=str(os.environ.get("HOST_LLM_KEY_PROFILE_SCOPE") or "host.llm").strip().lower()
-            or "host.llm",
-            key_profiles=profiles,
-            secret_store=secret_store,
-            current_epoch=current_epoch,
-        )
-        if resolved.success:
-            return str(resolved.secret_value or "").strip() or None
-    except Exception:
-        pass
-
-    env_name = {
-        "openai": "OPENAI_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "minimax": "MINIMAX_API_KEY",
-    }.get(normalized)
-    value = str(os.environ.get(env_name or "") or "").strip() if env_name else ""
-    if value:
-        return value
-    if normalized == "openai":
-        parsed = urlparse(str(_default_base_url_resolver(normalized) or ""))
-        if (parsed.hostname or "").strip().lower() in {"localhost", "127.0.0.1", "::1"}:
-            return "host-local-placeholder-key"
-    return None
-
-
-def _default_base_url_resolver(provider: str) -> str | None:
-    from host_brain.integrations.llm_helpers import _resolve_provider_base_url  # noqa: PLC0415, SLF001
-
-    normalized = "openai" if str(provider).strip().lower() == "openai_compatible" else provider
-    return _resolve_provider_base_url(normalized)
-
-
-def _default_single_attempt_transport(**kwargs: Any) -> str:
-    from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: PLC0415
-
-    return invoke_llm_text(**kwargs)
-
-
 class VaultBackedSingleAttemptAdapter:
     """Resolve a credential at call time and perform exactly one transport call.
 
@@ -208,9 +144,9 @@ class VaultBackedSingleAttemptAdapter:
         self,
         provider: str,
         *,
-        credential_resolver: CredentialResolver = _default_credential_resolver,
-        base_url_resolver: BaseUrlResolver = _default_base_url_resolver,
-        transport: SingleAttemptTransport = _default_single_attempt_transport,
+        credential_resolver: CredentialResolver,
+        base_url_resolver: BaseUrlResolver,
+        transport: SingleAttemptTransport,
     ) -> None:
         self._provider = str(provider or "").strip().lower()
         self._adapter_id = production_adapter_id(self._provider)
@@ -257,9 +193,9 @@ class VaultBackedSingleAttemptAdapter:
 def build_vault_backed_provider_registry(
     providers: Iterable[str] = tuple(sorted(SUPPORTED_PRODUCTION_PROVIDERS)),
     *,
-    credential_resolver: CredentialResolver = _default_credential_resolver,
-    base_url_resolver: BaseUrlResolver = _default_base_url_resolver,
-    transport: SingleAttemptTransport = _default_single_attempt_transport,
+    credential_resolver: CredentialResolver,
+    base_url_resolver: BaseUrlResolver,
+    transport: SingleAttemptTransport,
 ) -> ProviderAdapterRegistry:
     resolved = tuple(dict.fromkeys(str(item or "").strip().lower() for item in providers))
     if not resolved or any(not item for item in resolved):

@@ -6,25 +6,30 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.input_routes import (
+from host_brain.input_runtime.contracts_and_normalization import (
     _build_gateway_route_started_voice_ack_text,
     _build_gateway_reply_text,
     _build_gateway_voice_text,
-    _deliver_gateway_reply,
     _detect_gateway_execution_deviation,
-    _dispatch_to_graph,
-    _dispatch_to_graph_worker,
-    _maybe_realign_gateway_pipeline,
-    _run_cortex_orchestrator_pipeline,
-    _run_gateway_proactive_progress_push,
-    _run_cortex_pipeline,
-    _should_start_gateway_progress_push,
     _should_send_gateway_immediate_ack,
     _should_send_gateway_route_started_voice_ack,
+)
+from host_brain.input_runtime.gateway_delivery import _deliver_gateway_reply
+from host_brain.input_runtime.worker_dispatch import (
+    _dispatch_to_graph,
+    _dispatch_to_graph_worker,
+)
+from host_brain.input_runtime.cortex_dispatch import (
+    _maybe_realign_gateway_pipeline,
+    _run_cortex_orchestrator_pipeline,
+    _run_cortex_pipeline,
+)
+from host_brain.input_runtime.multimodal_progress import (
+    _run_gateway_proactive_progress_push,
+    _should_start_gateway_progress_push,
     _try_handle_gateway_progress_fastpath,
 )
 from host_brain.app.schemas import ChatRequest
-from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.tribe.thalamus_agent import classify_task_intent
 from tests.text_quality_assertions import assert_natsume_style
 
@@ -53,7 +58,7 @@ def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -62,7 +67,7 @@ def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 23, "reply_text_len": 20}),
         ):
             _run(
@@ -100,7 +105,7 @@ def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -109,7 +114,7 @@ def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(
                 return_value={
                     "success": True,
@@ -162,7 +167,7 @@ def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -171,7 +176,7 @@ def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(side_effect=RuntimeError("reply failed")),
         ):
             _run(
@@ -223,7 +228,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
             }
 
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -233,7 +238,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._maybe_realign_gateway_pipeline",
+            "host_brain.input_runtime.worker_dispatch._maybe_realign_gateway_pipeline",
             new=AsyncMock(
                 return_value=(
                     {
@@ -253,7 +258,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                 )
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(side_effect=_deliver_capture),
         ):
             _run(
@@ -291,7 +296,7 @@ def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_sta
             {"HOST_GATEWAY_REPLY_FAILURE_DEGRADE_INPUT": "false"},
             clear=False,
         ), patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -300,7 +305,7 @@ def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_sta
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(side_effect=RuntimeError("reply failed")),
         ):
             _run(
@@ -330,7 +335,7 @@ def test_dispatch_worker_persists_gateway_voice_result_in_completed_payload() ->
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -339,7 +344,7 @@ def test_dispatch_worker_persists_gateway_voice_result_in_completed_payload() ->
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(
                 return_value={
                     "success": True,
@@ -400,7 +405,7 @@ def test_dispatch_worker_passes_tts_text_ja_to_gateway_reply() -> None:
             return_value={"success": True, "status": "OK", "latency_ms": 30, "reply_text_len": 14}
         )
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -417,7 +422,7 @@ def test_dispatch_worker_passes_tts_text_ja_to_gateway_reply() -> None:
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=mocked_deliver,
         ):
             _run(
@@ -448,7 +453,7 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -467,7 +472,7 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 20, "reply_text_len": 8}),
         ):
             _run(
@@ -509,7 +514,7 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -528,7 +533,7 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 15, "reply_text_len": 12}),
         ):
             _run(
@@ -576,7 +581,7 @@ def test_dispatch_worker_degrades_when_skill_exec_is_no_effect() -> None:
         )
 
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -595,7 +600,7 @@ def test_dispatch_worker_degrades_when_skill_exec_is_no_effect() -> None:
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 20, "reply_text_len": 11}),
         ):
             _run(
@@ -634,7 +639,7 @@ def test_run_cortex_pipeline_forwards_to_cortex_orchestrator() -> None:
         "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
     }
     with patch(
-        "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+        "host_brain.input_runtime.cortex_dispatch._run_cortex_orchestrator_pipeline",
         new=AsyncMock(return_value=expected),
     ) as mocked:
         result = _run(
@@ -792,8 +797,8 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
     )
 
     try:
-        with patch("host_brain.app.input_routes.get_thalamus_agent", return_value=fake_agent), patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+        with patch("host_brain.input_runtime.worker_dispatch.get_thalamus_agent", return_value=fake_agent), patch(
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -808,10 +813,10 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
                 }
             ),
         ) as pipeline_mock, patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 5}),
         ), patch(
-            "host_brain.app.input_routes._maybe_schedule_gateway_route_started_voice_ack",
+            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
         ) as route_ack_mock:
             _run(
                 _dispatch_to_graph_worker(
@@ -1037,7 +1042,7 @@ def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> No
 def test_deliver_gateway_reply_skips_no_reply_decision_without_edge_send(monkeypatch) -> None:
     post_gateway_reply_mock = AsyncMock(return_value=SimpleNamespace(success=True))
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         post_gateway_reply_mock,
     )
     result = _run(
@@ -1066,7 +1071,7 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     post_gateway_reply_mock = AsyncMock(return_value=SimpleNamespace(success=True, status="OK", detail="", latency_ms=31))
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     monkeypatch.setattr(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         post_gateway_reply_mock,
     )
 
@@ -1109,7 +1114,7 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
 def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     with patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=True,
@@ -1147,7 +1152,7 @@ def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabl
         )
 
     speak_mock.assert_awaited_once()
-    voiced_text = speak_mock.await_args.kwargs["text"]
+    voiced_text = speak_mock.await_args.kwargs["payload"]["text"]
     assert voiced_text == "我先直接在你这边把结果念出来。"
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
@@ -1163,7 +1168,7 @@ def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabl
 def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=True,
@@ -1174,7 +1179,7 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
             )
         ),
     ), patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=True,
@@ -1212,7 +1217,7 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
         )
 
     speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["text"] == "今天我会直接把结果说给你听。"
+    assert speak_mock.await_args.kwargs["payload"]["text"] == "今天我会直接把结果说给你听。"
     assert result["success"] is True
     assert result["reply_form_reason"] == "force_dual_voice_reply"
     assert result["voice_sent"] is True
@@ -1238,10 +1243,10 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
         )
     )
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ), patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=True,
@@ -1279,8 +1284,8 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
     assert post_gateway_reply_mock.await_count == 1
     assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
     speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["text"] == "哈？"
-    assert speak_mock.await_args.kwargs["export_audio"] is False
+    assert speak_mock.await_args.kwargs["payload"]["text"] == "哈？"
+    assert speak_mock.await_args.kwargs["payload"]["export_audio"] is False
     assert result["success"] is True
     assert result["reply_form_reason"] == "embodied_presence_voice"
     assert result["voice_sent"] is True
@@ -1293,7 +1298,7 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
 def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delivery_fails(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=False,
@@ -1304,7 +1309,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
             )
         ),
     ), patch(
-        "host_brain.channels.edge_rpc_client.post_speak",
+        "host_brain.channels.embodiment.submit_voice_command",
         new=AsyncMock(
             return_value=SimpleNamespace(
                 success=True,
@@ -1343,7 +1348,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
         )
 
     speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
+    assert speak_mock.await_args.kwargs["payload"]["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
     assert result["voice_sent"] is True
@@ -1370,10 +1375,10 @@ def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monke
     )
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ), patch(
-        "host_brain.app.dependencies.get_multimodal_processor",
+        "host_brain.composition.process_services.get_multimodal_processor",
         return_value=fake_mm,
     ):
         result = _run(
@@ -1430,10 +1435,10 @@ def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_s
     )
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ), patch(
-        "host_brain.app.dependencies.get_multimodal_processor",
+        "host_brain.composition.process_services.get_multimodal_processor",
         return_value=fake_mm,
     ):
         result = _run(
@@ -1475,10 +1480,10 @@ def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(m
     )
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ), patch(
-        "host_brain.app.dependencies.get_multimodal_processor",
+        "host_brain.composition.process_services.get_multimodal_processor",
         return_value=fake_mm,
     ):
         result = _run(
@@ -1522,10 +1527,10 @@ def test_deliver_gateway_reply_non_qq_text_plus_sticker_keeps_secondary_send(mon
     )
 
     with patch(
-        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ), patch(
-        "host_brain.app.dependencies.get_multimodal_processor",
+        "host_brain.composition.process_services.get_multimodal_processor",
         return_value=fake_mm,
     ):
         result = _run(
@@ -1571,7 +1576,7 @@ def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypa
     try:
         monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
         with patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -1683,13 +1688,13 @@ def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
         monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
         monkeypatch.setenv("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", "true")
         with patch(
-            "host_brain.app.input_routes._get_ledger_safe",
+            "host_brain.input_runtime.worker_dispatch._get_ledger_safe",
             return_value=ledger,
         ), patch(
-            "host_brain.app.input_routes._dispatch_to_graph_worker",
+            "host_brain.input_runtime.worker_dispatch._dispatch_to_graph_worker",
             new=AsyncMock(return_value=None),
         ), patch(
-            "host_brain.app.input_routes._maybe_schedule_gateway_immediate_ack",
+            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_immediate_ack",
         ) as ack_mock:
             _run(
                 _dispatch_to_graph(
@@ -1723,7 +1728,7 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
                 "task": "translate",
             },
         ), patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -1737,10 +1742,10 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
                 }
             ),
         ), patch(
-            "host_brain.app.input_routes._deliver_gateway_reply",
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}),
         ), patch(
-            "host_brain.app.input_routes._maybe_schedule_gateway_route_started_voice_ack",
+            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
         ) as route_ack_mock:
             _run(
                 _dispatch_to_graph_worker(
@@ -1783,10 +1788,10 @@ def test_gateway_progress_fastpath_replies_from_runtime_registry(monkeypatch) ->
     try:
         monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
         with patch(
-            "host_brain.app.dependencies.get_runtime_task_registry",
+            "host_brain.composition.process_services.get_runtime_task_registry",
             return_value=_FakeRuntimeTaskRegistry(),
         ), patch(
-            "host_brain.channels.edge_rpc_client.post_gateway_reply",
+            "host_brain.channels.edge_transport.submit_gateway_reply",
             new=AsyncMock(return_value=SimpleNamespace(success=True, status="SENT", reason_code=None, latency_ms=28)),
         ) as post_mock:
             handled = _run(
@@ -1827,10 +1832,10 @@ def test_gateway_progress_fastpath_send_failure_falls_back(monkeypatch) -> None:
     try:
         monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
         with patch(
-            "host_brain.app.dependencies.get_runtime_task_registry",
+            "host_brain.composition.process_services.get_runtime_task_registry",
             return_value=_FakeRuntimeTaskRegistry(),
         ), patch(
-            "host_brain.channels.edge_rpc_client.post_gateway_reply",
+            "host_brain.channels.edge_transport.submit_gateway_reply",
             new=AsyncMock(return_value=SimpleNamespace(success=False, status="FAILED", reason_code="TIMEOUT", latency_ms=100)),
         ):
             handled = _run(
@@ -1908,7 +1913,7 @@ def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
     monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_WAIT_RESULT", "true")
     monkeypatch.setenv("HOST_GATEWAY_PROGRESS_PUSH_TIMEOUT_MS", "2000")
     monkeypatch.setattr(
-        "host_brain.app.input_routes._build_gateway_progress_reply_text",
+        "host_brain.input_runtime.multimodal_progress._build_gateway_progress_reply_text",
         lambda **_kwargs: (
             "正在处理 session_summary，已进行 12s。当前进展：已完成检索，正在汇总",
             "PROGRESS_SUMMARY_FOUND",
@@ -1919,7 +1924,7 @@ def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
     stop_event = asyncio.Event()
     try:
         with patch(
-            "host_brain.channels.edge_rpc_client.post_gateway_reply",
+            "host_brain.channels.edge_transport.submit_gateway_reply",
             new=AsyncMock(return_value=SimpleNamespace(success=True, status="SENT", reason_code=None, latency_ms=30)),
         ) as post_mock:
             _run(
@@ -1984,10 +1989,10 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_RETRY_ENABLED", "true")
         with patch(
-            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
             new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
         ), patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
                     "decision": "APPROVE",
@@ -2041,10 +2046,10 @@ def test_maybe_realign_gateway_pipeline_skips_for_agent_worker_skill(monkeypatch
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
             new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
         ) as notice_mock, patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
             result, meta = _run(
@@ -2085,10 +2090,10 @@ def test_maybe_realign_gateway_pipeline_skips_for_translate_delegate(monkeypatch
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
             new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
         ) as notice_mock, patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
             result, meta = _run(
@@ -2129,10 +2134,10 @@ def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> Non
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
         with patch(
-            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            "host_brain.input_runtime.cortex_dispatch._maybe_send_gateway_realign_notice",
             new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
         ) as notice_mock, patch(
-            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(),
         ) as rerun_mock:
             result, meta = _run(

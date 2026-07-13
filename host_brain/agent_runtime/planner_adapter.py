@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 from urllib.parse import quote
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     PLAN_CYCLE,
     PLANNER_NEEDS_INPUT,
@@ -24,13 +24,13 @@ from host_brain.agent_runtime.contract_errors import (
     ContractViolation,
     require_version,
 )
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TASK_GRAPH_SCHEMA_VERSION,
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
 )
-from host_brain.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 
 PLANNER_ADAPTER_SCHEMA_VERSION = "Natsume.agent.planner_adapter.v1"
@@ -574,11 +574,6 @@ class CanonicalPlannerOutput:
 
     def to_persistence_input(self) -> dict[str, Any]:
         """Return data for a future TaskStore without performing any write."""
-
-        return self.to_dict()
-
-    def to_plan_graph_input(self) -> dict[str, Any]:
-        """Return the exact existing-plan input consumed by app.plan_graph."""
 
         return self.to_dict()
 

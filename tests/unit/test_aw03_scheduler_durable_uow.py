@@ -10,6 +10,7 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.scheduler_repository import SchedulerDefinitionRepository
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.scheduler.governed_runtime import (
     SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED,
     GovernedSchedulerRuntimeError,
@@ -20,7 +21,6 @@ from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
 from host_brain.secure_ingress import (
     ClaimStatus,
     IngressAuditEvent,
-    SQLiteSecureIngressStore,
 )
 
 

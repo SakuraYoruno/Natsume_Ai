@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from host_brain.agent_runtime.task_store import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import (
@@ -23,13 +23,13 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
 )
-from host_brain.persistence import (
-    HostCommandRepository,
-    SchedulerDefinitionRepository,
-    SchedulerExecutionResultRepository,
-)
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
+)
+from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.scheduler_repository import (
+    SchedulerDefinitionRepository,
+    SchedulerExecutionResultRepository,
 )
 
 

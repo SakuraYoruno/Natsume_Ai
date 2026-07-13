@@ -58,7 +58,7 @@ def test_intent_agent_handler_can_execute_run_skill_tool() -> None:
     )
 
     with patch.dict("os.environ", {"INTENT_SUBGRAPH_ENABLED": "true", "INTENT_REACT_MAX_STEPS": "3"}, clear=False), patch(
-        "host_brain.app.executive_runtime_core._execute_skill",
+        "host_brain.executive_runtime.skill_execution._execute_skill",
         return_value=fake_outcome,
     ):
         out = intent_agent_handler(

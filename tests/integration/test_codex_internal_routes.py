@@ -13,7 +13,7 @@ from host_brain.app.settings.internal_agent import get_internal_agent_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,7 +92,7 @@ def test_codex_internal_owner_directive_route_persists_life_memory(monkeypatch) 
     ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
     try:
         store = LifeMemoryStore(ledger=ledger)
-        monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
+        monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: store)
 
         response = _client().post(
             "/internal/codex/owner-directives",

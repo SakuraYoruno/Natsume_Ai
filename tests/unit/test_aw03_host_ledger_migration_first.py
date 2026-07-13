@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import host_brain.__main__ as host_main
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.app.settings import get_persistence_settings
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
@@ -15,8 +15,8 @@ def test_durable_host_ledger_runs_catalog_and_skips_inline_schema(
     db_path = tmp_path / "host-ledger.sqlite3"
     monkeypatch.setenv("NATSUME_AUDIT_DB", str(db_path))
     get_persistence_settings.cache_clear()
-    previous = dependencies._ledger
-    dependencies._ledger = None
+    previous = dependencies.get_process_service_container().ledger
+    dependencies.get_process_service_container().ledger = None
 
     def reject_inline_schema(_self) -> None:
         raise AssertionError("durable Host ledger must not execute inline DDL")
@@ -37,7 +37,7 @@ def test_durable_host_ledger_runs_catalog_and_skips_inline_schema(
     finally:
         if ledger is not None:
             ledger.close()
-        dependencies._ledger = previous
+        dependencies.get_process_service_container().ledger = previous
         get_persistence_settings.cache_clear()
 
 

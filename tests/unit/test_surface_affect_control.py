@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.affect_state import AffectStateBlock
+from host_brain.persona.context.affect_state import AffectStateBlock
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.isolated_surface_harness import (
     build_isolated_surface_messages,

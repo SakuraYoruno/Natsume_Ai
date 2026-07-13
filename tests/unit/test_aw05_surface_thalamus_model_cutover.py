@@ -22,7 +22,12 @@ class _Ledger:
 
 
 def test_default_composition_installs_live_prompts_dynamic_route_and_one_attempt_adapters() -> None:
-    composition = build_default_production_model_runtime(ledger=_Ledger())
+    composition = build_default_production_model_runtime(
+        ledger=_Ledger(),
+        credential_resolver=lambda _provider: "test-key",
+        base_url_resolver=lambda _provider: None,
+        transport=lambda **_kwargs: "unused",
+    )
 
     expected = {
         AGENT_REACT_STEP_PROMPT_ID: "json_object",
@@ -64,4 +69,5 @@ def test_surface_and_thalamus_have_no_legacy_pool_or_private_fallback_authority(
     assert "_surface_gemini_fallback_runtime" not in surface
     assert 'trace_stage_meta["surface_llm_pool"]' not in surface
     assert "get_model_attempt_service" in surface
-    assert "get_model_attempt_service" in thalamus
+    assert 'require("model_attempt_service")' in thalamus
+    assert "host_brain.app" not in thalamus

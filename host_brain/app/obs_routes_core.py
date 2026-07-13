@@ -53,15 +53,15 @@ from host_brain.observability.api_models import (
     TribeEventsResponse,
 )
 from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
-from host_brain.observability.session_query import SessionQueryService
+from host_brain.app.observability_runtime.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
-from host_brain.observability.process_state_projection import (
+from host_brain.app.observability_runtime.process_state_projection import (
     RESOURCE_MANAGER_KEY,
     RESOURCE_MANAGER_KIND,
     RESOURCE_MANAGER_MAX_AGE_MS,
     read_process_projection,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
@@ -126,8 +126,16 @@ def _get_ledger() -> SQLiteLedger:
     if _ledger_provider is not None:
         return _ledger_provider()
     # Fallback to shared dependency factory to avoid import-order/cycle issues.
-    from host_brain.app.dependencies import get_ledger as _deps_get_ledger
+    from host_brain.composition.process_services import get_ledger as _deps_get_ledger
     return _deps_get_ledger()
+
+
+def _get_graph_evidence_repository():
+    from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+        GraphEvidenceRepository,
+    )
+
+    return GraphEvidenceRepository.from_ledger(_get_ledger())
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -412,9 +420,9 @@ def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
 
 def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_subgraph_summary(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_subgraph_summaries(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_subgraphs degraded: %s", exc)
         return []
@@ -655,9 +663,9 @@ def _merge_trace_subgraphs(
 
 def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_stream_events(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_stream_events(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_stream_events degraded: %s", exc)
         return []
@@ -1879,7 +1887,7 @@ def _build_sessions_response(
     keyword: Optional[str],
 ) -> SessionsResponse:
     if ledger is None:
-        from host_brain.app.dependencies import get_query_projection_store
+        from host_brain.composition.process_services import get_query_projection_store
 
         svc = SessionQueryService(None, projection_store=get_query_projection_store())
     else:
@@ -2645,7 +2653,7 @@ async def get_services_health(
     ledger = _get_ledger()
     since_ms = _now_ms() - window_minutes * 60 * 1000
     try:
-        from host_brain.observability import service_health_heartbeat as heartbeat
+        from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
         if not heartbeat.has_fresh_core_service_cache():
             await heartbeat.prime_core_service_cache_once()
@@ -2693,7 +2701,7 @@ def _build_probe_registry(ledger, since_ms: int):
     优先使用心跳缓存（service_health_heartbeat）：若某服务在 TTL 内有心跳结果，则直接返回，不再依赖 ledger。
     """
     from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     now_ms = _now_ms()
     host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
@@ -3087,9 +3095,9 @@ async def stream_trace_live_feed(
 def get_trace_stream_events(request_id: str):
     """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-        ep = get_evidence_plane()
-        rows = ep.query_stream_events(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_stream_events(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("get_trace_stream_events: %s", exc)
         rows = []

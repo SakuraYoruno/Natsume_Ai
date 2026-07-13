@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -16,6 +16,7 @@ from host_brain.model_runtime import (
     build_model_runtime_composition,
 )
 from host_brain.tribe.cerebellum_agent import CerebellumAgent
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.circadian_agent import CircadianAgent
 from host_brain.tribe.immune_agent import ImmuneAgent
 from host_brain.tribe.language_system_agent import LanguageSystemAgent
@@ -87,6 +88,7 @@ def test_tribe_helper_uses_process_composition_and_central_json_parser() -> None
     dependencies.reset_model_runtime_composition(composition)
     try:
         parsed = complete_tribe_json(
+            attempt_service=dependencies.get_model_attempt_service(),
             semantic_id="circadian_mood_hint",
             system_prompt="system",
             user_prompt="user",
@@ -125,30 +127,31 @@ def test_representative_tribe_business_returns_are_preserved(monkeypatch) -> Non
         },
     }
     monkeypatch.setattr(
-        "host_brain.app.prompt_template_store.resolve_prompt_template_json",
+        "host_brain.model_runtime.prompt_contract.resolve_prompt_contract_json",
         lambda _prompt_id: {"system_prompt": "system", "user_prompt_template": "user"},
     )
     monkeypatch.setattr(
         "host_brain.tribe.model_invocation.complete_tribe_json",
         lambda *, semantic_id, **_: dict(outputs[semantic_id]),
     )
+    ports = TribeApplicationPorts(model_attempt_service=lambda: object())
 
-    assert CircadianAgent().generate_circadian_mood_hint(
+    assert CircadianAgent(application_ports=ports).generate_circadian_mood_hint(
         energy_level=0.2,
         sleep_pressure=0.7,
     ) == "夜间节律"
-    cerebellum = CerebellumAgent()
+    cerebellum = CerebellumAgent(application_ports=ports)
     assert cerebellum.generate_correction_narrative(strategy="RETRY_ONCE") == "正在调整"
     assert cerebellum.analyze_failure_pattern(consecutive_failures=3) == "检查重复失败"
-    language = LanguageSystemAgent()
+    language = LanguageSystemAgent(application_ports=ports)
     parsed = language.wernicke_deep_parse(user_text="复杂输入", intent_type="complex")
     assert parsed["source"] == "wernicke_llm"
     assert parsed["implicit_need"] == "需求"
     assert language.broca_generate_opening_hint(emotional_pressure=0.8) == "先慢慢说"
-    immune = ImmuneAgent().semantic_intent_analysis(text="灰区", rule_score=0.4)
+    immune = ImmuneAgent(application_ports=ports).semantic_intent_analysis(text="灰区", rule_score=0.4)
     assert immune["intent_class"] == "SUSPICIOUS"
     assert immune["source"] == "semantic_llm"
-    style = MotorCortexAgent().plan_speak_style(arousal=0.8)
+    style = MotorCortexAgent(application_ports=ports).plan_speak_style(arousal=0.8)
     assert style == {
         "speed": 1.1,
         "pause_hint": "短",

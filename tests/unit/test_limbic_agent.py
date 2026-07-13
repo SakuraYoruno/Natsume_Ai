@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from host_brain.persona.reply_plan import build_reply_plan_from_inputs
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.limbic_agent import LimbicAgent
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
@@ -17,7 +18,7 @@ def test_emit_tribe_event_publishes_to_internal_bus(monkeypatch) -> None:
             captured["event"] = event
 
     monkeypatch.setattr(
-        "host_brain.app.internal_tribe_routes.get_tribe_event_bus",
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
         lambda: _Bus(),
     )
 
@@ -39,7 +40,7 @@ def test_emit_tribe_event_returns_none_on_publish_error(monkeypatch) -> None:
         raise RuntimeError("bus unavailable")
 
     monkeypatch.setattr(
-        "host_brain.app.internal_tribe_routes.get_tribe_event_bus",
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
         _boom,
     )
 
@@ -52,7 +53,14 @@ def test_limbic_agent_get_emotion_context_updates_state(monkeypatch) -> None:
         "host_brain.app.emotion_context.resolve_chat_emotion_context",
         lambda request_body: {"emotion_tag": "HAPPY", "mood_state": "warm"},
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(
+            resolve_chat_emotion_context=lambda **_: {
+                "emotion_tag": "HAPPY",
+                "mood_state": "warm",
+            },
+        ),
+    )
 
     context = agent.get_emotion_context(request_body={"message": "hi"})
 
@@ -72,7 +80,15 @@ def test_limbic_agent_build_snapshot_updates_state(monkeypatch) -> None:
             "ts_ms": ts_ms,
         },
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(
+            build_chat_emotion_snapshot=lambda emotion_context, source, ts_ms: {
+                "source": source,
+                "emotion_context": {"emotion_tag": "SAD"},
+                "ts_ms": ts_ms,
+            },
+        ),
+    )
 
     snapshot = agent.build_emotion_snapshot(
         emotion_context={"emotion_tag": "CALM"},
@@ -103,11 +119,17 @@ def test_limbic_agent_keeps_asr_text_emotion_hint_untrusted(monkeypatch) -> None
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
-    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
+    monkeypatch.setattr("host_brain.composition.process_services.get_hard_state", lambda: hard_state)
+    monkeypatch.setattr("host_brain.composition.process_services.get_emotion_timeline", lambda: timeline)
     monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
-    agent = LimbicAgent(state_registry=registry)
+    agent = LimbicAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            hard_state=lambda: hard_state,
+            emotion_timeline=lambda: timeline,
+        ),
+    )
 
     event = SimpleNamespace(
         payload={
@@ -155,11 +177,17 @@ def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) 
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
-    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
+    monkeypatch.setattr("host_brain.composition.process_services.get_hard_state", lambda: hard_state)
+    monkeypatch.setattr("host_brain.composition.process_services.get_emotion_timeline", lambda: timeline)
     monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
-    agent = LimbicAgent(state_registry=registry)
+    agent = LimbicAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            hard_state=lambda: hard_state,
+            emotion_timeline=lambda: timeline,
+        ),
+    )
 
     event = SimpleNamespace(
         payload={
@@ -256,10 +284,12 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot(monkeypatch) -> None:
             return {"events": 3}
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
+        "host_brain.composition.process_services.get_emotion_timeline",
         lambda: _Timeline(),
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: _Timeline()),
+    )
 
     snapshot = agent.resolve_emotion_timeline_snapshot()
 
@@ -274,10 +304,12 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot(monkeypatch) -> None:
 
 def test_limbic_agent_resolve_emotion_timeline_snapshot_default(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
+        "host_brain.composition.process_services.get_emotion_timeline",
         lambda: None,
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: None),
+    )
 
     snapshot = agent.resolve_emotion_timeline_snapshot()
 
@@ -301,10 +333,12 @@ def test_limbic_agent_resolve_emotion_timeline_snapshot_with_windows(monkeypatch
             return {"dominant_emotion": "sad"}
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_emotion_timeline",
+        "host_brain.composition.process_services.get_emotion_timeline",
         lambda: _Timeline(),
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(emotion_timeline=lambda: _Timeline()),
+    )
 
     snapshot = agent.resolve_emotion_timeline_snapshot(
         summary_window_ms=12345,
@@ -517,11 +551,10 @@ def test_limbic_agent_resolve_silence_state_and_apply_penalty(monkeypatch) -> No
         def apply_body_sense_penalty(self, penalty: float):
             captured["penalty"] = penalty
 
-    monkeypatch.setattr(
-        "host_brain.persona.emotional_silence.get_silence_engine",
-        lambda: _SilenceEngine(),
+    engine = _SilenceEngine()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(silence_engine=lambda: engine),
     )
-    agent = LimbicAgent()
 
     state = agent.resolve_silence_state(current_topic="topic-a")
     agent.apply_body_sense_penalty(penalty=0.35)
@@ -663,18 +696,12 @@ def test_limbic_agent_on_conversation_ended(monkeypatch) -> None:
 
 def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
-        lambda: type(
-            "_Inner",
-            (),
-            {
-                "get_state": lambda self, user_id: {
-                    "user_id": user_id,
-                    "total_offline_hours": 2.5,
-                    "anticipation_topics": ["topic-a"],
-                }
-            },
-        )(),
+        "host_brain.tribe.limbic_agent._read_canonical_inner_world",
+        lambda user_id, **_: {
+            "user_id": user_id,
+            "total_offline_hours": 2.5,
+            "anticipation_topics": ["topic-a"],
+        },
     )
     monkeypatch.setattr(
         "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
@@ -684,7 +711,9 @@ def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None
             "now_ms": now_ms,
         },
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(life_snapshot_reader=lambda: object()),
+    )
 
     inner_state = agent.resolve_inner_world_state(person_id="user-3")
     offline_state = agent.resolve_offline_state(person_id="user-3", now_ms=123)
@@ -701,34 +730,21 @@ def test_limbic_agent_resolve_inner_world_and_offline_state(monkeypatch) -> None
 def test_limbic_agent_on_user_awaken_and_session_end(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _Snapshot:
-        def as_dict(self):
-            return {
-                "offline_hours": 6.5,
-                "absence_band": "6h_plus",
-                "awakening_hint": "hint",
-            }
-
-    class _InnerWorld:
-        def on_user_awaken(self, *, user_id: str):
-            captured["awaken_user"] = user_id
-            return _Snapshot()
-
-        def on_session_end(self, user_id, **kwargs):  # noqa: ANN001, ANN003
-            captured["session_end"] = {"user_id": user_id, **kwargs}
-
-        def get_state(self, user_id: str):
-            return {"user_id": user_id, "total_offline_hours": 1.0}
-
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
-        lambda: _InnerWorld(),
+        "host_brain.tribe.limbic_agent._read_canonical_inner_world",
+        lambda user_id, **_: {"user_id": user_id, "total_offline_hours": 6.5},
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+        lambda _state: {"offline_hours": 6.5, "absence_band": "6h_plus"},
     )
     monkeypatch.setattr(
         "host_brain.tribe.limbic_agent.LimbicAgent.handle_signal",
         lambda self, **kwargs: captured.setdefault("signal_payload", kwargs),
     )
-    agent = LimbicAgent()
+    agent = LimbicAgent(
+        application_ports=TribeApplicationPorts(life_snapshot_reader=lambda: object()),
+    )
 
     awaken_payload = agent.on_user_awaken(person_id="user-awaken")
     session_payload = agent.on_session_end(
@@ -738,9 +754,7 @@ def test_limbic_agent_on_user_awaken_and_session_end(monkeypatch) -> None:
         pending_topics=["topic-1"],
     )
 
-    assert captured["awaken_user"] == "user-awaken"
     assert awaken_payload["absence_band"] == "6h_plus"
-    assert captured["session_end"]["user_id"] == "user-awaken"
     assert captured["signal_payload"]["event_type"] == "SESSION_ENDED"
     assert session_payload["user_id"] == "user-awaken"
 

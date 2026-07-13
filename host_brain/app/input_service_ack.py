@@ -107,7 +107,7 @@ def build_gateway_progress_reply_text(
 ) -> tuple[str, str, dict[str, Any] | None]:
     """构建进度回复文本，返回 (reply_text, reason, summary)。"""
     from host_brain.app.surface_reply_preprocessor import render_quick_gateway_progress_text  # noqa: PLC0415
-    from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+    from host_brain.composition.process_services import get_runtime_task_registry  # noqa: PLC0415
 
     person_id = str(payload.get("person_id") or "").strip()
     summary = None

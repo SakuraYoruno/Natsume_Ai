@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.conversation import ConversationHistory, TurnStore
+from host_brain.conversation import ConversationHistory
+from host_brain.composition.process_service_container import get_process_service_container
+from host_brain.persistence.context_repository import ContextRepository
 from host_brain.app.cortex_prompt_builder import build_cortex_prompt
 
 
@@ -49,7 +51,7 @@ def _plane_with_real_history(history: ConversationHistory, *, session_id: str, r
 
 def test_chat_history_end_to_end_recent_messages_and_session_isolation() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = TurnStore(ledger)
+    store = ContextRepository.from_ledger(ledger)
     history = ConversationHistory(store)
 
     for request_id, role, content, ts_ms in (
@@ -60,31 +62,38 @@ def test_chat_history_end_to_end_recent_messages_and_session_isolation() -> None
         ("req-5", "user", "昨天那家店还记得吗", 1004),
         ("req-6", "assistant", "记得。你当时嫌它太咸。", 1005),
     ):
-        store.append_generated(
-            session_id="sess-a",
-            person_id="p1",
-            request_id=request_id,
-            role=role,
-            content=content,
-            ts_ms=ts_ms,
-            lang="zh",
+        store.append_generated_turn(
+            {
+                "turn_id": f"turn::{request_id}::{role}",
+                "session_id": "sess-a",
+                "person_id": "p1",
+                "request_id": request_id,
+                "role": role,
+                "content": content,
+                "ts_ms": ts_ms,
+                "lang": "zh",
+            }
         )
 
-    store.append_generated(
-        session_id="sess-b",
-        person_id="p1",
-        request_id="req-other",
-        role="assistant",
-        content="别的会话内容",
-        ts_ms=2000,
-        lang="zh",
+    store.append_generated_turn(
+        {
+            "turn_id": "turn::req-other::assistant",
+            "session_id": "sess-b",
+            "person_id": "p1",
+            "request_id": "req-other",
+            "role": "assistant",
+            "content": "别的会话内容",
+            "ts_ms": 2000,
+            "lang": "zh",
+        }
     )
 
     with patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
         return_value="节点指令",
-    ), patch(
-        "host_brain.app.dependencies._conversation_history",
+    ), patch.object(
+        get_process_service_container(),
+        "conversation_history",
         history,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.app.dependencies import get_bond_neo4j_client
+from host_brain.composition.process_services import get_bond_neo4j_client
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine

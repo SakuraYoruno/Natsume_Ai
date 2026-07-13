@@ -5,7 +5,9 @@ import json
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore, MemorySleepReplayTask
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.sleep import MemorySleepReplayTask
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report
 
 

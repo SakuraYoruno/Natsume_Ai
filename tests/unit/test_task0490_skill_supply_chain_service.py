@@ -13,7 +13,7 @@ from host_brain.skills.supply_chain import (
 )
 from host_brain.skills.supply_chain_quarantine import QuarantineDecision
 from host_brain.skills.supply_chain_service import SkillSupplyChainService
-from host_brain.skills.supply_chain_store import SkillSupplyChainStoreError
+from host_brain.persistence.supply_chain_repository import SkillSupplyChainStoreError
 
 
 def _digest(label: str) -> str:

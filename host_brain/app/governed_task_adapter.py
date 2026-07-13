@@ -18,14 +18,14 @@ import time
 from typing import Any
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
@@ -87,11 +87,17 @@ class _FrozenSkillWorker:
         ledger: Any,
         skill_registry: Any,
         token_service: Any,
+        capability_broker: Any,
+        model_attempt_service: Any,
+        production_authority_verifier: Any,
         explicit_dependencies: bool,
     ) -> None:
         self._ledger = ledger
         self._skill_registry = skill_registry
         self._token_service = token_service
+        self._capability_broker = capability_broker
+        self._model_attempt_service = model_attempt_service
+        self._production_authority_verifier = production_authority_verifier
         self._explicit_dependencies = bool(explicit_dependencies)
 
     async def execute_stream(
@@ -101,9 +107,12 @@ class _FrozenSkillWorker:
         work_order: AgentWorkOrder,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        from host_brain.app.executive_runtime_core import (  # noqa: PLC0415
+        from host_brain.executive_runtime.skill_execution import (  # noqa: PLC0415
             _execute_skill,
             _log_skill_exec_row,
+        )
+        from host_brain.app.runtime_port_wiring import (  # noqa: PLC0415
+            build_executive_runtime_application_ports,
         )
 
         pack = dict(work_order.input_pack or {})
@@ -133,10 +142,15 @@ class _FrozenSkillWorker:
                 {
                     "skill_registry": self._skill_registry,
                     "token_service_override": self._token_service,
+                    "durable_authority_ledger": self._ledger,
+                    "capability_broker_override": self._capability_broker,
+                    "model_attempt_service_override": self._model_attempt_service,
+                    "production_authority_verifier": self._production_authority_verifier,
                 }
             )
         outcome = await asyncio.to_thread(
             _execute_skill,
+            ports=build_executive_runtime_application_ports(),
             request_body={"args": dict(intent_draft.get("args") or {})},
             request_id=command.request_id,
             session_id=command.session_id,
@@ -211,9 +225,8 @@ class _FrozenSkillWorker:
 
 
 class _FrozenWorkerResolver:
-    def __init__(self, *, canonical: _FrozenSkillWorker, legacy: _FrozenSkillWorker) -> None:
+    def __init__(self, *, canonical: _FrozenSkillWorker) -> None:
         self._canonical = canonical
-        self._legacy = legacy
 
     def resolve(self, *, executor: str, worker_route: str) -> _FrozenSkillWorker:
         if str(worker_route or "").strip() != GOVERNED_HOST_WORKER_ROUTE:
@@ -224,8 +237,6 @@ class _FrozenWorkerResolver:
         normalized = str(executor or "").strip().lower()
         if normalized == "canonical":
             return self._canonical
-        if normalized == "legacy":
-            return self._legacy
         raise GovernedHostAdapterError(
             GOVERNED_HOST_ROUTE_UNSUPPORTED,
             f"unsupported executor assignment: {executor}",
@@ -486,6 +497,9 @@ def build_governed_host_runtime(
     ledger: Any,
     skill_registry: Any,
     token_service: Any,
+    capability_broker: Any,
+    model_attempt_service: Any,
+    production_authority_verifier: Any,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
 ) -> GovernedHostRuntime:
@@ -493,19 +507,16 @@ def build_governed_host_runtime(
         ledger=ledger,
         skill_registry=skill_registry,
         token_service=token_service,
+        capability_broker=capability_broker,
+        model_attempt_service=model_attempt_service,
+        production_authority_verifier=production_authority_verifier,
         explicit_dependencies=True,
-    )
-    legacy = _FrozenSkillWorker(
-        ledger=ledger,
-        skill_registry=skill_registry,
-        token_service=token_service,
-        explicit_dependencies=False,
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
-        worker_resolver=_FrozenWorkerResolver(canonical=canonical, legacy=legacy),
+        worker_resolver=_FrozenWorkerResolver(canonical=canonical),
         verifier=_WorkerCommitVerifier(),
         acceptance=_WorkerCommitAcceptance(),
         projection_reader=_DurableSkillProjectionReader(ledger),

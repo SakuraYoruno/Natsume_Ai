@@ -7,7 +7,6 @@ from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 
-from host_brain.app.memory_event_store import MemoryEventStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.conversation.memory_spine import record_conversation_turn_memory_spine
 import host_brain.digital_life.experience_ingress as experience_ingress
@@ -112,101 +111,6 @@ def test_record_life_experience_is_one_idempotent_command_without_legacy_writers
         assert _count(connection, "digital_life_state_event") == 0
         assert _count(connection, "digital_life_state_occ_event") == 0
         assert _count(connection, "life_runtime_uow") == 0
-
-
-def test_memory_event_projection_uses_memory_event_identity_and_receipt_replay(
-    tmp_path: Path,
-) -> None:
-    db_path, ledger = _ledger(tmp_path)
-    store = MemoryEventStore(ledger)
-    event = store.append_event(
-        person_id="person-aw04",
-        session_id="session-aw04",
-        conversation_id="session-aw04",
-        source_kind="conversation_turn",
-        event_kind="user_message",
-        visibility="visible",
-        role="user",
-        content="你好",
-        refs={"request_id": "request-aw04"},
-        salience=0.7,
-        created_at_ms=NOW,
-    )
-    memory_event_id = str(event["event_id"])
-
-    first = store.project_life_experience_from_event(memory_event_id)
-    second = store.project_life_experience_from_event(memory_event_id)
-
-    assert first["status"] == "OK"
-    assert second["status"] == "EXISTS"
-    assert first["event_id"] == second["event_id"]
-    assert first["command_id"] == second["command_id"]
-    assert first["replayed"] is False
-    assert second["replayed"] is True
-    with sqlite3.connect(str(db_path)) as connection:
-        connection.row_factory = sqlite3.Row
-        assert _count(connection, "life_command") == 1
-        assert _count(connection, "life_event_journal") == 1
-        command = connection.execute(
-            "SELECT command_id, metadata_json FROM life_command"
-        ).fetchone()
-        assert command["command_id"] == first["command_id"]
-        assert command["command_id"] == f"life::memory_event::{memory_event_id}"
-        assert json.loads(command["metadata_json"])["identity_kind"] == (
-            "canonical_life_command_id"
-        )
-        intent = connection.execute(
-            """
-            SELECT payload_json FROM life_projection_intent
-            WHERE intent_kind = 'PROJECTION' AND target = 'life.experience'
-            """
-        ).fetchone()
-        assert json.loads(intent["payload_json"])["memory_event_id"] == memory_event_id
-        assert _count(connection, "life_experience_event") == 0
-        assert _count(connection, "life_runtime_uow") == 0
-
-
-def test_legacy_life_experience_ref_cannot_bypass_missing_canonical_receipt(
-    tmp_path: Path,
-) -> None:
-    db_path, ledger = _ledger(tmp_path)
-    store = MemoryEventStore(ledger)
-    event = store.append_event(
-        person_id="person-legacy-ref",
-        session_id="session-legacy-ref",
-        source_kind="legacy_import",
-        event_kind="inner_stream_tick",
-        visibility="private",
-        content="legacy projected event",
-        refs={"life_experience_event_id": "lifeexp_legacy_only"},
-        created_at_ms=NOW,
-    )
-    memory_event_id = str(event["event_id"])
-
-    first = store.project_life_experience_from_event(memory_event_id)
-    second = store.project_life_experience_from_event(memory_event_id)
-
-    assert first["status"] == "OK"
-    assert first["event_id"] != "lifeexp_legacy_only"
-    assert first["command_id"] == f"life::memory_event::{memory_event_id}"
-    assert second["status"] == "EXISTS"
-    assert second["event_id"] == first["event_id"]
-    with sqlite3.connect(str(db_path)) as connection:
-        connection.row_factory = sqlite3.Row
-        receipt = connection.execute(
-            "SELECT command_id, event_id FROM life_command_receipt"
-        ).fetchone()
-        assert receipt["command_id"] == first["command_id"]
-        assert receipt["event_id"] == first["event_id"]
-        projection = connection.execute(
-            """
-            SELECT payload_json FROM life_projection_intent
-            WHERE intent_kind = 'PROJECTION' AND target = 'life.experience'
-            """
-        ).fetchone()
-        assert json.loads(projection["payload_json"])["evidence"][
-            "life_experience_event_id"
-        ] == "lifeexp_legacy_only"
 
 
 def test_concurrent_duplicate_life_experience_converges_on_one_receipt(
@@ -332,9 +236,10 @@ def test_memory_spine_command_id_and_type_are_the_canonical_receipt_identity(
     monkeypatch,
 ) -> None:
     db_path, ledger = _ledger(tmp_path)
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
 
     first = record_conversation_turn_memory_spine(
+        ledger=ledger,
         request_id="request-memory-spine",
         session_id="session-memory-spine",
         person_id="person-memory-spine",
@@ -346,6 +251,7 @@ def test_memory_spine_command_id_and_type_are_the_canonical_receipt_identity(
         turn_index=3,
     )
     replay = record_conversation_turn_memory_spine(
+        ledger=ledger,
         request_id="request-memory-spine",
         session_id="session-memory-spine",
         person_id="person-memory-spine",
@@ -446,20 +352,10 @@ def test_record_life_experience_source_has_no_retired_state_or_experience_writer
 def test_production_experience_callsites_do_not_import_legacy_life_continuity() -> None:
     root = Path(__file__).resolve().parents[2]
     for relative in (
-        "host_brain/app/memory_event_store.py",
         "host_brain/conversation/memory_spine.py",
-        "host_brain/persona/inner_world.py",
+        "host_brain/agent_runtime/production_executor.py",
     ):
         source = (root / relative).read_text(encoding="utf-8")
         assert "runtime.life_continuity import record_life_experience" not in source
         assert "digital_life.experience_ingress import" in source
-
-    compatibility_source = inspect.getsource(
-        __import__(
-            "host_brain.runtime.life_continuity",
-            fromlist=["record_life_experience"],
-        ).record_life_experience
-    )
-    assert "canonical_record_life_experience" in compatibility_source
-    assert "LifeCommandRepository" not in compatibility_source
-    assert ".submit_next(" not in compatibility_source
+    assert not (root / "host_brain/runtime/life_continuity.py").exists()

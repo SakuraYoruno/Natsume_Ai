@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.integrations.graph_executor import GraphExecutor
 from host_brain.model_runtime import (
     CallableProviderAdapter,

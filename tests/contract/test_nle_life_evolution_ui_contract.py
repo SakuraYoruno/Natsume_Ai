@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from host_brain.app import obs_routes_life_evolution as routes
-from host_brain.app.dependencies import get_token_service
+from host_brain.composition.process_services import get_token_service
 from host_brain.app.settings.core import get_core_settings
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.action_arbiter import build_governed_action_binding
@@ -306,7 +306,7 @@ def test_t_nle_22_life_projection_rollout_is_disabled_when_absent_or_malformed(m
 
 
 def _patch_default_snapshot_dependencies(monkeypatch: pytest.MonkeyPatch, ledger: SQLiteLedger) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.tribe import social_brain_agent
 
     class Stage:
@@ -327,7 +327,7 @@ def test_t_nle_22_actual_surface_scene_producer_reaches_default_snapshot_without
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.app.surface_main_chain_adapter import _surface_scene_guardrails
+    from host_brain.surface_runtime.eligibility import _surface_scene_guardrails
     from host_brain.persona.life_evolution_observer import reset_life_evolution_observations
 
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")

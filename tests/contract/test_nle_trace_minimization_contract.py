@@ -9,7 +9,7 @@ import pytest
 
 from host_brain.agent_runtime.agent_executor import AgentExecutor, AgentStep
 from host_brain.agent_runtime.result_contract import AgentResult
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.app.agents.react_loop import ReactResult, ReactStep, astream_react_loop
 from host_brain.app.sub_agent_protocol import SubAgentDispatcher, SubAgentRequest, SubAgentResponse
 from host_brain.core.trace_redaction import (
@@ -138,8 +138,8 @@ def test_t_nle_12_agent_executor_persists_only_redacted_trace(monkeypatch, tmp_p
             )
 
     registry = build_live_production_prompt_registry()
-    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: _AttemptService())
+    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: _AttemptService())
     monkeypatch.setattr(
         "host_brain.agent_runtime.agent_executor.model_attempt_result_trace",
         lambda _result: {
@@ -349,7 +349,7 @@ def test_t_nle_12_dispatch_audit_persists_summary_and_output_ref_only(monkeypatc
         def log_skill_exec(self, payload):  # noqa: ANN001
             writes.append(dict(payload))
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: _Ledger())
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: _Ledger())
     dispatcher = SubAgentDispatcher()
     dispatcher._log_dispatch(
         SubAgentRequest(agent_id="translate_agent", task="translate", request_id="req-audit"),

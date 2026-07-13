@@ -1,30 +1,93 @@
-"""
-T-OBS-ROUTE-INT-01~16 — obs_routes.py 集成测试
-TASK-0198 / WARN-TEST-002
-使用内存 SQLite + FastAPI TestClient，覆盖 4 个端点 × 4 个场景
+"""OBS query-side integration tests.
+
+The operator surface is migration-first and projection-only.  Source rows are
+written to the canonical ledger, then an explicit background refresh
+materializes the public read models before HTTP is exercised.  No route in
+this test is allowed to fall back to a live ledger query.
 """
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app import obs_routes
 from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes_health import router as health_router
+from host_brain.app.obs_fastapi_app import request_trace
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
+from host_brain.app.observability_runtime.health_device_projection import (
+    refresh_health_query_projections,
+)
+from host_brain.app.observability_runtime.live_source_projection import (
+    refresh_operator_live_state_projections,
+)
+from host_brain.app.observability_runtime.process_state_projection import (
+    refresh_runtime_snapshot_projection,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    refresh_ledger_stats_projection,
+)
+from host_brain.app.observability_runtime.session_query import (
+    refresh_session_query_projection,
+)
+from host_brain.app.obs_routes_trace import refresh_trace_query_projections
+from host_brain.composition.process_service_container import (
+    get_process_service_container,
+)
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
+@dataclass(frozen=True)
+class ProjectionRefresh:
+    ledger_stats: Callable[[], object]
+    sessions: Callable[[], object]
+    health: Callable[[], object]
+    runtime: Callable[[], object]
+    gateway: Callable[[], object]
+    trace: Callable[[], object]
+
+
 @pytest.fixture
-def ledger():
-    """内存 SQLite ledger，预置 fixture 数据。"""
-    db = SQLiteLedger(":memory:", check_same_thread=False)
+def ledger(tmp_path: Path, monkeypatch):
+    """Migrated durable ledger shared by source writers and projection store."""
+
+    db_path = tmp_path / "obs-query.sqlite3"
+    migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="obs-route-integration",
+    )
+    assert migration.success, migration
+    db = SQLiteLedger(
+        db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
+    store = QueryProjectionStore(db_path)
+    container = get_process_service_container()
+    previous_ledger = container.ledger
+    previous_store = container.query_projection_store
+    container.ledger = db
+    container.query_projection_store = store
+
+    async def _no_remote_gateway_health():
+        return {}
+
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_platform._fetch_remote_gateway_health",
+        _no_remote_gateway_health,
+    )
     now = int(time.time() * 1000)
 
     # 预置 governor_log 数据
@@ -288,42 +351,73 @@ def ledger():
         ),
     )
 
-    # 预置 llm_node_call_log 数据
-    db.log_llm_node_call({
+    # Model attempts are the migration-owned model health source.  The retired
+    # ``llm_node_call_log`` and ``graph_run_trace`` bootstrap tables are not
+    # recreated in a fresh canonical database.
+    db.log_model_attempt({
+        "attempt_id": "attempt-int-001",
         "request_id": "req-int-001",
-        "node_id": "core_reasoner_primary",
-        "provider": "openai", "model_id": "gpt-5.2",
-        "status": "OK", "latency_ms": 120, "ts_ms": now - 4000,
-    })
-
-    # 预置 graph_run_trace 数据
-    db.log_graph_run_trace({
-        "request_id": "req-int-001",
-        "session_id": "sess-001",
-        "total_latency_ms": 350,
-        "status": "OK",
-        "node_count": 3,
-        "nodes_json": [
-            {"node_id": "intent_i1", "node_type": "intent", "display_name": "Intent Parser",
-             "status": "OK", "ts_ms": now - 5000},
-        ],
-        "edges_json": [],
-        "ts_ms": now - 4500,
+        "route_decision_id": "route-int-001",
+        "attempt_index": 1,
+        "status": "succeeded",
+        "retry_reason": "initial",
+        "adapter_id": "openai-production",
+        "provider": "openai",
+        "model_id": "gpt-5.2",
+        "prompt_id": "surface-reply",
+        "prompt_version": "1",
+        "prompt_digest": "a" * 64,
+        "started_at_ms": now - 4120,
+        "ended_at_ms": now - 4000,
+        "latency_ms": 120,
+        "output_digest": "b" * 64,
+        "error_code": None,
+        "error_message": None,
+        "metadata": {},
+        "ts_ms": now - 4000,
     })
 
     yield db
+    if container.ledger is db:
+        container.ledger = previous_ledger
+    if container.query_projection_store is store:
+        container.query_projection_store = previous_store
     db.close()
 
 
 @pytest.fixture
-def client(ledger):
-    """带 obs router 的 TestClient。"""
+def projection_refresh(ledger) -> ProjectionRefresh:
+    """Expose background-owned materializers; HTTP never invokes these."""
+
+    del ledger  # fixture ordering: canonical composition must exist first
+    return ProjectionRefresh(
+        ledger_stats=refresh_ledger_stats_projection,
+        sessions=refresh_session_query_projection,
+        health=refresh_health_query_projections,
+        runtime=refresh_runtime_snapshot_projection,
+        gateway=refresh_operator_live_state_projections,
+        trace=refresh_trace_query_projections,
+    )
+
+
+@pytest.fixture
+def client(ledger, projection_refresh: ProjectionRefresh):
+    """Projection-only HTTP app with retired trace compatibility paths absent."""
+
+    set_ledger_provider(lambda: ledger)
+    projection_refresh.ledger_stats()
+    projection_refresh.sessions()
+    projection_refresh.health()
+    projection_refresh.gateway()
+    projection_refresh.trace()
     app = FastAPI()
     app.include_router(router)
-    set_ledger_provider(lambda: ledger)
+    app.include_router(health_router)
+    app.add_api_route("/observability/trace", request_trace, methods=["POST"])
     _clear_obs_route_response_cache()
     client = TestClient(app)
     yield client
+    set_ledger_provider(None)
     _clear_obs_route_response_cache()
 
 
@@ -367,12 +461,16 @@ def test_services_health_invalid_window(client):
     assert resp.status_code == 422
 
 
-def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
+def test_runtime_snapshot_returns_unified_state(
+    client,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
     """T-OBS-ROUTE-INT-17: /obs/runtime-snapshot 返回统一数字生命状态摘要。"""
 
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers.build_digital_life_runtime_snapshot",
-        lambda current_topic="": {
+        "host_brain.lifecycle_runtime.runtime_snapshot.build_digital_life_runtime_snapshot",
+        lambda *, ports=None, current_topic="": {
             "persona_user_id": "persona-user-001",
             "current_topic": current_topic,
             "sys_mode": "focus",
@@ -443,13 +541,16 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
             },
         )(),
     )
+    projection_refresh.runtime()
 
     resp = client.get("/obs/runtime-snapshot?current_topic=%E9%82%A3%E4%B8%AA%E9%A1%B9%E7%9B%AE")
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["persona_user_id"] == "persona-user-001"
-    assert data["current_topic"] == "那个项目"
+    # Query parameters never trigger a live rebuild; the worker owns the
+    # canonical topic captured in the projection.
+    assert data["current_topic"] == ""
     assert data["sys_mode"] == "focus"
     assert data["sys_mode_status"]["sys_mode"] == "focus"
     assert data["hard_state"]["mood_state"] == "engaged"
@@ -460,7 +561,9 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["runtime_summary"]["current_state"]["activity_event"] == "wakeup"
     assert "offline:6h_plus->soft_resume" in data["runtime_summary"]["decision_chain"]
     assert data["runtime_summary"]["core_slots"]["sys_mode"]["activity_event"] == "wakeup"
-    assert data["runtime_summary"]["core_slots"]["render_policy"]["reply_posture"] == "focused"
+    # Content-shaped reply fields are removed by the projection-store privacy
+    # serializer before the document becomes queryable.
+    assert "reply_posture" not in data["runtime_summary"]["core_slots"]["render_policy"]
     assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
     assert "interoception_state" in data
@@ -471,12 +574,17 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert "homeostasis_report" in data
 
 
-def test_runtime_snapshot_uses_short_ttl_cache(client, monkeypatch):
-    """Regression: repeated runtime snapshot reads should reuse the short TTL cache."""
+def test_runtime_snapshot_repeated_reads_do_not_rebuild(
+    client,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
+    """Repeated GETs read the same projection and never invoke source builders."""
 
     calls = {"snapshot": 0, "status": 0}
 
-    def _fake_snapshot(current_topic=""):
+    def _fake_snapshot(*, ports=None, current_topic=""):
+        del ports
         calls["snapshot"] += 1
         return {
             "persona_user_id": "persona-user-cache",
@@ -540,13 +648,14 @@ def test_runtime_snapshot_uses_short_ttl_cache(client, monkeypatch):
             }
 
     monkeypatch.setattr(
-        "host_brain.app.http_hooks_runtime_helpers.build_digital_life_runtime_snapshot",
+        "host_brain.lifecycle_runtime.runtime_snapshot.build_digital_life_runtime_snapshot",
         _fake_snapshot,
     )
     monkeypatch.setattr(
         "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
         lambda: _FakeModeService(),
     )
+    projection_refresh.runtime()
 
     first = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
     second = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
@@ -601,7 +710,11 @@ def test_sessions_pagination(client):
     assert len(data["items"]) <= 1
 
 
-def test_sessions_can_find_rows_beyond_default_fetch_limit(client, ledger):
+def test_sessions_can_find_rows_beyond_default_fetch_limit(
+    client,
+    ledger,
+    projection_refresh: ProjectionRefresh,
+):
     """Regression: session query should not silently truncate to first 100 rows."""
     now = int(time.time() * 1000)
     for i in range(120):
@@ -618,6 +731,8 @@ def test_sessions_can_find_rows_beyond_default_fetch_limit(client, ledger):
             "stage": "S_GOVERNOR",
             "ts_ms": now - i,
         })
+    projection_refresh.sessions()
+    _clear_obs_route_response_cache()
 
     resp = client.get("/obs/sessions?window_minutes=10080&keyword=req-many-119")
     assert resp.status_code == 200
@@ -626,22 +741,22 @@ def test_sessions_can_find_rows_beyond_default_fetch_limit(client, ledger):
     assert data["items"][0]["request_id"] == "req-many-119"
 
 
-def test_sessions_include_input_preview(client):
-    """Sessions should expose input preview for request mapping."""
+def test_sessions_projection_redacts_input_preview(client):
+    """The durable public session projection never stores private input text."""
     resp = client.get("/obs/sessions?window_minutes=10080")
     assert resp.status_code == 200
     data = resp.json()
     item = next(row for row in data["items"] if row["request_id"] == "req-int-002")
-    assert item["input_preview"] == "fallback hello"
+    assert item["input_preview"] is None
 
 
-def test_sessions_keyword_matches_input_preview(client):
-    """Keyword filter should support matching by message preview."""
+def test_sessions_keyword_does_not_search_redacted_private_input(client):
+    """Query filters cannot recover text removed at projection-write time."""
     resp = client.get("/obs/sessions?window_minutes=10080&keyword=fallback%20hello")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] == 1
-    assert data["items"][0]["request_id"] == "req-int-002"
+    assert data["total"] == 0
+    assert data["items"] == []
 
 
 def test_sessions_export_csv_with_filters(client):
@@ -654,7 +769,11 @@ def test_sessions_export_csv_with_filters(client):
     assert "req-int-001" in text
 
 
-def test_gateway_stats_reads_channel_io_log(client, ledger):
+def test_gateway_stats_reads_channel_io_log(
+    client,
+    ledger,
+    projection_refresh: ProjectionRefresh,
+):
     """Gateway stats should work against current ledger schema without audit_log."""
     now = int(time.time() * 1000)
     ledger.log_channel_io({
@@ -699,6 +818,8 @@ def test_gateway_stats_reads_channel_io_log(client, ledger):
         "payload_digest": "digest-qq-in",
         "ts_ms": now - 1000,
     })
+    projection_refresh.ledger_stats()
+    projection_refresh.gateway()
 
     resp = client.get("/obs/gateway/stats?window_minutes=10080")
     assert resp.status_code == 200
@@ -714,7 +835,11 @@ def test_gateway_stats_reads_channel_io_log(client, ledger):
     assert qq["status"] == "DOWN"
 
 
-def test_gateway_stats_falls_back_to_remote_adapter_health(client, monkeypatch):
+def test_gateway_stats_falls_back_to_remote_adapter_health(
+    client,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
     """Gateway stats should surface remote adapter health even with no local samples."""
 
     async def _fake_remote_gateway_health():
@@ -737,7 +862,11 @@ def test_gateway_stats_falls_back_to_remote_adapter_health(client, monkeypatch):
             },
         }
 
-    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_platform._fetch_remote_gateway_health",
+        _fake_remote_gateway_health,
+    )
+    projection_refresh.gateway()
 
     resp = client.get("/obs/gateway/stats?window_minutes=60")
     assert resp.status_code == 200
@@ -752,7 +881,12 @@ def test_gateway_stats_falls_back_to_remote_adapter_health(client, monkeypatch):
     assert qq["status_detail"] == "adapter health via http://192.168.1.101:19000"
 
 
-def test_gateway_stats_counts_gateway_input_lifecycle_rows(client, ledger, monkeypatch):
+def test_gateway_stats_counts_gateway_input_lifecycle_rows(
+    client,
+    ledger,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
     """Gateway stats should count source=GATEWAY INPUT_* rows as live window traffic."""
     now = int(time.time() * 1000)
     ledger.log_voice_event({
@@ -785,7 +919,12 @@ def test_gateway_stats_counts_gateway_input_lifecycle_rows(client, ledger, monke
     async def _fake_remote_gateway_health():
         return {}
 
-    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_platform._fetch_remote_gateway_health",
+        _fake_remote_gateway_health,
+    )
+    projection_refresh.ledger_stats()
+    projection_refresh.gateway()
 
     resp = client.get("/obs/gateway/stats?window_minutes=10080")
     assert resp.status_code == 200
@@ -798,7 +937,12 @@ def test_gateway_stats_counts_gateway_input_lifecycle_rows(client, ledger, monke
     assert qq["status"] == "UP"
 
 
-def test_gateway_stats_counts_platform_from_gateway_payload(client, ledger, monkeypatch):
+def test_gateway_stats_counts_platform_from_gateway_payload(
+    client,
+    ledger,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
     """Gateway stats should honor payload.platform even when session_id has no platform prefix."""
     now = int(time.time() * 1000)
     ledger.log_voice_event({
@@ -847,7 +991,12 @@ def test_gateway_stats_counts_platform_from_gateway_payload(client, ledger, monk
     async def _fake_remote_gateway_health():
         return {}
 
-    monkeypatch.setattr(obs_routes, "_fetch_remote_gateway_health", _fake_remote_gateway_health)
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_platform._fetch_remote_gateway_health",
+        _fake_remote_gateway_health,
+    )
+    projection_refresh.ledger_stats()
+    projection_refresh.gateway()
 
     resp = client.get("/obs/gateway/stats?window_minutes=10080")
     assert resp.status_code == 200
@@ -859,26 +1008,21 @@ def test_gateway_stats_counts_platform_from_gateway_payload(client, ledger, monk
     assert telegram["status"] == "UP"
 
 
-def test_trace_live_feed_streams_snapshot(client):
-    """Trace live feed should emit an initial snapshot event."""
+def test_trace_live_feed_route_is_retired(client):
+    """The legacy SSE trace feed is absent from the canonical query app."""
     resp = client.get("/obs/trace-feed/live?limit=2&interval_ms=250&once=true")
-    assert resp.status_code == 200
-    assert "text/event-stream" in resp.headers.get("content-type", "")
-    raw = resp.text
-    first_event = raw.split("\n\n", 1)[0]
-    assert "event: snapshot" in first_event
-    data_line = next(line for line in first_event.splitlines() if line.startswith("data:"))
-    payload = json.loads(data_line[5:].strip())
-    assert payload["type"] == "snapshot"
-    assert payload["count"] >= 1
-    assert payload["items"][0]["session"]["request_id"].startswith("req-int-")
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
 # GET /obs/subsystems/stats
 # ---------------------------------------------------------------------------
 
-def test_subsystems_stats_classifies_intent_airlock_and_retrieval(client, ledger):
+def test_subsystems_stats_classifies_intent_airlock_and_retrieval(
+    client,
+    ledger,
+    projection_refresh: ProjectionRefresh,
+):
     """Subsystem health should not treat intent lint JSON or airlock policy hits as hard failures."""
     now = int(time.time() * 1000)
 
@@ -906,6 +1050,7 @@ def test_subsystems_stats_classifies_intent_airlock_and_retrieval(client, ledger
         "detail": "reranker slow: 40866ms>30000ms",
         "ts_ms": now - 60,
     })
+    projection_refresh.ledger_stats()
 
     resp = client.get("/obs/subsystems/stats?window_minutes=10080")
     assert resp.status_code == 200
@@ -930,66 +1075,61 @@ def test_subsystems_stats_classifies_intent_airlock_and_retrieval(client, ledger
 
 
 # ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}
+# Canonical POST /observability/trace; legacy GET /obs/trace/* is retired
 # ---------------------------------------------------------------------------
 
 def test_trace_existing_request(client):
-    """T-OBS-ROUTE-INT-09: 存在的 request_id 返回 200 + 节点列表。"""
-    resp = client.get("/obs/trace/req-int-001")
+    """The canonical trace query reads the durable public projection."""
+    resp = client.post("/observability/trace", json={"request_id": "req-int-001"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-int-001"
-    assert "nodes" in data
-    assert data["node_count"] >= 1
+    assert data["timeline_total"] >= 1
+    assert isinstance(data["timeline"], list)
+    assert isinstance(data["sources"], dict)
 
 
 def test_trace_not_found(client):
-    """T-OBS-ROUTE-INT-10: 不存在的 request_id 返回 404。"""
+    """Retired trace compatibility paths remain absent for every id."""
     resp = client.get("/obs/trace/nonexistent-xyz-999")
     assert resp.status_code == 404
 
 
 def test_trace_fallback_path(client, ledger):
-    """T-OBS-ROUTE-INT-11: graph_run_trace 无数据时降级路径正常返回。"""
-    # req-int-002 无 graph_run_trace，走审计表合成链路
+    """The old on-demand ledger synthesis route is permanently retired."""
+    del ledger
     resp = client.get("/obs/trace/req-int-002")
+    assert resp.status_code == 404
+
+
+def test_trace_projection_excludes_private_summary_and_recall_bodies(client):
+    """The canonical projection exposes structure without source text bodies."""
+    resp = client.post("/observability/trace", json={"request_id": "req-int-002"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-int-002"
-    assert data["node_count"] >= 1
-
-
-def test_trace_fallback_contains_summary_and_recall(client):
-    """Fallback trace should expose summary, recall stages, and node payloads."""
-    resp = client.get("/obs/trace/req-int-002")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["summary"]["input_text"] == "fallback hello"
-    assert data["summary"]["output_text"] == "fallback reply"
-    assert data["summary"]["recall"]["candidate_count"] == 7
-    assert data["summary"]["recall"]["pack_id"] == "epk_test_002"
-    assert data["summary"]["recall"]["content_available"] is True
-    assert data["summary"]["recall"]["items"][0]["snippet"] == "fallback hello recall snippet"
-    assert data["summary"]["recall"]["topk"][0]["snippet"] == "fallback hello rerank snippet"
-    assert data["summary"]["recall"]["evidence_topk"][0]["snippet"] == "fallback hello evidence snippet"
-    node_ids = {node["node_id"] for node in data["nodes"]}
-    node_display_names = {node["display_name"] for node in data["nodes"]}
-    assert "host_input" in node_ids
-    assert "query_planner" in node_ids
-    assert "agentic_rag" in node_ids
-    assert "recall_fusion" in node_ids
-    assert "cortex_orchestrator" in node_ids
-    assert "Cortex Orchestrator" in node_display_names
-    assert "surface_reply" in node_ids
-    assert "llm_gateway" in node_ids
+    assert data["timeline_total"] >= 1
+    serialized = json.dumps(data, ensure_ascii=False)
+    assert "fallback hello" not in serialized
+    assert "fallback reply" not in serialized
+    assert "recall snippet" not in serialized
+    assert "rerank snippet" not in serialized
+    assert "evidence snippet" not in serialized
 
 
 def test_trace_response_structure(client):
-    """T-OBS-ROUTE-INT-12: 响应结构包含所有必要字段。"""
-    resp = client.get("/obs/trace/req-int-001")
+    """Canonical trace response keeps its stable projection contract."""
+    resp = client.post("/observability/trace", json={"request_id": "req-int-001"})
     assert resp.status_code == 200
     data = resp.json()
-    required_fields = {"request_id", "status", "node_count", "nodes", "edges", "ts_ms", "timestamp"}
+    required_fields = {
+        "request_id",
+        "trace_status",
+        "timeline_total",
+        "sources",
+        "timeline",
+        "timestamp",
+    }
     assert required_fields.issubset(data.keys())
 
 

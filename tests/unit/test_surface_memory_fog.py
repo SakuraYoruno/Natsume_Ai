@@ -34,7 +34,7 @@ def test_none_bias_is_safe() -> None:
 
 def test_distortion_bias_read_from_life_state(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.life_application_boundary.read_life_snapshot",
+        "host_brain.digital_life.application_boundary.read_life_snapshot",
         lambda person_id: {
             "person_id": person_id,
             "version": 3,
@@ -52,5 +52,5 @@ def test_distortion_bias_safe_default_on_error(monkeypatch) -> None:
     def _boom(_person_id):
         raise RuntimeError("snapshot reader down")
 
-    monkeypatch.setattr("host_brain.app.life_application_boundary.read_life_snapshot", _boom)
+    monkeypatch.setattr("host_brain.digital_life.application_boundary.read_life_snapshot", _boom)
     assert crh._surface_memory_distortion_bias("default") == 0.0

@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
@@ -14,6 +14,7 @@ from host_brain.model_runtime import (
     build_model_runtime_composition,
     build_production_prompt_registry,
 )
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     _resolve_intent_classification_prompt_templates,
@@ -860,6 +861,9 @@ def test_classify_task_intent_by_llm_uses_canonical_attempt_service(monkeypatch)
                 request_id="req-thalamus-canonical-attempt",
                 session_id="session-thalamus-canonical-attempt",
                 text="普通聊天，不要走 Codex",
+                application_ports=TribeApplicationPorts(
+                    model_attempt_service=dependencies.get_model_attempt_service,
+                ),
             )
         )
     finally:
@@ -1312,7 +1316,9 @@ def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> No
     assert decision["target_id"] == "pentest_agent"
     assert decision["route_source"] == "thalamus.rule"
     assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
+    assert decision["args"]["secure_run_surface"] == "pentest.secure-run"
     assert decision["args"]["scope_hint_present"] is True
 
 
@@ -1325,7 +1331,8 @@ def test_classify_task_intent_routes_structured_scope_pentest_hint_to_agent() ->
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "pentest_agent"
     assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
     assert decision["args"]["scope_hint_present"] is True
 
 
@@ -1335,8 +1342,8 @@ def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> No
     assert decision is None or decision.get("target_id") != "pentest_agent"
 
 
-def test_classify_task_intent_routes_takeover_intent_to_autonomous_redteam() -> None:
-    """清场/拿域意图 → autonomous_redteam + domain_takeover goal。"""
+def test_classify_task_intent_routes_takeover_as_untrusted_secure_run_request() -> None:
+    """Takeover language is planning material, never an autonomous strategy."""
     decision = classify_task_intent_by_rules(
         "授权渗透测试 scope=10.10.10.0/24，把这个域端了，拿下域控"
     )
@@ -1344,9 +1351,11 @@ def test_classify_task_intent_routes_takeover_intent_to_autonomous_redteam() -> 
     assert decision is not None
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "pentest_agent"
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
-    assert decision["args"]["allow_exploit"] is False  # 安全门：种子层面仍禁 exploit
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
+    assert "strategy" not in decision["args"]
+    assert "allow_exploit" not in decision["args"]
     assert decision["args"]["scope_hint_present"] is True
 
 
@@ -1357,8 +1366,8 @@ def test_classify_task_intent_takeover_with_getshell() -> None:
     )
 
     assert decision is not None
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["secure_run_required"] is True
 
 
 def test_classify_task_intent_takeover_with_lateral() -> None:
@@ -1368,22 +1377,22 @@ def test_classify_task_intent_takeover_with_lateral() -> None:
     )
 
     assert decision is not None
-    assert decision["args"]["strategy"] == "autonomous_redteam"
-    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["requested_goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["secure_run_required"] is True
 
 
-def test_classify_task_intent_plain_scan_no_takeover() -> None:
-    """普通扫描不触发 takeover——仍走默认只读路径。"""
+def test_classify_task_intent_plain_scan_requires_secure_run_without_goal() -> None:
+    """A read-only network scan is still an effect and requires SecureRun."""
     decision = classify_task_intent_by_rules(
         "帮我对 target=example.com 做授权安全扫描，只做侦察和配置审计"
     )
 
     assert decision is not None
     assert decision["target_id"] == "pentest_agent"
-    # 无 strategy → handler 会走 _maybe_run_deterministic_readonly_workflow
     assert decision["args"].get("strategy") is None
-    assert decision["args"].get("goal") is None
-    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"].get("requested_goal") is None
+    assert decision["args"]["requested_execution"] is True
+    assert decision["args"]["secure_run_required"] is True
 
 
 def test_classify_and_compile_intent_draft_routes_pentest_message_only() -> None:

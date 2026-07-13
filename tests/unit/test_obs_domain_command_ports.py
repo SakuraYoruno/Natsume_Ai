@@ -12,7 +12,7 @@ from host_brain.observability.command_ports import (
     ObsCommandEnvelope,
     bind_server_authority,
 )
-from host_brain.observability.domain_command_ports import (
+from host_brain.app.observability_runtime.domain_command_ports import (
     OBS_DOMAIN_RESULT_SCHEMA,
     ObsDomainCommandError,
     build_default_obs_domain_command_registry,
@@ -92,7 +92,7 @@ def test_bio_adapter_uses_bound_principal_not_caller_owner(monkeypatch) -> None:
 
 
 def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
 
     captured: dict[str, object] = {}
 
@@ -118,7 +118,7 @@ def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
 
 
 def test_avatar_adapter_awaits_async_edge_port(monkeypatch) -> None:
-    from host_brain.channels import edge_rpc_client
+    from host_brain.channels import embodiment
 
     captured: dict[str, object] = {}
 
@@ -133,7 +133,7 @@ def test_avatar_adapter_awaits_async_edge_port(monkeypatch) -> None:
             event={"behavior_id": kwargs["behavior_id"]},
         )
 
-    monkeypatch.setattr(edge_rpc_client, "post_avatar_behavior", _post_avatar_behavior)
+    monkeypatch.setattr(embodiment, "submit_avatar_behavior", _post_avatar_behavior)
     result = _execute(
         "avatar.behavior.apply",
         {"behavior_id": "listening", "source": "owner-command"},
@@ -171,11 +171,11 @@ def test_sysmode_adapter_maps_service_and_rejects_fallback(monkeypatch) -> None:
 
 
 def test_domain_exception_propagates_without_legacy_degraded_result(monkeypatch) -> None:
-    from host_brain.channels import edge_rpc_client
+    from host_brain.channels import embodiment
 
     async def _fail(**_kwargs):  # noqa: ANN003
         raise RuntimeError("edge unavailable")
 
-    monkeypatch.setattr(edge_rpc_client, "post_avatar_behavior", _fail)
+    monkeypatch.setattr(embodiment, "submit_avatar_behavior", _fail)
     with pytest.raises(RuntimeError, match="edge unavailable"):
         _execute("avatar.behavior.apply", {"behavior_id": "thinking"})

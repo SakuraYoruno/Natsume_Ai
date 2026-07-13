@@ -75,9 +75,9 @@ class _SourceLedger:
 def test_background_job_materializes_metadata_without_private_bodies(
     tmp_path, monkeypatch
 ) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.memory import canon_world_store
-    from host_brain.observability import remaining_query_projection as projection
+    from host_brain.app.observability_runtime import remaining_query_projection as projection
 
     store = _store(tmp_path)
     profile = tmp_path / "character_profile.json"
@@ -153,7 +153,7 @@ def test_background_job_materializes_metadata_without_private_bodies(
 def test_remaining_gets_return_empty_projection_metadata_without_source_access(
     monkeypatch,
 ) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_stats_agent as agent_routes
     from host_brain.app import obs_routes_stats_capability_skill as skill_routes
     from host_brain.app import obs_routes_stats_system as system_routes
@@ -207,9 +207,9 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
 def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
     tmp_path, monkeypatch
 ) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_stats_agent as agent_routes
-    from host_brain.observability import remaining_query_projection as projection
+    from host_brain.app.observability_runtime import remaining_query_projection as projection
 
     store = _store(tmp_path)
     document = store.upsert(

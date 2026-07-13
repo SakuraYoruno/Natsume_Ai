@@ -4,15 +4,15 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.agents.agent_registry import AGENT_ID_CHAT
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.agent_runtime.agent_registry import AGENT_ID_CHAT
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     candidates = [str(template_id or "").strip()]
     for candidate in candidates:
-        raw = resolve_prompt_template_json_merged(candidate)
+        raw = resolve_prompt_contract_json(candidate)
         if isinstance(raw, Mapping) and raw:
             return dict(raw)
     return {}

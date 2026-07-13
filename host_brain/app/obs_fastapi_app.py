@@ -26,7 +26,7 @@ from host_brain.app.obs_routes_summary import router as obs_summary_router
 from host_brain.app.obs_routes_life_body import router as obs_life_body_router
 from host_brain.app.obs_routes_digital_life_soak import router as obs_digital_life_soak_router
 from host_brain.app.obs_routes_proactive_autonomy import router as obs_proactive_autonomy_router
-from host_brain.app.dependencies import (
+from host_brain.composition.process_services import (
     get_ledger as _get_ledger_dep,
     get_obs_metrics_collector,
     get_query_projection_store,
@@ -37,13 +37,23 @@ from host_brain.observability.operator_query_gateway import (
     OperatorQueryGateway,
     OperatorQueryMiddleware,
 )
-from host_brain.observability.projection_runtime import TRACE_KIND
-from host_brain.observability.projection_runtime import projection_meta
-from host_brain.observability.projection_daemon import (
+from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
+from host_brain.app.observability_runtime.projection_runtime import projection_meta
+from host_brain.app.observability_runtime.projection_daemon import (
+    register_projection_job,
     start_projection_jobs,
     stop_projection_jobs,
 )
-from host_brain.observability.health_device_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    refresh_remaining_query_projections,
+)
+from host_brain.app.observability_runtime.live_source_projection import (
+    run_operator_live_state_projection_job,
+)
+from host_brain.app.settings import get_persistence_settings
+from host_brain.composition.canon import build_process_canon_container
+from host_brain.composition.life import build_process_life_container
+from host_brain.app.observability_runtime.health_device_projection import (
     HEALTH_MAX_AGE_MS,
     SERVICE_HEALTH_KEY,
     SERVICE_HEALTH_KIND,
@@ -61,12 +71,39 @@ _set_obs_ledger_provider(_get_obs_ledger)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    ledger = _get_ledger_dep()
+    settings = get_persistence_settings()
+    canon = build_process_canon_container(
+        ledger=ledger,
+        canonical_db_path=str(getattr(ledger, "canonical_db_path", "") or ""),
+        world_root=settings.world_canon_root,
+    )
+    life = build_process_life_container(
+        ledger=ledger,
+        adopted_at_ms=int(time.time() * 1000),
+    )
+    _app.state.canon_container = canon
+    _app.state.life_container = life
+    register_projection_job(
+        "remaining-operator-queries",
+        lambda: refresh_remaining_query_projections(
+            canon_service=canon.application,
+        ),
+    )
+    register_projection_job(
+        "operator-live-state",
+        lambda: run_operator_live_state_projection_job(
+            life_snapshot_reader=life.snapshot_reader,
+        ),
+    )
     projection_status = start_projection_jobs(interval_ms=5000)
     _logger.info("operator projection daemon startup: %s", projection_status)
     try:
         yield
     finally:
         stop_status = stop_projection_jobs()
+        _app.state.canon_container = None
+        _app.state.life_container = None
         _logger.info("operator projection daemon shutdown: %s", stop_status)
 
 

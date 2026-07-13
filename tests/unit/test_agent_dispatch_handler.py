@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.app.agents.agent_registry import AGENT_ID_INTENT, AGENT_ID_TRANSLATE, AGENT_ID_RETRIEVAL
+from host_brain.agent_runtime.agent_registry import AGENT_ID_INTENT, AGENT_ID_TRANSLATE, AGENT_ID_RETRIEVAL
 from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
 
 

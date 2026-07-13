@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 _logger = logging.getLogger("Natsume.emergent_growth_engine")
 
@@ -133,7 +133,7 @@ def _normalize_template_lang(render_target_lang: str | None) -> str:
     return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
 
-def _resolve_prompt_template_json_localized(
+def _resolve_prompt_contract_json_localized(
     template_id: str,
     *,
     render_target_lang: str = "zh",
@@ -141,7 +141,7 @@ def _resolve_prompt_template_json_localized(
     lang_key = _normalize_template_lang(render_target_lang)
     for candidate_id in (f"{template_id}.{lang_key}", template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate_id)
+            raw = resolve_prompt_contract_json(candidate_id)
         except Exception:
             continue
         if isinstance(raw, Mapping):
@@ -154,7 +154,7 @@ def _resolve_prompt_template_json_localized(
 
 
 def _load_narrative_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_template_json_localized(
+    raw = _resolve_prompt_contract_json_localized(
         "emergent_growth_engine.narrative_templates",
         render_target_lang=render_target_lang,
     )

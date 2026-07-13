@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from host_brain.skills.supply_chain_store import (
+from host_brain.persistence.supply_chain_repository import (
     BundleKind,
     SKILL_SUPPLY_CHAIN_MIGRATION_SHA256,
     SQLiteSkillSupplyChainStore,
@@ -109,7 +109,7 @@ def test_schema_is_checksum_bound_expand_only_and_private_material_free(
     tmp_path: Path,
 ) -> None:
     source = (
-        ROOT / "host_brain/skills/supply_chain_store.py"
+        ROOT / "host_brain/persistence/supply_chain_repository.py"
     ).read_text(encoding="utf-8").upper()
     assert "CREATE TABLE" not in source
     assert "CREATE INDEX" not in source

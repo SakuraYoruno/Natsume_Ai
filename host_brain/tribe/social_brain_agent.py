@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -85,6 +86,7 @@ def derive_social_bond_vector(
 
 @dataclass(slots=True)
 class SocialBrainAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="social_brain_agent",
@@ -104,7 +106,6 @@ class SocialBrainAgent:
         person_id: str | None,
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
         resolved_person_id = _resolve_social_bond_user_id(person_id)
@@ -122,7 +123,7 @@ class SocialBrainAgent:
         last_event_ts_ms = 0
 
         try:
-            engine = get_bond_stage_engine()
+            engine = self.application_ports.require("bond_stage_engine")()
             if engine is not None:
                 if resolved_person_id and hasattr(engine, "get_state"):
                     state_obj = engine.get_state(resolved_person_id)
@@ -210,11 +211,9 @@ class SocialBrainAgent:
         session_id: str = "default",
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-
         summary: dict[str, Any] = {}
         try:
-            engine = get_bond_stage_engine()
+            engine = self.application_ports.require("bond_stage_engine")()
             if engine is None:
                 return {}
             state = None
@@ -253,10 +252,8 @@ class SocialBrainAgent:
         return {key: value for key, value in summary.items() if value}
 
     def resolve_stage_engine(self) -> Any:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-
         try:
-            return get_bond_stage_engine()
+            return self.application_ports.require("bond_stage_engine")()
         except Exception:
             return None
 
@@ -339,7 +336,7 @@ class SocialBrainAgent:
         将关系变化写入 TribeStateRegistry 快照，供 aggregate_vital_signs() 读取。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
@@ -897,19 +894,17 @@ class SocialBrainAgent:
         """
         try:
             from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
-            from host_brain.app.dependencies import (  # noqa: PLC0415
-                get_shared_memory_index,
-                get_milestone_tracker,
-            )
-
             resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
             resolved_user_id = _resolve_social_bond_user_id(user_id)
-            memory_index = get_shared_memory_index()
-            milestone_tracker = get_milestone_tracker()
+            memory_index = self.application_ports.require("shared_memory_index")()
+            milestone_tracker = self.application_ports.require("milestone_tracker")()
             layer = BondNarrativeLayer(
                 memory_index=memory_index,
                 milestone_tracker=milestone_tracker,
                 use_llm=True,
+                model_attempt_service=self.application_ports.require(
+                    "model_attempt_service"
+                )(),
             )
             result = layer.build_narrative(
                 user_id=resolved_user_id,
@@ -977,9 +972,7 @@ class SocialBrainAgent:
             SharedMemoryResult.to_prompt_slot() 字典，或空字典（降级）。
         """
         try:
-            from host_brain.app.dependencies import get_shared_memory_index  # noqa: PLC0415
-
-            memory_index = get_shared_memory_index()
+            memory_index = self.application_ports.require("shared_memory_index")()
             if memory_index is None:
                 return {"status": "NO_INDEX", "entries": []}
 
@@ -1040,7 +1033,7 @@ class SocialBrainAgent:
         try:
             from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
 
-            tracker = get_milestone_tracker()
+            tracker = self.application_ports.require("milestone_tracker")()
             if tracker is None:
                 return {"status": "NO_TRACKER", "new_milestones": [], "achieved_count": 0}
 
@@ -1162,4 +1155,3 @@ from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E4
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
-from host_brain.app.dependencies import get_milestone_tracker  # noqa: E402, F401

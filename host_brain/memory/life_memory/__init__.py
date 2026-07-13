@@ -1,7 +1,7 @@
-"""Life memory sub-package — backward-compatible re-export hub.
+"""Life-memory value contracts and constants.
 
-Decomposed from the original 8,299-line life_memory.py into focused modules.
-All public symbols are re-exported here for backward compatibility.
+Runtime services live in their precise modules: ``store``, ``consolidator``
+and ``sleep``.  The package root deliberately does not act as a service facade.
 """
 
 from __future__ import annotations
@@ -17,29 +17,7 @@ from .contracts import (
     MemoryWriteReceipt,
 )
 from .semantic import *  # noqa: F401,F403
-
-
-def __getattr__(name: str):
-    """Load runtime-heavy compatibility exports without package import cycles."""
-
-    if name == "LifeMemoryStore":
-        from .store import LifeMemoryStore
-
-        return LifeMemoryStore
-    if name == "LifeMemoryConsolidator":
-        from .consolidator import LifeMemoryConsolidator
-
-        return LifeMemoryConsolidator
-    if name == "MemorySleepReplayTask":
-        from .sleep import MemorySleepReplayTask
-
-        return MemorySleepReplayTask
-    raise AttributeError(name)
-
 __all__ = [
-    "LifeMemoryStore",
-    "LifeMemoryConsolidator",
-    "MemorySleepReplayTask",
     "ChatMemoryCandidate",
     "MemoryAdmissionDecision",
     "MemoryAdmissionKind",

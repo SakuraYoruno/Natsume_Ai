@@ -28,7 +28,7 @@ except Exception as e:
 print()
 print("=== 测试 dependencies 导入 ===")
 try:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     print(f"[OK] dependencies 导入成功")
 except Exception as e:
     import traceback

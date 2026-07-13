@@ -28,7 +28,7 @@ from host_brain.pentest.secure_run import (
     bind_secure_ingress_authority,
     build_governor_token_binding,
 )
-from host_brain.pentest.secure_ingress_authority import (
+from host_brain.persistence.pentest_ingress_authority_repository import (
     SQLiteSecureIngressAuthorityResolver,
 )
 from host_brain.secure_ingress import (
@@ -39,7 +39,7 @@ from host_brain.secure_ingress import (
     SecureIngressRequest,
 )
 from host_brain.secure_ingress.models import digest_identifier
-from host_brain.secure_ingress.store import (
+from host_brain.persistence.secure_ingress_repository import (
     SECURE_INGRESS_MIGRATION_ASSET_KEY,
     SECURE_INGRESS_MIGRATION_SHA256,
 )

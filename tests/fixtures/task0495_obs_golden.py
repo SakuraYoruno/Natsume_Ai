@@ -23,8 +23,8 @@ from natsume_contracts.identity import (
 )
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.observability import domain_command_ports
-from host_brain.observability.command_composition import (
+from host_brain.app.observability_runtime import domain_command_ports
+from host_brain.app.observability_runtime.command_composition import (
     ObsCommandComposition,
     build_obs_command_composition,
 )
@@ -297,7 +297,6 @@ def run_obs_golden(
         return {"success": True, "recording_only": True}
 
     env = {
-        "HOST_OBS_COMMAND_RELOCATION_MODE": "QUERY_ONLY",
         "HOST_SECURE_INGRESS_MODE": "ENFORCE",
         "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON": json.dumps(
             {_KEY_ID: harness.test_secret},

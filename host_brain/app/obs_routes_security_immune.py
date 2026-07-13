@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
-from host_brain.observability.domain_state_projection import (
+from host_brain.app.observability_runtime.domain_state_projection import (
     SECURITY_IMMUNE_KEY,
     SECURITY_IMMUNE_KIND,
     SECURITY_IMMUNE_MAX_AGE_MS,

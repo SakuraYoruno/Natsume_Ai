@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.agent_runtime.budget_policy import (
+from host_brain.contracts.agent_runtime.budget_policy import (
     BUDGET_POLICY_SCHEMA_VERSION,
     BUDGET_RESERVATION_SCHEMA_VERSION,
     BudgetAmount,
@@ -15,8 +15,8 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservationStatus,
     validate_budget_transition,
 )
-from host_brain.agent_runtime.acceptance_judge import ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.acceptance_judge import ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION
+from host_brain.contracts.agent_runtime.contract_errors import (
     BUDGET_RESERVATION_INVALID,
     CONTRACT_VERSION_UNSUPPORTED,
     PLAN_CYCLE,
@@ -26,7 +26,7 @@ from host_brain.agent_runtime.contract_errors import (
     ContractViolation,
 )
 from host_brain.agent_runtime.contract_schema import build_contract_schema_snapshot
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     REVIEW_ITEM_SCHEMA_VERSION,
     ReviewItem,
     ReviewResumePhase,
@@ -40,7 +40,7 @@ from host_brain.agent_runtime.sub_agent_contract import (
     SubAgentRequestContract,
     SubAgentSpec,
 )
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TASK_EVENT_SCHEMA_VERSION,
     TASK_GRAPH_SCHEMA_VERSION,
     TASK_NODE_SCHEMA_VERSION,
@@ -59,7 +59,7 @@ from host_brain.agent_runtime.verification_policy import (
     VerificationResult,
     VerificationStatus,
 )
-from host_brain.agent_runtime.work_order import (
+from host_brain.contracts.agent_runtime.work_order import (
     WORK_ORDER_V2_SCHEMA_VERSION,
     WORK_ORDER_V3_SCHEMA_VERSION,
     AgentWorkOrder,
@@ -426,13 +426,9 @@ def test_t_nle_04_schema_snapshot_matches_frozen_fixture() -> None:
     assert expected["contracts"]["SubAgentSpec"]["schema_version"] == SUB_AGENT_SPEC_SCHEMA_VERSION
 
 
-def test_t_nle_04_skill_dag_planner_compatibility_reexports_canonical_types() -> None:
-    from host_brain.app.skill_dag_planner import (
-        CanonicalTaskGraph,
-        CanonicalTaskNode,
-        SkillDagPlan,
-    )
+def test_t_nle_04_skill_dag_planner_uses_precise_canonical_modules() -> None:
+    from host_brain.executive_runtime.skill_dag import SkillDagPlan
 
-    assert CanonicalTaskGraph is TaskGraph
-    assert CanonicalTaskNode is TaskNode
+    assert TaskGraph.__module__ == "host_brain.contracts.agent_runtime.task_graph"
+    assert TaskNode.__module__ == "host_brain.contracts.agent_runtime.task_graph"
     assert SkillDagPlan(plan_id="legacy").plan_id == "legacy"

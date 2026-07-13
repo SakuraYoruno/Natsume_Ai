@@ -62,7 +62,7 @@ def _load_dotenv_file() -> None:
 
 _load_dotenv_file()
 
-from host_brain.app.dependencies import collect_dependency_probes_sync
+from host_brain.composition.process_services import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.app.settings import get_core_settings, get_persistence_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner

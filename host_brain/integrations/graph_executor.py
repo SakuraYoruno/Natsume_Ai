@@ -97,11 +97,13 @@ class GraphExecutor:
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
                  evidence_plane: Any = None,
-                 model_nodes: dict[str, dict[str, Any]] | None = None) -> None:
+                 model_nodes: dict[str, dict[str, Any]] | None = None,
+                 model_attempt_service: Any = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
         self._ledger = ledger
+        self._model_attempt_service = model_attempt_service
         self._model_nodes = {
             str(model_node_id): sanitize_model_node_spec(str(model_node_id), spec)
             for model_node_id, spec in dict(model_nodes or {}).items()
@@ -173,7 +175,9 @@ class GraphExecutor:
             if need_judge:
                 next_node = (state.get("edge_map") or {}).get(node_id)
             else:
-                from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
+                from host_brain.model_runtime.prompt_builder_utils import (  # noqa: PLC0415
+                    CHAT_RENDER_NODE_ID,
+                )
                 next_node = CHAT_RENDER_NODE_ID
 
             agent_artifacts = dict(state.get("agent_artifacts") or {})
@@ -593,7 +597,10 @@ class GraphExecutor:
             from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
             from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
+            if self._model_attempt_service is None:
+                raise RuntimeError("GRAPH_MODEL_ATTEMPT_SERVICE_NOT_COMPOSED")
             result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
                 prompt_id=semantic.prompt_id,
                 request_id=f"{str(state.get('request_id') or '')}:graph:{model_node_id}",
                 scene_type=semantic.scene_type,

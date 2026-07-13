@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Mapping, Sequence
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     ContractViolation,
     require_version,

@@ -1,4 +1,4 @@
-﻿"""surface_reply_preprocessor.py — Surface reply 输入结构与低延迟文本工具。
+"""surface_reply_preprocessor.py — Surface reply 输入结构与低延迟文本工具。
 
 旧 SurfaceReply 主体已移除；本模块仅保留 Surface 主链仍需要的数据结构与工具函数：
   - 输入/输出结构体（SurfaceSubAgentContext、SurfaceReplyInput）
@@ -16,7 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from host_brain.app.relational_chat_detector import is_relational_chat_message
+from host_brain.persona.relational_chat import is_relational_chat_message
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS, is_agent_runtime_skill
 
 _logger = logging.getLogger("Natsume.surface_reply")
@@ -48,6 +49,11 @@ _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
     _ = kind, render_target_lang
     return ""
+
+
+def _load_static_prompt_spec(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_spec_json(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +249,12 @@ def _surface_template_candidates(template_id: str) -> tuple[str, ...]:
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
     except Exception:
         return {}
     for candidate in _surface_template_candidates(template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate)
+            raw = resolve_prompt_contract_json(candidate)
         except Exception:
             raw = None
         if isinstance(raw, Mapping) and raw:
@@ -258,20 +264,20 @@ def _load_template_mapping(template_id: str) -> dict[str, Any]:
 
 def _resolve_template_text_localized(template_id: str, *, render_target_lang: str | None = None) -> str:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged, resolve_prompt_template_text  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json, resolve_prompt_contract_text  # noqa: PLC0415
     except Exception:
         return ""
     for candidate in _surface_template_candidates(template_id):
         raw: Any = None
         try:
-            raw = resolve_prompt_template_json_merged(candidate)
+            raw = resolve_prompt_contract_json(candidate)
         except Exception:
             raw = None
         raw = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
         if isinstance(raw, str) and raw.strip():
             return raw.strip()
         try:
-            raw_text = resolve_prompt_template_text(candidate)
+            raw_text = resolve_prompt_contract_text(candidate)
         except Exception:
             raw_text = ""
         raw_text = str(raw_text or "").strip()
@@ -355,7 +361,7 @@ def _mapping_text(
 
 
 def _runtime_text(key: str, *, render_target_lang: str | None = None, **kwargs: Any) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     return _mapping_text(templates, key, render_target_lang=render_target_lang, **kwargs)
 
 
@@ -383,7 +389,7 @@ def _format_elapsed_compact(elapsed_ms: int) -> str:
 
 
 def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     stage = str(bond_stage or "FRIEND").strip().upper() or "FRIEND"
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
@@ -409,7 +415,7 @@ def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "
 
 
 def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: str = "", progress_message: str = "", result_text: str = "", elapsed_ms: int = 0, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     normalized_status = str(status or "UNKNOWN").strip().upper() or "UNKNOWN"
     elapsed = _format_elapsed_compact(int(elapsed_ms or 0))
     target = str(target_id or "").strip() or _mapping_text(templates, "default_task_target")
@@ -435,7 +441,7 @@ def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: st
 
 
 def render_quick_gateway_realign_text(*, sender_name: str | None = None, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL") -> str:
-    templates = _load_template_mapping("surface_reply.runtime_texts")
+    templates = _load_static_prompt_spec("surface_reply.runtime_texts")
     clean_sender = str(sender_name or "").strip()
     text = _mapping_text(templates, "quick_realign_notice", sender_name=clean_sender)
     if not str(text or "").strip():
@@ -779,9 +785,9 @@ def _build_surface_reply_fallback(*, user_message: str, sub_agent_ctx: SurfaceSu
 
 
 def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
-    templates = _load_template_mapping("surface_reply.capabilities.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.capabilities.reply_templates")
     try:
-        from host_brain.app.dependencies import get_skill_registry
+        from host_brain.composition.process_services import get_skill_registry
         from host_brain.app.agents.tool_registry import get_tools_for_agent
         from host_brain.app.sub_agent_protocol import get_agent_capabilities
         registry = get_skill_registry()
@@ -841,7 +847,7 @@ def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, ren
     if raw in ("0", "false", "no", "off"):
         return False
     try:
-        from host_brain.app.dependencies import get_reflection_chain
+        from host_brain.composition.process_services import get_reflection_chain
         reflection = get_reflection_chain()
         return bool(reflection.should_reflect(emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""), intent=str((bond_summary or {}).get("intent") or ""), bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"), turn_count=int((emotion_context or {}).get("turn_count") or 1)))
     except Exception:
@@ -869,7 +875,7 @@ def _normalize_plan_step_description(description: str, *, render_target_lang: st
 
 
 def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: str = "zh") -> str:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     success_templates = _mapping_section(templates, "step_success", render_target_lang=render_target_lang)
     step_index = int(step.get("step_index") or 0)
     target_id = str(step.get("target_id") or _runtime_text("default_step_target", render_target_lang=render_target_lang)).strip()
@@ -904,7 +910,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
 
 
 def _render_plan_step_failure_cn(step: Dict[str, Any], *, render_target_lang: str = "zh") -> str:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     failure_templates = _mapping_section(templates, "step_failure", render_target_lang=render_target_lang)
     step_index = int(step.get("step_index") or 0)
     target_id = str(step.get("target_id") or _runtime_text("default_step_target", render_target_lang=render_target_lang)).strip()
@@ -920,7 +926,7 @@ def _render_plan_step_failure_cn(step: Dict[str, Any], *, render_target_lang: st
 
 
 def _build_plan_execution_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.plan_execution.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.plan_execution.reply_templates")
     summary_templates = _mapping_section(templates, "summary", render_target_lang=render_target_lang)
     payload = dict(ctx.payload or {})
     steps = list(payload.get("steps") or [])
@@ -964,7 +970,7 @@ def _format_hub_skill_name_list_cn(values: list[Any], *, limit: int = 6, render_
 
 
 def _build_hub_skill_install_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
@@ -1001,7 +1007,7 @@ def _build_hub_skill_install_reply_cn(ctx: SurfaceSubAgentContext, *, render_tar
 
 
 def _build_hub_skill_search_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     skills = list(detail.get("skills") or [])
@@ -1038,7 +1044,7 @@ def _build_hub_skill_search_reply_cn(ctx: SurfaceSubAgentContext, *, render_targ
 
 
 def _build_hub_skill_list_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     skills = list(detail.get("skills") or [])
@@ -1053,7 +1059,7 @@ def _build_hub_skill_list_reply_cn(ctx: SurfaceSubAgentContext, *, render_target
 
 
 def _build_hub_skill_remove_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_template_mapping("surface_reply.hub_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
@@ -1087,7 +1093,7 @@ def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     normalized = str(task_text or "").strip()
     if not normalized:
         return _mapping_text(
-            _load_template_mapping("surface_reply.system_skill.reply_templates"),
+            _load_static_prompt_spec("surface_reply.system_skill.reply_templates"),
             "default_app_name",
             render_target_lang=render_target_lang,
         )
@@ -1096,7 +1102,7 @@ def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     normalized = re.sub(r"(打开|启动|运行|launch|open)", "", normalized, flags=re.IGNORECASE)
     normalized = normalized.strip("，。；！？,.!? ：:　 ")
     return normalized or _mapping_text(
-        _load_template_mapping("surface_reply.system_skill.reply_templates"),
+        _load_static_prompt_spec("surface_reply.system_skill.reply_templates"),
         "default_app_name",
         render_target_lang=render_target_lang,
     )
@@ -1483,7 +1489,7 @@ def _build_system_skill_reply(ctx: SurfaceSubAgentContext, *, render_target_lang
         return _build_network_status_reply(ctx, render_target_lang=render_target_lang)
     if agent_id != "open_app":
         return None
-    templates = _load_template_mapping("surface_reply.system_skill.reply_templates")
+    templates = _load_static_prompt_spec("surface_reply.system_skill.reply_templates")
     payload = dict(ctx.payload or {})
     result = dict(payload.get("result") or {})
     detail_source = result.get("detail") or payload.get("detail") or result

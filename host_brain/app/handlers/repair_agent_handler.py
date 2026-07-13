@@ -11,7 +11,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_protocol import AGENT_REPAIR
 from host_brain.core.trace_redaction import build_public_agent_output, redact_legacy_trace_payload
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
@@ -20,7 +20,7 @@ _logger = logging.getLogger(__name__)
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -190,11 +190,13 @@ def _build_repair_planner_user_prompt(task_text: str, previous_error: str) -> st
 def _call_repair_planner_llm(task_text: str, previous_error: str) -> dict[str, Any] | None:
     try:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import REPAIR_AGENT_PLAN_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         user_prompt = _build_repair_planner_user_prompt(task_text=task_text, previous_error=previous_error)
         result = complete_compiled_prompt_sync(
+            attempt_service=get_model_attempt_service(),
             prompt_id=REPAIR_AGENT_PLAN_PROMPT_ID,
             request_id=f"repair-planner::{int(time.time() * 1000)}",
             scene_type="REPAIR_PLANNER",

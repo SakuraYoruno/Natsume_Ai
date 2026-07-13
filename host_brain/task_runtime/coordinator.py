@@ -119,7 +119,7 @@ class AdmittedExecution:
                 "ExecutorAssignment belongs to a different WorkOrder",
             )
         executor = _enum_text(assignment.executor)
-        if executor not in {TaskExecutor.CANONICAL.value, TaskExecutor.LEGACY.value}:
+        if executor != TaskExecutor.CANONICAL.value:
             raise GovernedRuntimeError(GOVERNED_ASSIGNMENT_CONFLICT, "unsupported executor")
         reservation_seed = "\n".join(
             (
@@ -167,7 +167,7 @@ class AdmittedExecution:
                 GOVERNED_ADMISSION_INVALID,
                 "admitted execution identity is incomplete",
             )
-        if self.executor not in {TaskExecutor.CANONICAL.value, TaskExecutor.LEGACY.value}:
+        if self.executor != TaskExecutor.CANONICAL.value:
             raise GovernedRuntimeError(GOVERNED_ASSIGNMENT_CONFLICT, "executor is not frozen")
 
 

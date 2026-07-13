@@ -4,16 +4,17 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.model_attempt_port import complete_compiled_model
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.tribe.model_invocation import complete_tribe_compiled
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime import HIPPOCAMPUS_RECALL_PROMPT_ID
 from host_brain.persona.identity import is_reserved_persona_self_id
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 def _load_recall_association_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("hippocampus.recall_association.prompt")
+    raw = resolve_prompt_contract_json("hippocampus.recall_association.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -44,6 +45,7 @@ def _clean_person_id(value: Any, *, fallback: str) -> str:
 
 @dataclass(slots=True)
 class HippocampusAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="hippocampus_agent",
@@ -135,7 +137,8 @@ class HippocampusAgent:
             snippets="\n".join(snippets),
         )
         try:
-            completion = await complete_compiled_model(
+            completion = await complete_tribe_compiled(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 prompt_id=HIPPOCAMPUS_RECALL_PROMPT_ID,
                 messages=(
                     {"role": "system", "content": system_prompt},
@@ -179,7 +182,7 @@ class HippocampusAgent:
         max_items: int = 10,
         snippet_limit: int = 240,
     ) -> list[dict[str, Any]]:
-        from host_brain.app.prompt_builder import _truncate_for_prompt  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_builder_utils import _truncate_for_prompt  # noqa: PLC0415
 
         query_plan_raw = retrieval_summary.get("query_plan")
         query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
@@ -299,7 +302,7 @@ class HippocampusAgent:
         hippocampus_agent 命名空间快照，供诊断端点查询。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
@@ -423,10 +426,9 @@ class HippocampusAgent:
         payload: Mapping[str, Any],
         request_id: str = "",
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_state_write_arbiter  # noqa: PLC0415
-        from host_brain.app.memory.state_write_arbiter import StateScope  # noqa: PLC0415
+        from host_brain.memory.state_write_contract import StateScope  # noqa: PLC0415
 
-        arbiter = get_state_write_arbiter()
+        arbiter = self.application_ports.require("state_write_arbiter")()
         result = arbiter.write(
             scope=StateScope.MEMORY_STATE,
             writer_agent_id=str(writer_agent_id or "").strip(),
@@ -760,4 +762,3 @@ from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: 
 from host_brain.tribe.immune_agent import get_immune_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
-from host_brain.app.dependencies import get_state_write_arbiter  # noqa: E402, F401

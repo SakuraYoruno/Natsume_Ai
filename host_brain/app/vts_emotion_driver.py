@@ -15,7 +15,7 @@ import re
 import time
 from typing import Any, Dict
 
-from host_brain.app.dependencies import get_ledger
+from host_brain.composition.process_services import get_ledger
 from host_brain.channels.embodiment import submit_avatar_command
 from host_brain.channels.vts_rate_limiter import VTSRateLimiter
 from natsume_contracts.edge.v1 import now_ms

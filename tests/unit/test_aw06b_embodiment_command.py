@@ -6,6 +6,7 @@ from edge_client.gateway.embodiment_runtime import (
     DurableEmbodimentRuntime,
     SQLiteEdgeEmbodimentStore,
 )
+from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
 from edge_client.app.schemas import EdgeRpcEnvelope
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_COMMAND_EXPIRED,
@@ -15,7 +16,6 @@ from natsume_contracts.edge.embodiment_v1 import (
 )
 from natsume_contracts.edge.transport_v1 import bind_command_to_lease
 from host_brain.channels.embodiment import (
-    configure_embodiment_command_port,
     submit_voice_command,
 )
 
@@ -54,7 +54,9 @@ def test_edge_executes_idempotent_physical_command_once(monkeypatch, tmp_path) -
         request_id="req-1",
         issued_at_ms=1_000,
     )
-    store = SQLiteEdgeEmbodimentStore(tmp_path / "edge.sqlite3", clock=lambda: 1_100)
+    db_path = tmp_path / "edge.sqlite3"
+    apply_edge_gateway_migrations(db_path)
+    store = SQLiteEdgeEmbodimentStore(db_path, clock=lambda: 1_100)
     lease = store.open_session(session_id="host", owner_id="host", ttl_ms=10_000)
     command = bind_command_to_lease(command, lease)
     transport = DurableEmbodimentRuntime(store)
@@ -90,7 +92,9 @@ def test_edge_rejects_expired_command_without_device_effect(monkeypatch, tmp_pat
         request_id="req-expired",
         issued_at_ms=1_000,
     )
-    store = SQLiteEdgeEmbodimentStore(tmp_path / "edge.sqlite3", clock=lambda: 2_001)
+    db_path = tmp_path / "edge.sqlite3"
+    apply_edge_gateway_migrations(db_path)
+    store = SQLiteEdgeEmbodimentStore(db_path, clock=lambda: 2_001)
     lease = store.open_session(session_id="host", owner_id="host", ttl_ms=10_000)
     command = bind_command_to_lease(command, lease)
     result = _handle_embodiment_command(
@@ -119,19 +123,16 @@ def test_host_authors_metadata_and_only_submits_to_port() -> None:
                 received_at_ms=command.issued_at_ms,
             )
 
-    configure_embodiment_command_port(_Port())
-    try:
-        receipt = asyncio.run(
-            submit_voice_command(
-                action="speak",
-                payload={"text": "hello"},
-                request_id="req-host-port",
-                grant_ref="grant://test/voice",
-                idempotency_key="voice-command-1",
-            )
+    receipt = asyncio.run(
+        submit_voice_command(
+            action="speak",
+            payload={"text": "hello"},
+            request_id="req-host-port",
+            grant_ref="grant://test/voice",
+            idempotency_key="voice-command-1",
+            command_port=_Port(),
         )
-    finally:
-        configure_embodiment_command_port(None)
+    )
 
     assert receipt.success is True
     assert len(captured) == 1

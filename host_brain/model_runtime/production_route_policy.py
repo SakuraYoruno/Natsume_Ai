@@ -113,10 +113,14 @@ _TIER_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
     },
 }
 
-_SERVER_ROUTE_CATALOG = ServerRouteCatalog(
-    generation_by_prompt=_PROMPT_GENERATION_PARAMETERS,
-    generation_by_scene=_SCENE_GENERATION_PARAMETERS,
-)
+
+def build_production_server_route_catalog() -> ServerRouteCatalog:
+    """Build the server-owned catalog installed by production composition."""
+
+    return ServerRouteCatalog(
+        generation_by_prompt=_PROMPT_GENERATION_PARAMETERS,
+        generation_by_scene=_SCENE_GENERATION_PARAMETERS,
+    )
 
 
 def _required_text(runtime: Mapping[str, Any], *names: str) -> str:
@@ -301,19 +305,10 @@ def build_production_route_policy(
     return StaticRoutePolicy(default, decisions=decisions)
 
 
-async def _default_runtime_resolver(
-    request: ModelAttemptRequest,
-    prompt: RenderedPrompt,
-) -> Mapping[str, Any]:
-    return _SERVER_ROUTE_CATALOG.resolve(
-        scene_type=request.scene_type,
-        cognitive_tier=request.cognitive_tier,
-        prompt_id=prompt.prompt_id,
-    )
-
-
 def build_server_owned_production_route_policy(
     runtime_resolver: ProductionRuntimeResolver | None = None,
+    *,
+    route_catalog: ServerRouteCatalog | None = None,
 ) -> CallableRoutePolicy:
     """Resolve one secret-free route from current server configuration.
 
@@ -322,7 +317,21 @@ def build_server_owned_production_route_policy(
     frozen target and remain owned by ``ModelAttemptService``.
     """
 
-    resolver = runtime_resolver or _default_runtime_resolver
+    if runtime_resolver is not None and route_catalog is not None:
+        raise ValueError("provide runtime_resolver or route_catalog, not both")
+    catalog = route_catalog or build_production_server_route_catalog()
+
+    async def _catalog_resolver(
+        request: ModelAttemptRequest,
+        prompt: RenderedPrompt,
+    ) -> Mapping[str, Any]:
+        return catalog.resolve(
+            scene_type=request.scene_type,
+            cognitive_tier=request.cognitive_tier,
+            prompt_id=prompt.prompt_id,
+        )
+
+    resolver = runtime_resolver or _catalog_resolver
 
     async def _resolve(
         request: ModelAttemptRequest,
@@ -348,6 +357,7 @@ def build_server_owned_production_route_policy(
 
 __all__ = [
     "ProductionRuntimeResolver",
+    "build_production_server_route_catalog",
     "build_production_route_policy",
     "build_server_owned_production_route_policy",
     "route_decision_from_graph_runtime",

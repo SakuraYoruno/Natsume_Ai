@@ -102,42 +102,48 @@ class TestIntentEngineInjectionM44(unittest.TestCase):
 
     def setUp(self) -> None:
         # 重置全局单例，确保测试隔离
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
+        import host_brain.composition.process_services as dep
+        from host_brain.audit.sqlite_ledger import SQLiteLedger
+        dep.get_process_service_container().intent_engine = None
+        dep.get_process_service_container().skill_registry = None
+        dep.get_process_service_container().policy_cache = None
+        dep.get_process_service_container().ledger = SQLiteLedger(":memory:")
 
     def tearDown(self) -> None:
         # 清理全局单例
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
+        import host_brain.composition.process_services as dep
+        dep.get_process_service_container().intent_engine = None
+        dep.get_process_service_container().skill_registry = None
+        dep.get_process_service_container().policy_cache = None
+        ledger = dep.get_process_service_container().ledger
+        if ledger is not None:
+            ledger.close()
+        dep.get_process_service_container().ledger = None
 
     def test_get_intent_engine_has_registry(self) -> None:
         """T-TG-RT-01：get_intent_engine() 返回的 IntentDecisionEngine 实例的 _registry 不为 None。"""
-        from host_brain.app.dependencies import get_intent_engine
+        from host_brain.composition.process_services import get_intent_engine
         engine = get_intent_engine()
         self.assertIsNotNone(engine._registry)
         self.assertIsInstance(engine._registry, SkillRegistry)
 
     def test_get_intent_engine_has_policy_cache(self) -> None:
         """T-TG-RT-02：get_intent_engine() 返回的实例的 _policy_cache 不为 None。"""
-        from host_brain.app.dependencies import get_intent_engine
+        from host_brain.composition.process_services import get_intent_engine
         engine = get_intent_engine()
         self.assertIsNotNone(engine._policy_cache)
         self.assertIsInstance(engine._policy_cache, GovernorPolicyCache)
 
     def test_get_intent_engine_is_singleton(self) -> None:
         """T-TG-RT-03：get_intent_engine() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.dependencies import get_intent_engine
+        from host_brain.composition.process_services import get_intent_engine
         engine1 = get_intent_engine()
         engine2 = get_intent_engine()
         self.assertIs(engine1, engine2)
 
     def test_get_skill_registry_contains_builtin_skills(self) -> None:
         """T-TG-RT-04：get_skill_registry() 返回的 SkillRegistry 包含内置 Skill。"""
-        from host_brain.app.dependencies import get_skill_registry
+        from host_brain.composition.process_services import get_skill_registry
         registry = get_skill_registry()
         names = registry.list_skill_names()
         self.assertIn("narrative_only", names)
@@ -147,14 +153,14 @@ class TestIntentEngineInjectionM44(unittest.TestCase):
 
     def test_get_policy_cache_is_singleton(self) -> None:
         """get_policy_cache() 多次调用返回同一实例（单例）。"""
-        from host_brain.app.dependencies import get_policy_cache
+        from host_brain.composition.process_services import get_policy_cache
         cache1 = get_policy_cache()
         cache2 = get_policy_cache()
         self.assertIs(cache1, cache2)
 
     def test_get_policy_cache_has_correct_ttl(self) -> None:
         """get_policy_cache() 返回的 GovernorPolicyCache TTL=60_000ms。"""
-        from host_brain.app.dependencies import get_policy_cache
+        from host_brain.composition.process_services import get_policy_cache
         cache = get_policy_cache()
         self.assertEqual(60_000, cache._ttl_ms)
 
@@ -231,25 +237,29 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
 
     def setUp(self) -> None:
         import os
-        import host_brain.app.dependencies as dep
+        import host_brain.composition.process_services as dep
+        from host_brain.audit.sqlite_ledger import SQLiteLedger
         os.environ["Natsume_AUDIT_DB"] = ":memory:"
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None  # 重置 ledger，避免 seq 记录污染
+        dep.get_process_service_container().intent_engine = None
+        dep.get_process_service_container().skill_registry = None
+        dep.get_process_service_container().policy_cache = None
+        dep.get_process_service_container().ledger = SQLiteLedger(":memory:")
 
     def tearDown(self) -> None:
         import os
-        import host_brain.app.dependencies as dep
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None  # 清理 ledger
+        import host_brain.composition.process_services as dep
+        dep.get_process_service_container().intent_engine = None
+        dep.get_process_service_container().skill_registry = None
+        dep.get_process_service_container().policy_cache = None
+        ledger = dep.get_process_service_container().ledger
+        if ledger is not None:
+            ledger.close()
+        dep.get_process_service_container().ledger = None
         os.environ.pop("Natsume_AUDIT_DB", None)
 
     def test_narrative_only_uses_cache_or_rule_tier(self) -> None:
         """narrative_only 请求应走 CACHE 或 RULE 通道（不走 FULL 通道）。"""
-        from host_brain.app.dependencies import get_intent_engine
+        from host_brain.composition.process_services import get_intent_engine
         from host_brain.core.ids import now_ms
 
         engine = get_intent_engine()
@@ -281,7 +291,7 @@ class TestTieredGovernanceEndToEndM44(unittest.TestCase):
 
     def test_second_narrative_only_hits_cache(self) -> None:
         """第二次 narrative_only 请求应命中 Policy Cache，走 CACHE 通道。"""
-        from host_brain.app.dependencies import get_intent_engine
+        from host_brain.composition.process_services import get_intent_engine
         from host_brain.core.ids import now_ms
 
         engine = get_intent_engine()

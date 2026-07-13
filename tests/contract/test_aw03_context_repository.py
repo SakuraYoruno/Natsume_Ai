@@ -4,11 +4,10 @@ import hashlib
 from pathlib import Path
 import pytest
 
-from host_brain.app.context.tactic_ledger import SessionTacticLedgerStore
-from host_brain.app.context.topic_ledger import SessionTopicLedgerStore
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
 from host_brain.app.context.topic_state import SessionTopicStateStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.conversation.store import TurnStore
 from host_brain.persistence.context_repository import (
     CONTEXT_MIGRATION_ASSET_KEY,
     CONTEXT_MIGRATION_SHA256,
@@ -83,50 +82,45 @@ def test_aw03_context_migration_is_catalogued_and_checksum_frozen(tmp_path: Path
     assert error.value.reason_code == CONTEXT_SCHEMA_NOT_READY
 
 
-def test_aw03_durable_compatibility_stores_use_repository_not_ledger_connection(
+def test_aw03_durable_context_repository_avoids_ledger_connection(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
     ledger = DurableLedgerReference(db_path)
-    store = TurnStore(ledger)  # type: ignore[arg-type]
+    store = ContextRepository.from_ledger(ledger)
 
-    first = store.append_generated(
-        session_id="session-1",
-        person_id="person-1",
-        request_id="request-1",
-        role="user",
-        content="first",
-        ts_ms=NOW,
-    )
-    replay = store.append_generated(
-        session_id="session-1",
-        person_id="person-1",
-        request_id="request-1",
-        role="user",
-        content="first",
-        ts_ms=NOW,
-    )
-    assert replay.turn_id == first.turn_id
-    assert replay.content == "first"
+    turn = {
+        "turn_id": "turn::request-1::user",
+        "session_id": "session-1",
+        "person_id": "person-1",
+        "request_id": "request-1",
+        "role": "user",
+        "content": "first",
+        "ts_ms": NOW,
+        "lang": "en",
+    }
+    first = store.append_generated_turn(turn)
+    replay = store.append_generated_turn(turn)
+    assert replay["turn_id"] == first["turn_id"]
+    assert replay["content"] == "first"
 
     with pytest.raises(ContextRepositoryError) as conflict:
-        store.append_generated(
-            session_id="session-1",
-            person_id="person-1",
-            request_id="request-1",
-            role="user",
-            content="conflicting replay body",
-            ts_ms=NOW + 1,
+        store.append_generated_turn(
+            {
+                **turn,
+                "content": "conflicting replay body",
+                "ts_ms": NOW + 1,
+            }
         )
 
     assert conflict.value.reason_code == "CONTEXT_RECORD_CONFLICT"
-    canonical = store.find_by_request(
+    canonical = store.find_turn(
         session_id="session-1",
         request_id="request-1",
         role="user",
     )
     assert canonical is not None
-    assert canonical.content == "first"
+    assert canonical["content"] == "first"
     assert store.next_turn_index(session_id="session-1") == 1
 
 
@@ -185,7 +179,6 @@ def test_aw03_tactic_store_uses_semantic_repository_uow(tmp_path: Path) -> None:
 
 def test_aw03_context_compatibility_files_have_no_private_sqlite_access() -> None:
     files = (
-        ROOT / "host_brain" / "conversation" / "store.py",
         ROOT / "host_brain" / "app" / "context" / "topic_ledger.py",
         ROOT / "host_brain" / "app" / "context" / "topic_state.py",
         ROOT / "host_brain" / "app" / "context" / "tactic_ledger.py",
@@ -195,3 +188,4 @@ def test_aw03_context_compatibility_files_have_no_private_sqlite_access() -> Non
         source = path.read_text(encoding="utf-8")
         for token in forbidden:
             assert token not in source, f"{path.name} still contains {token}"
+    assert not (ROOT / "host_brain" / "conversation" / "store.py").exists()

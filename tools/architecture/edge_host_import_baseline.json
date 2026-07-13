@@ -2,16 +2,8 @@
   "schema_version": 1,
   "policy_id": "TASK-0493_EDGE_CONTRACTS_ONLY",
   "baseline_commit": "840680d18f21c8b3c2d42668bd06129e440d63af",
-  "expected_fingerprints": [
-    "HOST_TO_EDGE|host_brain/agent_runtime/__init__.py|function:__getattr__|eager|dynamic_risk|edge_client.__dynamic_risk__|sha256:8fa9c718451971e69d08c53c6751211de2f5c4344a5841c559fe604c23ff9e64|1",
-    "HOST_TO_EDGE|host_brain/app/http_hooks.py|function:runtime_lifespan/async_function:_lifespan|try/try/for/try|dynamic_risk|edge_client.__dynamic_risk__|sha256:3028a510e0cfe636749ddb9d25493196b263c6521cd454e9a030da36a91736cb|1",
-    "HOST_TO_EDGE|host_brain/app/obs_routes_health.py|function:get_organ_tribe_status|for/try|dynamic_risk|edge_client.__dynamic_risk__|sha256:61d8638fff340cf9d7a8f874ee6077c32a2bc70b8fbb09d742f5cc1b0c0b47ea|1",
-    "HOST_TO_EDGE|host_brain/pentest/phase3_vuln.py|function:_import_scanner|eager|dynamic_risk|edge_client.__dynamic_risk__|sha256:55e7a2a6c25f8e25a4f49d742a59e4b8b18082d03d58d4ad1749e1b62964c9db|1",
-    "HOST_TO_EDGE|host_brain/persistence/__init__.py|function:__getattr__|eager|dynamic_risk|edge_client.__dynamic_risk__|sha256:82104d604921fa99f76c3e0b9ffcecfb375dea62c449504491f51633a1b28770|1",
-    "HOST_TO_EDGE|host_brain/skills/custom_provider_installer.py|function:validate_provider_source|try|dynamic_risk|edge_client.__dynamic_risk__|sha256:2ae6af88f6e8951a30d2d9da37376e66e8f3ed1062e7bcd2c7ff62cc627fd829|1",
-    "HOST_TO_EDGE|host_brain/skills/provider_catalog.py|class:SkillProviderSpec/function:instantiate|eager|dynamic_risk|edge_client.__dynamic_risk__|sha256:44d2b1155ddf6a4465e3feb95ea100b70adf7f8bd1f81bf5e55c726c9e5032db|1"
-  ],
-  "fingerprints_sha256": "sha256:c7911197b99c1ede561751675a20ee299fe8c9e179afa7306de02c469525963b",
+  "expected_fingerprints": [],
+  "fingerprints_sha256": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "migration_manifest": "edge_host_import_migration.json",
-  "migration_sha256": "sha256:13122be5d6e47468adb4a6f5f7fffd3adb575af1ceabd52c91193f7c8bafabf4"
+  "migration_sha256": "sha256:fef731e770556125f58fabf04315d8ba6c4f8c8d3a649038f5feef49367adf39"
 }

@@ -688,41 +688,9 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
 
 
 def _load_api_key_from_runtime_profiles(provider_name: str) -> str | None:
-    provider = str(provider_name or "").strip().lower()
-    if not provider:
-        return None
-    if provider == PROVIDER_GEMINI:
-        try:
-            from host_brain.app.model_router import resolve_gemini_api_key  # noqa: PLC0415
-
-            gemini_key = resolve_gemini_api_key()
-            if gemini_key:
-                return str(gemini_key or "").strip() or None
-        except Exception:
-            pass
-    try:
-        from host_brain.app import config as host_config  # noqa: PLC0415
-        from host_brain.core.key_profiles import resolve_secret_from_profiles  # noqa: PLC0415
-
-        profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
-            env=os.environ,
-            key_profiles=None,
-            secret_store=None,
-            node_id=None,
-            current_epoch=None,
-        )
-        resolved = resolve_secret_from_profiles(
-            provider=provider,
-            node_id=node_id,
-            scope=str(os.environ.get("HOST_LLM_KEY_PROFILE_SCOPE") or "host.llm").strip().lower() or "host.llm",
-            key_profiles=profiles,
-            secret_store=secret_store,
-            current_epoch=current_epoch,
-        )
-        if resolved.success:
-            return str(resolved.secret_value or "").strip() or None
-    except Exception:
-        return None
+    # Vault/profile resolution belongs to the application composition adapter.
+    # Legacy pool callers receive only already-resolved credentials or env keys.
+    del provider_name
     return None
 
 
@@ -1065,22 +1033,17 @@ def _build_langchain_messages(messages: list[Mapping[str, Any]]) -> list[Any]:
 
 
 def _extract_text_from_response_content(content: Any) -> str:
-    try:
-        from host_brain.app.prompt_builder import extract_langchain_content_text  # noqa: PLC0415
-
-        return str(extract_langchain_content_text(content) or "").strip()
-    except Exception:
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, Mapping):
-                    text = str(item.get("text") or item.get("content") or "").strip()
-                    if text:
-                        parts.append(text)
-            return "\n".join(parts).strip()
-        return str(content or "").strip()
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, Mapping):
+                text = str(item.get("text") or item.get("content") or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    return str(content or "").strip()
 
 
 def _build_chat_openai_kwargs(
@@ -1709,12 +1672,13 @@ def _log_llm_pool_call(
     content: Any = "",
     token_usage: Mapping[str, Any] | None = None,
     ts_ms: int | None = None,
+    ledger: Any = None,
 ) -> None:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
         from host_brain.observability.token_usage import build_llm_token_usage_row  # noqa: PLC0415
 
-        ledger = get_ledger()
+        if ledger is None:
+            return
         ts_value = int(ts_ms if ts_ms is not None else _now_ms())
         attempts_payload = [
             {

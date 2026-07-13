@@ -36,7 +36,7 @@ from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.agent_runtime.artifact_store import sanitize_segment
 from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
-from host_brain.observability.process_state_projection import (
+from host_brain.app.observability_runtime.process_state_projection import (
     BIO_OPS_KIND,
     BIO_OPS_LATEST_KEY,
     BIO_OPS_MAX_AGE_MS,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from host_brain.channels import edge_rpc_client
+from host_brain.channels import edge_transport
 from host_brain.channels.embodiment import (
     EdgeRpcEmbodimentCommandPort,
     build_host_embodiment_command,
@@ -59,7 +59,7 @@ def test_host_port_handshakes_binds_fence_and_reuses_live_lease(monkeypatch) -> 
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    monkeypatch.setattr(edge_rpc_client, "_post_to_edge", fake_post_to_edge)
+    monkeypatch.setattr(edge_transport, "submit_edge_request", fake_post_to_edge)
     port = EdgeRpcEmbodimentCommandPort()
     first = asyncio.run(
         port.submit(
@@ -97,7 +97,7 @@ def test_host_port_fails_closed_when_session_handshake_is_unavailable(monkeypatc
             detail="another Host session owns the Edge lease",
         )
 
-    monkeypatch.setattr(edge_rpc_client, "_post_to_edge", fake_post_to_edge)
+    monkeypatch.setattr(edge_transport, "submit_edge_request", fake_post_to_edge)
     receipt = asyncio.run(
         EdgeRpcEmbodimentCommandPort().submit(
             build_host_embodiment_command(
@@ -142,7 +142,7 @@ def test_host_port_renews_near_expiry_with_exact_reconnect_credentials(monkeypat
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    monkeypatch.setattr(edge_rpc_client, "_post_to_edge", fake_post_to_edge)
+    monkeypatch.setattr(edge_transport, "submit_edge_request", fake_post_to_edge)
     port = EdgeRpcEmbodimentCommandPort()
     asyncio.run(port.submit(build_host_embodiment_command(kind="voice", action="speak", payload={"text": "one"})))
     clock["value"] = first_lease.expires_at_ms - 4_000
@@ -176,7 +176,7 @@ def test_host_session_handshake_serializes_across_event_loops(monkeypatch) -> No
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    monkeypatch.setattr(edge_rpc_client, "_post_to_edge", fake_post_to_edge)
+    monkeypatch.setattr(edge_transport, "submit_edge_request", fake_post_to_edge)
 
     def submit(index: int):
         return asyncio.run(

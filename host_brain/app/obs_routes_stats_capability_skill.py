@@ -32,13 +32,13 @@ from host_brain.app.obs_routes_core import (
     _now_ms,
     _safe_json,
 )
-from host_brain.observability.remaining_query_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
     AGENT_LOOP_INDEX_KEY,
     AGENT_LOOP_KIND,
     read,
     response_meta,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 _PROMPT_BUILDER_STATS_CACHE_TTL_MS = _env_int("OBS_PROMPT_BUILDER_STATS_CACHE_TTL_MS", 5000, minimum=0)

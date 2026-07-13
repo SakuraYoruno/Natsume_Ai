@@ -11,7 +11,7 @@ import time
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.digital_life.contracts import LifeCommand, LifeCommandStatus
+from natsume_contracts.life import LifeCommand, LifeCommandStatus
 from host_brain.digital_life.outbox import LifeOutboxDispatcher
 from host_brain.digital_life.projection import LifeProjectionDispatcher
 from host_brain.digital_life.reader import LifeSnapshotReader

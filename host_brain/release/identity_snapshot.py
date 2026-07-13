@@ -18,11 +18,11 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     ContractViolation,
 )
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
     ReviewResumePhase,
     ReviewStatus,

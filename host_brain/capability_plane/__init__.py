@@ -16,6 +16,10 @@ from .journal import (
     InMemoryCapabilityExecutionJournal,
     SQLiteCapabilityExecutionJournal,
 )
+from .production_composition import (
+    CapabilityRuntimeComposition,
+    build_production_capability_runtime,
+)
 
 __all__ = [
     "CapabilityAttempt",
@@ -27,8 +31,10 @@ __all__ = [
     "CapabilityKind",
     "CapabilityReceipt",
     "CapabilityRequest",
+    "CapabilityRuntimeComposition",
     "GrantDecision",
     "InMemoryCapabilityExecutionJournal",
     "ReceiptStatus",
     "SQLiteCapabilityExecutionJournal",
+    "build_production_capability_runtime",
 ]

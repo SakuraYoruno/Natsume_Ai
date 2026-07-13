@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.observability.remaining_query_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
     AGENT_LOOP_INDEX_KEY,
     AGENT_LOOP_KIND,
     RESIDENT_CONTEXT_INDEX_KEY,
@@ -22,7 +22,7 @@ from host_brain.observability.remaining_query_projection import (
     read,
     response_meta,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 

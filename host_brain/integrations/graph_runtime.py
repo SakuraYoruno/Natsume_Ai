@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.app.chat_runtime_input import (
+from host_brain.integrations.chat_runtime_contract import (
     get_chat_runtime_emotion_state,
     get_chat_runtime_graph,
 )
@@ -106,12 +106,14 @@ class GraphRuntimeContract:
         default_timeout_ms: int = 5_000,
         gateway_factory: GatewayFactory | None = None,
         model_plane_dir: str | Path | None = None,
+        model_attempt_service: Any = None,
     ) -> None:
         self.ledger = ledger
         self.default_timeout_ms = int(default_timeout_ms)
         self._handlers: dict[str, NodeHandler] = {}
         self._gateway_factory = gateway_factory or self._default_gateway_factory
         self._model_plane_dir = Path(model_plane_dir) if model_plane_dir is not None else DEFAULT_MODEL_PLANE_DIR
+        self._model_attempt_service = model_attempt_service
         self._policy_guard = HostPolicyGuard()
         # FIX-4.1：获取 GovernorRulesCache 单例（TRIBE 族 → Governor 参数通道）
         self._governor_rules_cache: GovernorRulesCache = get_governor_rules_cache()
@@ -191,6 +193,7 @@ class GraphRuntimeContract:
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
             model_nodes=model_nodes,
+            model_attempt_service=self._model_attempt_service,
         )
         compiled = executor.compile_runtime_graph()
         serialized_model_nodes = _sanitize_model_nodes_for_state(model_nodes)
@@ -497,6 +500,7 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
+            model_attempt_service=self._model_attempt_service,
         )
         compiled = executor.compile_runtime_graph()
         # FIX-5.1：传 None 作为 input，LangGraph 从 thread_id 对应的 checkpoint 恢复
@@ -596,35 +600,38 @@ class GraphRuntimeContract:
             pass  # 静默降级，不影响主流程
 
     def _write_evidence(self, *, request_id: str, state: Any) -> None:
-        """M36-F：图执行完成后写入 Evidence Plane（静默降级）。"""
+        """Persist graph evidence through the composition-owned typed repository."""
         try:
-            from host_brain.integrations.graph_evidence import get_evidence_plane
-            ep = get_evidence_plane()
+            from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+                GraphEvidenceRepository,
+            )
+
+            repository = GraphEvidenceRepository.from_ledger(self.ledger)
             graph_id = str((state or {}).get("graph_id") or "")
             # 写入 trace
             trace = list((state or {}).get("trace") or [])
             if trace:
-                ep.write_trace(request_id=request_id, graph_id=graph_id, trace=trace)
+                repository.append_traces(request_id=request_id, graph_id=graph_id, trace=trace)
             # 写入 subgraph_commit_summary
             summary = ((state or {}).get("payload") or {}).get("subgraph_commit_summary")
             if summary:
-                ep.write_subgraph_summary(request_id=request_id, summary=summary)
+                repository.append_subgraph_summary(request_id=request_id, summary=summary)
             # 写入 clock_events
             clock_events = list((state or {}).get("clock_events") or [])
             if clock_events:
-                ep.write_clock_events(request_id=request_id, graph_id=graph_id, clock_events=clock_events)
+                repository.append_clock_events(request_id=request_id, graph_id=graph_id, events=clock_events)
             # M37-L：写入 branch_manifest
             branch_manifest = (state or {}).get("branch_manifest")
             if branch_manifest:
-                ep.write_branch_manifest(request_id=request_id, graph_id=graph_id, manifest=branch_manifest)
+                repository.append_branch_manifest(request_id=request_id, graph_id=graph_id, manifest=branch_manifest)
             # M38-I：写入 streaming 事件
             presence_events = list((state or {}).get("presence_events") or [])
             if presence_events:
-                ep.write_stream_events(request_id=request_id, graph_id=graph_id, events=presence_events)
+                repository.append_stream_events(request_id=request_id, graph_id=graph_id, events=presence_events)
             # M39-H：写入 checkpoint 信息
             gov_checkpoint_id = str((state or {}).get("gov_checkpoint_id") or "").strip()
             if gov_checkpoint_id:
-                ep.write_checkpoint(
+                repository.save_checkpoint(
                     checkpoint_id=gov_checkpoint_id,
                     request_id=request_id,
                     graph_id=graph_id,
@@ -634,10 +641,10 @@ class GraphRuntimeContract:
             # M40-I：写入 barrier_join 结果
             barrier_join_result = (state or {}).get("barrier_join_result")
             if barrier_join_result and isinstance(barrier_join_result, dict):
-                ep.write_barrier_join(
+                repository.append_barrier_join(
                     request_id=request_id,
                     graph_id=graph_id,
-                    barrier_join_result=barrier_join_result,
+                    result=barrier_join_result,
                 )
         except Exception:
             pass  # 静默降级，不影响主流程

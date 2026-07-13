@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.relational_chat_detector import (
+from host_brain.persona.relational_chat import (
     build_relational_chat_reason_code,
     detect_relational_chat_topic,
     is_relational_chat_message,

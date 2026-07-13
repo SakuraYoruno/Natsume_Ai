@@ -23,9 +23,6 @@ logger = logging.getLogger("Natsume.edge.gateway.delivery_runtime")
 
 GATEWAY_TRANSPORT_MODE_ENV = "EDGE_GATEWAY_TRANSPORT_MODE"
 GATEWAY_ACCEPT_NEW_INTAKE_ENV = "EDGE_GATEWAY_ACCEPT_NEW_INTAKE"
-# Compatibility alias for the originally proposed HTTP-only switch.  Intake
-# must stop across HTTP and non-HTTP producers so a durable queue can drain.
-GATEWAY_ACCEPT_NEW_HTTP_ENV = "EDGE_GATEWAY_ACCEPT_NEW_HTTP"
 GW_TRANSPORT_DISABLED = "GW_TRANSPORT_DISABLED"
 GW_TRANSPORT_SCHEMA_UNAVAILABLE = "GW_TRANSPORT_SCHEMA_UNAVAILABLE"
 GW_TRANSPORT_INBOX_CONFLICT = "GW_TRANSPORT_INBOX_CONFLICT"
@@ -36,25 +33,28 @@ GW_TRANSPORT_WORKER_STOP_TIMEOUT = "GW_TRANSPORT_WORKER_STOP_TIMEOUT"
 
 
 class GatewayTransportMode(str, Enum):
-    """Fail-closed Gateway transport rollout modes."""
+    """The only supported Gateway transport mode."""
 
-    LEGACY_DRAIN = "LEGACY_DRAIN"
-    SHADOW = "SHADOW"
     DURABLE = "DURABLE"
 
 
 def load_gateway_transport_mode(
     env: Mapping[str, str] | None = None,
 ) -> GatewayTransportMode:
-    """Resolve the rollout mode, defaulting to legacy-queue drain only."""
+    """Resolve the transport mode.
+
+    Missing, retired and malformed values all converge on the durable owner;
+    there is no compatibility queue or shadow acknowledgement path left.
+    """
 
     source = os.environ if env is None else env
-    raw = str(source.get(GATEWAY_TRANSPORT_MODE_ENV, "LEGACY_DRAIN")).strip().upper()
-    try:
-        return GatewayTransportMode(raw)
-    except ValueError:
-        logger.error("Gateway transport mode is invalid; falling back to LEGACY_DRAIN: %r", raw)
-        return GatewayTransportMode.LEGACY_DRAIN
+    raw = str(source.get(GATEWAY_TRANSPORT_MODE_ENV, "DURABLE")).strip().upper()
+    if raw and raw != GatewayTransportMode.DURABLE.value:
+        logger.warning(
+            "Gateway transport mode %r is retired; DURABLE remains authoritative",
+            raw,
+        )
+    return GatewayTransportMode.DURABLE
 
 
 def load_gateway_accept_new_intake(
@@ -63,18 +63,13 @@ def load_gateway_accept_new_intake(
     """Resolve the independent durable-intake kill switch.
 
     The switch defaults on for a normal DURABLE rollout.  An invalid explicit
-    value fails closed so operators can still drain existing records without
-    accidentally admitting more work.  ``EDGE_GATEWAY_ACCEPT_NEW_HTTP`` is
-    accepted as a compatibility alias, but the canonical switch stops every
-    producer, including DB watcher and Telegram listener callbacks.
+    value fails closed without disabling the durable delivery owner.
+    The canonical switch stops every producer, including DB watcher and
+    Telegram listener callbacks.
     """
 
     source = os.environ if env is None else env
     raw_value = source.get(GATEWAY_ACCEPT_NEW_INTAKE_ENV)
-    source_name = GATEWAY_ACCEPT_NEW_INTAKE_ENV
-    if raw_value is None:
-        raw_value = source.get(GATEWAY_ACCEPT_NEW_HTTP_ENV)
-        source_name = GATEWAY_ACCEPT_NEW_HTTP_ENV
     if raw_value is None or not str(raw_value).strip():
         return True
     normalized = str(raw_value).strip().casefold()
@@ -82,7 +77,11 @@ def load_gateway_accept_new_intake(
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    logger.error("Gateway intake switch is invalid; failing closed: %s=%r", source_name, raw_value)
+    logger.error(
+        "Gateway intake switch is invalid; failing closed: %s=%r",
+        GATEWAY_ACCEPT_NEW_INTAKE_ENV,
+        raw_value,
+    )
     return False
 
 
@@ -152,11 +151,11 @@ class GatewayDeliveryRuntime:
             try:
                 self.mode = GatewayTransportMode(str(mode).strip().upper())
             except ValueError:
-                logger.error(
-                    "Gateway transport runtime mode is invalid; falling back to LEGACY_DRAIN: %r",
+                logger.warning(
+                    "Gateway transport runtime mode %r is retired; DURABLE remains authoritative",
                     mode,
                 )
-                self.mode = GatewayTransportMode.LEGACY_DRAIN
+                self.mode = GatewayTransportMode.DURABLE
         self._store = store
         self._reporter = reporter
         self._outbound = outbound
@@ -194,9 +193,9 @@ class GatewayDeliveryRuntime:
 
     @property
     def verification_enabled(self) -> bool:
-        """SHADOW may verify requests without acknowledging or persisting them."""
+        """Durable intake always verifies before acknowledging or persisting."""
 
-        return self.mode in {GatewayTransportMode.SHADOW, GatewayTransportMode.DURABLE}
+        return True
 
     @property
     def delivery_enabled(self) -> bool:
@@ -464,7 +463,6 @@ class GatewayDeliveryRuntime:
         return last
 
     def stats(self) -> dict[str, Any]:
-        drain = self._drain_status()
         worker_alive = bool(self._worker is not None and self._worker.is_alive())
         with self._lock:
             return {
@@ -475,55 +473,8 @@ class GatewayDeliveryRuntime:
                 "delivery_enabled": self.delivery_enabled,
                 "ready": bool(self._ready and worker_alive),
                 "worker_alive": worker_alive,
-                **drain,
                 **dict(self._stats),
             }
-
-    def _drain_status(self) -> dict[str, Any]:
-        """Return a fail-closed decision surface for DURABLE -> LEGACY_DRAIN."""
-
-        result: dict[str, Any] = {
-            "pending_known": False,
-            "pending_inbox": None,
-            "pending_outbox": None,
-            "pending": None,
-            "drained": False,
-            "reconciliation_required": True,
-        }
-        if self.mode is not GatewayTransportMode.DURABLE or self._store is None:
-            return result
-        counts_fn = getattr(self._store, "transport_counts", None)
-        if not callable(counts_fn):
-            return result
-        try:
-            counts = _mapping(counts_fn())
-            inbox_pending = int(counts.get("inbox_pending") or 0)
-            outbox_pending = int(counts.get("outbox_pending") or 0)
-            reconciliation = int(counts.get("reconciliation_required") or 0)
-            if min(inbox_pending, outbox_pending, reconciliation) < 0:
-                raise ValueError("negative transport count")
-        except Exception as exc:
-            result["drain_status_error"] = exc.__class__.__name__
-            return result
-        pending = inbox_pending + outbox_pending
-        result.update({
-            "pending_known": True,
-            "pending_inbox": inbox_pending,
-            "pending_outbox": outbox_pending,
-            "pending": pending,
-            "inbox_claimed": int(counts.get("inbox_claimed") or 0),
-            "outbox_claimed": int(counts.get("outbox_claimed") or 0),
-            "claimed": int(counts.get("claimed") or 0),
-            "inbox_dlq": int(counts.get("inbox_dlq") or 0),
-            "outbox_dlq": int(counts.get("outbox_dlq") or 0),
-            "drained": (
-                not self._accept_new_intake
-                and pending == 0
-                and reconciliation == 0
-            ),
-            "reconciliation_required": reconciliation > 0,
-        })
-        return result
 
     def _worker_loop(self) -> None:
         while not self._shutdown.is_set():
@@ -803,7 +754,6 @@ class GatewayDeliveryRuntime:
 
 
 __all__ = [
-    "GATEWAY_ACCEPT_NEW_HTTP_ENV",
     "GATEWAY_ACCEPT_NEW_INTAKE_ENV",
     "GATEWAY_TRANSPORT_MODE_ENV",
     "GW_TRANSPORT_DELIVERY_FAILED",

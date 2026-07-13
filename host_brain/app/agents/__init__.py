@@ -4,7 +4,7 @@
 以及 Supervisor 分派所需的公共符号。
 """
 
-from host_brain.app.agents.agent_registry import (
+from host_brain.agent_runtime.agent_registry import (
     AGENT_ALLOWLIST,
     AGENT_ID_CHAT,
     AGENT_ID_TRANSLATE,
@@ -17,7 +17,7 @@ from host_brain.app.agents.agent_registry import (
     is_agent_allowed,
     get_agent_meta,
 )
-from host_brain.app.agents.agent_contract import (
+from host_brain.agent_runtime.agent_contract import (
     AgentArtifact,
     AgentRuntime,
     SupervisorProposal,
@@ -46,6 +46,8 @@ __all__ = [
     "AGENT_ID_SAFETY",
     "AGENT_ID_JUDGE",
     "AGENT_ID_RENDERER",
+    "AGENT_ID_REPAIR",
+    "AGENT_ID_PENTEST",
     "is_agent_allowed",
     "get_agent_meta",
     # contract

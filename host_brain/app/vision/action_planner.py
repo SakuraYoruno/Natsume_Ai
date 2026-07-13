@@ -15,8 +15,8 @@ import json
 import logging
 from typing import Any, Dict, List, Mapping, Optional
 
-from host_brain.app.dependencies import get_model_attempt_service, get_prompt_registry
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.composition.process_services import get_model_attempt_service, get_prompt_registry
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime import (
     ModelAttemptRequest,
     OutputContract,
@@ -60,7 +60,7 @@ _DEFAULT_USER_PROMPT_TEMPLATE = """用户目标：
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

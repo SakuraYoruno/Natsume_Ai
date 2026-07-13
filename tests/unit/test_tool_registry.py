@@ -459,7 +459,7 @@ class TestIntentAgentExecutionTools:
             route_type="skill",
             latency_ms=12,
         )
-        with patch("host_brain.app.executive_runtime_core._execute_skill", return_value=fake_outcome):
+        with patch("host_brain.executive_runtime.skill_execution._execute_skill", return_value=fake_outcome):
             result = execute_tool(
                 "run_skill",
                 {
@@ -528,7 +528,7 @@ class TestIntentAgentExecutionTools:
                 )
 
         with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher", return_value=_FakeDispatcher()), patch(
-            "host_brain.app.dependencies.get_conversation_history",
+            "host_brain.composition.process_services.get_conversation_history",
             return_value=_FakeHistory(),
         ):
             result = execute_tool(

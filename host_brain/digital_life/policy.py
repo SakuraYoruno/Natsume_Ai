@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeSnapshot,
 )
@@ -15,6 +15,69 @@ from host_brain.digital_life.contracts import (
 
 PROACTIVE_IDLE_THRESHOLD_MS = 4 * 60 * 60 * 1_000
 PROACTIVE_COOLDOWN_MS = 4 * 60 * 60 * 1_000
+REACH_OUT_CALIBRATION_BASELINE = 0.6
+
+
+def resolve_reach_out_calibration(state: Mapping[str, Any]) -> float:
+    """Read the durable proactive calibration from a canonical Life snapshot."""
+
+    calibration = _mapping(_mapping(state).get("reach_out_calibration"))
+    if "value" not in calibration:
+        return REACH_OUT_CALIBRATION_BASELINE
+    return _clamp(calibration.get("value"), REACH_OUT_CALIBRATION_BASELINE)
+
+
+def derive_inner_weather(
+    affect: Mapping[str, Any],
+    inner_world: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pure canonical policy for the coupled affect/weather projection."""
+
+    affect_state = _mapping(affect)
+    inner_state = _mapping(inner_world)
+    numeric = _mapping(inner_state.get("numeric_state"))
+    fatigue = _clamp(affect_state.get("fatigue"))
+    loneliness = _clamp(affect_state.get("loneliness"))
+    energy = _clamp(affect_state.get("energy"), 0.6)
+    agitation = _clamp(
+        _float(affect_state.get("irritation")) * 0.6
+        + _float(affect_state.get("tension")) * 0.6
+    )
+    low_energy = _clamp(1.0 - energy)
+    anticipation = _clamp(
+        numeric.get("anticipation_value") or inner_state.get("anticipation")
+    )
+    reply_brevity_bias = _clamp(max(fatigue, low_energy * 0.8, agitation * 0.7))
+    memory_distortion_bias = _clamp(
+        fatigue * 0.4 + loneliness * 0.3 + agitation * 0.3
+    )
+    reach_out_bias = _clamp(
+        loneliness * 0.7 + anticipation * 0.3 - agitation * 0.2 - fatigue * 0.15
+    )
+    expressiveness_ceiling = _clamp(1.0 - reply_brevity_bias * 0.6)
+    withdrawn = bool(reply_brevity_bias >= 0.5 and reach_out_bias < 0.5)
+    if fatigue >= 0.6 or low_energy >= 0.6:
+        label = "低气压·乏力"
+    elif agitation >= 0.5:
+        label = "闷·烦躁"
+    elif loneliness >= 0.55:
+        label = "空·想找人"
+    elif reach_out_bias >= 0.5:
+        label = "微亮·想靠近"
+    else:
+        label = "平稳"
+    return {
+        "label": label,
+        "fatigue": round(fatigue, 3),
+        "loneliness": round(loneliness, 3),
+        "agitation": round(agitation, 3),
+        "energy": round(energy, 3),
+        "reply_brevity_bias": round(reply_brevity_bias, 3),
+        "memory_distortion_bias": round(memory_distortion_bias, 3),
+        "reach_out_bias": round(reach_out_bias, 3),
+        "expressiveness_ceiling": round(expressiveness_ceiling, 3),
+        "withdrawn": withdrawn,
+    }
 
 
 def build_life_tick_payload(
@@ -162,8 +225,22 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _clamp(value: Any, default: float = 0.0) -> float:
+    return max(0.0, min(1.0, _float(value, default)))
+
+
 __all__ = [
     "PROACTIVE_COOLDOWN_MS",
     "PROACTIVE_IDLE_THRESHOLD_MS",
+    "REACH_OUT_CALIBRATION_BASELINE",
     "build_life_tick_payload",
+    "derive_inner_weather",
+    "resolve_reach_out_calibration",
 ]

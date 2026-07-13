@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from host_brain.app import chat_retrieval_helpers as helpers
-from host_brain.app.agent_runtime_shared import _surface_memory_debug_trace_for_audit
+from host_brain.observability.runtime_audit import _surface_memory_debug_trace_for_audit
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig
 from tests.fakes.chroma_client import FakeChromaClient
@@ -23,7 +23,10 @@ class _FakeEpisodicStore:
         return _Result()
 
 
-def _surface_life_episode_recall_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _surface_life_episode_recall_service(
+    ledger: SQLiteLedger,
+    life_memory_store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     route = RecallRouteConfig(
         route_id="surface_life_episode",
@@ -35,6 +38,7 @@ def _surface_life_episode_recall_service(ledger: SQLiteLedger) -> RecallFusionSe
     )
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=life_memory_store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -160,17 +164,18 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         monkeypatch.setattr(
             helpers,
             "_build_surface_memory_recall_service",
-            lambda: _surface_life_episode_recall_service(ledger),
+            lambda: _surface_life_episode_recall_service(ledger, life_store),
         )
         monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
         monkeypatch.setattr(
-            "host_brain.agent_runtime.lightnovel_deep_reviewer._life_memory_store_provider",
+            "host_brain.composition.process_services.get_life_memory_store",
             lambda: life_store,
         )
-        monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: episodic_store)
+        monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: episodic_store)
         monkeypatch.setattr("host_brain.agent_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
 
         retrieval_summary, evidence_items = await helpers._run_retrieval(
+            life_snapshot_reader=object(),
             request_id="req-qq-followup",
             message="这三本书，你喜欢哪本？",
             person_id="owner",
@@ -182,6 +187,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         )
 
         packet = retrieval_summary["surface_memory_recall_packet"]
+        assert packet["facts"], retrieval_summary
         fact = packet["facts"][0]
         assert evidence_items == []
         assert retrieval_summary["status"] == "OK"

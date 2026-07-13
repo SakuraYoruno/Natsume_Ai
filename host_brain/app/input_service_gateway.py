@@ -371,8 +371,8 @@ def _safe_format_template(text: str, **kwargs: Any) -> str:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
-    raw = resolve_prompt_template_json_merged(template_id)
+    from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, dict) else {}
 
 

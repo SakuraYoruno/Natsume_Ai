@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeCommandReceipt,
     LifeEvent,
     LifeSnapshot,
 )
-from host_brain.persistence.life_command_repository import LifeCommandRepository
+from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
 
 
 class LifeSnapshotReader:
-    def __init__(self, repository: LifeCommandRepository) -> None:
+    def __init__(self, repository: LifeCommandRepositoryPort) -> None:
         self.repository = repository
 
     def get_snapshot(self, person_id: str) -> LifeSnapshot:

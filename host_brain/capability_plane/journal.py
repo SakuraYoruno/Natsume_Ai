@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
-import sqlite3
 import threading
 from typing import Any, Protocol
+
+from host_brain.persistence.capability_execution_repository import (
+    CapabilityExecutionRepository,
+)
 
 from .contracts import (
     CapabilityAttempt,
@@ -147,26 +150,19 @@ class InMemoryCapabilityExecutionJournal:
 
 
 class SQLiteCapabilityExecutionJournal:
-    """SQLite-backed journal sharing the canonical Host ledger connection."""
+    """Domain journal delegating all SQLite mechanics to persistence."""
 
     def __init__(self, ledger: Any) -> None:
-        connection = getattr(ledger, "_conn", None)
-        write_lock = getattr(ledger, "_write_lock", None)
-        if not isinstance(connection, sqlite3.Connection) or write_lock is None:
-            raise TypeError("ledger must expose the canonical SQLite connection and write lock")
-        self._conn = connection
-        self._write_lock = write_lock
+        db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
+        if not db_path:
+            raise TypeError("ledger must expose a durable canonical_db_path")
+        self._repository = CapabilityExecutionRepository(db_path)
 
     def lookup(self, idempotency_key: str) -> tuple[str, CapabilityReceipt] | None:
-        with self._write_lock:
-            row = self._conn.execute(
-                "SELECT request_hash, receipt_json FROM capability_execution_receipt "
-                "WHERE idempotency_key = ?",
-                (str(idempotency_key),),
-            ).fetchone()
+        row = self._repository.lookup(idempotency_key)
         if row is None:
             return None
-        return str(row["request_hash"]), _receipt_from_json(str(row["receipt_json"]))
+        return row[0], _receipt_from_json(row[1])
 
     def claim(
         self,
@@ -176,54 +172,19 @@ class SQLiteCapabilityExecutionJournal:
         now_ms: int,
         lease_expires_at_ms: int,
     ) -> str:
-        with self._write_lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                receipt = self._conn.execute(
-                    "SELECT request_hash FROM capability_execution_receipt WHERE idempotency_key = ?",
-                    (request.idempotency_key,),
-                ).fetchone()
-                if receipt is not None:
-                    status = CLAIM_REPLAY if str(receipt["request_hash"]) == request.request_hash else CLAIM_CONFLICT
-                    self._conn.commit()
-                    return status
-                claim = self._conn.execute(
-                    "SELECT request_hash, lease_expires_at_ms FROM capability_execution_claim "
-                    "WHERE idempotency_key = ?",
-                    (request.idempotency_key,),
-                ).fetchone()
-                if claim is not None:
-                    if str(claim["request_hash"]) != request.request_hash:
-                        status = CLAIM_CONFLICT
-                    elif int(claim["lease_expires_at_ms"]) > int(now_ms):
-                        status = CLAIM_IN_FLIGHT
-                    else:
-                        status = CLAIM_ABANDONED
-                    self._conn.commit()
-                    return status
-                self._conn.execute(
-                    "INSERT INTO capability_execution_claim "
-                    "(idempotency_key, request_hash, request_id, attempt_id, capability_id, "
-                    "kind, owner_token, state, lease_expires_at_ms, created_at_ms, updated_at_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?)",
-                    (
-                        request.idempotency_key,
-                        request.request_hash,
-                        request.request_id,
-                        request.attempt_id,
-                        request.capability_id,
-                        request.kind.value,
-                        owner_token,
-                        int(lease_expires_at_ms),
-                        int(now_ms),
-                        int(now_ms),
-                    ),
-                )
-                self._conn.commit()
-                return CLAIM_ACQUIRED
-            except Exception:
-                self._conn.rollback()
-                raise
+        return self._repository.claim(
+            {
+                "idempotency_key": request.idempotency_key,
+                "request_hash": request.request_hash,
+                "request_id": request.request_id,
+                "attempt_id": request.attempt_id,
+                "capability_id": request.capability_id,
+                "kind": request.kind.value,
+                "owner_token": owner_token,
+                "now_ms": int(now_ms),
+                "lease_expires_at_ms": int(lease_expires_at_ms),
+            }
+        )
 
     def complete(
         self,
@@ -235,61 +196,26 @@ class SQLiteCapabilityExecutionJournal:
         receipt: CapabilityReceipt,
     ) -> CapabilityReceipt:
         finished_at_ms = int(attempt.finished_at_ms)
-        with self._write_lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                existing = self._conn.execute(
-                    "SELECT request_hash, receipt_json FROM capability_execution_receipt "
-                    "WHERE idempotency_key = ?",
-                    (request.idempotency_key,),
-                ).fetchone()
-                if existing is not None:
-                    if str(existing["request_hash"]) != request.request_hash:
-                        raise RuntimeError("CAPABILITY_IDEMPOTENCY_CONFLICT")
-                    resolved = _receipt_from_json(str(existing["receipt_json"]))
-                    self._conn.commit()
-                    return resolved
-                claim = self._conn.execute(
-                    "SELECT request_hash, owner_token FROM capability_execution_claim "
-                    "WHERE idempotency_key = ?",
-                    (request.idempotency_key,),
-                ).fetchone()
-                if (
-                    claim is None
-                    or str(claim["request_hash"]) != request.request_hash
-                    or str(claim["owner_token"]) != owner_token
-                ):
-                    raise RuntimeError("CAPABILITY_CLAIM_OWNERSHIP_LOST")
-                self._conn.execute(
-                    "INSERT INTO capability_execution_receipt "
-                    "(idempotency_key, request_hash, request_id, attempt_id, capability_id, kind, "
-                    "status, attempt_json, evidence_json, receipt_json, created_at_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        request.idempotency_key,
-                        request.request_hash,
-                        request.request_id,
-                        request.attempt_id,
-                        request.capability_id,
-                        request.kind.value,
-                        receipt.status.value,
-                        _json({**asdict(attempt), "kind": attempt.kind.value}),
-                        _json(asdict(evidence)),
-                        _json(receipt.to_dict()),
-                        finished_at_ms,
-                    ),
-                )
-                claim_state = "IN_DOUBT" if receipt.status is ReceiptStatus.IN_DOUBT else "COMPLETED"
-                self._conn.execute(
-                    "UPDATE capability_execution_claim SET state = ?, updated_at_ms = ? "
-                    "WHERE idempotency_key = ? AND owner_token = ?",
-                    (claim_state, finished_at_ms, request.idempotency_key, owner_token),
-                )
-                self._conn.commit()
-                return receipt
-            except Exception:
-                self._conn.rollback()
-                raise
+        receipt_json = self._repository.complete(
+            {
+                "idempotency_key": request.idempotency_key,
+                "request_hash": request.request_hash,
+                "request_id": request.request_id,
+                "attempt_id": request.attempt_id,
+                "capability_id": request.capability_id,
+                "kind": request.kind.value,
+                "owner_token": owner_token,
+                "status": receipt.status.value,
+                "attempt_json": _json({**asdict(attempt), "kind": attempt.kind.value}),
+                "evidence_json": _json(asdict(evidence)),
+                "receipt_json": _json(receipt.to_dict()),
+                "finished_at_ms": finished_at_ms,
+                "claim_state": (
+                    "IN_DOUBT" if receipt.status is ReceiptStatus.IN_DOUBT else "COMPLETED"
+                ),
+            }
+        )
+        return _receipt_from_json(receipt_json)
 
     def record_late_outcome(
         self,
@@ -301,22 +227,17 @@ class SQLiteCapabilityExecutionJournal:
         error_type: str | None,
         observed_at_ms: int,
     ) -> None:
-        with self._write_lock:
-            with self._conn:
-                self._conn.execute(
-                    "INSERT INTO capability_execution_late_outcome "
-                    "(idempotency_key, request_hash, owner_token, status, output_digest, "
-                    "error_type, observed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        request.idempotency_key,
-                        request.request_hash,
-                        owner_token,
-                        str(status),
-                        output_digest,
-                        error_type,
-                        int(observed_at_ms),
-                    ),
-                )
+        self._repository.record_late_outcome(
+            {
+                "idempotency_key": request.idempotency_key,
+                "request_hash": request.request_hash,
+                "owner_token": owner_token,
+                "status": str(status),
+                "output_digest": output_digest,
+                "error_type": error_type,
+                "observed_at_ms": int(observed_at_ms),
+            }
+        )
 
 
 def _json(value: Any) -> str:

@@ -5,7 +5,7 @@
 
 第一层判断：RULE_ROUTE_MAP 规则映射表（精确匹配，无歧义词）
 第二层判断：LLM 节点（由 executive_runtime_core 调用）
-规划执行：LangGraph 父子图（plan_graph.py）
+规划执行：由 Executive Runtime 消费上游 canonical SkillDagPlan
 """
 
 from __future__ import annotations
@@ -210,12 +210,11 @@ class PlanningAgent:
 
     判断流程（两层）：
     1. 第一层：RULE_ROUTE_MAP 精确规则匹配 → 命中则直接路由（由 executive_runtime_core 调用）
-    2. 第二层：needs_planning() 评分 + LLM 节点判断 → 判定为多步则进入 LangGraph 父子图
+    2. 第二层：needs_planning() 评分 + LLM 节点判断 → 产出上游 canonical SkillDagPlan
 
     规划执行：
-    - 使用 LangGraph 父子图（app/plan_graph.py）
-    - 父图：plan_decompose_node（LLM 拆解）→ Send API 并行子图 → synthesize_node
-    - 子图：每个子任务独立的 task_exec_subgraph
+    - Executive Runtime 按 SkillDagPlan.execution_batches 执行
+    - 计划身份、依赖和路由由同一个上游 SkillDagPlan 提供
     """
 
     def __init__(
@@ -494,7 +493,7 @@ class PlanningAgent:
 
     # ------------------------------------------------------------------
     # execute_plan() 已废弃（Deprecated）
-    # 实际执行由 LangGraph 父子图（app/plan_graph.py）负责
+    # 实际执行由 Executive Runtime canonical SkillDag 路径负责
     # 保留此方法仅为向后兼容，不应在新代码中调用
     # ------------------------------------------------------------------
     def execute_plan(
@@ -506,12 +505,12 @@ class PlanningAgent:
     ) -> PlanExecutionResult:
         """[已废弃] 同步执行计划。
 
-        此方法已被 LangGraph 父子图（app/plan_graph.py）替代，
+        此方法已被 Executive Runtime canonical SkillDag 执行路径替代，
         不应在新代码中调用。保留仅为向后兼容。
         """
         _logger.warning(
-            "PlanningAgent.execute_plan() 已废弃，请使用 app/plan_graph.py 中的 "
-            "LangGraph 父子图执行规划。task_id=%s",
+            "PlanningAgent.execute_plan() 已废弃，请使用 Executive Runtime "
+            "canonical SkillDag 执行路径。task_id=%s",
             plan.task_id,
         )
         # 返回空结果，不执行任何逻辑
@@ -523,4 +522,3 @@ class PlanningAgent:
             final_response="execute_plan_deprecated",
             elapsed_ms=0.0,
         )
-

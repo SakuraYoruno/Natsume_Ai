@@ -536,7 +536,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_update_loneliness,
-            description="身体感知孤独感注入：将 OfflineInnerWorld 的孤独值同步到 BodySenseModel。",
+            description="身体感知孤独感注入：将 canonical Life affect snapshot 的孤独值同步到 BodySenseModel。",
             scheduler_allowed=False,
         ),
     )

@@ -34,7 +34,7 @@ class _FakePrefrontal:
 def test_emergent_growth_weekly_delegates_to_prefrontal(monkeypatch) -> None:
     fake_prefrontal = _FakePrefrontal()
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_prefrontal_agent", lambda: fake_prefrontal)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: object())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: object())
 
     result = execute_emergent_growth_weekly(args={"user_id": "u-eg", "lookback_days": 9, "use_llm": False})
 

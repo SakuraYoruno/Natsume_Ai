@@ -173,7 +173,7 @@ class TestReActMode:
     def test_agent_artifacts_written(self):
         """agent_artifacts[translate_agent] 存在。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-        from host_brain.app.agents.agent_registry import AGENT_ID_TRANSLATE
+        from host_brain.agent_runtime.agent_registry import AGENT_ID_TRANSLATE
         gateway = _make_gateway()
         result = translate_agent_handler(
             _make_payload(),
@@ -235,7 +235,7 @@ class TestReActMode:
 
     def test_only_readonly_tools(self):
         """translate_agent 只读工具集不含有副作用工具。"""
-        from host_brain.app.agents.agent_registry import AGENT_ID_TRANSLATE
+        from host_brain.agent_runtime.agent_registry import AGENT_ID_TRANSLATE
         from host_brain.app.agents.tool_registry import get_tools_for_agent
         tools = get_tools_for_agent(AGENT_ID_TRANSLATE, allow_side_effects=False)
         for tool in tools:
@@ -287,7 +287,7 @@ class TestTranslateAgentTraceContract:
     def test_trace_agent_id_is_translate_agent(self):
         """agent_id 固定为 'translate_agent'。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-        from host_brain.app.agents.agent_registry import AGENT_ID_TRANSLATE
+        from host_brain.agent_runtime.agent_registry import AGENT_ID_TRANSLATE
         gateway = _make_gateway()
         result = translate_agent_handler(
             {"request_id": "p10-contract-003", "user_input": "翻译这段文字"},

@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.observability.domain_state_projection import (
+from host_brain.app.observability_runtime.domain_state_projection import (
     LIFE_EVOLUTION_KIND,
     LIFE_MAX_AGE_MS,
     SECURITY_IMMUNE_KEY,
@@ -29,7 +29,7 @@ def _store(tmp_path) -> QueryProjectionStore:  # noqa: ANN001
 
 
 def _install_store(monkeypatch, store: QueryProjectionStore) -> None:  # noqa: ANN001
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
 
     monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
 
@@ -37,7 +37,7 @@ def _install_store(monkeypatch, store: QueryProjectionStore) -> None:  # noqa: A
 def test_life_get_reads_durable_projection_without_source_getter(tmp_path, monkeypatch) -> None:  # noqa: ANN001
     from host_brain.app import obs_routes_life_evolution as routes
     from host_brain.app.settings.core import get_core_settings
-    from host_brain.app import life_application_boundary
+    from host_brain.digital_life import application_boundary as life_application_boundary
 
     store = _store(tmp_path)
     now = int(time.time() * 1000)
@@ -127,7 +127,8 @@ def test_security_gets_never_initialize_agent(tmp_path, monkeypatch) -> None:  #
 
 
 def test_skill_get_never_initializes_registry_or_scans_supply_chain(tmp_path, monkeypatch) -> None:  # noqa: ANN001
-    from host_brain.app import dependencies, obs_routes_platform as routes
+    from host_brain.composition import process_services as dependencies
+    from host_brain.app import obs_routes_platform as routes
     from host_brain.skills import custom_provider_installer
     from host_brain.skills.hub import hub_installer
 

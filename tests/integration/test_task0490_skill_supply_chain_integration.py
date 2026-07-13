@@ -19,7 +19,7 @@ from host_brain.skills.supply_chain import (
 )
 from host_brain.skills.supply_chain_quarantine import SkillBundleQuarantine
 from host_brain.skills.supply_chain_service import SkillSupplyChainService
-from host_brain.skills.supply_chain_store import SQLiteSkillSupplyChainStore
+from host_brain.persistence.supply_chain_repository import SQLiteSkillSupplyChainStore
 
 
 ROOT = Path(__file__).resolve().parents[2]

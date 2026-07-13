@@ -1,4 +1,4 @@
-﻿"""关系感知回复风格引擎（Phase X 方案 4）。
+"""关系感知回复风格引擎（Phase X 方案 4）。
 
 职责：根据 Bond 阶段 + 情感质感动态生成风格指令注入 prompt。
 超越静态 stage_instruction，提供更细腻的关系感知。
@@ -10,8 +10,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-from host_brain.app.prompt_builder_utils import (
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
     _resolve_template_payload_with_mirror,
 )
 
@@ -74,7 +74,7 @@ def _load_localized_template_mapping(template_id: str, *, render_target_lang: st
             render_target_lang=render_target_lang,
         )
     except Exception:
-        raw = resolve_prompt_template_json_merged(template_id)
+        raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 # ---------------------------------------------------------------------------

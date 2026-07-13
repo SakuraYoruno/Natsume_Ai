@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.app.context.soul_runtime import CompiledSoul, load_compiled_soul
+from host_brain.persona.context.soul_runtime import CompiledSoul, load_compiled_soul
 
 
 def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(

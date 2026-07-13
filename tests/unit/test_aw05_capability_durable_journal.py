@@ -64,8 +64,8 @@ def test_two_brokers_share_one_durable_receipt_and_do_not_repeat_side_effect(tmp
     assert rows[0]["request_hash"].startswith("sha256:")
 
 
-def test_abandoned_claim_requires_reconciliation_instead_of_takeover() -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_abandoned_claim_requires_reconciliation_instead_of_takeover(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=tmp_path / "abandoned.sqlite3", check_same_thread=False)
     journal = SQLiteCapabilityExecutionJournal(ledger)
     request = _request(key="abandoned")
     journal.claim(
@@ -83,8 +83,8 @@ def test_abandoned_claim_requires_reconciliation_instead_of_takeover() -> None:
     assert calls == []
 
 
-def test_timed_out_running_adapter_is_in_doubt_and_late_outcome_is_audited() -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_timed_out_running_adapter_is_in_doubt_and_late_outcome_is_audited(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=tmp_path / "timeout.sqlite3", check_same_thread=False)
     calls: list[int] = []
     completed = threading.Event()
 
@@ -115,8 +115,8 @@ def test_timed_out_running_adapter_is_in_doubt_and_late_outcome_is_audited() -> 
     assert calls == [1]
 
 
-def test_durable_receipt_redacts_secret_output_and_replay_is_identical() -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_durable_receipt_redacts_secret_output_and_replay_is_identical(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=tmp_path / "redaction.sqlite3", check_same_thread=False)
     calls: list[int] = []
 
     def _secret_output(*_args):
@@ -146,8 +146,8 @@ def test_durable_receipt_redacts_secret_output_and_replay_is_identical() -> None
     assert "SUPERSECRET" not in str(durable)
 
 
-def test_durable_failure_detail_is_redacted() -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_durable_failure_detail_is_redacted(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=tmp_path / "failure.sqlite3", check_same_thread=False)
     calls: list[int] = []
 
     def _failure(*_args):
@@ -166,8 +166,8 @@ def test_durable_failure_detail_is_redacted() -> None:
     assert "SUPERSECRET" not in str(durable)
 
 
-def test_object_string_and_bare_token_refs_are_redacted_from_receipt() -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_object_string_and_bare_token_refs_are_redacted_from_receipt(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=tmp_path / "object.sqlite3", check_same_thread=False)
     calls: list[int] = []
 
     class _SecretObject:

@@ -259,7 +259,7 @@ Pentest 不属于普通 skill executor。它有独立 API、handler、ToolSpec�
 | 约束 | `opsec.py`、`budget.py`、`reward.py` | 433 + 75 + 102 | OPSEC 规则与规避、多维预算、奖励画像（4 种 profile） |
 | 策略 | `strategy_escalator.py`、`playbook.py`、`biz_logic_probe.py` | 256 + 225 + 215 | 策略升级、可复用攻击模板、业务逻辑探测 |
 
-Pentest 知识的默认运行模式为 `HOST_PENTEST_KNOWLEDGE_MODE=domain`，DB 默认路径按模块绝对锚定。成功链、反思、pitfall、command 与 technique 都通过 `PentestKnowledgeAccess` 进入 `pentest-domain-*` namespace；需要进入通用 Canon 的内容只生成 `PENDING_REVIEW` promotion candidate。若 legacy 目录存在 eligible 文档，domain access 必须验证目标 DB 内的 cutover receipt 以及 source/target count+digest，否则 fail closed。`shadow` 提供全部 legacy JSON 中 Pentest eligible 文档的只读回滚读取与对账，新写仍只进入领域 Store。迁移工具执行闭集扫描和 `backfill -> shadow -> bounded stable final_delta`；CLI 要求 legacy writer quiesce，只有稳定对账成功才写 `VERIFIED` receipt，且不删除或改写旧 Canon 文件。
+Pentest 知识只有一个运行时权威：`PentestKnowledgeAccess` 直接访问 Pentest 领域 SQLite Store，DB 默认路径按模块绝对锚定。成功链、反思、pitfall、command 与 technique 进入 `pentest-domain-*` namespace；需要进入通用 Canon 的内容只生成 `PENDING_REVIEW` promotion candidate。运行时不再提供 mode 开关、WorldCanon 目录读取、shadow 对账或回退分支。历史数据转换与 cutover receipt 仅属于显式离线迁移 API，不参与 production 读路径。
 
 ### 7.3 报告模块
 

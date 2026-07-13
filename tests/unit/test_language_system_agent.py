@@ -50,7 +50,7 @@ def test_language_system_agent_get_language_style_compatibility() -> None:
 def test_language_system_agent_runtime_texts_override(monkeypatch) -> None:
     monkeypatch.setattr(
         lsa,
-        "resolve_prompt_template_json_merged",
+        "resolve_prompt_contract_json",
         lambda template_id: {
             "loneliness_hints": {
                 "high": "自定义高孤独提示。",

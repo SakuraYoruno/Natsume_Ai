@@ -22,7 +22,7 @@ import random
 import time
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 _logger = logging.getLogger("Natsume.evolution_desire_engine")
 
@@ -30,8 +30,9 @@ _logger = logging.getLogger("Natsume.evolution_desire_engine")
 class _EvolutionDesireModelPort:
     canonical_model_attempt_port = True
 
-    def __init__(self, *, request_id: str) -> None:
+    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
         self._request_id = str(request_id or "evolution-desire")
+        self._attempt_service = attempt_service
         self.last_trace: dict[str, Any] = {}
 
     def __call__(self, prompt: str) -> str:
@@ -40,6 +41,7 @@ class _EvolutionDesireModelPort:
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         result = complete_compiled_prompt_sync(
+            attempt_service=self._attempt_service,
             prompt_id=EVOLUTION_DESIRE_PROMPT_ID,
             request_id=self._request_id,
             scene_type="EVOLUTION_DESIRE",
@@ -54,7 +56,7 @@ class _EvolutionDesireModelPort:
 
 
 def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+    raw = resolve_prompt_contract_json("persona.self_narrative_prompts")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -127,11 +129,7 @@ def _default_desire_template_data() -> dict[str, Any]:
 
 
 def _load_desire_template_data() -> dict[str, Any]:
-    try:
-        raw = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
-    except Exception:
-        return _default_desire_template_data()
-    return dict(raw) if isinstance(raw, Mapping) else _default_desire_template_data()
+    return _default_desire_template_data()
 
 
 def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
@@ -281,11 +279,7 @@ class EvolutionDesireEngine:
         if pref_text:
             return pref_text
 
-        resolved_llm_fn = (
-            llm_fn
-            if isinstance(llm_fn, _EvolutionDesireModelPort)
-            else _EvolutionDesireModelPort(request_id=f"evolution_desire::{int(ts)}")
-        )
+        resolved_llm_fn = llm_fn if callable(llm_fn) else None
 
         if strict_llm and resolved_llm_fn is None:
             return ""
@@ -379,7 +373,7 @@ class EvolutionDesireEngine:
         失败时返回空字符串，由调用方降级到模板库。
         """
         try:
-            if not isinstance(llm_fn, _EvolutionDesireModelPort):
+            if not callable(llm_fn):
                 return ""
             # 构建特质描述
             trait_hints: list[str] = []

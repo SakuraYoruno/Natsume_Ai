@@ -20,14 +20,14 @@ from typing import Any, Protocol
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
@@ -935,7 +935,6 @@ def build_governed_scheduler_runtime(
     worker_registry: SchedulerWorkerRegistry,
     owner_id: str,
     definition_repository: SchedulerDefinitionRepositoryPort | None = None,
-    legacy_worker_registry: SchedulerWorkerRegistry | None = None,
 ) -> GovernedSchedulerRuntime:
     definitions = definition_repository or getattr(
         task_runtime_container,
@@ -950,25 +949,12 @@ def build_governed_scheduler_runtime(
         occurrence_repository=definitions,
         result_repository=result_repository,
     )
-    legacy_worker = (
-        GovernedSchedulerWorker(
-            handlers=legacy_worker_registry,
-            definition_repository=definitions,
-            occurrence_repository=definitions,
-            result_repository=result_repository,
-        )
-        if legacy_worker_registry is not None
-        else None
-    )
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
-        worker_resolver=SchedulerWorkerResolver(
-            canonical_worker=canonical_worker,
-            legacy_worker=legacy_worker,
-        ),
+        worker_resolver=SchedulerWorkerResolver(canonical_worker=canonical_worker),
         verifier=SchedulerResultVerifier(result_repository),
         acceptance=SchedulerResultAcceptance(),
         projection_reader=SchedulerProjectionReader(

@@ -8,13 +8,13 @@ import sqlite3
 
 import pytest
 
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
     ReviewResumePhase,
     ReviewStatus,
     ReviewType,
 )
-from host_brain.agent_runtime.review_store import ReviewStore
+from host_brain.persistence.review_repository import ReviewStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.core.resource_manager import assess_background_task_pressure
 from host_brain.integrations.runtime_events import RuntimeEventStore

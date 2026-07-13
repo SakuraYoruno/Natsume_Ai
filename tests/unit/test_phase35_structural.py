@@ -1,4 +1,4 @@
-﻿"""P3.5/P16 结构性断言：executor agent_dispatch_node 分派逻辑统一到 graph_executor，不再经过 agent_dispatch_handler。"""
+"""P3.5/P16 结构性断言：executor agent_dispatch_node 分派逻辑统一到 graph_executor，不再经过 agent_dispatch_handler。"""
 
 from __future__ import annotations
 
@@ -71,9 +71,9 @@ def test_supervised_graph_has_workbench_nodes_for_handlers() -> None:
 
 def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
     """当前运行时不会把 codegen skill 当成可执行 handler 注册。"""
-    import host_brain.app.dependencies as deps
+    import host_brain.composition.process_services as deps
 
-    deps._graph_runtime = None
+    deps.get_process_service_container().graph_runtime = None
     runtime = deps.get_graph_runtime()
     assert "agent_worker" not in getattr(runtime, "_handlers", {})
 

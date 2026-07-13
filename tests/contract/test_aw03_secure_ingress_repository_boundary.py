@@ -7,28 +7,15 @@ import host_brain.secure_ingress as secure_ingress
 from host_brain.persistence.secure_ingress_repository import (
     SECURE_INGRESS_MIGRATION_ASSET_KEY,
     SECURE_INGRESS_MIGRATION_SHA256,
-    SQLiteSecureIngressStore,
-    SecureIngressStoreError,
 )
-from host_brain.secure_ingress.store import (
-    SQLiteSecureIngressStore as CompatibilityStore,
-)
-from host_brain.secure_ingress.store import (
-    SecureIngressStoreError as CompatibilityStoreError,
-)
-
-
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_MODULE = "host_brain.persistence.secure_ingress_repository"
 PRODUCTION_IMPORTS = {
     "host_brain/composition/command_ingress.py": {"SQLiteSecureIngressStore"},
-    "host_brain/observability/command_composition.py": {"SQLiteSecureIngressStore"},
+    "host_brain/app/observability_runtime/command_composition.py": {"SQLiteSecureIngressStore"},
     "host_brain/skills/signed_intake_composition.py": {"SQLiteSecureIngressStore"},
     "host_brain/pentest/production_runtime.py": {"SQLiteSecureIngressStore"},
     "host_brain/app/input_service_gateway.py": {"SQLiteSecureIngressStore"},
-    # The Pentest resolver implementation is persistence-owned; the old
-    # pentest module is now only a lazy compatibility facade and is not a
-    # production composition boundary.
     "host_brain/persistence/pentest_ingress_authority_repository.py": {
         "SECURE_INGRESS_MIGRATION_ASSET_KEY",
         "SECURE_INGRESS_MIGRATION_SHA256",
@@ -46,22 +33,8 @@ def _imports_from(path: Path, module: str) -> set[str]:
     }
 
 
-def test_secure_ingress_compatibility_entrypoint_has_no_sqlite_implementation() -> None:
-    source = (ROOT / "host_brain" / "secure_ingress" / "store.py").read_text(
-        encoding="utf-8"
-    )
-    forbidden = (
-        "sqlite3",
-        "_conn",
-        ".execute(",
-        "SELECT ",
-        "INSERT ",
-        "UPDATE ",
-        "DELETE ",
-        "CREATE TABLE",
-    )
-    for token in forbidden:
-        assert token not in source, f"compatibility store still contains {token}"
+def test_secure_ingress_compatibility_entrypoint_is_retired() -> None:
+    assert not (ROOT / "host_brain" / "secure_ingress" / "store.py").exists()
 
 
 def test_secure_ingress_production_composition_imports_persistence_adapter() -> None:
@@ -74,11 +47,11 @@ def test_secure_ingress_production_composition_imports_persistence_adapter() -> 
         ), relative_path
 
 
-def test_secure_ingress_legacy_and_public_imports_preserve_type_identity() -> None:
-    assert CompatibilityStore is SQLiteSecureIngressStore
-    assert CompatibilityStoreError is SecureIngressStoreError
-    assert secure_ingress.SQLiteSecureIngressStore is SQLiteSecureIngressStore
-    assert secure_ingress.SecureIngressStoreError is SecureIngressStoreError
+def test_secure_ingress_package_does_not_reexport_persistence_adapters() -> None:
+    assert "SQLiteSecureIngressStore" not in secure_ingress.__all__
+    assert "SecureIngressStoreError" not in secure_ingress.__all__
+    assert not hasattr(secure_ingress, "SQLiteSecureIngressStore")
+    assert not hasattr(secure_ingress, "SecureIngressStoreError")
 
 
 def test_secure_ingress_migration_contract_is_unchanged() -> None:

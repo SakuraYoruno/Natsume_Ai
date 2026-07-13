@@ -16,37 +16,15 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize(
-    "imports",
-    (
-        (
-            "import host_brain.persistence.task_repository as task",
-            "import host_brain.persistence.review_repository as review",
-            "import host_brain.agent_runtime as runtime",
-        ),
-        (
-            "import host_brain.persistence.review_repository as review",
-            "import host_brain.persistence.task_repository as task",
-            "import host_brain.agent_runtime as runtime",
-        ),
-        (
-            "import host_brain.agent_runtime as runtime",
-            "import host_brain.persistence.task_repository as task",
-            "import host_brain.persistence.review_repository as review",
-        ),
-    ),
-)
-def test_agent_runtime_and_persistence_import_in_any_order(
-    imports: tuple[str, ...],
-) -> None:
+def test_agent_runtime_and_persistence_use_precise_imports() -> None:
     program = "\n".join(
         (
-            *imports,
-            "assert runtime.AttemptStatus is task.AttemptStatus",
-            "assert runtime.DurableTaskStore is task.DurableTaskStore",
-            "assert runtime.ReviewStore is review.ReviewStore",
-            "assert runtime.ReviewStoreError is review.ReviewStoreError",
-            "assert runtime.AgentRuntimeExecutor.__module__ == 'host_brain.agent_runtime.executor'",
+            "import host_brain.persistence.task_repository as task",
+            "import host_brain.persistence.review_repository as review",
+            "import host_brain.agent_runtime.executor as runtime_executor",
+            "assert task.DurableTaskStore.__module__ == 'host_brain.persistence.task_repository'",
+            "assert review.ReviewStore.__module__ == 'host_brain.persistence.review_repository'",
+            "assert runtime_executor.AgentRuntimeExecutor.__module__ == 'host_brain.agent_runtime.executor'",
         )
     )
     environment = dict(os.environ)
@@ -72,7 +50,7 @@ def test_agent_runtime_package_import_does_not_eager_load_persistence() -> None:
             "import host_brain.agent_runtime as runtime",
             "assert 'host_brain.persistence.task_repository' not in sys.modules",
             "assert 'host_brain.persistence.review_repository' not in sys.modules",
-            "assert runtime.__all__",
+            "assert runtime.__all__ == ()",
         )
     )
     environment = dict(os.environ)

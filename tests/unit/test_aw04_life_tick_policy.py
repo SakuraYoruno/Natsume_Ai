@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from host_brain.digital_life.contracts import LifeSnapshot, digest_json
+from natsume_contracts.life import LifeSnapshot, digest_json
 from host_brain.digital_life.policy import (
     PROACTIVE_IDLE_THRESHOLD_MS,
     build_life_tick_payload,

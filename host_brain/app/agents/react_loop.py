@@ -27,7 +27,7 @@ from host_brain.app.agents.tool_registry import (
     execute_tool,
     is_tool_allowed,
 )
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_context import render_agent_context_envelope_for_prompt
 from host_brain.core.trace_redaction import (
     build_public_agent_output,
@@ -38,7 +38,7 @@ from host_brain.core.trace_redaction import (
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -348,7 +348,7 @@ def run_react_loop(
         ReactResult（含 final_answer、steps、stopped_reason）
     """
     from host_brain.integrations.graph_governed_tool_node import GovernedToolNode  # noqa: PLC0415
-    from host_brain.app.dependencies import get_capability_execution_journal  # noqa: PLC0415
+    from host_brain.composition.process_services import get_capability_broker  # noqa: PLC0415
 
     ctx = dict(context or {})
     steps: list[ReactStep] = []
@@ -363,7 +363,7 @@ def run_react_loop(
         tools=lc_tools,
         governor=governor,
         evidence_plane=evidence_plane,
-        execution_journal=get_capability_execution_journal(),
+        capability_broker=get_capability_broker(),
     )
 
     # 构建 system prompt

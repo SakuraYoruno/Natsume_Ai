@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.digital_life.contracts import LifeOutboxMessage
+from natsume_contracts.life import LifeOutboxMessage
 from host_brain.orchestration.governor_grant import DurableGovernorGrantResolver
 
 
@@ -54,17 +54,17 @@ class LifeDeliveryTransport:
             payload=payload,
         )
         if destination == "edge.proactive":
-            from host_brain.channels.edge_rpc_client import post_proactive_push  # noqa: PLC0415
+            from host_brain.channels.edge_transport import submit_proactive_push  # noqa: PLC0415
 
-            result = await post_proactive_push(
+            result = await submit_proactive_push(
                 message=payload,
                 request_id=message.delivery_key,
             )
             return _validated_result(destination, result)
         if destination in {"proactive.gateway", "edge.gateway_reply"}:
-            from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+            from host_brain.channels.edge_transport import submit_gateway_reply  # noqa: PLC0415
 
-            result = await post_gateway_reply(
+            result = await submit_gateway_reply(
                 platform=str(payload.get("platform") or ""),
                 conversation_id=str(payload.get("conversation_id") or ""),
                 content=str(payload.get("content") or ""),

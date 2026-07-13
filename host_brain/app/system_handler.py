@@ -14,7 +14,7 @@ from typing import Any, Callable, Mapping
 from fastapi import HTTPException, status
 
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
-from host_brain.app.dependencies import collect_dependency_probes_sync
+from host_brain.composition.process_services import collect_dependency_probes_sync
 from host_brain.app.main import (
     build_env_readiness_report,
     build_request_observability_report,
@@ -289,6 +289,7 @@ def _schedule_edge_asr_bridge(
     *,
     candidate: Mapping[str, Any],
     logger: Any,
+    input_dispatcher: Callable[..., Any],
     inline_waiters: list[Any] | None = None,
     main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
@@ -366,9 +367,7 @@ def _schedule_edge_asr_bridge(
 
     async def _dispatch() -> None:
         try:
-            from host_brain.app.input_routes import _dispatch_to_graph
-
-            await _dispatch_to_graph(
+            await input_dispatcher(
                 request_id=request_id,
                 session_id=session_id,
                 source="ASR",
@@ -585,7 +584,10 @@ def mcp_health_check_response() -> HealthResponse:
     )
 
 
-def canon_sync_health_check_response(*, get_ledger: Callable[[], Any]) -> HealthResponse:
+def canon_sync_health_check_response(
+    *,
+    canon_service_provider: Callable[[], Any],
+) -> HealthResponse:
     ts_ms = int(time.time() * 1000)
     world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
     status_text = "OK"
@@ -594,7 +596,7 @@ def canon_sync_health_check_response(*, get_ledger: Callable[[], Any]) -> Health
     drift_count = 0
     drift_sample: list[dict[str, Any]] = []
     try:
-        drifts = detect_world_version_drift(world_root=world_root, ledger=get_ledger())
+        drifts = detect_world_version_drift(service=canon_service_provider())
         drift_count = len(drifts)
         if drift_count > 0:
             status_text = "DEGRADED"
@@ -687,6 +689,7 @@ def receive_edge_events_response(
     request_body: EdgeEventsRequest,
     get_ledger: Callable[[], Any],
     logger: Any,
+    input_dispatcher: Callable[..., Any],
     inline_waiters: list[Any] | None = None,
     main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> EdgeEventsResponse:
@@ -926,11 +929,16 @@ def receive_edge_events_response(
 
     for candidate in bridge_candidates:
         if inline_waiters is None:
-            _schedule_edge_asr_bridge(candidate=candidate, logger=logger)
+            _schedule_edge_asr_bridge(
+                candidate=candidate,
+                logger=logger,
+                input_dispatcher=input_dispatcher,
+            )
         else:
             _schedule_edge_asr_bridge(
                 candidate=candidate,
                 logger=logger,
+                input_dispatcher=input_dispatcher,
                 inline_waiters=inline_waiters,
                 main_loop=main_loop,
             )

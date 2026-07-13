@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     SUB_AGENT_ADAPTER_INVALID,
     SUB_AGENT_LINEAGE_INVALID,
     ContractViolation,
     require_version,
 )
-from host_brain.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 
 SUB_AGENT_SPEC_SCHEMA_VERSION = "Natsume.agent.sub_agent_spec.v1"

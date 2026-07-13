@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.agent_runtime.task_store import DurableTaskStore
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.app.internal_task_runtime import (
     InternalAgentCommandService,
     build_governed_internal_runtime,
@@ -21,7 +21,7 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
-from host_brain.secure_ingress import SQLiteSecureIngressStore
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 
 
 NOW = 1_800_000_000_000
@@ -173,15 +173,9 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             task_runtime_container=infrastructure,
             ledger=ledger,
             result_repository=result_repository,
-            runtime_router=CanonicalRuntimeRouter(
-                mode="canonical",
-                canary_percent=100,
-                canonical_owner="internal-owner",
-                confirmed_owner="internal-owner",
-            ),
+            runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-owner",
             canonical_executor=executor,
-            legacy_executor=_Executor([]),
         )
         await runtime.activate()
         intent_engine = _IntentEngine(ledger)

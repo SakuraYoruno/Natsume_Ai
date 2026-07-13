@@ -41,22 +41,14 @@ def _reload_observability_settings():
 
 
 class TestObservabilitySettingsOpt4Batch1(unittest.TestCase):
-    """OPT-4 首批 5 个 obs_routes 字段的 settings 回归保护。"""
+    """Session query cache settings regression protection."""
 
     NEW_FIELDS_DEFAULTS = {
         "obs_sessions_cache_ttl_ms": 3000,
-        "obs_insights_summary_warm_enabled": True,
-        "obs_digital_life_overview_warm_enabled": True,
-        "obs_runtime_snapshot_warm_enabled": True,
-        "obs_trace_feed_warm_enabled": True,
     }
 
     NEW_FIELDS_ENV_KEYS = {
         "obs_sessions_cache_ttl_ms": "OBS_SESSIONS_CACHE_TTL_MS",
-        "obs_insights_summary_warm_enabled": "HOST_OBS_INSIGHTS_SUMMARY_WARM_ENABLED",
-        "obs_digital_life_overview_warm_enabled": "HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED",
-        "obs_runtime_snapshot_warm_enabled": "HOST_OBS_RUNTIME_SNAPSHOT_WARM_ENABLED",
-        "obs_trace_feed_warm_enabled": "HOST_OBS_TRACE_FEED_WARM_ENABLED",
     }
 
     def setUp(self) -> None:
@@ -124,29 +116,6 @@ class TestObservabilitySettingsOpt4Batch1(unittest.TestCase):
             7777,
             msg="obs_routes_sessions._SESSIONS_CACHE_TTL_MS 未能跟随 env 刷新",
         )
-
-    # -----------------------------------------------------------------
-    # T-OPT4-13：布尔字段接受常见关闭字面量
-    # -----------------------------------------------------------------
-    def test_t_opt4_13_bool_field_accepts_false_literals(self) -> None:
-        # pydantic-settings 默认把 "false"/"0" 等解析为 False
-        for literal in ("false", "False", "0", "off", "no"):
-            with self.subTest(literal=literal):
-                os.environ["HOST_OBS_TRACE_FEED_WARM_ENABLED"] = literal
-                s = _reload_observability_settings()
-                self.assertFalse(
-                    s.obs_trace_feed_warm_enabled,
-                    msg=f"env 值 {literal!r} 应被解析为 False",
-                )
-
-    # -----------------------------------------------------------------
-    # T-OPT4-13b：布尔字段默认 True
-    # -----------------------------------------------------------------
-    def test_t_opt4_13b_bool_field_default_true(self) -> None:
-        os.environ.pop("HOST_OBS_TRACE_FEED_WARM_ENABLED", None)
-        s = _reload_observability_settings()
-        self.assertTrue(s.obs_trace_feed_warm_enabled)
-
 
 if __name__ == "__main__":
     unittest.main()

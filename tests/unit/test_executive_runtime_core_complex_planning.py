@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from host_brain.app.capability_gap_detector import CapabilityGapDecision
-from host_brain.app.executive_runtime_core import (
-    _RouteSelection,
-    _ExecutionOutcome,
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.executive_runtime._shared import _ExecutionOutcome, _RouteSelection
+from host_brain.executive_runtime.conversation_execution import (
     _build_plan_chat_outcome,
+    _execute_skill_dag,
+)
+from host_brain.executive_runtime.route_planning import (
     _hard_rule_route,
     _maybe_build_multi_step_plan,
     _should_force_complex_plan,
 )
-from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan
+from host_brain.executive_runtime.skill_dag import SkillDagNode, SkillDagPlan
 
 
 class _StubSkillRegistry:
@@ -65,11 +69,11 @@ def test_maybe_build_multi_step_plan_requires_explicit_steps_in_intent_draft(mon
 def test_should_force_complex_plan_returns_false_for_chat_without_action_gap(monkeypatch) -> None:
     monkeypatch.setenv("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", "true")
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_planning_agent",
+        "host_brain.composition.process_services.get_planning_agent",
         lambda: _StubPlanningAgent(needs_planning=True),
     )
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.detect_capability_gap",
+        "host_brain.executive_runtime.route_planning.detect_capability_gap",
         lambda **_: CapabilityGapDecision(
             detected=False,
             reason_code="NO_ACTION_INTENT",
@@ -81,6 +85,7 @@ def test_should_force_complex_plan_returns_false_for_chat_without_action_gap(mon
     )
 
     forced = _should_force_complex_plan(
+        ports=build_executive_runtime_application_ports(),
         route=_RouteSelection("chat", "", "default:chat"),
         user_message="今天心情怎么样，聊聊天吧",
         intent_draft={"route_source": "llm"},
@@ -92,11 +97,11 @@ def test_should_force_complex_plan_returns_false_for_chat_without_action_gap(mon
 def test_should_force_complex_plan_returns_true_for_chat_action_gap(monkeypatch) -> None:
     monkeypatch.setenv("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", "true")
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_planning_agent",
+        "host_brain.composition.process_services.get_planning_agent",
         lambda: _StubPlanningAgent(needs_planning=True),
     )
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.detect_capability_gap",
+        "host_brain.executive_runtime.route_planning.detect_capability_gap",
         lambda **_: CapabilityGapDecision(
             detected=True,
             reason_code="ACTION_INTENT_FALLBACK_CHAT",
@@ -108,6 +113,7 @@ def test_should_force_complex_plan_returns_true_for_chat_action_gap(monkeypatch)
     )
 
     forced = _should_force_complex_plan(
+        ports=build_executive_runtime_application_ports(),
         route=_RouteSelection("chat", "", "default:chat"),
         user_message="请先整理现状并拆分任务，然后分步执行代码修复和验证",
         intent_draft={"route_source": "llm"},
@@ -324,3 +330,64 @@ def test_build_plan_chat_outcome_preserves_structured_steps() -> None:
     assert enriched.payload["parallel_enabled"] is True
     assert enriched.payload["steps"][0]["target_id"] == "session_summary"
     assert enriched.payload["steps"][1]["target_id"] == "emotion_query"
+
+
+def test_execute_skill_dag_uses_upstream_plan_without_replanning(monkeypatch) -> None:
+    plan = SkillDagPlan(
+        plan_id="plan::canonical-upstream",
+        nodes=[
+            SkillDagNode(
+                node_id="approved-step",
+                step_index=1,
+                description="execute approved step",
+                task_description="execute approved step",
+                route="skill",
+                target_id="session_summary",
+                route_reason="test:canonical-upstream",
+                allow_parallel=False,
+                skill_family="social",
+                risk_level=1,
+            )
+        ],
+        execution_batches=[["approved-step"]],
+    )
+    executed_nodes: list[str] = []
+
+    async def _execute_approved_node(**kwargs):  # noqa: ANN003
+        executed_nodes.append(kwargs["node"].node_id)
+        return _ExecutionOutcome(
+            route_type="skill",
+            target_id="session_summary",
+            skill_family="social",
+            success=True,
+            result_text="approved result",
+            error_text="",
+            latency_ms=7,
+            payload={},
+        )
+
+    monkeypatch.setattr(
+        "host_brain.executive_runtime.conversation_execution._execute_plan_node",
+        _execute_approved_node,
+    )
+
+    outcome, metadata = asyncio.run(
+        _execute_skill_dag(
+            ports=build_executive_runtime_application_ports(),
+            plan=plan,
+            request_body={},
+            request_id="req-canonical-upstream",
+            session_id="session",
+            person_id="person",
+            intent_id="intent",
+            governor_result={},
+            intent_draft={},
+            emotion_context={},
+            render_target_lang="zh-CN",
+        )
+    )
+
+    assert executed_nodes == ["approved-step"]
+    assert outcome.success is True
+    assert outcome.payload["plan"] == plan.as_dict()
+    assert metadata["engine"] == "canonical_skill_dag"

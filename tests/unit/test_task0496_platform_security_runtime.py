@@ -26,6 +26,7 @@ from host_brain.app.pentest_secure_run_routes import (
     create_pentest_secure_run_http_router,
 )
 from host_brain.app.router_registry import register_host_routers
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.governor.tokens import TokenService
 from host_brain.pentest.lab_isolation import PentestEffectAction
@@ -34,7 +35,7 @@ from host_brain.pentest.production_runtime import (
     PENTEST_EXECUTOR_RECORDING_ONLY,
     build_pentest_secure_run_composition,
 )
-from host_brain.pentest.run_store import PentestRunStoreError
+from host_brain.persistence.pentest_run_repository import PentestRunStoreError
 from host_brain.pentest.secure_run import (
     SECURE_RUN_INGRESS_ACTION,
     SECURE_RUN_NORMALIZED_PATH,
@@ -63,7 +64,10 @@ TOOL_ID = "pentest_http_probe"
 
 def test_production_router_registry_mounts_each_secure_route_once() -> None:
     app = FastAPI()
-    register_host_routers(app)
+    register_host_routers(
+        app,
+        input_runtime_ports=build_input_runtime_application_ports(),
+    )
     paths = [route.path for route in app.routes]
 
     assert paths.count("/v1/host/obs-commands/{command_id}") == 1

@@ -2,7 +2,7 @@
 
 将 notification_registry.py 的归一化 payload 转化为真正的执行：
   - notify_desktop：调用系统原生通知（plyer / win10toast / notify-send）
-  - notify_tts_speak：通过 edge_rpc_client.post_speak() 驱动 Edge TTS
+  - notify_tts_speak：通过 EmbodimentCommandPort 驱动 Edge TTS
   - notify_schedule_reminder：生成 secret-free Governed Scheduler proposal
 
 降级策略：
@@ -176,19 +176,37 @@ def execute_notify_tts_speak(payload: dict[str, Any]) -> dict[str, Any]:
                        detail="text is required", ts_ms=ts, request_id=request_id)
 
     try:
-        from host_brain.channels.edge_rpc_client import post_speak as _post_speak  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
 
-        # post_speak 是 async 函数，需要在事件循环中运行
+        # Embodiment command submission is async and must run on an event loop.
         async def _call() -> dict[str, Any]:
-            result = await _post_speak(
-                text=text,
-                request_id=request_id,
-                voice_id=voice,
-                speed=rate,
-                pitch=pitch - 1.0,  # edge_rpc_client pitch 是偏移量（-1.0~1.0）
-                emotion_tag=emotion_tag,
+            normalized_text = (
+                str(text).replace("〜", "ー").replace("～", "ー").replace("\u200b", "").strip()
             )
-            return result.as_dict()
+            req_id = str(request_id or f"notify-tts-{event_id}")
+            result = await submit_voice_command(
+                action="speak",
+                payload={
+                    "session_id": f"sess::{req_id}",
+                    "utterance_id": f"utt::{req_id}",
+                    "text": normalized_text,
+                    "voice_id": voice,
+                    "speed": rate,
+                    "pitch": pitch - 1.0,
+                    "emotion_tag": emotion_tag,
+                },
+                request_id=req_id,
+                deadline_ms=now_ms() + 60_000,
+                idempotency_key=f"{req_id}:notify-tts:{event_id}",
+            )
+            return {
+                "success": bool(result.success),
+                "status": result.status,
+                "reason_code": result.reason_code,
+                "detail": result.detail,
+                "event": dict(result.event or {}),
+                "latency_ms": int(result.latency_ms or 0),
+            }
 
         # 使用 get_running_loop()（Python 3.7+），避免已废弃的 get_event_loop()
         # （Python 3.12+ 无运行中事件循环时 get_event_loop() 直接报错）

@@ -5,9 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import host_brain.app.input_routes as input_routes_module
+import host_brain.input_runtime.ingress as input_routes_module
+import host_brain.input_runtime.contracts_and_normalization as input_contracts
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
-from host_brain.app.input_routes import InputPayload, receive_input
+from host_brain.input_runtime.contracts_and_normalization import InputPayload
+from host_brain.input_runtime.ingress import receive_input
 from host_brain.app.settings.input import input_settings_from_mapping
 
 
@@ -42,7 +44,7 @@ def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        input_routes_module,
+        input_contracts,
         "_complete_host_gateway_ingress",
         lambda **_kwargs: True,
     )
@@ -51,7 +53,7 @@ def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_receive_input_smoke_gateway_dispatches_to_graph():
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock):
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock):
         response = asyncio.run(
             receive_input(
                 body=InputPayload(
@@ -78,7 +80,7 @@ def test_receive_input_smoke_gateway_dispatches_to_graph():
 def test_receive_input_smoke_asr_dispatches_to_graph():
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock):
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock):
         response = asyncio.run(
             receive_input(
                 body=InputPayload(
@@ -106,7 +108,7 @@ def test_receive_input_smoke_asr_dispatches_to_graph():
 def test_receive_input_smoke_asr_non_final_is_ignored():
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock):
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock):
         response = asyncio.run(
             receive_input(
                 body=InputPayload(
@@ -132,10 +134,10 @@ def test_receive_input_smoke_asr_low_confidence_is_ignored():
     settings = input_settings_from_mapping({"HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95"})
 
     with patch.dict("os.environ", {"HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95"}), patch(
-        "host_brain.app.input_routes._dispatch_to_graph",
+        "host_brain.input_runtime.ingress._dispatch_to_graph",
         dispatch_mock,
     ), patch(
-        "host_brain.app.input_routes.get_input_settings",
+        "host_brain.input_runtime.contracts_and_normalization.get_input_settings",
         return_value=settings,
     ):
         response = asyncio.run(

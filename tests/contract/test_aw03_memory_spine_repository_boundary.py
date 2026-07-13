@@ -13,7 +13,7 @@ from host_brain.conversation.memory_spine import (
     count_conversation_turn_memory_spine_gaps,
     record_conversation_turn_memory_spine,
 )
-from host_brain.digital_life.contracts import LifeCommand
+from natsume_contracts.life import LifeCommand
 from host_brain.digital_life.service import LifeCommandService
 from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.life_command_repository import LifeCommandRepository
@@ -242,8 +242,9 @@ def test_memory_spine_orchestrates_durable_repositories_without_private_access(
         role="assistant",
     )
     ledger = DurableLedgerReference(db_path)
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
     result = backfill_conversation_turn_memory_spine(
+        ledger=ledger,
         person_id="person-1",
         dry_run=True,
     )
@@ -252,7 +253,9 @@ def test_memory_spine_orchestrates_durable_repositories_without_private_access(
     assert result["eligible"] == 1
     assert result["skipped_existing"] == 1
     assert [sample["request_id"] for sample in result["samples"]] == ["request-new"]
-    assert count_conversation_turn_memory_spine_gaps(person_id="person-1") == 1
+    assert count_conversation_turn_memory_spine_gaps(
+        ledger=ledger, person_id="person-1"
+    ) == 1
 
 
 def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
@@ -267,12 +270,13 @@ def test_record_turn_keeps_asr_filtering_and_sentiment_weights(
         captured.update(kwargs)
         return {"event_id": "life::new"}
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
     monkeypatch.setattr(
         "host_brain.digital_life.experience_ingress.record_life_experience",
         fake_record_life_experience,
     )
     result = record_conversation_turn_memory_spine(
+        ledger=ledger,
         request_id="request-voice",
         session_id="session-main",
         person_id="person-1",
@@ -335,9 +339,10 @@ def test_record_turn_skips_on_canonical_receipt_not_legacy_event(
         ts_ms=NOW + 7,
     )
     ledger = DurableLedgerReference(db_path)
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
 
     result = record_conversation_turn_memory_spine(
+        ledger=ledger,
         request_id="request-duplicate",
         session_id="session-main",
         person_id="person-1",

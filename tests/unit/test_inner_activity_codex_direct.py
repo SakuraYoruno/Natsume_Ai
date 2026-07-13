@@ -55,8 +55,8 @@ def _install_service(monkeypatch, responses: list[str]):  # noqa: ANN001, ANN202
         provider_adapters=ProviderAdapterRegistry((adapter,)),
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
     return adapter
 
 

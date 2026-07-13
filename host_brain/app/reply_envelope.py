@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.app.reply_performance import ReplyPerformance, coerce_reply_performance
-from host_brain.app.response_form_contract import (
+from host_brain.persona.response_form_contract import (
     has_structured_media_payload,
     is_mixed_media_response_form,
     is_pure_media_response_form,

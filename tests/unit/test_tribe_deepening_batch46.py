@@ -192,9 +192,20 @@ def test_t350_high_fatigue_no_comfort():
 def test_t351_semantic_memory_write_triggers_limbic():
     """T-351：语义记忆写入成功后，应联动 LimbicAgent.drive_emotion_metabolism()。"""
     from host_brain.tribe.hippocampus_agent import HippocampusAgent
+    from host_brain.tribe.application_ports import TribeApplicationPorts
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = HippocampusAgent(state_registry=TribeStateRegistry())
+    mock_arbiter = MagicMock()
+    mock_arbiter.write.return_value = MagicMock(
+        status="OK", written=True, state_version=1,
+        reason_code=None, detail=None, payload={},
+    )
+    agent = HippocampusAgent(
+        state_registry=TribeStateRegistry(),
+        application_ports=TribeApplicationPorts(
+            state_write_arbiter=lambda: mock_arbiter,
+        ),
+    )
     mock_limbic = MagicMock()
 
     with patch("host_brain.tribe.hippocampus_agent.get_limbic_agent", return_value=mock_limbic), \

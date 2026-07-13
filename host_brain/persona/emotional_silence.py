@@ -36,8 +36,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.model_attempt_port import complete_compiled_model_sync
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
+from host_brain.model_runtime.trace import model_attempt_result_trace
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.model_runtime import EMOTIONAL_SILENCE_PROMPT_ID
 
 from host_brain.persona.offline_continuity import (
@@ -172,12 +173,14 @@ _TOPIC_RESISTANCE_HINT_TEMPLATE = ""
 
 
 def _load_runtime_hints() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotional_silence.runtime_hints")
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    return {
+        "silence_hints": dict(_SILENCE_HINT_MAP),
+        "topic_resistance_hint": _TOPIC_RESISTANCE_HINT_TEMPLATE,
+    }
 
 
 def _load_llm_hint_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("emotional_silence.llm_hints")
+    raw = resolve_prompt_contract_json("emotional_silence.llm_hints")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -221,7 +224,8 @@ class EmotionalSilenceEngine:
             prompt += state.silence_hint
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, model_attempt_service: Any = None) -> None:
+        self._model_attempt_service = model_attempt_service
         # 当前回复意愿值 [0.0, 1.0]
         self._response_willingness: float = 1.0
         # 上次 tick 时间戳（毫秒）
@@ -364,6 +368,7 @@ class EmotionalSilenceEngine:
         current_topic: str = "",
         bond_summary: dict[str, Any] | None = None,
         emotion_context: dict[str, Any] | None = None,
+        life_snapshot_reader: Any = None,
     ) -> dict[str, Any]:
         """每分钟调用一次，驱动意愿自然恢复和话题抗拒衰减。
 
@@ -384,7 +389,10 @@ class EmotionalSilenceEngine:
         absence_band = "recent"
         absence_recovery_factor = 1.0
         try:
-            from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+            from host_brain.digital_life.application_boundary import (  # noqa: PLC0415
+                project_inner_world_state,
+                read_life_snapshot,
+            )
             from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
             from host_brain.persona.motive_runtime import (  # noqa: PLC0415
                 build_offline_state_from_inner_state,
@@ -392,7 +400,11 @@ class EmotionalSilenceEngine:
             )
 
             persona_user_id = resolve_persona_self_id(user_id)
-            inner_state = get_inner_world().get_state(persona_user_id)
+            if life_snapshot_reader is None:
+                raise RuntimeError("LIFE_SNAPSHOT_READER_NOT_COMPOSED")
+            inner_state = project_inner_world_state(
+                read_life_snapshot(persona_user_id, reader=life_snapshot_reader)
+            )
             offline_state = build_offline_state_from_inner_state(inner_state, now_ms=now)
             absence_band = _resolve_absence_band(offline_state)
             absence_recovery_factor = _absence_recovery_factor(absence_band)
@@ -559,6 +571,8 @@ class EmotionalSilenceEngine:
         topic_resistance_hint: str,
         trigger_reason: str,
     ) -> dict[str, Any]:
+        if self._model_attempt_service is None:
+            return {}
         templates = _load_llm_hint_templates()
         if not templates:
             return {}
@@ -580,7 +594,8 @@ class EmotionalSilenceEngine:
             "请输出 JSON：{{\"silence_hint\":\"...\",\"topic_resistance_hint\":\"...\"}}"
         )
         try:
-            completion = complete_compiled_model_sync(
+            completion = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
                 prompt_id=EMOTIONAL_SILENCE_PROMPT_ID,
                 messages=(
                     {"role": "system", "content": system_prompt},
@@ -609,17 +624,17 @@ class EmotionalSilenceEngine:
             )
         except Exception:
             return {}
-        self._last_model_attempt_trace = dict(completion.trace)
+        self._last_model_attempt_trace = model_attempt_result_trace(completion)
         if not completion.success:
             return {}
         try:
-            parsed = json.loads(completion.content)
+            parsed = json.loads(str(completion.content or ""))
         except Exception:
             return {}
         return {
             "silence_hint": str(parsed.get("silence_hint") or "").strip(),
             "topic_resistance_hint": str(parsed.get("topic_resistance_hint") or "").strip(),
-            "model_attempt": dict(completion.trace),
+            "model_attempt": dict(self._last_model_attempt_trace),
         }
 
     # ── 查询 ──────────────────────────────────────────────────────────────
@@ -698,19 +713,3 @@ def _classify_willingness(willingness: float) -> str:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-# ---------------------------------------------------------------------------
-# 全局单例
-# ---------------------------------------------------------------------------
-
-_GLOBAL_SILENCE_ENGINE: EmotionalSilenceEngine | None = None
-
-
-def get_silence_engine() -> EmotionalSilenceEngine:
-    """获取全局沉默引擎单例（懒加载）。"""
-    global _GLOBAL_SILENCE_ENGINE
-    if _GLOBAL_SILENCE_ENGINE is None:
-        _GLOBAL_SILENCE_ENGINE = EmotionalSilenceEngine()
-        _logger.info("EmotionalSilenceEngine 全局单例已初始化")
-    return _GLOBAL_SILENCE_ENGINE

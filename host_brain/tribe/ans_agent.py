@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 
 logger = logging.getLogger("Natsume.tribe.ans_agent")
@@ -39,6 +40,7 @@ def _resolve_ans_bond_user_id(value: Any = None, *, session_id: str = "default")
 
 @dataclass(slots=True)
 class ANSAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """自主神经系统族 Agent。
 
     职责：持续后台节律，驱动生命体征。
@@ -547,9 +549,7 @@ class ANSAgent:
             {"status": "OK", "event_type": str} 或降级结果。
         """
         try:
-            from host_brain.app.dependencies import get_activity_monitor  # noqa: PLC0415
-
-            monitor = get_activity_monitor()
+            monitor = self.application_ports.require("activity_monitor")()
             if monitor is None:
                 return {"status": "NO_MONITOR", "event_type": str(event_type or "")}
 
@@ -580,9 +580,7 @@ class ANSAgent:
             ActivityMonitor.get_status() 或空字典（降级）。
         """
         try:
-            from host_brain.app.dependencies import get_activity_monitor  # noqa: PLC0415
-
-            monitor = get_activity_monitor()
+            monitor = self.application_ports.require("activity_monitor")()
             if monitor is None:
                 return {"status": "NO_MONITOR"}
             return monitor.get_status() if hasattr(monitor, "get_status") else {}
@@ -611,9 +609,7 @@ class ANSAgent:
             ModeTransitionService.on_event() 结果或降级结果。
         """
         try:
-            from host_brain.app.dependencies import get_mode_transition_service  # noqa: PLC0415
-
-            service = get_mode_transition_service()
+            service = self.application_ports.require("mode_transition_service")()
             if service is None:
                 return {"status": "NO_SERVICE", "event_type": str(event_type or "")}
 
@@ -650,9 +646,7 @@ class ANSAgent:
             ModeTransitionService.get_current_status() 或空字典（降级）。
         """
         try:
-            from host_brain.app.dependencies import get_mode_transition_service  # noqa: PLC0415
-
-            service = get_mode_transition_service()
+            service = self.application_ports.require("mode_transition_service")()
             if service is None:
                 return {"status": "NO_SERVICE"}
             return service.get_current_status() if hasattr(service, "get_current_status") else {}
@@ -815,7 +809,7 @@ class ANSAgent:
         T-120：订阅 CHANNEL_MESSAGE_RECEIVED，消息到达时更新活跃度感知。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)

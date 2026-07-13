@@ -38,9 +38,6 @@ def _foreground_runner(context: dict[str, object]) -> dict[str, object]:
 
 
 def test_digital_life_supervisor_runs_foreground_and_rejects_direct_idle_tick(tmp_path) -> None:
-    import host_brain.persona.inner_world as inner_world
-
-    original_inner_world_dir = inner_world._DEFAULT_STATE_DIR
     supervisor = DigitalLifeSupervisor(
         DigitalLifeRuntimeConfig(
             mode="fixture",
@@ -69,7 +66,6 @@ def test_digital_life_supervisor_runs_foreground_and_rejects_direct_idle_tick(tm
     assert final_snapshot["scheduler"]["scheduler_status"] == "EXTERNAL_GOVERNED_RUNTIME"
     assert any(event["event_type"] == "foreground_turn" for event in supervisor.events)
     assert any(event["event_type"] == "idle_tick" for event in supervisor.events)
-    assert inner_world._DEFAULT_STATE_DIR == original_inner_world_dir
 
 
 def test_digital_life_supervisor_never_runs_proactive_task_directly(tmp_path) -> None:

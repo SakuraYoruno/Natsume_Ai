@@ -11,12 +11,12 @@ from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id
-from host_brain.observability.projection_runtime import (
+from host_brain.app.observability_runtime.projection_runtime import (
     SESSION_INDEX_KEY,
     SESSION_KIND,
     TRACE_KIND,
 )
-from host_brain.observability.remaining_query_projection import read, read_all, response_meta
+from host_brain.app.observability_runtime.remaining_query_projection import read, read_all, response_meta
 
 logger = logging.getLogger("Natsume.web_ui")
 
@@ -90,7 +90,7 @@ class LinkTopologyResponse(BaseModel):
 
 def get_ledger() -> SQLiteLedger:
     """获取SQLite账本实例"""
-    from host_brain.app.dependencies import get_ledger as get_app_ledger
+    from host_brain.composition.process_services import get_ledger as get_app_ledger
     return get_app_ledger()
 
 @router.get("/timeline", response_model=TimelineAggregationResponse)

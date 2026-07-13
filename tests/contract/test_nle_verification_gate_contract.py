@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.verification_policy import (

@@ -7,13 +7,13 @@ import inspect
 from typing import Any
 
 from host_brain.core.ids import now_ms
-from host_brain.digital_life.contracts import LifeDispatchSummary, LifeProjectionMessage
+from natsume_contracts.life import LifeDispatchSummary, LifeProjectionMessage
 from host_brain.digital_life.lease_heartbeat import (
     AsyncLifeLeaseHeartbeat,
     LifeLeaseHeartbeatError,
     SyncLifeLeaseHeartbeat,
 )
-from host_brain.persistence.life_command_repository import LifeCommandRepository
+from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
 
 
 ProjectionHandler = Callable[
@@ -25,7 +25,7 @@ ProjectionHandler = Callable[
 class LifeProjectionDispatcher:
     def __init__(
         self,
-        repository: LifeCommandRepository,
+        repository: LifeCommandRepositoryPort,
         handler: ProjectionHandler,
         *,
         owner_id: str = "life-projection-dispatcher",

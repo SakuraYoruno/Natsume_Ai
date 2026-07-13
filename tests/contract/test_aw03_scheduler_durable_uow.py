@@ -15,10 +15,10 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerRepositoryError,
 )
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.secure_ingress import (
     ClaimStatus,
     IngressAuditEvent,
-    SQLiteSecureIngressStore,
 )
 
 

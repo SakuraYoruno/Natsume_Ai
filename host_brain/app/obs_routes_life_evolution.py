@@ -67,7 +67,7 @@ async def _default_snapshot(
     fact_keys: list[str],
     now_ms: int,
 ) -> dict[str, Any]:
-    from host_brain.app.dependencies import get_bond_stage_engine, get_ledger, get_state_arbiter
+    from host_brain.composition.process_services import get_bond_stage_engine, get_ledger, get_state_arbiter
     from host_brain.bond.bond_projection import build_bond_projection
     from host_brain.governor.action_preview import preview_action
     from host_brain.persona.life_evolution_observer import (
@@ -153,7 +153,7 @@ async def _get_life_evolution_snapshot(
 ) -> dict[str, Any]:
     _require_life_views_enabled()
     del session_id
-    from host_brain.observability.domain_state_projection import (
+    from host_brain.app.observability_runtime.domain_state_projection import (
         LIFE_EVOLUTION_KIND,
         LIFE_MAX_AGE_MS,
         read_domain_projection,
@@ -244,7 +244,7 @@ async def post_life_evolution_action_preview(
     authority_context_status = "UNAVAILABLE"
     authority_validation_reason = "TRUSTED_CONTEXT_PROVIDER_UNAVAILABLE"
     if trusted:
-        from host_brain.app.dependencies import get_token_service
+        from host_brain.composition.process_services import get_token_service
         from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL
 
         governor = dict(trusted.get("governor_decision") or {})

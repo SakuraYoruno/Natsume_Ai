@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import Any, Mapping, Protocol
 
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     VERIFICATION_RESULT_INVALID,
     ContractViolation,
@@ -23,6 +23,11 @@ from host_brain.agent_runtime.contract_errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.core.subprocess_utils import run as _subprocess_run
+from host_brain.contracts.agent_runtime.verification_contract import (
+    VerificationGate as _ContractVerificationGate,
+    VerificationResult as _ContractVerificationResult,
+    VerificationStatus as _ContractVerificationStatus,
+)
 
 
 VERIFICATION_RESULT_SCHEMA_VERSION = "Natsume.agent.verification_result.v1"
@@ -643,6 +648,14 @@ class VerificationGate:
                 "VERIFICATION_FAILED transition cannot use PASS verification",
             )
         return verification
+
+
+# Runtime execution and persistence must share one contract type.  The policy
+# below owns command execution only; canonical DTO/transition authority lives
+# in verification_contract.
+VerificationGate = _ContractVerificationGate
+VerificationResult = _ContractVerificationResult
+VerificationStatus = _ContractVerificationStatus
 
 
 class VerificationPolicy:

@@ -4,7 +4,6 @@ import importlib
 import logging
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 
 import pytest
 
@@ -88,16 +87,7 @@ def test_external_provider_environment_is_ignored_in_every_activation_mode(
     assert "extra_provider_mod" not in sys.modules
 
 
-def test_arbitrary_spec_is_rejected_before_import(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    imported: list[str] = []
-
-    def _unexpected_import(module_name: str):
-        imported.append(module_name)
-        raise AssertionError("untrusted module import reached")
-
-    monkeypatch.setattr(provider_catalog.importlib, "import_module", _unexpected_import)
+def test_arbitrary_spec_is_rejected_before_static_factory() -> None:
     untrusted = provider_catalog.SkillProviderSpec(
         env_flag="HOST_UNTRUSTED_ENABLED",
         provider_path="attacker.module:Provider",
@@ -114,25 +104,13 @@ def test_arbitrary_spec_is_rejected_before_import(
     )
 
     assert count == 0
-    assert imported == []
     with pytest.raises(ValueError, match="SKILL_PROVIDER_NOT_TRUSTED_BUILTIN"):
         untrusted.instantiate()
 
 
-def test_frozen_builtin_provider_path_still_instantiates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _BuiltinProvider:
-        pass
-
-    imported: list[str] = []
-
-    def _trusted_import(module_name: str):
-        imported.append(module_name)
-        return SimpleNamespace(FileSkillProvider=_BuiltinProvider)
-
-    monkeypatch.setattr(provider_catalog.importlib, "import_module", _trusted_import)
+def test_frozen_builtin_provider_path_still_instantiates_statically() -> None:
     spec = provider_catalog.BUILTIN_SKILL_PROVIDER_SPECS[0]
+    provider = spec.instantiate()
 
-    assert isinstance(spec.instantiate(), _BuiltinProvider)
-    assert imported == ["host_brain.skills.file_registry"]
+    assert type(provider).__name__ == "FileSkillProvider"
+    assert type(provider).__module__ == "host_brain.skills.file_registry"

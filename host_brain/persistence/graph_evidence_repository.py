@@ -157,6 +157,8 @@ class GraphEvidenceRepository:
         clock: Callable[[], int] = now_ms,
         timeout_ms: int = 3_000,
         fault_injector: Callable[[str], None] | None = None,
+        _borrowed_connection: sqlite3.Connection | None = None,
+        _borrowed_lock: Any | None = None,
     ) -> None:
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path.lower().startswith("file:"):
@@ -174,6 +176,20 @@ class GraphEvidenceRepository:
         self._fault_injector = fault_injector
         self._memory_connection: sqlite3.Connection | None = None
         self._memory_lock = threading.RLock()
+        self._borrowed_connection = _borrowed_connection
+        self._borrowed_lock = _borrowed_lock
+
+        if _borrowed_connection is not None:
+            if raw_path != ":memory:" or _borrowed_lock is None:
+                raise GraphEvidenceRepositoryError(
+                    GRAPH_EVIDENCE_INVALID,
+                    "borrowed graph evidence connection requires in-memory ledger lock",
+                )
+            self.db_path = raw_path
+            self._configure(_borrowed_connection)
+            self._apply_memory_asset()
+            self.assert_schema_ready(require_catalog=False)
+            return
 
         if raw_path == ":memory:":
             self.db_path: str | Path = raw_path
@@ -193,6 +209,35 @@ class GraphEvidenceRepository:
         else:
             self.db_path = Path(raw_path).expanduser().resolve()
             self.assert_schema_ready(require_catalog=True)
+
+    @classmethod
+    def from_ledger(cls, ledger: Any) -> "GraphEvidenceRepository":
+        """Compose the typed repository from the canonical ledger boundary."""
+
+        canonical = str(
+            getattr(ledger, "canonical_db_path", "")
+            or getattr(ledger, "db_path", "")
+            or ""
+        ).strip()
+        if not canonical:
+            raise GraphEvidenceRepositoryError(
+                GRAPH_EVIDENCE_INVALID,
+                "ledger does not expose a canonical database path",
+            )
+        if canonical == ":memory:":
+            connection = getattr(ledger, "_conn", None)
+            lock = getattr(ledger, "_write_lock", None)
+            if connection is None or lock is None:
+                raise GraphEvidenceRepositoryError(
+                    GRAPH_EVIDENCE_INVALID,
+                    "in-memory ledger does not expose its compatibility connection",
+                )
+            return cls(
+                canonical,
+                _borrowed_connection=connection,
+                _borrowed_lock=lock,
+            )
+        return cls(canonical)
 
     @staticmethod
     def _migration_asset() -> Path:
@@ -218,9 +263,10 @@ class GraphEvidenceRepository:
                 GRAPH_EVIDENCE_SCHEMA_NOT_READY,
                 "0074 migration checksum drifted",
             )
-        assert self._memory_connection is not None
+        connection = self._memory_connection or self._borrowed_connection
+        assert connection is not None
         try:
-            self._memory_connection.executescript(sql)
+            connection.executescript(sql)
         except sqlite3.DatabaseError as exc:
             raise GraphEvidenceRepositoryError(
                 GRAPH_EVIDENCE_SCHEMA_NOT_READY,
@@ -234,6 +280,10 @@ class GraphEvidenceRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self._borrowed_connection is not None:
+            with self._borrowed_lock:
+                yield self._borrowed_connection
+            return
         if self._memory_connection is not None:
             with self._memory_lock:
                 yield self._memory_connection
@@ -746,6 +796,8 @@ class GraphEvidenceRepository:
             return [dict(row) for row in conn.execute(sql, (str(key),)).fetchall()]
 
     def close(self) -> None:
+        if self._borrowed_connection is not None:
+            return
         with self._memory_lock:
             if self._memory_connection is not None:
                 self._memory_connection.close()

@@ -14,13 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.observability.live_source_projection import (
+from host_brain.app.observability_runtime.live_source_projection import (
     GATEWAY_STATS_MAX_AGE_MS,
     GATEWAY_STATS_SOURCE_KEY,
     GATEWAY_STATS_SOURCE_KIND,
     read_operator_live_projection,
 )
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -216,7 +216,7 @@ async def _fetch_remote_gateway_health() -> Dict[str, Any]:
     stale = dict(cached) if isinstance(cached, dict) else {}
     try:
         import httpx
-        from host_brain.channels.edge_rpc_client import _resolve_gateway_base_urls
+        from host_brain.channels.edge_transport import resolve_gateway_base_urls
     except Exception:
         return stale
 
@@ -227,7 +227,7 @@ async def _fetch_remote_gateway_health() -> Dict[str, Any]:
         timeout_ms = 3000
     timeout_s = max(0.5, min(float(timeout_ms) / 1000.0, 5.0))
 
-    for base_url in _resolve_gateway_base_urls():
+    for base_url in resolve_gateway_base_urls():
         url = f"{base_url}/v1/gateway/health"
         try:
             async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
@@ -509,7 +509,7 @@ class SkillHubStatsResponse(BaseModel):
 @router.get("/skills-hub/stats", response_model=SkillHubStatsResponse)
 def get_skills_hub_stats():
     """Read the durable Skill/Domain-Pack catalog; never scan on GET."""
-    from host_brain.observability.domain_state_projection import (
+    from host_brain.app.observability_runtime.domain_state_projection import (
         SKILL_PACK_CATALOG_KEY,
         SKILL_PACK_CATALOG_KIND,
         SKILL_PACK_CATALOG_MAX_AGE_MS,
@@ -648,7 +648,7 @@ async def ws_health(websocket: WebSocket):
 def _read_ws_health_projection() -> dict[str, Any]:
     """Read only the durable service-health projection."""
     from host_brain.app.obs_routes_health import _read_query_projection
-    from host_brain.observability.health_device_projection import (
+    from host_brain.app.observability_runtime.health_device_projection import (
         HEALTH_MAX_AGE_MS,
         SERVICE_HEALTH_KEY,
         SERVICE_HEALTH_KIND,

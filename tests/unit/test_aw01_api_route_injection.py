@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from host_brain.app import app_factory, router_registry
 from host_brain.app.runtime_metrics import RuntimeMetrics
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
 _SECURE_ROUTE_EXPECTATIONS = (
@@ -30,7 +31,10 @@ _SECURE_ROUTE_EXPECTATIONS = (
 
 def test_router_registry_mounts_secure_routes_with_stable_unavailable_defaults() -> None:
     app = FastAPI()
-    router_registry.register_host_routers(app)
+    router_registry.register_host_routers(
+        app,
+        input_runtime_ports=build_input_runtime_application_ports(),
+    )
 
     paths = [getattr(route, "path", "") for route in app.routes]
     assert paths.count("/v1/host/obs-commands/{command_id}") == 1
@@ -88,6 +92,7 @@ def test_app_factory_forwards_explicit_secure_route_providers(
         obs_command_ingress_provider=provider("obs"),
         pentest_secure_run_composition_provider=provider("pentest"),
         signed_skill_provider_intake_provider=provider("signed_intake"),
+        input_runtime_ports=build_input_runtime_application_ports(),
     )
 
     with TestClient(app) as client:
@@ -117,6 +122,7 @@ def test_scheduler_duplicate_reaches_single_governed_service() -> None:
     app = FastAPI()
     router_registry.register_host_routers(
         app,
+        input_runtime_ports=build_input_runtime_application_ports(),
         scheduler_command_ingress_provider=lambda: _DuplicateIngress(),
         scheduler_command_service_provider=lambda: _Service(),
     )

@@ -806,7 +806,7 @@ def _fetch_conversation_window(
     summary_chars: int = MAX_SUMMARY_CHARS,
 ) -> dict[str, Any]:
     try:
-        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+        from host_brain.composition.process_services import get_conversation_history  # noqa: PLC0415
 
         window = get_conversation_history().fetch_window_for_messages(
             session_id=session_id,

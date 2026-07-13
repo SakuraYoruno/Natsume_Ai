@@ -3,7 +3,7 @@ from .base_agent import TribeAgentDescriptor
 from .cortex_agent import CortexAgent, get_cortex_agent, set_cortex_agent
 from .events import emit_tribe_event
 from .event_bus import InMemoryTribeEventBus, TribeEvent, new_tribe_event
-from .handoff import TribeHandoffCoordinator, get_tribe_handoff_coordinator
+from .handoff import TribeHandoffCoordinator
 from .circadian_agent import CircadianAgent, get_circadian_agent, set_circadian_agent
 from .cerebellum_agent import CerebellumAgent, get_cerebellum_agent, set_cerebellum_agent
 from .default_mode_agent import DefaultModeAgent, get_default_mode_agent, set_default_mode_agent
@@ -102,7 +102,6 @@ __all__ = [
     "get_somatic_agent",
     "get_thalamus_agent",
     "get_vestibular_agent",
-    "get_tribe_handoff_coordinator",
     "resolve_scene_type_from_intent_decision",
     "set_limbic_agent",
     "set_prefrontal_agent",

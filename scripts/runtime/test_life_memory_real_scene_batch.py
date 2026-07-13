@@ -29,7 +29,8 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.observability_persist import persist_life_action_event_memory  # noqa: E402
 from host_brain.audit.sqlite_ledger import SQLiteLedger  # noqa: E402
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore  # noqa: E402
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator  # noqa: E402
+from host_brain.memory.life_memory.store import LifeMemoryStore  # noqa: E402
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:18080"

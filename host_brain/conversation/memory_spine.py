@@ -3,11 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.digital_life.application_boundary import (
+    LifeCommandServiceLike,
+    LifeSnapshotReaderLike,
+)
 from host_brain.persistence.context_repository import ContextRepository
-from host_brain.persistence.life_command_repository import LifeCommandRepository
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
 
 
 def _text(value: Any, *, limit: int = 1000) -> str:
@@ -89,10 +94,10 @@ def _conversation_turn_command_id(
 
 def _already_in_life_stream(
     *,
-    repository: LifeCommandRepository,
+    reader: LifeSnapshotReaderLike,
     command_id: str,
 ) -> bool:
-    return repository.get_receipt(command_id) is not None
+    return reader.get_receipt(command_id) is not None
 
 
 def _turn_source_kind(role: str, metadata: Mapping[str, Any]) -> tuple[str, str]:
@@ -104,6 +109,129 @@ def _turn_source_kind(role: str, metadata: Mapping[str, Any]) -> tuple[str, str]
     if role == "assistant":
         return "conversation_turn.assistant", "assistant_reply"
     return "conversation_turn.other", "conversation_turn"
+
+
+def append_visible_conversation_turn(
+    *,
+    ledger: Any,
+    life_service: LifeCommandServiceLike,
+    life_reader: LifeSnapshotReaderLike,
+    request_id: str,
+    session_id: str,
+    person_id: str | None,
+    role: str,
+    content: str,
+    ts_ms: int,
+    lang: str,
+    metadata: Mapping[str, Any] | None = None,
+    token_count: int | None = None,
+    corrupted: bool = False,
+) -> dict[str, Any]:
+    """Atomically admit the canonical memory event/turn, then project Life."""
+
+    session = _text(session_id, limit=180)
+    clean_role = str(role or "").strip().lower()
+    clean_content = _text(content, limit=4000)
+    if not session or clean_role not in {"user", "assistant"} or not clean_content:
+        return {"status": "SKIPPED", "reason_code": "EMPTY_VISIBLE_TURN"}
+    meta = _mapping(metadata)
+    source_kind, event_kind = _turn_source_kind(clean_role, meta)
+    salience, valence, uncertainty = _signal_weights(
+        role=clean_role,
+        source_kind=source_kind,
+        content=clean_content,
+        metadata=meta,
+    )
+    resolved_person = _text(person_id or "default", limit=120) or "default"
+    timestamp = max(0, int(ts_ms or 0))
+    turn_id = "turn::sha256:" + hashlib.sha256(
+        "\x1f".join((session, str(request_id or "").strip(), clean_role)).encode("utf-8")
+    ).hexdigest()
+    memory_event_id = f"memevt_{uuid.uuid4().hex}"
+    repository = MemoryEventRepository.from_ledger(ledger)
+    admitted = repository.append_visible_turn(
+        event={
+            "event_id": memory_event_id,
+            "person_id": resolved_person,
+            "session_id": session,
+            "conversation_id": session,
+            "source_kind": source_kind,
+            "event_kind": event_kind,
+            "role": clean_role,
+            "content": clean_content,
+            "content_summary": clean_content,
+            "refs": {
+                "request_id": str(request_id or "").strip(),
+                "lang": str(lang or "zh").strip() or "zh",
+                "metadata": meta,
+            },
+            "salience": salience,
+            "valence": valence,
+            "uncertainty": uncertainty,
+            "confidence": 1.0,
+            "created_at_ms": timestamp,
+        },
+        turn={
+            "turn_id": turn_id,
+            "session_id": session,
+            "person_id": resolved_person,
+            "request_id": str(request_id or "").strip(),
+            "role": clean_role,
+            "content": clean_content,
+            "ts_ms": timestamp,
+            "lang": str(lang or "zh").strip() or "zh",
+            "token_count": token_count,
+            "corrupted": bool(corrupted),
+            "metadata": {**meta, "memory_event_id": memory_event_id},
+        },
+    )
+    if admitted.get("status") == "DUPLICATE":
+        return {
+            **admitted,
+            "status": "SKIPPED",
+            "reason_code": "DUPLICATE_VISIBLE_TURN",
+        }
+    turn = dict(admitted.get("turn") or {})
+    life = record_conversation_turn_memory_spine(
+        ledger=ledger,
+        life_service=life_service,
+        life_reader=life_reader,
+        request_id=request_id,
+        session_id=session,
+        person_id=resolved_person,
+        role=clean_role,
+        content=clean_content,
+        ts_ms=timestamp,
+        lang=lang,
+        metadata=meta,
+        turn_id=str(turn.get("turn_id") or turn_id),
+        turn_index=int(turn.get("turn_index") or 0),
+    )
+    repository.merge_refs(
+        event_id=memory_event_id,
+        refs={
+            "turn_id": turn.get("turn_id"),
+            "life_experience_event_id": life.get("event_id"),
+        },
+    )
+    projection_status = {
+        "conversation_turn": {"status": "OK", "turn_id": turn.get("turn_id")},
+        "life_experience": {
+            "status": life.get("status", "OK"),
+            "event_id": life.get("event_id"),
+        },
+    }
+    repository.merge_projection_status(
+        event_id=memory_event_id,
+        projection_status=projection_status,
+    )
+    return {
+        "status": "OK",
+        "memory_event_id": memory_event_id,
+        "turn": turn,
+        "life_experience_event_id": life.get("event_id"),
+        "projection_status": projection_status,
+    }
 
 
 def _signal_weights(*, role: str, source_kind: str, content: str, metadata: Mapping[str, Any]) -> tuple[float, float, float]:
@@ -129,6 +257,9 @@ def _signal_weights(*, role: str, source_kind: str, content: str, metadata: Mapp
 
 def record_conversation_turn_memory_spine(
     *,
+    ledger: Any,
+    life_service: LifeCommandServiceLike,
+    life_reader: LifeSnapshotReaderLike,
     request_id: str,
     session_id: str,
     person_id: str | None,
@@ -167,15 +298,12 @@ def record_conversation_turn_memory_spine(
         ts_ms=ts_ms,
     )
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
         from host_brain.digital_life.experience_ingress import (  # noqa: PLC0415
             record_life_experience,
         )
 
-        ledger = get_ledger()
-        command_repository = LifeCommandRepository.from_ledger(ledger)
         if _already_in_life_stream(
-            repository=command_repository,
+            reader=life_reader,
             command_id=command_id,
         ):
             return {"status": "SKIPPED", "reason_code": "DUPLICATE_CONVERSATION_TURN"}
@@ -205,7 +333,8 @@ def record_conversation_turn_memory_spine(
             "canonical_turn_identity": stable_identity,
         }
         result = record_life_experience(
-            ledger=ledger,
+            service=life_service,
+            reader=life_reader,
             person_id=resolved_person,
             session_id=clean_session,
             source_kind=source_kind,
@@ -229,6 +358,9 @@ def record_conversation_turn_memory_spine(
 
 def backfill_conversation_turn_memory_spine(
     *,
+    ledger: Any,
+    life_service: LifeCommandServiceLike,
+    life_reader: LifeSnapshotReaderLike,
     person_id: str | None = "default",
     session_id: str = "",
     limit: int = 500,
@@ -238,11 +370,7 @@ def backfill_conversation_turn_memory_spine(
     """Find or bridge conversation turns using canonical command receipts as authority."""
 
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-
-        ledger = get_ledger()
         turn_repository = ContextRepository.from_ledger(ledger)
-        command_repository = LifeCommandRepository.from_ledger(ledger)
         clean_person = _text(person_id or "", limit=120)
         clean_session = _text(session_id, limit=180)
         capped = max(1, min(int(limit or 500), 5000))
@@ -271,7 +399,7 @@ def backfill_conversation_turn_memory_spine(
                 ts_ms=int(row.get("ts_ms") or 0),
             )
             if _already_in_life_stream(
-                repository=command_repository,
+                reader=life_reader,
                 command_id=command_id,
             ):
                 skipped_existing += 1
@@ -295,6 +423,9 @@ def backfill_conversation_turn_memory_spine(
             except Exception:
                 metadata = {}
             result = record_conversation_turn_memory_spine(
+                ledger=ledger,
+                life_service=life_service,
+                life_reader=life_reader,
                 request_id=request_id,
                 session_id=str(row.get("session_id") or ""),
                 person_id=str(row.get("person_id") or clean_person or "default"),
@@ -330,13 +461,9 @@ def backfill_conversation_turn_memory_spine(
         return {"status": "DEGRADED", "reason_code": type(exc).__name__, "detail": str(exc)[:240]}
 
 
-def count_conversation_turn_memory_spine_gaps(*, person_id: str | None = "default", session_id: str = "", limit: int = 2000, include_asr_sessions: bool = False) -> int:
+def count_conversation_turn_memory_spine_gaps(*, ledger: Any, life_reader: LifeSnapshotReaderLike, person_id: str | None = "default", session_id: str = "", limit: int = 2000, include_asr_sessions: bool = False) -> int:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-
-        ledger = get_ledger()
         turn_repository = ContextRepository.from_ledger(ledger)
-        command_repository = LifeCommandRepository.from_ledger(ledger)
         clean_person = _text(person_id or "", limit=120)
         clean_session = _text(session_id, limit=180)
         capped = max(1, min(int(limit or 2000), 10000))
@@ -350,7 +477,7 @@ def count_conversation_turn_memory_spine_gaps(*, person_id: str | None = "defaul
             1
             for row in rows
             if not _already_in_life_stream(
-                repository=command_repository,
+                reader=life_reader,
                 command_id=_conversation_turn_command_id(
                     request_id=str(row.get("request_id") or ""),
                     session_id=str(row.get("session_id") or ""),
@@ -366,6 +493,7 @@ def count_conversation_turn_memory_spine_gaps(*, person_id: str | None = "defaul
 
 
 __all__ = [
+    "append_visible_conversation_turn",
     "backfill_conversation_turn_memory_spine",
     "count_conversation_turn_memory_spine_gaps",
     "record_conversation_turn_memory_spine",

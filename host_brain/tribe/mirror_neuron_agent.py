@@ -6,9 +6,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.model_attempt_port import complete_compiled_model_sync
+from host_brain.tribe.model_invocation import complete_tribe_compiled_sync
 from host_brain.core.ids import now_ms
 from host_brain.model_runtime import MIRROR_EMPATHY_PROMPT_ID
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -37,6 +38,7 @@ def _emotion_anchor(tag: str) -> tuple[float, float]:
 
 @dataclass(slots=True)
 class MirrorNeuronAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="mirror_neuron_agent",
@@ -53,7 +55,7 @@ class MirrorNeuronAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)
@@ -295,9 +297,9 @@ class MirrorNeuronAgent:
         _log = _logging.getLogger("Natsume.tribe.mirror_neuron_agent")
         _model_attempt_trace: dict[str, Any] = {}
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("mirror_neuron_agent.empathy_response_hint") or {}
+            _tpl = resolve_prompt_contract_json("mirror_neuron_agent.empathy_response_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -308,7 +310,8 @@ class MirrorNeuronAgent:
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
                 bond_stage=str(bond_stage or "friend"),
             )
-            _completion = complete_compiled_model_sync(
+            _completion = complete_tribe_compiled_sync(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 prompt_id=MIRROR_EMPATHY_PROMPT_ID,
                 messages=(
                     {"role": "system", "content": _system_prompt},

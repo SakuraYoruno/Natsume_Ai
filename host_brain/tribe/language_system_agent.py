@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -41,7 +42,7 @@ def _load_runtime_texts() -> dict[str, Any]:
             "mid": "有一点孤独感，语气可以稍微靠近。",
         }
     }
-    raw = resolve_prompt_template_json_merged("language_system_agent.runtime_texts")
+    raw = resolve_prompt_contract_json("language_system_agent.runtime_texts")
     if not isinstance(raw, dict) or not raw:
         return defaults
     merged = dict(defaults)
@@ -61,6 +62,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class LanguageSystemAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """语言系统（理解侧 + 生成侧）。
 
     - Wernicke（理解侧）：意图分类、语义槽位抽取、语义压力估计
@@ -290,7 +292,7 @@ class LanguageSystemAgent:
         # broca_generate_plan 产出后，将 tone/warmth_weight 映射为 TTS 参数，
         # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
         try:
-            from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.tribe.speech import broca_to_tts_params  # noqa: PLC0415
             import asyncio as _asyncio  # noqa: PLC0415
 
             _tts_params = broca_to_tts_params(
@@ -427,10 +429,10 @@ class LanguageSystemAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("language_system_agent.wernicke_deep_parse") or {}
+            _tpl = resolve_prompt_contract_json("language_system_agent.wernicke_deep_parse") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -442,6 +444,7 @@ class LanguageSystemAgent:
                 user_text=str(user_text or "")[:300],
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="language_wernicke_deep_parse",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
@@ -492,10 +495,10 @@ class LanguageSystemAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("language_system_agent.broca_opening_hint") or {}
+            _tpl = resolve_prompt_contract_json("language_system_agent.broca_opening_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -508,6 +511,7 @@ class LanguageSystemAgent:
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="language_broca_opening_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
@@ -522,7 +526,7 @@ class LanguageSystemAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)

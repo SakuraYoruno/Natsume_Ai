@@ -1,19 +1,11 @@
-"""Compatibility facade for the explicit Canon application service.
-
-Production startup must inject ``CanonApplicationService``.  The ledger-based
-constructor remains only for narrow compatibility callers and performs no
-direct writes; all mutations still enter ``CanonRepository``.
-"""
+"""Pure operations over the explicitly composed Canon application service."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.canon.application import CanonApplicationService
 from host_brain.canon.contracts import CanonSyncRecord as WorldCanonSyncRecord
-from host_brain.persistence.canon_repository import CanonRepository
 
 
 WORLD_CANON_VERSION_DRIFT = "WORLD_CANON_VERSION_DRIFT"
@@ -27,27 +19,21 @@ S_CANON_DRIFT = "S_CANON_DRIFT"
 
 def sync_world_canon_index(
     *,
-    world_root: str | Path = "host_brain/canon/world",
-    service: CanonApplicationService | None = None,
-    ledger: SQLiteLedger | None = None,
+    service: CanonApplicationService,
     ts_ms: int | None = None,
 ) -> list[WorldCanonSyncRecord]:
     """Project Canon assets through the single application/writer boundary."""
 
-    application = service or _compat_application(ledger=ledger, world_root=world_root)
-    return list(application.sync_startup(ts_ms=ts_ms).records)
+    return list(service.sync_startup(ts_ms=ts_ms).records)
 
 
 def detect_world_version_drift(
     *,
-    world_root: str | Path = "host_brain/canon/world",
-    service: CanonApplicationService | None = None,
-    ledger: SQLiteLedger | None = None,
+    service: CanonApplicationService,
 ) -> list[dict[str, Any]]:
     """Pure read comparison between assets and the durable Canon projection."""
 
-    application = service or _compat_application(ledger=ledger, world_root=world_root)
-    preview = application.preview_sync()
+    preview = service.preview_sync()
     drifts: list[dict[str, Any]] = []
     for issue in preview.issues:
         drifts.append(
@@ -60,7 +46,7 @@ def detect_world_version_drift(
     for record in preview.records:
         if not record.changed:
             continue
-        indexed = application.get_document(record.doc_id)
+        indexed = service.get_document(record.doc_id)
         if indexed is None:
             drifts.append(
                 {
@@ -84,7 +70,7 @@ def detect_world_version_drift(
                 }
             )
     for doc_id in preview.removed_doc_ids:
-        indexed = application.get_document(doc_id)
+        indexed = service.get_document(doc_id)
         drifts.append(
             {
                 "code": WORLD_CANON_FILE_MISSING,
@@ -95,22 +81,6 @@ def detect_world_version_drift(
             }
         )
     return drifts
-
-
-def _compat_application(
-    *,
-    ledger: SQLiteLedger | None,
-    world_root: str | Path,
-) -> CanonApplicationService:
-    if ledger is None:
-        raise RuntimeError("Canon application service must be injected")
-    db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
-    if not db_path or db_path == ":memory:":
-        raise RuntimeError("Canon application service requires a migrated durable database")
-    return CanonApplicationService(
-        repository=CanonRepository(db_path),
-        world_root=world_root,
-    )
 
 
 __all__ = [

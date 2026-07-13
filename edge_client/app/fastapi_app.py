@@ -127,9 +127,14 @@ def create_edge_fastapi_app(
     startup_runner = startup_hook or runtime_startup
     shutdown_runner = shutdown_hook or runtime_shutdown
     health_runner = health_collector or collect_health
-    embodiment_store_value = embodiment_store or SQLiteEdgeEmbodimentStore(
-        _resolve_embodiment_transport_db_path(), clock=clock
-    )
+    if embodiment_store is None:
+        from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
+
+        embodiment_db_path = _resolve_embodiment_transport_db_path()
+        apply_edge_gateway_migrations(embodiment_db_path)
+        embodiment_store_value = SQLiteEdgeEmbodimentStore(embodiment_db_path, clock=clock)
+    else:
+        embodiment_store_value = embodiment_store
     embodiment_runtime = DurableEmbodimentRuntime(embodiment_store_value)
 
     @asynccontextmanager
@@ -351,36 +356,6 @@ def create_edge_fastapi_app(
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_context_compress,
         )
-
-    @app.post("/v1/edge/wechat/callback")
-    async def edge_wechat_callback(request: Request) -> JSONResponse:
-        """接收微信 Hook 工具（wcf 等）推送的消息，转发给 Host Brain。
-
-        此接口不需要 HMAC 鉴权（本地 Hook 工具调用），但只监听 127.0.0.1。
-        """
-        ts = int(clock())
-        _ = request
-        return JSONResponse(_response(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=CONFIG_VALUE_INVALID,
-            detail="legacy /v1/edge/wechat/callback disabled; use /v1/gateway/{platform}/webhook",
-            event={"stage": "S_EDGE_WECHAT_CALLBACK", "deprecated": True},
-            ts_ms=ts,
-        ))
-
-    @app.post("/v1/edge/wechat/command")
-    async def edge_wechat_command(request: Request) -> JSONResponse:
-        ts = int(clock())
-        _ = request
-        return JSONResponse(_response(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=CONFIG_VALUE_INVALID,
-            detail="legacy /v1/edge/wechat/command disabled; use /v1/gateway/reply on EDGE_GATEWAY_PORT",
-            event={"stage": "S_EDGE_WECHAT_COMMAND", "deprecated": True},
-            ts_ms=ts,
-        ))
 
     @app.post("/v1/edge/screenshot")
     async def edge_screenshot(request: Request) -> JSONResponse:
@@ -679,60 +654,32 @@ def create_edge_fastapi_app(
 
         # ── T-169：通过 EdgeTribeBridge.receive_command() 统一分发 ──────────
         try:
-            from edge_client.tribe.registry import get_edge_tribe_registry  # noqa: PLC0415
-            from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge  # noqa: PLC0415
-
-            registry = get_edge_tribe_registry()
-
-            # 优先使用 registry 中已初始化的 bridge；否则降级为直接分发
-            bridge: EdgeTribeBridge | None = registry.bridge if registry.initialized else None
-
-            if bridge is not None:
-                # T-169：通过 EdgeTribeBridge.receive_command() 统一路由
-                result = bridge.receive_command(
-                    command_type=command_type,
-                    source_agent=source_agent,
-                    target_agent=target_agent or None,
-                    payload=payload,
-                    command_id=str(body.get("command_id") or "").strip() or None,
-                    schema_version=str(body.get("schema_version") or "tribe.command.v1"),
-                    somatic_agent=registry.somatic if registry.initialized else None,
-                    peripheral_agent=registry.peripheral if registry.initialized else None,
-                    channel_agent=registry.channel if registry.initialized else None,
+            registry = getattr(runtime_value, "tribe_registry", None)
+            if registry is None:
+                return JSONResponse(
+                    {
+                        "accepted": False,
+                        "reason": "EDGE_TRIBE_COMPOSITION_UNAVAILABLE",
+                        "ts_ms": ts,
+                    },
+                    status_code=503,
                 )
-                dispatched = bool(result.get("dispatched", False))
-                _log.debug(
-                    "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
-                    command_type, result.get("routed_to"), result.get("ok"),
-                )
-            else:
-                # 降级：registry 未初始化时直接分发（向后兼容）
-                dispatched = False
-                if command_type in {"EMOTION_STATE_CHANGED", "EMOTION_STATE_COMMAND"} and (
-                    not target_agent or target_agent in ("edge.somatic", "somatic_agent")
-                ):
-                    if registry.initialized and hasattr(registry, "somatic"):
-                        registry.somatic.on_emotion_state_command(payload=payload)
-                        dispatched = True
-                elif command_type in {"GATE_CONTROL", "GATE_CONTROL_COMMAND"} and (
-                    not target_agent or target_agent in ("edge.channel", "channel_agent")
-                ):
-                    if registry.initialized and hasattr(registry, "channel"):
-                        gate_open = bool(payload.get("gate_open", True))
-                        if "gate" in payload:
-                            gate_open = str(payload.get("gate") or "").strip().lower() != "closed"
-                        registry.channel.on_gate_control_command(
-                            gate_open=gate_open,
-                            reason=payload.get("reason"),
-                            platform=payload.get("platform"),
-                            ts_ms=int(payload.get("ts_ms") or 0),
-                        )
-                        dispatched = True
-                else:
-                    _log.info(
-                        "tribe_command: unhandled command_type=%s target=%s (ignored)",
-                        command_type, target_agent,
-                    )
+            result = registry.bridge.receive_command(
+                command_type=command_type,
+                source_agent=source_agent,
+                target_agent=target_agent or None,
+                payload=payload,
+                command_id=str(body.get("command_id") or "").strip() or None,
+                schema_version=str(body.get("schema_version") or "tribe.command.v1"),
+                somatic_agent=registry.somatic,
+                peripheral_agent=registry.peripheral,
+                channel_agent=registry.channel,
+            )
+            dispatched = bool(result.get("dispatched", False))
+            _log.debug(
+                "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
+                command_type, result.get("routed_to"), result.get("ok"),
+            )
 
             return JSONResponse({
                 "accepted": True,

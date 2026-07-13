@@ -1,5 +1,5 @@
-from .affect_state import AffectStateBlock, build_affect_summary, resolve_affect_state
-from .conversation_interpretation import (
+from host_brain.persona.context.affect_state import AffectStateBlock, build_affect_summary, resolve_affect_state
+from host_brain.persona.context.conversation_interpretation import (
     ConversationInterpretation,
     classify_assistant_answer_style,
     classify_literal_topic,
@@ -7,16 +7,16 @@ from .conversation_interpretation import (
     interpret_conversation,
     normalize_surface_group,
 )
-from .drive_state import DriveStateBlock, resolve_drive_state
-from .emotional_act import EmotionalAct, resolve_emotional_act
+from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.persona.context.emotional_act import EmotionalAct, resolve_emotional_act
 from .interaction_state import InteractionState, build_interaction_state, coerce_interaction_state
-from .interaction_thread import (
+from host_brain.persona.context.interaction_thread import (
     InteractionThreadState,
     coerce_interaction_thread_state,
     resolve_interaction_thread,
 )
 from .interaction_facts_plane import InteractionFactsPlane, assemble_interaction_facts_plane
-from .perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet
+from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet
 from .prompt_context_plane import (
     AffectBlock,
     BudgetTrace,
@@ -37,16 +37,16 @@ from .prompt_context_plane import (
     assemble_prompt_context_plane,
     assemble_prompt_context_plane_v5,
 )
-from .relationship_state import (
+from host_brain.persona.context.relationship_state import (
     RelationshipStateBlock,
     build_relationship_summary,
     derive_relationship_substage,
     resolve_relationship_state,
 )
-from .social_act import SocialAct, resolve_social_act
-from .soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul
-from .tactic_ledger import SessionTacticLedgerStore, TacticLedgerBlock, TacticLedgerEntry, coerce_tactic_ledger_block
-from .topic_ledger import SessionTopicLedgerStore, TopicLedgerBlock, TopicLedgerEntry, coerce_topic_ledger_block
+from host_brain.persona.context.social_act import SocialAct, resolve_social_act
+from host_brain.persona.context.soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore, TacticLedgerBlock, TacticLedgerEntry, coerce_tactic_ledger_block
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore, TopicLedgerBlock, TopicLedgerEntry, coerce_topic_ledger_block
 
 __all__ = [
     "AffectBlock",

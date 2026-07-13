@@ -16,20 +16,19 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from host_brain.agent_runtime.budget_policy import (
+from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
     BudgetReservation,
     BudgetReservationStatus,
 )
-from host_brain.agent_runtime.acceptance_judge import (
+from host_brain.contracts.agent_runtime.acceptance_judge import (
     ACCEPTANCE_EVIDENCE_REQUIRED,
     ACCEPTANCE_REQUIRED_NOT_ACCEPTED,
     AcceptanceJudgement,
     judge_acceptance_result,
 )
 import host_brain.persistence.task_repository as task_store_module
-from host_brain.agent_runtime.job_registry import AgentJobRegistry
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
@@ -2975,152 +2974,3 @@ def test_t_nle_06_frozen_v1_public_deserializers_keep_compatibility_fallbacks() 
     ).to_dict()
     budget_payload["consumed"] = []
     assert BudgetReservation.from_mapping(budget_payload).consumed == BudgetAmount()
-
-
-def test_t_nle_06_legacy_shadow_rejects_rollback_and_same_timestamp_conflict(
-    tmp_path: Path,
-) -> None:
-    store = _migrated_store(tmp_path)
-    latest = {
-        "job_id": "agent-job::ordered",
-        "kind": "test",
-        "status": "DONE",
-        "work_order": {"work_order_id": "wo-ordered"},
-        "result": {"status": "EXECUTED"},
-        "created_at_ms": 50,
-        "updated_at_ms": 200,
-    }
-    first = store.mirror_legacy_job(latest)
-    baseline_outbox = len(store.list_pending_outbox())
-
-    older = dict(latest, status="RUNNING", updated_at_ms=100)
-    with pytest.raises(TaskStoreError) as rollback:
-        store.mirror_legacy_job(older)
-    assert rollback.value.reason_code == TASK_STORE_CAS_CONFLICT
-
-    idempotent = store.mirror_legacy_job(dict(latest))
-    assert idempotent["shadow_version"] == first["shadow_version"]
-    assert len(store.list_pending_outbox()) == baseline_outbox
-
-    same_timestamp_conflict = dict(latest, status="FAILED")
-    with pytest.raises(TaskStoreError) as conflict:
-        store.mirror_legacy_job(same_timestamp_conflict)
-    assert conflict.value.reason_code == TASK_STORE_CAS_CONFLICT
-    shadow = store.get_legacy_job_shadow("agent-job::ordered")
-    assert shadow is not None
-    assert shadow["job"]["status"] == "DONE"
-    assert shadow["job"]["updated_at_ms"] == 200
-    assert shadow["shadow_version"] == first["shadow_version"]
-    assert len(store.list_pending_outbox()) == baseline_outbox
-
-
-def test_t_nle_06_corrupt_legacy_shadow_is_never_downgraded_or_overwritten(
-    tmp_path: Path,
-) -> None:
-    store = _migrated_store(tmp_path)
-    legacy_job = {
-        "job_id": "agent-job::strict",
-        "kind": "test",
-        "status": "QUEUED",
-        "work_order": {"work_order_id": "wo-strict"},
-        "result": None,
-        "created_at_ms": 100,
-        "updated_at_ms": 100,
-    }
-    store.mirror_legacy_job(legacy_job)
-    with sqlite3.connect(str(store.db_path)) as conn:
-        conn.execute(
-            """
-            UPDATE task_runtime_graph SET legacy_snapshot_json = '{}'
-            WHERE source_ref = 'agent-job::strict'
-            """
-        )
-    with pytest.raises(TaskStoreError) as shadow_read:
-        store.get_legacy_job_shadow("agent-job::strict")
-    assert shadow_read.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
-
-    updated_job = dict(legacy_job, status="RUNNING", updated_at_ms=101)
-    with pytest.raises(TaskStoreError) as shadow_write:
-        store.mirror_legacy_job(updated_job)
-    assert shadow_write.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
-    with sqlite3.connect(str(store.db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT status_version, legacy_snapshot_json FROM task_runtime_graph
-            WHERE source_ref = 'agent-job::strict'
-            """
-        ).fetchone()
-    assert row == (0, "{}")
-
-
-def test_t_nle_06_legacy_dual_write_is_shadow_only_redacted_and_reconciled(tmp_path: Path) -> None:
-    store = _migrated_store(tmp_path)
-    registry = AgentJobRegistry(task_store=store, read_mode="shadow")
-    job = registry.create(
-        kind="codex_work_order",
-        work_order={
-            "schema_version": "Natsume.agent.work_order.v2",
-            "work_order_id": "wo-legacy",
-            "objective": "safe objective",
-            "analysis": "private chain of thought must never be persisted",
-        },
-    )
-    assert registry.read_authority == "LEGACY"
-    assert registry.get(job["job_id"]) == job
-    assert registry.reconcile(job["job_id"])["classification"] == "MATCH"
-
-    updated = registry.update(
-        job["job_id"],
-        status="COMPLETED",
-        result={
-            "status": "EXECUTED",
-            "reasoning": "another private reasoning body",
-            "evidence_refs": ["evidence://1"],
-        },
-    )
-    assert updated is not None
-    assert registry.get(job["job_id"])["result"]["reasoning"] == "another private reasoning body"
-    report = registry.reconcile(job["job_id"])
-    assert report["classification"] == "MATCH"
-    assert report["authority"] == "LEGACY"
-    assert "work_order_digest" in report["durable_shadow"]
-    assert "work_order" not in report["durable_shadow"]
-
-    with sqlite3.connect(str(store.db_path)) as conn:
-        persisted = str(
-            conn.execute(
-                "SELECT legacy_snapshot_json FROM task_runtime_graph WHERE source_ref = ?",
-                (job["job_id"],),
-            ).fetchone()[0]
-        )
-    assert "private chain of thought" not in persisted
-    assert "private reasoning body" not in persisted
-    assert "safe objective" not in persisted
-    projection = json.loads(persisted)
-    assert projection["result_status"] == "EXECUTED"
-    assert projection["result_digest"].startswith("sha256:")
-
-
-def test_t_nle_06_shadow_failure_never_changes_legacy_return_or_authority() -> None:
-    class BrokenShadow:
-        def mirror_legacy_job(self, job: dict[str, Any]) -> None:
-            raise RuntimeError("shadow database unavailable")
-
-        def reconcile_legacy_job(self, job_id: str, job: dict[str, Any] | None) -> dict[str, Any]:
-            raise RuntimeError("shadow read unavailable")
-
-    registry = AgentJobRegistry(task_store=BrokenShadow(), read_mode="shadow")  # type: ignore[arg-type]
-    job = registry.create(kind="test", work_order={"work_order_id": "wo-1"})
-    updated = registry.update(job["job_id"], status="RUNNING")
-
-    assert updated is not None
-    assert updated["status"] == "RUNNING"
-    assert registry.get(job["job_id"])["status"] == "RUNNING"
-    assert registry.read_authority == "LEGACY"
-    report = registry.reconcile(job["job_id"])
-    assert report["classification"] == "MIRROR_WRITE_FAILED"
-    assert report["match"] is False
-    assert report["reason_code"] == "TASK_STORE_SHADOW_WRITE_FAILED"
-
-    with pytest.raises(ValueError):
-        AgentJobRegistry(read_mode="durable")  # type: ignore[arg-type]

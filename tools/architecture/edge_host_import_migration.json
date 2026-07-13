@@ -1,13 +1,5 @@
 {
   "schema_version": 1,
   "policy_id": "TASK-0493_EDGE_CONTRACTS_ONLY",
-  "edges": [
-    {"edge_id":"H2E-008","direction":"HOST_TO_EDGE","source_path":"host_brain/app/http_hooks.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_RUNTIME","reason":"Host lifespan dynamically imports a runtime probe whose target cannot statically exclude Edge implementation code.","migration_target":"typed runtime probe registry wired only in Host composition","remove_by":"TASK-0581","priority":"P0"},
-    {"edge_id":"H2E-009","direction":"HOST_TO_EDGE","source_path":"host_brain/app/obs_routes_health.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_QUERY","reason":"Host observability health dynamically imports tribe status providers without a statically bounded target.","migration_target":"Service Catalog health query port","remove_by":"TASK-0581","priority":"P0"},
-    {"edge_id":"H2E-010","direction":"HOST_TO_EDGE","source_path":"host_brain/pentest/phase3_vuln.py","target_module":"edge_client.__dynamic_risk__","owner":"PENTEST_LAB","reason":"Pentest scanner discovery dynamically imports an unresolved implementation module.","migration_target":"lab scanner registry with an explicit allowlisted implementation namespace","remove_by":"TASK-0581","priority":"P1"},
-    {"edge_id":"H2E-011","direction":"HOST_TO_EDGE","source_path":"host_brain/skills/custom_provider_installer.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_CAPABILITY","reason":"Custom provider validation executes dynamically compiled provider code and cannot prove the Edge boundary statically.","migration_target":"isolated provider validation adapter behind the capability contract","remove_by":"TASK-0581","priority":"P0"},
-    {"edge_id":"H2E-012","direction":"HOST_TO_EDGE","source_path":"host_brain/skills/provider_catalog.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_CAPABILITY","reason":"Provider discovery and instantiation dynamically load unresolved implementation modules.","migration_target":"typed provider registry wired only in Host composition","remove_by":"TASK-0581","priority":"P0"},
-    {"edge_id":"H2E-013","direction":"HOST_TO_EDGE","source_path":"host_brain/agent_runtime/__init__.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_RUNTIME","reason":"Agent runtime compatibility loading cannot statically exclude Edge implementation modules.","migration_target":"typed Host composition registry","remove_by":"TASK-0581","priority":"P1"},
-    {"edge_id":"H2E-014","direction":"HOST_TO_EDGE","source_path":"host_brain/persistence/__init__.py","target_module":"edge_client.__dynamic_risk__","owner":"HOST_PERSISTENCE","reason":"Persistence compatibility loading cannot statically exclude Edge implementation modules.","migration_target":"typed Host persistence registry","remove_by":"TASK-0581","priority":"P1"}
-  ]
+  "edges": []
 }

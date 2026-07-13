@@ -29,9 +29,12 @@ from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, bu
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
+from edge_client.runtime.tribe_composition import (
+    EdgeTribeComposition,
+    compose_edge_tribe,
+)
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
 from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
-from edge_client.tribe.registry import build_edge_tribe_bridge, get_edge_tribe_registry
 
 
 LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
@@ -53,7 +56,7 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | VrmBridgeDriver | None
-    tribe_bridge: Any | None
+    tribe_composition: EdgeTribeComposition
     gateway_transport_store_factory: GatewayTransportStoreFactory | None = None
     startup_threads: list[threading.Thread] = field(default_factory=list, repr=False)
 
@@ -72,6 +75,14 @@ class EdgeRuntime:
     @property
     def rpc_client(self) -> VoiceRpcContract:
         return self.voice_rpc
+
+    @property
+    def tribe_bridge(self):
+        return self.tribe_composition.bridge
+
+    @property
+    def tribe_registry(self):
+        return self.tribe_composition.registry
 
     def service_statuses(self) -> dict[str, dict[str, Any]]:
         return build_edge_runtime_statuses(self.config)
@@ -146,6 +157,7 @@ def build_edge_runtime(
     """Build runtime components from validated edge configuration."""
 
     env_lookup = _normalize_env_lookup(os.environ)
+    tribe_composition = compose_edge_tribe()
     resource_gate = (
         VoiceResourceGate(
             vram_soft_limit_ratio=_parse_float(
@@ -386,7 +398,7 @@ def build_edge_runtime(
         event_reporter=event_reporter,
         vts_driver=vts_driver,
         resource_gate=resource_gate,
-        tribe_bridge=build_edge_tribe_bridge(),
+        tribe_bridge=tribe_composition.bridge,
     )
     if playback_device is not None:
         playback_device.set_on_playback_finished(lambda: voice_pipeline.complete_playback())
@@ -588,7 +600,7 @@ def build_edge_runtime(
         tts_model=tts_model,
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
-        tribe_bridge=getattr(voice_pipeline, "tribe_bridge", None),
+        tribe_composition=tribe_composition,
         gateway_transport_store_factory=gateway_transport_store_factory,
     )
 
@@ -625,8 +637,7 @@ def bootstrap(
     # SomaticAgent 接收来自 host_brain LimbicAgent 的下行情绪指令后，
     # 通过 vts_driver.set_expression() 驱动 VTubeStudio 表情，实现身心联动闭环
     try:
-        _tribe_registry = get_edge_tribe_registry()
-        _tribe_registry.initialize()
+        _tribe_registry = runtime.tribe_registry
         somatic = _tribe_registry.somatic
         if hasattr(somatic, "set_vts_driver"):
             somatic.set_vts_driver(runtime.vts_driver)
@@ -652,11 +663,7 @@ def bootstrap(
             def _face_capture_poll_loop() -> None:
                 """面部捕捉感知轮询循环，在后台线程中持续运行。"""
                 import time as _time  # noqa: PLC0415
-                _somatic = None
-                try:
-                    _somatic = get_edge_tribe_registry().somatic
-                except Exception:
-                    pass
+                _somatic = _tribe_registry.somatic
 
                 while True:
                     try:
@@ -729,6 +736,7 @@ def bootstrap(
             )
             gw_instance = start_gateway(
                 gw_config,
+                tribe_bridge=runtime.tribe_bridge,
                 transport_store_factory=runtime.gateway_transport_store_factory,
             )
             runtime._gateway_instance = gw_instance  # type: ignore[attr-defined]

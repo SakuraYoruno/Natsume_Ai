@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from string import Formatter
 from typing import Any, Mapping, Sequence
 
-from host_brain.app.prompt_specs import PromptSpec, list_prompt_specs
+from host_brain.model_runtime.prompt_specs import PromptSpec, list_prompt_specs
 from host_brain.model_runtime.contracts import OutputContract, sha256_digest
 from host_brain.model_runtime.prompt_registry import (
     PromptRegistry,
@@ -237,6 +237,7 @@ def build_production_prompt_registry() -> PromptRegistry:
                 version=bound.spec.version,
                 output_contract=output_contract,
                 metadata=metadata,
+                compilation_source=bound.content,
             )
             continue
 
@@ -256,6 +257,7 @@ def build_production_prompt_registry() -> PromptRegistry:
             required_variables=_OPERATIONAL_VARIABLES,
             output_contract=output_contract,
             metadata=metadata,
+            compilation_source=bound.content,
         )
     return registry
 

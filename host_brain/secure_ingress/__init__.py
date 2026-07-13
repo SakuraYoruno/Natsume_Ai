@@ -44,23 +44,6 @@ from .surfaces import (
     SECURE_INGRESS_SURFACE_POLICIES,
     build_surface_request,
 )
-
-
-def __getattr__(name: str):
-    if name in {"SQLiteSecureIngressStore", "SecureIngressStoreError"}:
-        from host_brain.persistence.secure_ingress_repository import (  # noqa: PLC0415
-            SQLiteSecureIngressStore,
-            SecureIngressStoreError,
-        )
-
-        value = {
-            "SQLiteSecureIngressStore": SQLiteSecureIngressStore,
-            "SecureIngressStoreError": SecureIngressStoreError,
-        }[name]
-        globals()[name] = value
-        return value
-    raise AttributeError(name)
-
 __all__ = [
     "ClaimDecision",
     "ClaimStatus",
@@ -93,8 +76,6 @@ __all__ = [
     "SecureIngressMode",
     "SecureIngressRequest",
     "SecureIngressService",
-    "SQLiteSecureIngressStore",
-    "SecureIngressStoreError",
     "build_hmac_sha256_signature",
     "build_surface_request",
     "load_secure_ingress_mode",

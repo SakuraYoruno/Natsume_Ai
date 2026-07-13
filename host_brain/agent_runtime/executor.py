@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from host_brain.agent_runtime.acceptance_judge import (
+from host_brain.contracts.agent_runtime.acceptance_judge import (
     ACCEPTANCE_CRITERION_FAILED,
     AcceptanceDecision,
     judge_acceptance_result,
@@ -15,13 +15,13 @@ from host_brain.agent_runtime.agent_executor import AgentExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
-from host_brain.agent_runtime.review_policy import ReviewPolicy
+from host_brain.contracts.agent_runtime.review_policy import ReviewPolicy
 from host_brain.agent_runtime.verification_policy import (
     VERIFICATION_REQUIRED_NOT_PASSED,
     VerificationGate,
     VerificationPolicy,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.core.subprocess_utils import run as _subprocess_run
@@ -29,41 +29,6 @@ from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
 
 logger = logging.getLogger(__name__)
-
-
-def evaluate_task_runtime_shadow(
-    store: Any,
-    graph_id: str,
-    graph_revision: int,
-    *,
-    confirmed_owner: str,
-    now_ts_ms: int,
-    artifact_refs: dict[str, str] | None = None,
-    budget_allowed: dict[str, bool] | None = None,
-    legacy_decisions: list[dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    """Read-only TASK-0469 adapter; it never enters the execution path."""
-    from host_brain.agent_runtime.task_scheduler import (  # noqa: PLC0415
-        CanonicalShadowScheduler,
-        evaluate_configured_shadow,
-    )
-    from host_brain.app.settings.core import get_core_settings  # noqa: PLC0415
-
-    settings = get_core_settings()
-    report = evaluate_configured_shadow(
-        CanonicalShadowScheduler(),
-        store,
-        graph_id,
-        graph_revision,
-        runtime_mode=settings.task_runtime_mode,
-        configured_owner=settings.task_runtime_shadow_owner,
-        confirmed_owner=confirmed_owner,
-        now_ts_ms=now_ts_ms,
-        artifact_refs=artifact_refs,
-        budget_allowed=budget_allowed,
-        legacy_decisions=legacy_decisions,
-    )
-    return None if report is None else report.to_dict()
 
 
 def _collect_git_summary(workspace: Path) -> dict[str, Any]:
@@ -200,11 +165,15 @@ class AgentRuntimeExecutor:
         workspace_policy: WorkspacePolicy | None = None,
         verification_policy: VerificationPolicy | None = None,
         review_policy: ReviewPolicy | None = None,
+        model_attempt_service: Any = None,
+        prompt_registry: Any = None,
     ) -> None:
         self.artifact_store = artifact_store or AgentArtifactStore()
         self.workspace_policy = workspace_policy or WorkspacePolicy()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.review_policy = review_policy or ReviewPolicy()
+        self.model_attempt_service = model_attempt_service
+        self.prompt_registry = prompt_registry
 
     def execute(self, work_order: AgentWorkOrder | dict[str, Any]) -> dict[str, Any]:
         order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
@@ -272,7 +241,12 @@ class AgentRuntimeExecutor:
 
         logger.info("Canonical AgentExecutor selected for %s", order.work_order_id)
         try:
-            result = AgentExecutor().execute(order, workspace=resolution.path)
+            if self.model_attempt_service is None or self.prompt_registry is None:
+                raise RuntimeError("AGENT_MODEL_RUNTIME_NOT_COMPOSED")
+            result = AgentExecutor(
+                model_attempt_service=self.model_attempt_service,
+                prompt_registry=self.prompt_registry,
+            ).execute(order, workspace=resolution.path)
         except Exception as exc:
             logger.warning("Canonical AgentExecutor execution failed: %s", exc)
             result = AgentResult(

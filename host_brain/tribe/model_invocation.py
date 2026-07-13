@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from host_brain.core.ids import new_request_id
 from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
+from host_brain.model_runtime.invocation import complete_compiled_prompt
 from host_brain.model_runtime.json_parser import extract_json_object
 from host_brain.model_runtime.live_prompts import TRIBE_PROMPT_IDS
+from host_brain.model_runtime.model_attempt_service import ModelAttemptService
+from host_brain.model_runtime import ModelAttemptResult, model_attempt_result_trace
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +20,20 @@ class TribeModelSemantic:
     semantic_id: str
     prompt_id: str
     cognitive_tier: str
+
+
+@dataclass(frozen=True, slots=True)
+class TribeModelCompletion:
+    result: ModelAttemptResult
+    trace: Mapping[str, Any]
+
+    @property
+    def success(self) -> bool:
+        return bool(self.result.success)
+
+    @property
+    def content(self) -> str:
+        return str(self.result.content or "")
 
 
 _TRIBE_MODEL_SEMANTICS = {
@@ -49,6 +67,7 @@ def tribe_model_semantic(semantic_id: str) -> TribeModelSemantic:
 
 def complete_tribe_json(
     *,
+    attempt_service: ModelAttemptService,
     semantic_id: str,
     system_prompt: str,
     user_prompt: str,
@@ -58,6 +77,7 @@ def complete_tribe_json(
 
     semantic = tribe_model_semantic(semantic_id)
     result = complete_compiled_prompt_sync(
+        attempt_service=attempt_service,
         prompt_id=semantic.prompt_id,
         messages=(
             {"role": "system", "content": str(system_prompt)},
@@ -80,8 +100,63 @@ def complete_tribe_json(
     return extract_json_object(result.content)
 
 
+def complete_tribe_compiled_sync(
+    *,
+    attempt_service: ModelAttemptService,
+    prompt_id: str,
+    messages: Sequence[Mapping[str, Any]],
+    request_id: str,
+    scene_type: str,
+    cognitive_tier: str,
+    deadline_ms: int,
+    foreground: bool = False,
+    metadata: Mapping[str, Any] | None = None,
+) -> TribeModelCompletion:
+    result = complete_compiled_prompt_sync(
+        attempt_service=attempt_service,
+        prompt_id=prompt_id,
+        messages=messages,
+        request_id=request_id,
+        scene_type=scene_type,
+        cognitive_tier=cognitive_tier,
+        deadline_ms=max(1, int(deadline_ms)),
+        foreground=foreground,
+        metadata={"caller": "tribe_model_attempt", **dict(metadata or {})},
+    )
+    return TribeModelCompletion(result=result, trace=model_attempt_result_trace(result))
+
+
+async def complete_tribe_compiled(
+    *,
+    attempt_service: ModelAttemptService,
+    prompt_id: str,
+    messages: Sequence[Mapping[str, Any]],
+    request_id: str,
+    scene_type: str,
+    cognitive_tier: str,
+    deadline_ms: int,
+    foreground: bool = False,
+    metadata: Mapping[str, Any] | None = None,
+) -> TribeModelCompletion:
+    result = await complete_compiled_prompt(
+        attempt_service=attempt_service,
+        prompt_id=prompt_id,
+        messages=messages,
+        request_id=request_id,
+        scene_type=scene_type,
+        cognitive_tier=cognitive_tier,
+        deadline_ms=max(1, int(deadline_ms)),
+        foreground=foreground,
+        metadata={"caller": "tribe_model_attempt", **dict(metadata or {})},
+    )
+    return TribeModelCompletion(result=result, trace=model_attempt_result_trace(result))
+
+
 __all__ = [
     "TribeModelSemantic",
+    "TribeModelCompletion",
+    "complete_tribe_compiled",
+    "complete_tribe_compiled_sync",
     "complete_tribe_json",
     "tribe_model_semantic",
 ]

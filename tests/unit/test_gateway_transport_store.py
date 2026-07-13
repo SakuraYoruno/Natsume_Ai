@@ -7,13 +7,11 @@ import sqlite3
 
 import pytest
 
-from host_brain.eventing import (
+from host_brain.persistence.gateway_transport_repository import (
     GATEWAY_TRANSPORT_MIGRATION_SHA256,
     GatewayTransportStoreError,
     InboxAcceptanceStatus,
     SQLiteGatewayTransportStore,
-)
-from host_brain.eventing.gateway_transport import (
     GATEWAY_TRANSPORT_MAX_INBOX_BODY_BYTES,
     GATEWAY_TRANSPORT_MAX_OUTBOX_BODY_BYTES,
 )
@@ -113,7 +111,7 @@ def test_schema_is_catalog_checksum_bound_and_runtime_has_no_ddl(tmp_path: Path)
         GATEWAY_TRANSPORT_MIGRATION_SHA256
     )
     source = (
-        ROOT / "host_brain/eventing/gateway_transport.py"
+        ROOT / "host_brain/persistence/gateway_transport_repository.py"
     ).read_text(encoding="utf-8").upper()
     assert "CREATE TABLE" not in source
     assert "CREATE INDEX" not in source

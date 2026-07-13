@@ -7,9 +7,14 @@ from host_brain.skills.impl.hub_skill_executor import execute_hub_skill
 
 def test_execute_hub_skill_install_activates(monkeypatch) -> None:
     monkeypatch.setattr('host_brain.skills.impl.hub_skill_executor.install_skill', lambda source, force=False: SimpleNamespace(success=True, name='demo_skill', version='1.0.0', source=source, install_dir='D:/skills/demo_skill', detail='installed ok', error=None))
-    monkeypatch.setattr('host_brain.app.tool_routes._attempt_activate_hub_skill', lambda install_dir, skill_name: (True, ['demo_skill'], True, True, 2, 'skill installed, auto-repaired, and activated'))
 
-    result = execute_hub_skill({'action': 'install', 'source': 'github:owner/repo/demo_skill', 'force': False, 'activate_now': True}, {})
+    def activate_hub_skill(*, install_dir: str, skill_name: str):
+        return True, ['demo_skill'], True, True, 2, 'skill installed, auto-repaired, and activated'
+
+    result = execute_hub_skill(
+        {'action': 'install', 'source': 'github:owner/repo/demo_skill', 'force': False, 'activate_now': True},
+        {'activate_hub_skill': activate_hub_skill},
+    )
 
     assert result['status'] == 'OK'
     assert result['detail']['activated'] is True
@@ -38,9 +43,14 @@ def test_execute_hub_skill_list_returns_installed(monkeypatch) -> None:
 def test_execute_hub_skill_remove_refreshes_registry(monkeypatch) -> None:
     called = {'refresh': 0}
     monkeypatch.setattr('host_brain.skills.impl.hub_skill_executor.remove_skill', lambda skill_name: SimpleNamespace(success=True, name=skill_name, detail='removed', error=None))
-    monkeypatch.setattr('host_brain.app.dependencies.refresh_skill_registry', lambda: called.__setitem__('refresh', called['refresh'] + 1) or None)
 
-    result = execute_hub_skill({'action': 'remove', 'skill_name': 'demo_skill'}, {})
+    def refresh_skill_registry() -> None:
+        called['refresh'] += 1
+
+    result = execute_hub_skill(
+        {'action': 'remove', 'skill_name': 'demo_skill'},
+        {'refresh_skill_registry': refresh_skill_registry},
+    )
 
     assert result['status'] == 'OK'
     assert called['refresh'] == 1
@@ -164,9 +174,10 @@ def test_execute_hub_skill_install_keeps_success_when_activation_raises(monkeypa
     def _raise_activation(*args, **kwargs):  # noqa: ANN001
         raise NameError('os is not defined')
 
-    monkeypatch.setattr('host_brain.app.tool_routes._attempt_activate_hub_skill', _raise_activation)
-
-    result = execute_hub_skill({'action': 'install', 'source': 'clawhub:demo_skill', 'force': False, 'activate_now': True}, {})
+    result = execute_hub_skill(
+        {'action': 'install', 'source': 'clawhub:demo_skill', 'force': False, 'activate_now': True},
+        {'activate_hub_skill': _raise_activation},
+    )
 
     assert result['status'] == 'OK'
     assert result['detail']['success'] is True

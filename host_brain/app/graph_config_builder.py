@@ -31,12 +31,6 @@ from host_brain.app.prompt_builder import (
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.app.provider_factory import (
-    _GEMINI_PRIMARY_RETRY_NODE_ID,
-    _GEMINI_PRIMARY_RETRY_MODEL_IDS,
-    resolve_gemini_primary_fallback_model_id,
-    resolve_host_llm_model_id,
-)
 from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 
 # ---------------------------------------------------------------------------
@@ -67,7 +61,6 @@ from host_brain.app.graph_config_constants import (  # noqa: E402
     REPAIR_AGENT_HANDLER_ID,
     PENTEST_AGENT_NODE_ID,
     PENTEST_AGENT_HANDLER_ID,
-    PENTEST_ATTACK_AGENT_HANDLER_ID,
     AGENT_DISPATCH_NODE_ID,
     AGENT_DISPATCH_HANDLER_ID,
     ALLOWED_EXPLICIT_SCENE_TYPES,
@@ -613,7 +606,6 @@ def _build_graph_config_by_profile(
         chain_budget_ms = sum(
             int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence
         )
-        primary_budget_node_id = INTENT_AGENT_ENTRY_NODE_ID
     elif use_supervised:
         # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer
         scene_node_sequence = [
@@ -633,7 +625,6 @@ def _build_graph_config_by_profile(
             EMOTION_AGENT_HANDLER_ID,  # 方向 G Phase 2 新增
             REPAIR_AGENT_HANDLER_ID,
             PENTEST_AGENT_HANDLER_ID,
-            PENTEST_ATTACK_AGENT_HANDLER_ID,
         ]
         node_bindings = [
             {
@@ -671,7 +662,6 @@ def _build_graph_config_by_profile(
         chain_budget_ms = sum(
             int(node_timeouts.get(node_id, base_timeout_ms)) for node_id in scene_node_sequence
         )
-        primary_budget_node_id = SUPERVISOR_DISPATCH_NODE_ID
     else:
         # Chat 图：chat_direct → renderer（仅快路径两节点）
         # P3：code/translate 已迁入 Supervised 图，此处不再用旧长链做主路由；误入时强制快路径
@@ -721,29 +711,8 @@ def _build_graph_config_by_profile(
                 else 0
             )
         )
-        primary_budget_node_id = entry_node_id
 
-    primary_timeout_ms = int(node_timeouts.get(primary_budget_node_id, base_timeout_ms))
-    try:
-        configured_attempts = int(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_ATTEMPTS") or "2").strip())
-    except ValueError:
-        configured_attempts = 2
-    retry_attempts = max(1, min(configured_attempts, 3))
-    try:
-        configured_retry_delay_ms = int(float(str(os.environ.get("HOST_GEMINI_PRIMARY_RETRY_DELAY_MS") or "150").strip()))
-    except ValueError:
-        configured_retry_delay_ms = 150
-    retry_delay_ms = max(0, min(configured_retry_delay_ms, 2_000))
-    retry_budget_ms = 0
-    fallback_budget_ms = 0
-    if primary_budget_node_id == _GEMINI_PRIMARY_RETRY_NODE_ID:
-        retry_budget_ms = max(0, retry_attempts - 1) * (primary_timeout_ms + retry_delay_ms)
-        fallback_budget_ms = (
-            primary_timeout_ms
-            if resolve_gemini_primary_fallback_model_id(str(node_model_ids.get(primary_budget_node_id) or ""))
-            else 0
-        )
-    policy_timeout_ms = chain_budget_ms + retry_budget_ms + fallback_budget_ms + 5_000
+    policy_timeout_ms = chain_budget_ms + 5_000
     if is_chat_fast_path or (not use_supervised and not is_intent and use_chat_sequence):
         policy_timeout_ms = max(8_000, min(int(policy_timeout_ms), 12_000))
     elif use_supervised:
@@ -788,54 +757,6 @@ def _build_graph_config_by_profile(
             "active_nodes": list(scene_node_sequence),
         },
     }
-
-
-# ---------------------------------------------------------------------------
-# Phase XV: 三套 Agent 专用 LLM 运行时解析
-# ---------------------------------------------------------------------------
-
-
-
-def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
-    return _resolve_agent_llm_runtime_v2(
-        base_runtime=base_runtime,
-        role="surface_reply",
-        model_env_name="HOST_SURFACE_REPLY_MODEL_ID",
-        timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS",
-        timeout_default_ms=30_000,
-        timeout_max_ms=120_000,
-        gen_params={"temperature": 0.8, "top_p": 0.92},
-        fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",),
-        fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
-    )
-
-
-def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
-    return _resolve_agent_llm_runtime_v2(
-        base_runtime=base_runtime,
-        role="executive_router",
-        model_env_name="HOST_EXECUTIVE_ROUTER_MODEL_ID",
-        timeout_env_name="HOST_EXECUTIVE_ROUTER_TIMEOUT_MS",
-        timeout_default_ms=5_000,
-        timeout_max_ms=30_000,
-        gen_params={"temperature": 0.1, "top_p": 0.80},
-        fallback_model_env_names=("HOST_DISPATCH_AGENT_MODEL_ID",),
-        fallback_timeout_env_names=("HOST_DISPATCH_AGENT_TIMEOUT_MS",),
-    )
-
-
-def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
-    runtime = _resolve_agent_llm_runtime_v2(
-        base_runtime=base_runtime,
-        role="subagent",
-        model_env_name="HOST_SUBAGENT_MODEL_ID",
-        timeout_env_name="HOST_SUBAGENT_TIMEOUT_MS",
-        timeout_default_ms=30_000,
-        timeout_max_ms=120_000,
-        gen_params={"temperature": 0.3, "top_p": 0.85},
-    )
-    runtime["agent_role"] = "sub_agent"
-    return runtime
 
 
 # Production callers consume the canonical secret-free RouteCatalog projection.

@@ -1,4 +1,4 @@
-﻿"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
+"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
 
 提供：
   - _run_retrieval: 并行执行检索
@@ -201,12 +201,19 @@ def filter_retrieval_evidence_items_for_prompt(
     }
 
 
-def _surface_memory_distortion_bias(person_id: str | None) -> float:
+def _surface_memory_distortion_bias(
+    person_id: str | None,
+    *,
+    life_snapshot_reader: Any | None = None,
+) -> float:
     """B1 记忆变糊：从 life-state 内在天气读 memory_distortion_bias（app 层读，作 float 传给召回；失败=0.0）。"""
     try:
-        from host_brain.app.life_application_boundary import read_life_snapshot  # noqa: PLC0415
+        from host_brain.digital_life.application_boundary import read_life_snapshot  # noqa: PLC0415
 
-        snapshot = read_life_snapshot(str(person_id or "default"))
+        snapshot = read_life_snapshot(
+            str(person_id or "default"),
+            reader=life_snapshot_reader,
+        )
         weather = dict(snapshot.get("state") or {}).get("inner_weather")
         if isinstance(weather, dict):
             return max(0.0, min(1.0, float(weather.get("memory_distortion_bias") or 0.0)))
@@ -217,6 +224,7 @@ def _surface_memory_distortion_bias(person_id: str | None) -> float:
 
 async def _run_retrieval(
     *,
+    life_snapshot_reader: Any,
     request_id: str,
     message: str,
     person_id: str,
@@ -321,7 +329,10 @@ async def _run_retrieval(
                     target_store_ids=plan.target_store_ids,
                     time_lookback_days=plan.time_lookback_days,
                     max_facts=plan.max_facts,
-                    distortion_bias=_surface_memory_distortion_bias(person_id),
+                    distortion_bias=_surface_memory_distortion_bias(
+                        person_id,
+                        life_snapshot_reader=life_snapshot_reader,
+                    ),
                     max_chars_per_fact=plan.max_chars_per_fact,
                     validation_requirements=plan.validation_requirements,
                     temporal_scope=plan.temporal_scope,
@@ -421,7 +432,7 @@ def _maybe_recall_collection_fastpath(
     started_ms = int(time.time() * 1000)
     try:
         from dataclasses import replace  # noqa: PLC0415
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
 
         store = get_life_memory_store()
         raw_packet = store.recall_collection_packet(
@@ -493,7 +504,7 @@ def _recent_lightnovel_delivery_packet_payload(
     session_id: str,
 ) -> dict[str, Any]:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
         from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
     except Exception:
         return dict(packet_payload or {})
@@ -755,18 +766,14 @@ async def _maybe_apply_lightnovel_deep_review(
         from dataclasses import replace  # noqa: PLC0415
 
         from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
-            configure_life_action_memory_persist,
-            configure_life_memory_store_provider,
             review_lightnovel_selection_from_memory_packet,
             should_deep_review_lightnovel_selection,
         )
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
         from host_brain.app.observability_persist import (  # noqa: PLC0415
             persist_life_action_event_memory,
         )
 
-        configure_life_memory_store_provider(get_life_memory_store)
-        configure_life_action_memory_persist(persist_life_action_event_memory)
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
@@ -790,6 +797,8 @@ async def _maybe_apply_lightnovel_deep_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=get_life_memory_store(),
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
     except Exception as exc:
         review = {
@@ -1080,6 +1089,9 @@ async def _maybe_apply_generic_evidence_review(
             review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
         )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
@@ -1097,6 +1109,7 @@ async def _maybe_apply_generic_evidence_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
     except Exception as exc:
         review = {
@@ -1289,7 +1302,7 @@ def _recent_explicit_memory_facts(*, message: str, session_id: str, request_id: 
     if not normalized_session_id:
         return []
     try:
-        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+        from host_brain.composition.process_services import get_conversation_history  # noqa: PLC0415
 
         turns = get_conversation_history().fetch_recent_turns(
             session_id=normalized_session_id,
@@ -1356,7 +1369,10 @@ def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
 
 
 def _build_surface_memory_recall_service() -> Any:
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.composition.process_services import (  # noqa: PLC0415
+        get_ledger,
+        get_life_memory_store,
+    )
     from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
     from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
 
@@ -1412,13 +1428,14 @@ def _build_surface_memory_recall_service() -> Any:
         ),
     }
     try:
-        from host_brain.app.dependencies import get_bond_neo4j_client  # noqa: PLC0415
+        from host_brain.composition.process_services import get_bond_neo4j_client  # noqa: PLC0415
 
         neo4j_client = get_bond_neo4j_client()
     except Exception:
         neo4j_client = None
     return RecallFusionServiceContract(
         ledger=get_ledger(),
+        life_memory_store=get_life_memory_store(),
         neo4j_client=neo4j_client,
         runtime_config=RecallRuntimeConfig(
             enabled=True,

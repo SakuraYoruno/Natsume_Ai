@@ -6,7 +6,6 @@ import pytest
 
 from host_brain.model_runtime import (
     OutputContract,
-    ModelAttemptRequest,
     ProductionProviderBinding,
     ProductionProviderConfigurationError,
     PromptRef,
@@ -20,9 +19,8 @@ from host_brain.model_runtime import (
 from host_brain.model_runtime.production_route_policy import (
     _apply_cognitive_tier_route,
     _cloud_runtime,
-    _default_runtime_resolver,
 )
-from host_brain.model_runtime.production_provider_adapters import _default_credential_resolver
+from host_brain.app.model_provider_composition import resolve_model_provider_credential
 
 
 def _rendered_prompt():
@@ -108,30 +106,6 @@ def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(mo
     assert tier_a["model_id"] != tier_c["model_id"]
     assert cloud["model_id"] == "gemini-vision"
     assert cloud["timeout_ms"] == 9000
-
-
-def test_default_runtime_resolver_uses_secret_free_subagent_catalog_lane(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
-    monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "deepseek-subagent")
-    monkeypatch.setenv("HOST_SUBAGENT_TIMEOUT_MS", "6400")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-stay-in-adapter")
-    request = ModelAttemptRequest(
-        request_id="subagent-route",
-        scene_type="SUBAGENT",
-        cognitive_tier="B",
-        prompt=PromptRef("provider.test"),
-        deadline_ms=1000,
-    )
-
-    runtime = asyncio.run(_default_runtime_resolver(request, _rendered_prompt()))
-
-    assert runtime["provider_name"] == "deepseek"
-    assert runtime["model_id"] == "deepseek-subagent"
-    assert runtime["timeout_ms"] == 6400
-    assert runtime["route_target"] == "cloud"
-    assert runtime["route_lane"] == "subagent"
-    assert runtime["generation_parameters"]["max_tokens"] == 1200
-    assert "must-stay-in-adapter" not in repr(runtime)
 
 
 def test_production_route_policy_freezes_default_and_scene_routes() -> None:
@@ -221,7 +195,7 @@ def test_production_credential_resolver_does_not_cache_or_mutate_environment(mon
     monkeypatch.setenv("OPENAI_API_KEY", "adapter-only-secret")
     before = dict(__import__("os").environ)
 
-    resolved = _default_credential_resolver("openai")
+    resolved = resolve_model_provider_credential("openai")
 
     assert resolved == "adapter-only-secret"
     assert dict(__import__("os").environ) == before

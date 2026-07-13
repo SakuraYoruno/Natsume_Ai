@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.social_act import resolve_social_act
+from host_brain.persona.context.social_act import resolve_social_act
 
 
 def test_social_act_presence_avoids_need_question() -> None:

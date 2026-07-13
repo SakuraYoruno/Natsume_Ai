@@ -1,12 +1,13 @@
 from types import SimpleNamespace
 
-from host_brain.app.agent_runtime_shared import _memory_recall_plan_should_bypass_direct_status_fastlane
-from host_brain.app.executive_runtime_core import _message_requests_memory_recall
-from host_brain.app.surface_main_chain_adapter import _surface_memory_acceptance_must_include
+from host_brain.agent_runtime.contextual_answers import _memory_recall_plan_should_bypass_direct_status_fastlane
+from host_brain.executive_runtime._shared import _message_requests_memory_recall
+from host_brain.surface_runtime.life_context import _surface_memory_acceptance_must_include
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.memory import build_process_memory_container
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import (
@@ -186,7 +187,9 @@ def test_semantic_memory_recall_prefers_same_person_distilled_correction(tmp_pat
         ledger.close()
 
 
-def test_memory_acceptance_must_include_uses_latest_distilled_test_code() -> None:
+def test_memory_acceptance_must_include_uses_latest_distilled_test_code(
+    surface_runtime_ports_factory,
+) -> None:
     agent_input = SimpleNamespace(
         user_message="跨会话蒸馏最终验收：请列出当前测试代号、海边灯塔含义、app-server预热指标、轻小说推荐格式。",
         trace_stage_meta={
@@ -202,7 +205,10 @@ def test_memory_acceptance_must_include_uses_latest_distilled_test_code() -> Non
         },
     )
 
-    required = _surface_memory_acceptance_must_include(agent_input)
+    required = _surface_memory_acceptance_must_include(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+    )
 
     assert "蓝莲-0531-D4" in required
     assert "蓝莲-0531-D3" not in required

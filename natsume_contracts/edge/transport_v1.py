@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from .embodiment_v1 import EmbodimentCommand
 
@@ -19,6 +19,41 @@ EDGE_SESSION_LEASE_SCHEMA_VERSION = "natsume.edge.session-lease.v1"
 EDGE_SESSION_BUSY = "EDGE_SESSION_BUSY"
 EDGE_SESSION_RECONNECT_INVALID = "EDGE_SESSION_RECONNECT_INVALID"
 EDGE_SESSION_LEASE_EXPIRED = "EDGE_SESSION_LEASE_EXPIRED"
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeTransportResult:
+    """Transport-neutral receipt returned by a typed Host -> Edge port."""
+
+    success: bool
+    status: str
+    reason_code: str | None
+    detail: str
+    event: Mapping[str, Any]
+    latency_ms: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "success": bool(self.success),
+            "status": str(self.status),
+            "reason_code": self.reason_code,
+            "detail": str(self.detail),
+            "event": dict(self.event),
+            "latency_ms": int(self.latency_ms),
+        }
+
+
+class EdgeTransportPort(Protocol):
+    """Typed boundary for one non-retrying Host -> Edge HTTP submission."""
+
+    async def submit(
+        self,
+        *,
+        path: str,
+        payload: Mapping[str, Any],
+        request_id: str,
+        timeout_ms: int,
+    ) -> EdgeTransportResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,5 +150,5 @@ __all__ = [
     "EDGE_SESSION_LEASE_SCHEMA_VERSION", "EDGE_SESSION_BUSY",
     "EDGE_SESSION_RECONNECT_INVALID", "EDGE_SESSION_LEASE_EXPIRED",
     "EdgeSessionLease", "stable_lease_id", "bind_command_to_lease",
-    "parse_edge_session_lease",
+    "parse_edge_session_lease", "EdgeTransportPort", "EdgeTransportResult",
 ]

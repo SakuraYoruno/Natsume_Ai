@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.digital_life.contracts import LifeProjectionMessage
+from natsume_contracts.life import LifeProjectionMessage
 
 
 async def handle_life_projection(
@@ -41,7 +41,8 @@ async def _handle_surface_post_process(
     message: LifeProjectionMessage,
     payload: dict[str, Any],
 ) -> Mapping[str, Any]:
-    from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
+    from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
+    from host_brain.agent_runtime.postprocess import _async_post_process  # noqa: PLC0415
 
     trace = _mapping(payload.get("trace_stage_meta"))
     trace.update(
@@ -56,6 +57,7 @@ async def _handle_surface_post_process(
     )
     model_audit = _mapping(payload.get("model_audit"))
     await _async_post_process(
+        application_ports=AGENT_RUNTIME_PORTS,
         request_id=str(payload.get("request_id") or message.command_id),
         person_id=str(payload.get("person_id") or message.person_id),
         session_id=str(payload.get("session_id") or ""),

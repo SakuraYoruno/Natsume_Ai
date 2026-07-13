@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.agent_runtime import AgentRuntimeExecutor
+from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.result_contract import AgentResult
 
@@ -21,7 +21,7 @@ def _inspect_order(tmp_path: Path, *, work_order_id: str) -> dict[str, object]:
 
 
 def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> None:
-    from host_brain.agent_runtime import execute_agent_runtime_payload
+    from host_brain.agent_runtime.executor import execute_agent_runtime_payload
 
     result = execute_agent_runtime_payload({"run_mode": "worker", "task": "edit files"})
 

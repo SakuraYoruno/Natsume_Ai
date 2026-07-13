@@ -5,19 +5,19 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.agents.agent_registry import AGENT_ID_EMOTION
+from host_brain.agent_runtime.agent_registry import AGENT_ID_EMOTION
 from host_brain.app.agents.react_loop import run_react_loop
 from host_brain.app.agents.tool_registry import get_tools_for_agent
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
+from host_brain.model_runtime.prompt_contract import (
+    resolve_prompt_contract_json,
+    resolve_prompt_contract_text,
 )
 from host_brain.core.trace_redaction import public_decision_summary
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -38,7 +38,7 @@ def _mapping_text(
 
 
 def _resolve_emotion_agent_error_summary() -> str:
-    return resolve_prompt_template_text("emotion_agent_handler.error_summary")
+    return resolve_prompt_contract_text("emotion_agent_handler.error_summary")
 
 
 def emotion_agent_handler(

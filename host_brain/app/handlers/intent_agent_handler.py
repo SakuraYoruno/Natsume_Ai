@@ -4,10 +4,10 @@ import os
 import time
 from typing import Any
 
-from host_brain.app.agents.agent_registry import AGENT_ID_INTENT
+from host_brain.agent_runtime.agent_registry import AGENT_ID_INTENT
 from host_brain.app.agents.react_loop import run_react_loop
 from host_brain.app.agents.tool_registry import get_tools_for_agent
-from host_brain.app.prompt_template_store import resolve_prompt_template_text
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_text
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 _INTENT_EXECUTION_ENFORCEMENT = (
@@ -28,11 +28,11 @@ def _parse_bool_env(key: str, default: bool = False) -> bool:
 
 
 def _resolve_intent_agent_system_prompt() -> str:
-    return resolve_prompt_template_text("intent_agent_handler.system_prompt_extra")
+    return resolve_prompt_contract_text("intent_agent_handler.system_prompt_extra")
 
 
 def _resolve_intent_agent_error_summary() -> str:
-    return resolve_prompt_template_text("intent_agent_handler.error_summary")
+    return resolve_prompt_contract_text("intent_agent_handler.error_summary")
 
 
 def intent_agent_handler(

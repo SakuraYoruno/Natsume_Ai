@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
 from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -31,6 +32,17 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 def _background_tasks_enabled() -> bool:
     return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
+
+
+def _read_canonical_inner_state(person_id: str, *, reader: Any) -> dict[str, Any]:
+    from host_brain.digital_life.application_boundary import (  # noqa: PLC0415
+        project_inner_world_state,
+        read_life_snapshot,
+    )
+
+    return project_inner_world_state(
+        read_life_snapshot(resolve_persona_self_id(person_id), reader=reader)
+    )
 
 
 def _resolve_foreground_chat_cooldown_ms() -> int:
@@ -103,6 +115,7 @@ def _is_recursive_glymphatic_tick_source(source: str) -> bool:
 
 @dataclass(slots=True)
 class DefaultModeAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="default_mode_agent",
@@ -119,7 +132,7 @@ class DefaultModeAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INNER_WORLD_TICKED", self._on_inner_world_ticked)
@@ -146,10 +159,10 @@ class DefaultModeAgent:
         resolved_inner_state = dict(inner_state or {})
         if not resolved_inner_state:
             try:
-                from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
-                world = get_inner_world()
-                resolved_inner_state = dict(world.get_state(user_id=user_id) or {})
+                resolved_inner_state = _read_canonical_inner_state(
+                    user_id,
+                    reader=self.application_ports.require("life_snapshot_reader")(),
+                )
             except Exception:
                 resolved_inner_state = {}
 
@@ -186,6 +199,10 @@ class DefaultModeAgent:
                     inner_state=resolved_inner_state,
                     now_ms=ts_ms,
                     topic_phrase=str(topic_phrase or ""),
+                    model_attempt_service=self.application_ports.require(
+                        "model_attempt_service"
+                    )(),
+                    prompt_registry=self.application_ports.require("prompt_registry")(),
                 )
             except Exception as exc:
                 reason = f"DEFAULT_MODE_NOTE_FAILED:{str(exc)[:64]}"
@@ -394,9 +411,10 @@ class DefaultModeAgent:
         offline_state = dict(last_tick.get("offline_state") or state.get("last_offline_state") or {})
         if not state:
             try:
-                from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
-                raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
+                raw_inner_state = _read_canonical_inner_state(
+                    persona_self_id,
+                    reader=self.application_ports.require("life_snapshot_reader")(),
+                )
             except Exception:
                 raw_inner_state = {}
             offline_state = dict(
@@ -406,9 +424,10 @@ class DefaultModeAgent:
         if not inner_monologue:
             if not raw_inner_state:
                 try:
-                    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
-                    raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
+                    raw_inner_state = _read_canonical_inner_state(
+                        persona_self_id,
+                        reader=self.application_ports.require("life_snapshot_reader")(),
+                    )
                 except Exception:
                     raw_inner_state = {}
             inner_monologue = build_inner_monologue_digest(

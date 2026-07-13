@@ -7,7 +7,7 @@ import sqlite3
 
 from host_brain.audit.migration_guard import STATUS_READY, SQLiteMigrationVersionGuard
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.skills.supply_chain_store import (
+from host_brain.persistence.supply_chain_repository import (
     SKILL_SUPPLY_CHAIN_MIGRATION_ASSET_KEY,
     SKILL_SUPPLY_CHAIN_MIGRATION_SHA256,
 )

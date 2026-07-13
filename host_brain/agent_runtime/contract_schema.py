@@ -6,7 +6,7 @@ from dataclasses import fields
 from enum import StrEnum
 from typing import Any
 
-from host_brain.agent_runtime.budget_policy import (
+from host_brain.contracts.agent_runtime.budget_policy import (
     BUDGET_POLICY_SCHEMA_VERSION,
     BUDGET_RESERVATION_SCHEMA_VERSION,
     BudgetAmount,
@@ -15,14 +15,14 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservation,
     BudgetReservationStatus,
 )
-from host_brain.agent_runtime.acceptance_judge import (
+from host_brain.contracts.agent_runtime.acceptance_judge import (
     ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION,
     AcceptanceCriterionStatus,
     AcceptanceCriterionVerdict,
     AcceptanceDecision,
     AcceptanceJudgement,
 )
-from host_brain.agent_runtime.contract_errors import (
+from host_brain.contracts.agent_runtime.contract_errors import (
     ACCEPTANCE_JUDGEMENT_INVALID,
     BUDGET_POLICY_INVALID,
     BUDGET_RESERVATION_INVALID,
@@ -39,7 +39,7 @@ from host_brain.agent_runtime.contract_errors import (
     TASK_TRANSITION_INVALID,
     VERIFICATION_RESULT_INVALID,
 )
-from host_brain.agent_runtime.review_policy import (
+from host_brain.contracts.agent_runtime.review_policy import (
     REVIEW_ITEM_SCHEMA_VERSION,
     ReviewItem,
     ReviewResumePhase,
@@ -52,7 +52,7 @@ from host_brain.agent_runtime.sub_agent_contract import (
     SubAgentRequestContract,
     SubAgentSpec,
 )
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TASK_EVENT_SCHEMA_VERSION,
     TASK_GRAPH_SCHEMA_VERSION,
     TASK_NODE_SCHEMA_VERSION,
@@ -64,12 +64,12 @@ from host_brain.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.verification_policy import (
+from host_brain.contracts.agent_runtime.verification_contract import (
     VERIFICATION_RESULT_SCHEMA_VERSION,
     VerificationResult,
     VerificationStatus,
 )
-from host_brain.agent_runtime.work_order import WORK_ORDER_V3_SCHEMA_VERSION, WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order import WORK_ORDER_V3_SCHEMA_VERSION, WorkOrderV3
 
 
 CONTRACT_SCHEMA_SNAPSHOT_VERSION = "Natsume.agent.canonical_contracts.snapshot.v1"

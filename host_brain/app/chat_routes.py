@@ -76,7 +76,7 @@ async def handle_v1_chat_route(
     handle_chat_fn: Callable[..., Any],
 ) -> StreamingResponse:
     try:
-        from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415
+        from host_brain.composition.process_services import notify_user_interaction  # noqa: PLC0415
 
         notify_user_interaction()
     except Exception:

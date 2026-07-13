@@ -10,25 +10,60 @@ from host_brain.model_runtime.composition import (
 )
 from host_brain.model_runtime.live_prompts import build_live_production_prompt_registry
 from host_brain.model_runtime.production_provider_adapters import (
+    BaseUrlResolver,
+    CredentialResolver,
+    SingleAttemptTransport,
     build_vault_backed_provider_registry,
 )
 from host_brain.model_runtime.production_route_policy import (
+    build_production_server_route_catalog,
     build_server_owned_production_route_policy,
 )
+
+
+_DEFAULT_ROUTE_CATALOG = build_production_server_route_catalog()
+_DEFAULT_PROMPT_REGISTRY = build_live_production_prompt_registry()
+
+
+def get_default_production_route_catalog():
+    """Return the catalog shared by projections and the production route policy."""
+
+    return _DEFAULT_ROUTE_CATALOG
+
+
+def get_default_production_prompt_registry():
+    """Return the one code-side registry shared by boot and composition."""
+
+    return _DEFAULT_PROMPT_REGISTRY
 
 
 def build_default_production_model_runtime(
     *,
     ledger: Any,
+    credential_resolver: CredentialResolver,
+    base_url_resolver: BaseUrlResolver,
+    transport: SingleAttemptTransport,
 ) -> ModelRuntimeComposition:
     """Build the sole production prompt/route/provider/service object graph."""
 
+    route_catalog = get_default_production_route_catalog()
     return build_model_runtime_composition(
-        prompt_registry=build_live_production_prompt_registry(),
-        route_policy=build_server_owned_production_route_policy(),
-        provider_adapters=build_vault_backed_provider_registry(),
+        prompt_registry=get_default_production_prompt_registry(),
+        route_policy=build_server_owned_production_route_policy(
+            route_catalog=route_catalog,
+        ),
+        route_catalog=route_catalog,
+        provider_adapters=build_vault_backed_provider_registry(
+            credential_resolver=credential_resolver,
+            base_url_resolver=base_url_resolver,
+            transport=transport,
+        ),
         ledger=ledger,
     )
 
 
-__all__ = ["build_default_production_model_runtime"]
+__all__ = [
+    "build_default_production_model_runtime",
+    "get_default_production_prompt_registry",
+    "get_default_production_route_catalog",
+]

@@ -71,33 +71,18 @@ class ProactivePushClient:
                   推送失败时返回 {"success": False, "error": str}。
         """
         try:
-            from host_brain.channels.edge_rpc_client import _post_to_edge  # noqa: PLC0415
+            from host_brain.channels.edge_transport import submit_proactive_push  # noqa: PLC0415
 
             request_id = new_request_id()
 
             async def _call() -> Any:
-                old_base = os.environ.get("HOST_EDGE_RPC_BASE_URL")
-                old_key = os.environ.get("HOST_EDGE_RPC_SHARED_KEY")
-                if self._edge_base_url and not old_base:
-                    os.environ["HOST_EDGE_RPC_BASE_URL"] = self._edge_base_url
-                if self._hmac_key and not old_key:
-                    os.environ["HOST_EDGE_RPC_SHARED_KEY"] = self._hmac_key
-                try:
-                    return await _post_to_edge(
-                        path="/v1/edge/proactive_push",
-                        payload=message,
-                        request_id=request_id,
-                        request_timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
-                    )
-                finally:
-                    if old_base is None:
-                        os.environ.pop("HOST_EDGE_RPC_BASE_URL", None)
-                    else:
-                        os.environ["HOST_EDGE_RPC_BASE_URL"] = old_base
-                    if old_key is None:
-                        os.environ.pop("HOST_EDGE_RPC_SHARED_KEY", None)
-                    else:
-                        os.environ["HOST_EDGE_RPC_SHARED_KEY"] = old_key
+                return await submit_proactive_push(
+                    message=message,
+                    request_id=request_id,
+                    timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
+                    base_url=self._edge_base_url,
+                    shared_key=self._hmac_key,
+                )
 
             result = _run_edge_push_sync(_call)
             data = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})

@@ -43,6 +43,9 @@ from .m48b_entry_gate import (
     load_m48b_entry_gate_packet,
 )
 from .release_manifest import (
+    CORE_RELEASE_GATE_COUNT,
+    CORE_RELEASE_MANIFEST_SCHEMA_VERSION,
+    CORE_RELEASE_SBOM_SCHEMA_VERSION,
     M8_MIGRATION_DIRS,
     S_RELEASE_CHECKLIST,
     STATUS_FAILED,
@@ -51,10 +54,29 @@ from .release_manifest import (
     _load_model_plane_meta,
     build_release_checklist,
     generate_m8_manifest,
+    generate_core_release_manifest,
+    generate_core_sbom,
+    validate_core_release_manifest,
     validate_release_bundle,
+)
+from .compatibility_registry import (
+    ACTIVE_COMPATIBILITY_FACADES,
+    COMPATIBILITY_REGISTRY_SCHEMA_VERSION,
+    CompatibilityFacade,
+    CompatibilityUsage,
+    scan_production_usage,
+    validate_registry,
+    validate_retired_paths_absent,
 )
 
 __all__ = [
+    "ACTIVE_COMPATIBILITY_FACADES",
+    "COMPATIBILITY_REGISTRY_SCHEMA_VERSION",
+    "CORE_RELEASE_GATE_COUNT",
+    "CORE_RELEASE_MANIFEST_SCHEMA_VERSION",
+    "CORE_RELEASE_SBOM_SCHEMA_VERSION",
+    "CompatibilityFacade",
+    "CompatibilityUsage",
     "IDENTITY_SNAPSHOT_FEATURE_FLAG",
     "IDENTITY_SNAPSHOT_SCHEMA_VERSION",
     "IdentityReleaseGate",
@@ -96,8 +118,14 @@ __all__ = [
     "evaluate_m48_release_seal",
     "evaluate_m48b_entry_gate",
     "generate_m8_manifest",
+    "generate_core_release_manifest",
+    "generate_core_sbom",
     "load_m48_seal_manifest",
     "load_m48b_entry_gate_packet",
     "validate_m48_seal_bundle",
+    "validate_core_release_manifest",
+    "scan_production_usage",
+    "validate_registry",
+    "validate_retired_paths_absent",
     "validate_release_bundle",
 ]

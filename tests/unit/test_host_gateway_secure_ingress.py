@@ -20,12 +20,12 @@ from host_brain.app.input_service_gateway import (
     complete_host_gateway_ingress,
     evaluate_host_gateway_ingress,
 )
+from host_brain.persistence.secure_ingress_repository import SECURE_INGRESS_MIGRATION_SHA256
 from host_brain.secure_ingress import (
     IngressSurface,
     build_hmac_sha256_signature,
     build_surface_request,
 )
-from host_brain.secure_ingress.store import SECURE_INGRESS_MIGRATION_SHA256
 from edge_client.channels.input_reporter import EdgeInputReporter
 
 

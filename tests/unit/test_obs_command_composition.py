@@ -7,10 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import host_brain.observability.command_composition as composition_module
-from host_brain.observability.command_relocation import (
-    OBS_COMMAND_RELOCATION_MODE_ENV,
-)
+import host_brain.app.observability_runtime.command_composition as composition_module
 from host_brain.secure_ingress import SecureIngressMode
 
 
@@ -163,8 +160,8 @@ def _install_fakes(monkeypatch):  # noqa: ANN001
 
 
 def _env(relocation: str, global_mode: str) -> dict[str, str]:
+    del relocation
     return {
-        OBS_COMMAND_RELOCATION_MODE_ENV: relocation,
         composition_module.HOST_SECURE_INGRESS_MODE_ENV: global_mode,
         composition_module.HOST_SECURE_INGRESS_HMAC_SECRETS_ENV: json.dumps({
             "obs-key": TEST_HMAC_SECRET,
@@ -180,7 +177,7 @@ def _env(relocation: str, global_mode: str) -> dict[str, str]:
     ("relocation", "global_mode", "expected_mode", "execution_enabled"),
     (
         ("SHADOW", "SHADOW", SecureIngressMode.SHADOW, False),
-        ("SHADOW", "ENFORCE", SecureIngressMode.SHADOW, False),
+        ("SHADOW", "ENFORCE", SecureIngressMode.ENFORCE, True),
         ("QUERY_ONLY", "ENFORCE", SecureIngressMode.ENFORCE, True),
     ),
 )
@@ -397,7 +394,7 @@ def test_disabled_composition_creates_no_outcome_wal(tmp_path, monkeypatch) -> N
     journal_path = tmp_path / "disabled-outcomes.jsonl"
 
     composition = composition_module.build_obs_command_composition(
-        env=_env("LEGACY_AUDIT", "ENFORCE"),
+        env=_env("RETIRED", "OFF"),
         db_path=tmp_path / "must-not-open.sqlite3",
         outcome_journal_path=journal_path,
     )
@@ -412,23 +409,20 @@ def test_disabled_composition_creates_no_outcome_wal(tmp_path, monkeypatch) -> N
 
 
 @pytest.mark.parametrize(
-    ("relocation", "global_mode"),
+    ("retired_relocation", "global_mode"),
     (
-        ("typo", "ENFORCE"),
-        ("LEGACY_AUDIT", "ENFORCE"),
         ("SHADOW", "OFF"),
-        ("QUERY_ONLY", "SHADOW"),
         ("QUERY_ONLY", "invalid"),
     ),
 )
-def test_invalid_or_disallowed_mode_matrix_is_off_without_store(
+def test_invalid_or_disabled_global_mode_is_off_without_store(
     monkeypatch,
-    relocation,
+    retired_relocation,
     global_mode,
 ) -> None:
     _install_fakes(monkeypatch)
     composition = composition_module.build_obs_command_composition(
-        env=_env(relocation, global_mode),
+        env=_env(retired_relocation, global_mode),
         db_path="must-not-open.sqlite3",
     )
 

@@ -42,7 +42,7 @@ def _derive_social_bond_vector(
     bond_snapshot: Mapping[str, Any],
     repair_state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    # Keep Tribe imports lazy: host_brain.app.dependencies imports the Bond
+    # Keep Tribe imports lazy: host_brain.composition.process_services imports the Bond
     # package during startup, while Tribe modules themselves depend on that
     # dependency registry.
     from host_brain.tribe.social_brain_agent import derive_social_bond_vector  # noqa: PLC0415

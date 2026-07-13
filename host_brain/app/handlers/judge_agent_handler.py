@@ -6,15 +6,15 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.agents.agent_registry import AGENT_ID_JUDGE
+from host_brain.agent_runtime.agent_registry import AGENT_ID_JUDGE
 from host_brain.app.agents.react_loop import run_react_loop
 from host_brain.app.agents.tool_registry import get_tools_for_agent
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.core.trace_redaction import public_decision_summary
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

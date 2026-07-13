@@ -13,7 +13,7 @@ def emit_tribe_event(
     payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+        from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
         bus = get_tribe_event_bus()
         event = new_tribe_event(

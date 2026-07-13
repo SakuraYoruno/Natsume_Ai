@@ -17,7 +17,6 @@ from host_brain.capability_plane.broker import (
 )
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
 from host_brain.capability_plane.policies import PredicateCapabilityPolicy
-from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
 from host_brain.core.errors import (
     MCP_PROVIDER_UNAVAILABLE,
     MCP_TOOL_NOT_REGISTERED,
@@ -56,20 +55,18 @@ class MCPToolBroker:
         self,
         *,
         registry: MCPToolRegistry,
+        capability_broker: CapabilityBroker,
         ledger: SQLiteLedger | None = None,
         token_service: TokenService | None = None,
     ) -> None:
+        if capability_broker is None:
+            raise ValueError("MCPToolBroker requires the composed CapabilityBroker")
         self.registry = registry
         self.ledger = ledger
         self._token_service = token_service
         self._handlers: dict[str, MCPHandler] = {}
-        self._registered: set[str] = set()
-        self._broker = CapabilityBroker(
-            policy=PredicateCapabilityPolicy(self._evaluate_policy),
-            execution_journal=(
-                SQLiteCapabilityExecutionJournal(ledger) if ledger is not None else None
-            ),
-        )
+        self._broker = capability_broker
+        self._policy = PredicateCapabilityPolicy(self._evaluate_policy)
 
     def register_handler(self, provider_id: str, tool_id: str, handler: MCPHandler) -> None:
         if not callable(handler):
@@ -95,6 +92,11 @@ class MCPToolBroker:
         meta = self.registry.get(provider_id=provider_id, tool_id=tool_id)
         if meta is not None:
             self._ensure_registered(meta)
+        else:
+            # A shared broker can outlive a replaced MCP registry.  Remove any
+            # stale binding before executing an identifier absent from the
+            # current registry so it cannot reach an old provider handler.
+            self._broker.unregister(kind=CapabilityKind.MCP, capability_id=capability_id)
         payload = dict(args or {})
         digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
         request = CapabilityRequest(
@@ -142,8 +144,6 @@ class MCPToolBroker:
 
     def _ensure_registered(self, meta: ToolMeta) -> None:
         capability_id = _handler_key(meta.provider_id, meta.tool_id)
-        if capability_id in self._registered:
-            return
 
         def _adapter(request: CapabilityRequest, _grant: Any) -> Any:
             handler = self._handlers.get(capability_id)
@@ -178,8 +178,8 @@ class MCPToolBroker:
             version=str(meta.version or "1"),
             risk_level={"LOW": 1, "MEDIUM": 3, "HIGH": 4}.get(str(meta.risk_level).upper(), 5),
             adapter=_adapter,
-        ))
-        self._registered.add(capability_id)
+            authorization_policy=self._policy,
+        ), replace_existing=True)
 
     def _evaluate_policy(self, request: CapabilityRequest, _descriptor: CapabilityDescriptor) -> tuple[bool, str, str]:
         provider_id = str(request.context.get("provider_id") or "")

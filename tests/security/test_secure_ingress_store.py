@@ -8,13 +8,15 @@ import sqlite3
 
 import pytest
 
-from host_brain.secure_ingress import (
-    ClaimStatus,
-    IngressAuditEvent,
+from host_brain.persistence.secure_ingress_repository import (
+    SECURE_INGRESS_MIGRATION_SHA256,
     SQLiteSecureIngressStore,
     SecureIngressStoreError,
 )
-from host_brain.secure_ingress.store import SECURE_INGRESS_MIGRATION_SHA256
+from host_brain.secure_ingress import (
+    ClaimStatus,
+    IngressAuditEvent,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -426,7 +428,7 @@ def test_primary_audit_sink_rejects_secret_marker_in_any_external_field(tmp_path
 
 
 def test_runtime_store_source_contains_no_schema_ddl() -> None:
-    source = (ROOT / "host_brain/secure_ingress/store.py").read_text(encoding="utf-8").upper()
+    source = (ROOT / "host_brain/persistence/secure_ingress_repository.py").read_text(encoding="utf-8").upper()
     assert "CREATE TABLE" not in source
     assert "CREATE INDEX" not in source
 

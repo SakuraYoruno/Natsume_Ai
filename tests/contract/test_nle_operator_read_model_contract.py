@@ -16,7 +16,7 @@ from host_brain.agent_runtime.operator_read_model import (
     build_execution_index_read_model,
     build_execution_review_read_model,
 )
-from host_brain.agent_runtime.review_store import REVIEW_STORE_NOT_FOUND, ReviewStoreError
+from host_brain.persistence.review_repository import REVIEW_STORE_NOT_FOUND, ReviewStoreError
 from host_brain.app.obs_routes_task_runtime import (
     _get_operator_read_model_service,
     get_task_runtime_review_locator,

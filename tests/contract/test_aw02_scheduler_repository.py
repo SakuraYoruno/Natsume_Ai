@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.agent_runtime.task_graph import (
+from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.host_command_repository import (
     HOST_COMMAND_INGRESS_CONFLICT,
@@ -32,17 +32,18 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerExecutionResultRepository,
     SchedulerRepositoryError,
 )
+from host_brain.persistence.secure_ingress_repository import (
+    SQLiteSecureIngressStore,
+    SecureIngressStoreError,
+)
 from host_brain.secure_ingress import (
     ClaimStatus,
     IngressAuditEvent,
-    SQLiteSecureIngressStore,
-    SecureIngressStoreError,
 )
 from natsume_contracts.task import (
     ExecutorAssignment,
     HostCommandSurface,
     TaskExecutor,
-    TaskRuntimeMode,
     build_host_command,
 )
 
@@ -227,12 +228,8 @@ def _admit_command(
     assignment = ExecutorAssignment(
         work_order_id=work_order.work_order_id,
         executor=TaskExecutor.CANONICAL,
-        mode=TaskRuntimeMode.CANONICAL,
         assignment_id="runtime-assignment://work-order-scheduler-result/canonical",
         assigned_at_ms=NOW,
-        canary_percent=100,
-        canary_selected=True,
-        kill_switch_active=False,
         is_new_task=True,
         reason_code="RUNTIME_NEW_TASK_CANONICAL",
     )

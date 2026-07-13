@@ -1,12 +1,10 @@
-﻿"""Life-body aggregate observability routes for monitor-side digital life views."""
+"""Life-body aggregate observability routes for monitor-side digital life views."""
 
 from __future__ import annotations
 
 import asyncio
 import copy
 import logging
-import os
-import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query
@@ -21,22 +19,20 @@ from host_brain.app.obs_routes_core import (
 from host_brain.app.obs_routes_stats_capability import get_prompt_builder_stats
 from host_brain.app.obs_routes_summary import (
     _build_digital_life_overview_snapshot_async,
-    _get_warmed_digital_life_overview_snapshot,
 )
 from host_brain.app.obs_routes_sysmode import (
     _build_runtime_snapshot_response,
-    _get_warmed_runtime_snapshot,
 )
 from host_brain.app.obs_routes_trace import (
     _get_ledger as _get_trace_ledger,
     _get_trace_builders,
 )
-from host_brain.observability.projection_runtime import (
+from host_brain.app.observability_runtime.projection_runtime import (
     TRACE_FEED_INDEX_KEY,
     TRACE_FEED_KIND,
     projection_meta,
 )
-from host_brain.observability.process_state_projection import (
+from host_brain.app.observability_runtime.process_state_projection import (
     LIFE_BODY_KIND,
     LIFE_BODY_MAX_AGE_MS,
     read_process_projection,
@@ -58,29 +54,7 @@ _LIFE_TIMELINE_REQUEST_FALLBACK_CACHE_TTL_MS = _env_int(
     15_000,
     minimum=0,
 )
-_LIFE_BODY_WARM_ENABLED = str(
-    os.getenv("HOST_OBS_LIFE_BODY_WARM_ENABLED", "true")
-).strip().lower() not in {"0", "false", "no", "off"}
-_LIFE_BODY_WARM_WINDOW_MINUTES = _env_int(
-    "HOST_OBS_LIFE_BODY_WARM_WINDOW_MINUTES",
-    360,
-    minimum=1,
-)
-_LIFE_BODY_WARM_INTERVAL_MS = _env_int(
-    "HOST_OBS_LIFE_BODY_WARM_INTERVAL_MS",
-    30000,
-    minimum=1500,
-)
-_LIFE_BODY_WARM_STALE_MS = _env_int(
-    "HOST_OBS_LIFE_BODY_WARM_STALE_MS",
-    max(_LIFE_BODY_WARM_INTERVAL_MS * 3, 90000),
-    minimum=5000,
-)
-_LIFE_BODY_STALE_FALLBACK_MS = _env_int(
-    "HOST_OBS_LIFE_BODY_STALE_FALLBACK_MS",
-    max(_LIFE_BODY_WARM_STALE_MS * 3, 270000),
-    minimum=_LIFE_BODY_WARM_STALE_MS,
-)
+LIFE_BODY_PROJECTION_WINDOW_MINUTES = 360
 _LIFE_BODY_RECENT_SESSIONS_LIMIT = _env_int(
     "HOST_OBS_LIFE_BODY_RECENT_SESSIONS_LIMIT",
     3,
@@ -116,16 +90,6 @@ _LIFE_LINEAGE_IMMUNE_SCAN_LIMIT = _env_int(
     48,
     minimum=1,
 )
-
-_life_body_warm_thread: threading.Thread | None = None
-_life_body_warm_stop = threading.Event()
-_life_body_warm_lock = threading.Lock()
-_life_body_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
 
 STATUS_RANK = {"critical": 0, "warning": 1, "stable": 2, "pending": 3}
 SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
@@ -755,7 +719,7 @@ def _get_recent_sessions_projection(window_minutes: int) -> dict[str, Any]:
 def _get_trace_feed_projection() -> dict[str, Any]:
     """Read the canonical durable trace-feed projection only."""
     try:
-        from host_brain.app.dependencies import get_query_projection_store
+        from host_brain.composition.process_services import get_query_projection_store
 
         document = get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
         meta = projection_meta(
@@ -1931,13 +1895,17 @@ def _build_diagnostic_guidance(
 
 
 def _build_life_body_payload(window_minutes: int) -> dict[str, Any]:
-    overview_payload = _get_warmed_digital_life_overview_snapshot(window_minutes)
-    overview_from_warm = overview_payload is not None
-    if overview_payload is None:
-        overview_payload = asyncio.run(_build_digital_life_overview_snapshot_async(window_minutes))
-    runtime_value = _get_warmed_runtime_snapshot("")
-    runtime_from_warm = runtime_value is not None
-    runtime_payload = _model_dump_compat(runtime_value) if runtime_value is not None else _model_dump_compat(_build_runtime_snapshot_response(""))
+    from host_brain.app.lifecycle_runtime_composition import (
+        build_lifecycle_runtime_application_ports,
+    )
+
+    overview_payload = asyncio.run(_build_digital_life_overview_snapshot_async(window_minutes))
+    runtime_payload = _model_dump_compat(
+        _build_runtime_snapshot_response(
+            "",
+            lifecycle_ports=build_lifecycle_runtime_application_ports(),
+        )
+    )
     prompt_stats = _model_dump_compat(_get_obs_route_cached_response(cache_name="life_body_prompt_stats", cache_key={"window_minutes": int(window_minutes)}, ttl_ms=_LIFE_BODY_PROMPT_CACHE_TTL_MS, builder=lambda: get_prompt_builder_stats(window_minutes=window_minutes)))
     memory_data = _as_dict(overview_payload.get("memoryData"))
     runtime_snapshot = _as_dict(runtime_payload)
@@ -2010,116 +1978,8 @@ def _build_life_body_payload(window_minutes: int) -> dict[str, Any]:
     primary_pathology = pathologies[0] if pathologies else None
     life_state = _build_life_state(has_runtime_snapshot=bool(runtime_snapshot), mode_label=_format_mode_label(runtime_snapshot.get("sys_mode")), runtime_alerts=runtime_alerts, background_runtime=_as_dict(runtime_snapshot.get("background_runtime")), humanoid_loop_alerts_data=humanoid_loop_alerts_data)
     diagnostic_guidance = _build_diagnostic_guidance(life_state=life_state, primary_organ=primary_organ, primary_pathology=primary_pathology, timeline_events=timeline_events)
-    payload = LifeBodyResponse(window_minutes=window_minutes, timestamp=_now_ms(), runtimeSnapshot=runtime_snapshot, promptStats=prompt_stats, vtsData=vts_data, memoryData=memory_data, servicesData=services_data, subsystemsData=subsystems_data, capabilityGapData=capability_gap_data, humanoidLoopData=humanoid_loop_data, humanoidLoopTrendData=_as_dict(overview_payload.get("humanoidLoopTrendData")), humanoidLoopAlertsData=humanoid_loop_alerts_data, humanoidLoopRemediationData=_as_dict(overview_payload.get("humanoidLoopRemediationData")), humanoidLoopDiagnosticsData=_as_dict(overview_payload.get("humanoidLoopDiagnosticsData")), humanoidLoopHotspotsData=humanoid_loop_hotspots_data, humanoidLoopHotspotTrendData=_as_dict(overview_payload.get("humanoidLoopHotspotTrendData")), humanoidLoopSourceCorrelationData=_as_dict(overview_payload.get("humanoidLoopSourceCorrelationData")), runtimeAlerts=runtime_alerts, nonLiveSlots=non_live_slots, growthSignals=growth_signals, derived={"hasRuntimeSnapshot": bool(runtime_snapshot), "hasMemoryData": bool(memory_data), "hasMemorySamples": memory_summary["averageRate"] is not None, "avgMemorySuccessRate": memory_summary["averageRate"], "sampledMemorySubsystemCount": memory_summary["sampledCount"], "configuredMemorySubsystemCount": memory_summary["configuredCount"], "overviewUpdatedAt": overview_updated_at, "runtimeUpdatedAt": runtime_updated_at, "currentBondStage": current_bond_stage, "currentEmotion": current_emotion, "dominantMotive": dominant_motive, "replyPosture": reply_posture, "riskLevel": risk_level, "absenceBand": absence_band, "bondTrend": bond_trend, "activeSubsystemCount": active_subsystem_count, "recentSessionCount": len(recent_sessions), "recentSessionWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "activeTraceFeedCount": len(trace_feed_items), "memoryLineageCount": len(memory_lineage_rows), "bondLineageCount": len(bond_lineage_rows), "tickLineageCount": len(scheduler_tick_rows), "immuneLineageCount": len(immune_lineage_rows)}, model={"organSystems": organ_systems_preview, "lifeState": life_state, "pathologies": pathologies, "primaryPathology": primary_pathology, "timelineEvents": timeline_events, "timelineEventPool": timeline_event_pool, "primaryOrgan": primary_organ, "diagnosticGuidance": diagnostic_guidance}, meta={"aggregateSource": "obs-sidecar-life-body", "projectionMode": "derived-from-runtime-and-overview-snapshots-plus-bounded-ledger-lineage", "overviewFromWarmCache": overview_from_warm, "runtimeFromWarmCache": runtime_from_warm, "lifeBodyRouteCacheTtlMs": _LIFE_BODY_ROUTE_CACHE_TTL_MS, "promptStatsCacheTtlMs": _LIFE_BODY_PROMPT_CACHE_TTL_MS, "warmWindowMinutes": _LIFE_BODY_WARM_WINDOW_MINUTES, "recentSessionsLimit": _LIFE_BODY_RECENT_SESSIONS_LIMIT, "recentSessionsWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "traceFeedMeta": _as_dict(trace_feed_projection.get("meta")), "lineageLedger": {"memoryRows": len(memory_lineage_rows), "bondRows": len(bond_lineage_rows), "tickRows": len(scheduler_tick_rows), "immuneRows": len(immune_lineage_rows), "memoryLimit": _LIFE_LINEAGE_MEMORY_LIMIT, "bondLimit": _LIFE_LINEAGE_BOND_LIMIT, "tickLimit": _LIFE_LINEAGE_TICK_LIMIT, "immuneLimit": _LIFE_LINEAGE_IMMUNE_LIMIT, "immuneScanLimit": _LIFE_LINEAGE_IMMUNE_SCAN_LIMIT}})
+    payload = LifeBodyResponse(window_minutes=window_minutes, timestamp=_now_ms(), runtimeSnapshot=runtime_snapshot, promptStats=prompt_stats, vtsData=vts_data, memoryData=memory_data, servicesData=services_data, subsystemsData=subsystems_data, capabilityGapData=capability_gap_data, humanoidLoopData=humanoid_loop_data, humanoidLoopTrendData=_as_dict(overview_payload.get("humanoidLoopTrendData")), humanoidLoopAlertsData=humanoid_loop_alerts_data, humanoidLoopRemediationData=_as_dict(overview_payload.get("humanoidLoopRemediationData")), humanoidLoopDiagnosticsData=_as_dict(overview_payload.get("humanoidLoopDiagnosticsData")), humanoidLoopHotspotsData=humanoid_loop_hotspots_data, humanoidLoopHotspotTrendData=_as_dict(overview_payload.get("humanoidLoopHotspotTrendData")), humanoidLoopSourceCorrelationData=_as_dict(overview_payload.get("humanoidLoopSourceCorrelationData")), runtimeAlerts=runtime_alerts, nonLiveSlots=non_live_slots, growthSignals=growth_signals, derived={"hasRuntimeSnapshot": bool(runtime_snapshot), "hasMemoryData": bool(memory_data), "hasMemorySamples": memory_summary["averageRate"] is not None, "avgMemorySuccessRate": memory_summary["averageRate"], "sampledMemorySubsystemCount": memory_summary["sampledCount"], "configuredMemorySubsystemCount": memory_summary["configuredCount"], "overviewUpdatedAt": overview_updated_at, "runtimeUpdatedAt": runtime_updated_at, "currentBondStage": current_bond_stage, "currentEmotion": current_emotion, "dominantMotive": dominant_motive, "replyPosture": reply_posture, "riskLevel": risk_level, "absenceBand": absence_band, "bondTrend": bond_trend, "activeSubsystemCount": active_subsystem_count, "recentSessionCount": len(recent_sessions), "recentSessionWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "activeTraceFeedCount": len(trace_feed_items), "memoryLineageCount": len(memory_lineage_rows), "bondLineageCount": len(bond_lineage_rows), "tickLineageCount": len(scheduler_tick_rows), "immuneLineageCount": len(immune_lineage_rows)}, model={"organSystems": organ_systems_preview, "lifeState": life_state, "pathologies": pathologies, "primaryPathology": primary_pathology, "timelineEvents": timeline_events, "timelineEventPool": timeline_event_pool, "primaryOrgan": primary_organ, "diagnosticGuidance": diagnostic_guidance}, meta={"aggregateSource": "obs-sidecar-life-body", "projectionMode": "derived-from-runtime-and-overview-snapshots-plus-bounded-ledger-lineage", "lifeBodyRouteCacheTtlMs": _LIFE_BODY_ROUTE_CACHE_TTL_MS, "promptStatsCacheTtlMs": _LIFE_BODY_PROMPT_CACHE_TTL_MS, "projectionWindowMinutes": LIFE_BODY_PROJECTION_WINDOW_MINUTES, "recentSessionsLimit": _LIFE_BODY_RECENT_SESSIONS_LIMIT, "recentSessionsWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "traceFeedMeta": _as_dict(trace_feed_projection.get("meta")), "lineageLedger": {"memoryRows": len(memory_lineage_rows), "bondRows": len(bond_lineage_rows), "tickRows": len(scheduler_tick_rows), "immuneRows": len(immune_lineage_rows), "memoryLimit": _LIFE_LINEAGE_MEMORY_LIMIT, "bondLimit": _LIFE_LINEAGE_BOND_LIMIT, "tickLimit": _LIFE_LINEAGE_TICK_LIMIT, "immuneLimit": _LIFE_LINEAGE_IMMUNE_LIMIT, "immuneScanLimit": _LIFE_LINEAGE_IMMUNE_SCAN_LIMIT}})
     return payload.model_dump()
-
-
-def _refresh_life_body_warm_once() -> dict[str, Any] | None:
-    if not _LIFE_BODY_WARM_ENABLED:
-        return None
-    started_at = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="life_body")
-        if deferred:
-            with _life_body_warm_lock:
-                _life_body_warm_state["last_duration_ms"] = 0
-                _life_body_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        acquired, reason = try_acquire_obs_warm_slot(task_name="life_body")
-        if not acquired:
-            with _life_body_warm_lock:
-                _life_body_warm_state["last_duration_ms"] = 0
-                _life_body_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = _build_life_body_payload(_LIFE_BODY_WARM_WINDOW_MINUTES)
-    except Exception as exc:
-        with _life_body_warm_lock:
-            _life_body_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-            _life_body_warm_state["last_error"] = str(exc)
-        logger.warning("life-body warm refresh degraded: %s", exc)
-        return None
-    finally:
-        if release_slot is not None:
-            release_slot()
-    with _life_body_warm_lock:
-        _life_body_warm_state["value"] = _clone_payload(payload)
-        _life_body_warm_state["updated_ts_ms"] = _now_ms()
-        _life_body_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        _life_body_warm_state["last_error"] = None
-    return payload
-
-
-def _life_body_warm_loop() -> None:
-    while not _life_body_warm_stop.is_set():
-        _refresh_life_body_warm_once()
-        if _life_body_warm_stop.wait(_LIFE_BODY_WARM_INTERVAL_MS / 1000.0):
-            break
-
-
-def start_life_body_warm_cache() -> dict[str, Any]:
-    """Compatibility hook; the unified projection daemon owns refreshes."""
-    return {**get_life_body_warm_status(), "authority": "projection_daemon"}
-
-
-def stop_life_body_warm_cache() -> dict[str, Any]:
-    global _life_body_warm_thread
-    _life_body_warm_stop.set()
-    thread = _life_body_warm_thread
-    if thread and thread.is_alive():
-        thread.join(timeout=2.0)
-    _life_body_warm_thread = None
-    return get_life_body_warm_status()
-
-
-def get_life_body_warm_status() -> dict[str, Any]:
-    with _life_body_warm_lock:
-        updated_ts_ms = int(_life_body_warm_state.get("updated_ts_ms") or 0)
-        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms else None
-        return {
-            "enabled": bool(_LIFE_BODY_WARM_ENABLED),
-            "running": bool(_life_body_warm_thread and _life_body_warm_thread.is_alive()),
-            "has_value": _life_body_warm_state.get("value") is not None,
-            "updated_ts_ms": updated_ts_ms or None,
-            "age_ms": age_ms,
-            "interval_ms": int(_LIFE_BODY_WARM_INTERVAL_MS),
-            "stale_after_ms": int(_LIFE_BODY_WARM_STALE_MS),
-            "stale_fallback_ms": int(_LIFE_BODY_STALE_FALLBACK_MS),
-            "last_duration_ms": int(_life_body_warm_state.get("last_duration_ms") or 0),
-            "last_error": _life_body_warm_state.get("last_error"),
-            "window_minutes": int(_LIFE_BODY_WARM_WINDOW_MINUTES),
-        }
-
-
-def _get_warmed_life_body(window_minutes: int, *, allow_stale: bool = False) -> dict[str, Any] | None:
-    if not _LIFE_BODY_WARM_ENABLED or int(window_minutes) != int(_LIFE_BODY_WARM_WINDOW_MINUTES):
-        return None
-    with _life_body_warm_lock:
-        payload = _clone_payload(_life_body_warm_state.get("value"))
-        updated_ts_ms = int(_life_body_warm_state.get("updated_ts_ms") or 0)
-    if payload is None or updated_ts_ms <= 0:
-        return None
-    age_ms = max(0, _now_ms() - updated_ts_ms)
-    stale_limit = _LIFE_BODY_STALE_FALLBACK_MS if allow_stale else _LIFE_BODY_WARM_STALE_MS
-    if age_ms > int(stale_limit):
-        return None
-    meta = _as_dict(payload.get("meta"))
-    meta["servedFromWarmCache"] = True
-    meta["warmAgeMs"] = age_ms
-    if age_ms > int(_LIFE_BODY_WARM_STALE_MS):
-        meta["servedStale"] = True
-    payload["meta"] = meta
-    return payload
 
 
 def _get_life_body_snapshot(window_minutes: int) -> dict[str, Any]:

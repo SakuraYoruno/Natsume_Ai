@@ -44,10 +44,12 @@ class SkillLoader:
         registry: SkillRegistry,
         token_service: TokenService,
         ledger: SQLiteLedger,
+        capability_broker: Any | None = None,
     ) -> None:
         self.registry = registry
         self.token_service = token_service
         self.ledger = ledger
+        self.capability_broker = capability_broker
 
     def execute(
         self,
@@ -256,7 +258,11 @@ class SkillLoader:
                     durable_ledger=self.ledger,
                     validated_by="skill_loader.token_service",
                 )
-                handler_result = _dispatch_executor(payload, authority=dispatch_authority)
+                handler_result = _dispatch_executor(
+                    payload,
+                    authority=dispatch_authority,
+                    capability_broker=self.capability_broker,
+                )
         except Exception as exc:  # pragma: no cover - defensive guard
             return self._log_and_return(
                 intent_id=intent_id,
@@ -419,12 +425,19 @@ def _dispatch_executor(
     payload: Any,
     *,
     authority: BoundSkillExecutionAuthority | None = None,
+    capability_broker: Any,
 ) -> Any:
     """将 handler 返回的归一化 payload 路由到对应的 impl executor。
 
     若 payload 不是 dict 或 tool 字段未注册，则原样透传（向后兼容）。
     """
-    return dispatch_executor_payload(payload, authority=authority)
+    if capability_broker is None:
+        raise RuntimeError("SKILL_CAPABILITY_BROKER_NOT_COMPOSED")
+    return dispatch_executor_payload(
+        payload,
+        authority=authority,
+        capability_broker=capability_broker,
+    )
 
 
 def _extract_audit_tier(governor_output: dict[str, Any] | None) -> AuditTier:

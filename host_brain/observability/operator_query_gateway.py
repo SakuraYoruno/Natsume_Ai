@@ -126,6 +126,7 @@ _CONTENT_KEY_PARTS = frozenset(
         "reasoning",
         "reply",
         "response",
+        "snippet",
         "text",
     }
 )

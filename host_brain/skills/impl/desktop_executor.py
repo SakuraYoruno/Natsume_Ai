@@ -62,12 +62,12 @@ def execute_desktop_skill(
 
     receipt_payload = receipt.as_dict()
     return {
-        "status": "OK" if receipt.success else "FAILED",
+        "status": "QUEUED" if receipt.success else "FAILED",
         "reason_code": receipt.reason_code,
         "manifest_ref": manifest_ref,
         "action": action,
         "detail": dict(receipt.event or {}),
-        "embodiment_receipt": receipt_payload,
+        "embodiment_outbox": receipt_payload,
     }
 
 

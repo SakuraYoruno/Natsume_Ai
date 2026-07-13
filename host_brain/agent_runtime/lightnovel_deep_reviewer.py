@@ -32,37 +32,6 @@ _CHOICE_QUERY_RE = re.compile(
 _DETAIL_ONLY_QUERY_RE = re.compile(r"(详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)")
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v4"
-_life_memory_store_provider: Callable[[], Any] | None = None
-_life_action_memory_persist: Callable[..., Mapping[str, Any]] | None = None
-
-
-def configure_life_memory_store_provider(
-    provider: Callable[[], Any] | None,
-) -> None:
-    global _life_memory_store_provider
-    if provider is not None and not callable(provider):
-        raise TypeError("life memory store provider must be callable")
-    _life_memory_store_provider = provider
-
-
-def configure_life_action_memory_persist(
-    callback: Callable[..., Mapping[str, Any]] | None,
-) -> None:
-    global _life_action_memory_persist
-    if callback is not None and not callable(callback):
-        raise TypeError("life action memory callback must be callable")
-    _life_action_memory_persist = callback
-
-
-def _life_memory_store() -> Any | None:
-    if _life_memory_store_provider is None:
-        return None
-    try:
-        return _life_memory_store_provider()
-    except Exception:
-        return None
-
-
 def _clean_text(value: Any, *, limit: int = 0) -> str:
     text = re.sub(r"\s+", " ", str(value or "").replace("\u3000", " ")).strip()
     if limit > 0 and len(text) > limit:
@@ -106,6 +75,8 @@ def review_lightnovel_selection_from_memory_packet(
     session_id: str | None = None,
     ts_ms: int | None = None,
     timeout_s: int | None = None,
+    life_memory_store: Any | None = None,
+    persist_life_action_event_memory: Callable[..., Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     cards = _extract_cards(packet)
     source_card_count = len(cards)
@@ -137,6 +108,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -147,6 +120,7 @@ def review_lightnovel_selection_from_memory_packet(
         person_id=person_id,
         session_id=session_id,
         now_ms=int(ts_ms or time.time() * 1000),
+        life_memory_store=life_memory_store,
     )
     if cached:
         _annotate_review_scope(
@@ -167,12 +141,14 @@ def review_lightnovel_selection_from_memory_packet(
                 persist_result=cached_persist_result,
                 source_episode_ids=list(review_context.get("source_episode_ids") or []),
                 ts_ms=int(ts_ms or time.time() * 1000),
+                life_memory_store=life_memory_store,
             )
             _attach_review_to_source_collection_items(
                 persist_result=cached_persist_result,
                 result=cached,
                 review_context=review_context,
                 ts_ms=int(ts_ms or time.time() * 1000),
+                life_memory_store=life_memory_store,
             )
         return cached
 
@@ -208,6 +184,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -235,6 +213,8 @@ def review_lightnovel_selection_from_memory_packet(
             ts_ms=ts_ms,
             recommendation_signature=signature,
             review_context=review_context,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -268,6 +248,8 @@ def review_lightnovel_selection_from_memory_packet(
         ts_ms=ts_ms,
         recommendation_signature=signature,
         review_context=review_context,
+        life_memory_store=life_memory_store,
+        persist_life_action_event_memory=persist_life_action_event_memory,
     )
     _attach_persist_result(result, persist_result)
     return result
@@ -440,12 +422,13 @@ def _load_cached_review(
     person_id: str | None,
     session_id: str | None,
     now_ms: int,
+    life_memory_store: Any | None,
 ) -> dict[str, Any] | None:
     if not _cache_enabled() or not recommendation_signature:
         return None
     max_age_days = load_lightnovel_review_settings().cache_max_age_days
     max_age_ms = max(1, int(max_age_days * 24 * 60 * 60 * 1000))
-    store = _life_memory_store()
+    store = life_memory_store
     if store is None:
         return None
     repository = getattr(store, "persistence", None)
@@ -1503,8 +1486,9 @@ def _persist_review_memory(
     ts_ms: int | None,
     recommendation_signature: str,
     review_context: Mapping[str, Any] | None = None,
+    life_memory_store: Any | None,
+    persist_life_action_event_memory: Callable[..., Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
-    persist_life_action_event_memory = _life_action_memory_persist
     if persist_life_action_event_memory is None:
         return {"status": "SKIPPED", "reason_code": "PERSIST_PROVIDER_UNAVAILABLE"}
     signature = str(recommendation_signature or "").strip()
@@ -1556,12 +1540,14 @@ def _persist_review_memory(
             persist_result=persist_result,
             source_episode_ids=list(context.get("source_episode_ids") or []),
             ts_ms=int(ts_ms or time.time() * 1000),
+            life_memory_store=life_memory_store,
         )
         _attach_review_to_source_collection_items(
             persist_result=persist_result,
             result=result,
             review_context=context,
             ts_ms=int(ts_ms or time.time() * 1000),
+            life_memory_store=life_memory_store,
         )
         return persist_result
     except Exception as exc:
@@ -1573,6 +1559,7 @@ def _link_review_to_source_episodes(
     persist_result: Mapping[str, Any],
     source_episode_ids: Sequence[Any],
     ts_ms: int,
+    life_memory_store: Any | None,
 ) -> None:
     life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
     review_episode_id = _clean_text(life.get("episode_id"))
@@ -1585,7 +1572,7 @@ def _link_review_to_source_episodes(
     ]
     if not source_ids:
         return
-    store = _life_memory_store()
+    store = life_memory_store
     if store is None:
         return
     for source_id in list(dict.fromkeys(source_ids))[:12]:
@@ -1608,6 +1595,7 @@ def _attach_review_to_source_collection_items(
     result: Mapping[str, Any],
     review_context: Mapping[str, Any],
     ts_ms: int,
+    life_memory_store: Any | None,
 ) -> None:
     life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
     review_episode_id = _clean_text(life.get("episode_id"))
@@ -1632,7 +1620,7 @@ def _attach_review_to_source_collection_items(
         reviewed_items.append(item)
     if not reviewed_items:
         return
-    store = _life_memory_store()
+    store = life_memory_store
     if store is None:
         return
     attach = getattr(store, "attach_collection_item_review_evidence", None)

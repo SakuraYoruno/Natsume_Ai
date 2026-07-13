@@ -16,14 +16,12 @@ from natsume_contracts import (
     TaskContractError,
     TaskContractReasonCode,
     TaskExecutor,
-    TaskRuntimeMode,
     build_host_command,
 )
 from host_brain.agent_runtime.runtime_router import (
     RUNTIME_ASSIGNMENT_SCHEMA_VERSION,
     RuntimeAssignment,
     RuntimeExecutor,
-    RuntimeMode,
 )
 
 
@@ -145,17 +143,13 @@ def test_host_command_requires_paired_ingress_evidence_and_canonical_digests() -
     assert noncanonical.value.field_path == "host_command.input_sha256"
 
 
-def test_executor_assignment_preserves_runtime_assignment_v1_wire_contract() -> None:
+def test_executor_assignment_preserves_canonical_runtime_assignment_v2_contract() -> None:
     payload = {
-        "schema_version": "Natsume.agent.runtime_assignment.v1",
+        "schema_version": "Natsume.agent.runtime_assignment.v2",
         "work_order_id": "wo::assignment::1",
         "executor": "canonical",
-        "mode": "canonical",
         "assignment_id": "runtime-assignment://wo::assignment::1/" + _DIGEST_A,
         "assigned_at_ms": 123,
-        "canary_percent": 100,
-        "canary_selected": True,
-        "kill_switch_active": False,
         "is_new_task": True,
         "reason_code": "RUNTIME_NEW_TASK_CANONICAL",
     }
@@ -165,9 +159,7 @@ def test_executor_assignment_preserves_runtime_assignment_v1_wire_contract() -> 
     assert EXECUTOR_ASSIGNMENT_SCHEMA_VERSION == RUNTIME_ASSIGNMENT_SCHEMA_VERSION
     assert RuntimeAssignment is ExecutorAssignment
     assert RuntimeExecutor is TaskExecutor
-    assert RuntimeMode is TaskRuntimeMode
     assert assignment.executor is TaskExecutor.CANONICAL
-    assert assignment.mode is TaskRuntimeMode.CANONICAL
     assert assignment.to_dict() == payload
     assert RuntimeAssignment.from_mapping(payload) == assignment
 
@@ -177,12 +169,8 @@ def test_executor_assignment_is_single_strict_fail_closed_model() -> None:
         "schema_version": EXECUTOR_ASSIGNMENT_SCHEMA_VERSION,
         "work_order_id": "wo::assignment::2",
         "executor": "legacy",
-        "mode": "canonical",
         "assignment_id": "runtime-assignment://wo::assignment::2/" + _DIGEST_B,
         "assigned_at_ms": 124,
-        "canary_percent": 100,
-        "canary_selected": True,
-        "kill_switch_active": False,
         "is_new_task": True,
         "reason_code": "RUNTIME_NEW_TASK_LEGACY",
     }
@@ -190,7 +178,7 @@ def test_executor_assignment_is_single_strict_fail_closed_model() -> None:
     with pytest.raises(TaskContractError):
         ExecutorAssignment.from_mapping(payload)
 
-    payload["canary_selected"] = False
+    payload["executor"] = "canonical"
     payload["raw_secret"] = "forbidden"
     with pytest.raises(TaskContractError) as forbidden:
         RuntimeAssignment.from_mapping(payload)

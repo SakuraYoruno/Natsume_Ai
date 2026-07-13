@@ -25,7 +25,7 @@ import requests
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT
 from host_brain.agent_runtime.result_contract import AgentResult
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 logger = logging.getLogger(__name__)
 

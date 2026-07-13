@@ -4,12 +4,59 @@ import asyncio
 from types import SimpleNamespace
 import time
 
+import pytest
+
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.executive_runtime_core import _execute_skill, _execute_skill_dag
-from host_brain.app.skill_dag_planner import build_skill_dag_plan
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
+from host_brain.composition import process_services as dependencies
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.executive_runtime.skill_execution import _execute_skill
+from host_brain.executive_runtime.conversation_execution import _execute_skill_dag
+from host_brain.executive_runtime.skill_dag import build_skill_dag_plan
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.memory_registry import build_memory_skill_registry
+
+
+@pytest.fixture
+def durable_skill_runtime(tmp_path, monkeypatch):  # noqa: ANN001
+    """Bind each smoke case to one migrated canonical authority database."""
+
+    resources: list[tuple[object, SQLiteLedger]] = []
+
+    def bind(*, case_id: str, registry):  # noqa: ANN001
+        db_path = tmp_path / f"{case_id}.sqlite3"
+        migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+            request_id=f"{case_id}-migration",
+        )
+        assert migrated.success is True, migrated.as_dict()
+        ledger = SQLiteLedger(
+            db_path=str(db_path),
+            check_same_thread=False,
+            initialize_schema=False,
+        )
+        composition = build_production_capability_runtime(
+            execution_journal=SQLiteCapabilityExecutionJournal(ledger),
+        )
+        monkeypatch.setattr(dependencies, "get_ledger", lambda: ledger)
+        monkeypatch.setattr(dependencies, "get_skill_registry", lambda: registry)
+        monkeypatch.setattr(
+            dependencies,
+            "get_capability_broker",
+            lambda: composition.broker,
+        )
+        resources.append((composition, ledger))
+        return ledger
+
+    yield bind
+
+    for composition, ledger in reversed(resources):
+        composition.broker.close()
+        ledger.close()
 
 
 def _durable_skill_grant(
@@ -53,12 +100,14 @@ def _durable_skill_grant(
     return decision
 
 
-def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_builtin_writes_skill_exec_audit(
+    durable_skill_runtime,
+) -> None:
     registry = build_builtin_skill_registry()
-
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-builtin",
+        registry=registry,
+    )
 
     governor = _durable_skill_grant(
         ledger,
@@ -71,6 +120,7 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
     )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={},
         request_id="req_exec_skill_smoke_001",
         session_id="sess_exec_skill_smoke_001",
@@ -105,12 +155,14 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
     assert trace["skill_exec_log"][0]["approval_token_ref"] == "approval::exec_skill_smoke_001"
 
 
-def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_dag_parallel_builtin_skills_write_audit(
+    durable_skill_runtime,
+) -> None:
     registry = build_builtin_skill_registry()
-
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-dag",
+        registry=registry,
+    )
 
     planned_steps = [
         {
@@ -156,6 +208,7 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
 
     async def _run() -> tuple[object, dict[str, object]]:
         return await _execute_skill_dag(
+            ports=build_executive_runtime_application_ports(),
             plan=plan,
             request_body={},
             request_id="req_exec_plan_smoke_001",
@@ -196,9 +249,15 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
     assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
 
 
-def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_memory_store_injects_runtime_memory_dependencies(
+    monkeypatch,
+    durable_skill_runtime,
+) -> None:
     registry = build_memory_skill_registry()
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-memory-store",
+        registry=registry,
+    )
     writes: list[dict[str, object]] = []
 
     class _StoreStub:
@@ -223,10 +282,8 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
             )
             return SimpleNamespace(success=True, reason_code=None, detail="ok", memory_id="mem-001")
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: _StoreStub())
-    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: object())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: _StoreStub())
+    monkeypatch.setattr("host_brain.composition.process_services.get_semantic_recaller", lambda: object())
 
     governor = _durable_skill_grant(
         ledger,
@@ -240,6 +297,7 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
     )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={},
         request_id="req_exec_skill_memory_001",
         session_id="sess_exec_skill_memory_001",
@@ -274,9 +332,15 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
     assert "source:user_request" in writes[0]["evidence_refs"]
 
 
-def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_long_term_memory_search_filters_semantic_layer(
+    monkeypatch,
+    durable_skill_runtime,
+) -> None:
     registry = build_memory_skill_registry()
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-memory-search",
+        registry=registry,
+    )
     captured: dict[str, object] = {}
 
     class _SemanticRecallStub:
@@ -304,10 +368,8 @@ def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatc
                 ]
             )
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: None)
-    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: _SemanticRecallStub())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: None)
+    monkeypatch.setattr("host_brain.composition.process_services.get_semantic_recaller", lambda: _SemanticRecallStub())
 
     governor = _durable_skill_grant(
         ledger,
@@ -321,6 +383,7 @@ def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatc
     )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={
             "args": {
                 "query": "技术场景怎么帮我",

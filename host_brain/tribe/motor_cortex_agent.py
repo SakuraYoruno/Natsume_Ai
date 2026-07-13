@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
 from host_brain.tribe.events import emit_tribe_event
@@ -17,6 +18,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class MotorCortexAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="motor_cortex_agent",
@@ -33,7 +35,7 @@ class MotorCortexAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision)
@@ -600,10 +602,10 @@ class MotorCortexAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.motor_cortex_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("motor_cortex_agent.speak_style") or {}
+            _tpl = resolve_prompt_contract_json("motor_cortex_agent.speak_style") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -616,6 +618,7 @@ class MotorCortexAgent:
                 tone_hint=str(tone_hint or "balanced"),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="motor_speak_style",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,

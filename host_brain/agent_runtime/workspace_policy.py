@@ -9,7 +9,7 @@ import subprocess
 from typing import Any
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT, REPO_ROOT, sanitize_segment
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 
 DEFAULT_CLONE_ROOT = REPO_ROOT / "artifacts" / "codex_clones"

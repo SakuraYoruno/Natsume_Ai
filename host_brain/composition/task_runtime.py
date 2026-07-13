@@ -23,13 +23,13 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
 )
-from host_brain.persistence import (
-    HostCommandRepository,
-    SchedulerDefinitionRepository,
-    SchedulerExecutionResultRepository,
-)
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
+)
+from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.scheduler_repository import (
+    SchedulerDefinitionRepository,
+    SchedulerExecutionResultRepository,
 )
 
 

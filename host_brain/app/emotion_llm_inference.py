@@ -21,13 +21,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 logger = logging.getLogger(__name__)
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -272,9 +272,11 @@ async def _llm_emotion_call(
 ) -> str:
     """调用唯一模型 authority；route/provider/deadline 由服务端策略决定。"""
     from host_brain.model_runtime.invocation import complete_compiled_prompt  # noqa: PLC0415
+    from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
     from host_brain.model_runtime.live_prompts import EMOTION_INFERENCE_PROMPT_ID  # noqa: PLC0415
 
     result = await complete_compiled_prompt(
+        attempt_service=get_model_attempt_service(),
         prompt_id=EMOTION_INFERENCE_PROMPT_ID,
         request_id=f"emotion_inference::{int(time.time() * 1000)}",
         scene_type="EMOTION",

@@ -223,10 +223,12 @@ def _messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
 
 def _judge_sync(payload: Mapping[str, Any], *, request_id: str) -> dict[str, Any]:
     from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+    from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
     from host_brain.model_runtime.live_prompts import SURFACE_REPLY_JUDGE_PROMPT_ID  # noqa: PLC0415
     from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
     result = complete_compiled_prompt_sync(
+        attempt_service=get_model_attempt_service(),
         prompt_id=SURFACE_REPLY_JUDGE_PROMPT_ID,
         request_id=f"{request_id or int(time.time() * 1000)}:surface-reply-judge",
         scene_type="SURFACE_REPLY_JUDGE",

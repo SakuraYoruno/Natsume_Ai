@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-07 已完成，AW-08 正式实施
+当前代码基线：`codex/m48-integration`，AW-00～AW-07 已完成，AW-08 已进入 `CODE_COMPLETE`，等待唯一一次 Program Acceptance
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -291,7 +291,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-08：兼容层退役与 Core Release
 
-状态：`IN_PROGRESS`
+状态：`CODE_COMPLETE`
 
 目标：在单一生产架构成立后删除全部旧 authority，完成核心架构的唯一完整验收和可回滚发布。Evolution Lab、Skill Compiler、Counterfactual、Knowledge OS 与 Identity Migration 的新增能力移到 Core Release 之后的独立 Follow-up Goal，不能反向阻塞核心架构封板。
 
@@ -300,6 +300,16 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 生产切换：兼容 facade usage=0 后删除；冻结 active contracts/schema/config/assets，生成 ReleaseManifest。
 
 删除目标：旧 writer/runtime/scheduler/facade/re-export/flag/dead fallback、重复目录和过期生成资产。
+
+代码完成事实（2026-07-13）：
+
+- production composition 已成为 Executive、Lifecycle、Surface、Agent、Input、Digital Life、Tool 与具身 outbox 的唯一装配入口；Input Runtime 使用 `frozen/slots` typed ports，由 ASGI 每个 application 只构造一次，runtime→`host_brain.app` / `host_brain.composition` 反向依赖为 0。
+- Pentest attack handler、进程内 RUNS/event bus、zombie recovery、通用 ReAct 注册和旧 `/v1/pentest/runs*` writer 已物理退休；应用 Agent 只生成只读 Domain Pack / SecureRun handoff，实际效果只能经 durable principal、Governor token、Lab capability 与 receipt 约束的服务器端执行面。
+- ToolCatalog/ToolBroker 只由 process composition 构造并一次性 seed；HTTP route 不再构造或补种 service。Digital Life 旧 application provider、旧 runtime shutdown 命名链、旧 writer/runtime/scheduler/facade、生成脚本和过期验证资产均已删除。
+- Core 收口提交为 `1,061 files changed / 47,869 insertions / 94,908 deletions`，其中删除文件 `277` 个，production/tool 路径删除 `194` 个；compatibility registry 为 `active=0 / usage=0`，retired path remaining 为 0。
+- Slice / readiness 证据：Pentest `93 passed` 与 autonomous planner `56 passed`；Input explicit-port contract `5 passed`、ASGI `142` routes；最终精确回归 `16 passed`。全仓 collect-only 首次只发现 4 个陈旧 import，相关 12 个节点修复后 `12 collected`；`compileall`、`git diff --check` 和目标层 reverse-dependency audit（violations=[]）通过。
+- Final Architecture 静态 Gate 1～14 独立评估全部 `PASS`；隔离临时数据库 ASGI lifecycle smoke 为 `142 routes / health=200 / required routes missing=[]`。全仓历史业务域仍存在一个 27-package SCC，不冒充“全仓无环”；Gate 1 约束的目标层双向依赖与 Edge→Host 实现导入均为 0。
+- Program Acceptance 尚未执行；下一步只运行一次完整离线、真实隔离 HTTP/UI/Edge、migration/backup/restore、security/performance 与 rollback drill，结果决定 `DONE` 或精确修复。
 
 状态流：`IN_PROGRESS → CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`。代码删除、manifest 和本地构建完成后进入 `CODE_COMPLETE`；随后只运行一次完整离线套件、真实隔离环境 smoke、迁移/恢复、性能/安全和 rollback drill。通过第 9 节 Final Architecture Gate 后才进入 `DONE`。只有外部环境尚不可用时使用 `ACCEPTANCE_PENDING_EXTERNAL`，不得保持代码波 `IN_PROGRESS` 或重复已通过的本地全量验证。
 
@@ -453,7 +463,7 @@ AW-08 只有在以下全部成立时才完成：
 | AW-05 | `DONE` | ModelAttempt/Prompt/Route、Capability Broker、durable Skill/MCP authority 与三类 Domain Pack 已完成 production cutover；无 P0/P1 |
 | AW-06 | `DONE` | Edge/Host 显式实现导入归零，设备单 authority、durable lease/fence/receipt 与 reconnect no-replay 已切流；无 P0/P1 |
 | AW-07 | `DONE` | durable projection/lease/fence/rebuild、Query auth/privacy、generated BFF command client 已切流；无 P0/P1 |
-| AW-08 | `IN_PROGRESS` | 删除 compatibility facade、旧 writer/runtime/scheduler/flag 与生成污染，进入 `CODE_COMPLETE` 后一次最终实测与 Core Release |
+| AW-08 | `CODE_COMPLETE` | compatibility facade、旧 writer/runtime/scheduler/flag、Pentest 旁路与生成污染已删除；静态 Gate 1～14 PASS，等待唯一一次 Program Acceptance |
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 

@@ -16,8 +16,8 @@ from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequ
 from host_brain.capability_plane.policies import issue_grant
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
-from host_brain.agent_runtime import execute_agent_runtime_payload
-from host_brain.agent_runtime.production_executor import (
+from host_brain.agent_runtime.executor import execute_agent_runtime_payload
+from host_brain.domain_packs.production_runtime import (
     GOVERNED_PRODUCTION_EXECUTION_MODE,
     execute_agent_production_payload,
 )
@@ -91,12 +91,6 @@ def _focus_mode_with_mode_changer(payload: dict[str, Any]) -> Any:
     如果调用方未提供 mode_changer，则自动注入 dependencies.set_sys_mode。
     """
     ctx = dict(payload.get("_context") or {})
-    if ctx.get("mode_changer") is None:
-        try:
-            from host_brain.app.dependencies import set_sys_mode  # noqa: PLC0415
-            ctx["mode_changer"] = set_sys_mode
-        except ImportError:
-            pass  # 降级：不注入，focus_mode 仍返回 EXECUTED 但不切换模式
     return execute_focus_mode(payload, ctx)
 
 
@@ -109,13 +103,20 @@ def _execute_agent_production_with_context(payload: dict[str, Any]) -> Any:
         if isinstance(context, dict)
         else None
     )
-    if governed_context is None:
-        return execute_agent_production_payload(payload)
     if not isinstance(governed_context, dict):
-        governed_context = {"execution_mode": GOVERNED_PRODUCTION_EXECUTION_MODE}
+        governed_context = None
+    platform = context if isinstance(context, dict) else {}
+    capability_broker = platform.get("capability_broker")
+    model_attempt_service = platform.get("model_attempt_service")
+    authority_verifier = platform.get("production_authority_verifier")
+    if capability_broker is None or model_attempt_service is None or not callable(authority_verifier):
+        raise RuntimeError("PRODUCTION_EXECUTION_PORTS_NOT_COMPOSED")
     return execute_agent_production_payload(
         payload,
         governed_execution_context=governed_context,
+        capability_broker=capability_broker,
+        model_attempt_service=model_attempt_service,
+        authority_verifier=authority_verifier,
     )
 
 
@@ -198,12 +199,9 @@ class BoundSkillExecutionAuthority:
 
 
 def _canonical_authority_ledger(candidate: Any | None) -> Any:
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-
-    canonical = get_ledger()
-    if candidate is not None and candidate is not canonical:
-        raise ValueError("skill authority requires the canonical ledger instance")
-    return canonical
+    if candidate is None:
+        raise ValueError("skill authority requires an explicit durable ledger")
+    return candidate
 
 
 def _verify_durable_token_authority(
@@ -447,6 +445,9 @@ class _SkillExecutionPolicy:
         )
 
 
+_SKILL_EXECUTION_POLICY = _SkillExecutionPolicy()
+
+
 def _authority_error(
     authority: BoundSkillExecutionAuthority | None,
     request: CapabilityRequest,
@@ -504,12 +505,13 @@ def _verify_durable_governed_authority(
     """Re-resolve the exact HostCommand, Task attempt and Governor grant."""
 
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
         from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
         from host_brain.persistence.host_command_repository import HostCommandRepository  # noqa: PLC0415
         from host_brain.persistence.task_repository import DurableTaskStore  # noqa: PLC0415
 
-        ledger = authority.durable_ledger or get_ledger()
+        ledger = authority.durable_ledger
+        if ledger is None:
+            return "SKILL_DURABLE_AUTHORITY_UNAVAILABLE"
         db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
         if not db_path or db_path == ":memory:":
             return "SKILL_DURABLE_AUTHORITY_UNAVAILABLE"
@@ -648,32 +650,21 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
     return _BUILTIN_EXECUTOR_REGISTRY._dispatch_unchecked(payload)
 
 
-_SKILL_CAPABILITY_BROKER: CapabilityBroker | None = None
-_SKILL_CAPABILITY_BROKER_LOCK = threading.Lock()
+def _bind_skill_capabilities(capability_broker: CapabilityBroker) -> None:
+    """Attach built-in Skill adapters to the composed process broker."""
 
-
-def _get_skill_capability_broker() -> CapabilityBroker:
-    global _SKILL_CAPABILITY_BROKER
-    if _SKILL_CAPABILITY_BROKER is not None:
-        return _SKILL_CAPABILITY_BROKER
-    with _SKILL_CAPABILITY_BROKER_LOCK:
-        if _SKILL_CAPABILITY_BROKER is None:
-            from host_brain.app.dependencies import get_capability_execution_journal  # noqa: PLC0415
-
-            broker = CapabilityBroker(
-                policy=_SkillExecutionPolicy(),
-                execution_journal=get_capability_execution_journal(),
-            )
-            for executor_id in _BUILTIN_EXECUTOR_REGISTRY._executor_ids_unchecked():
-                broker.register(CapabilityDescriptor(
-                    capability_id=executor_id,
-                    kind=CapabilityKind.SKILL,
-                    version="1",
-                    risk_level=5,
-                    adapter=_broker_executor_adapter,
-                ))
-            _SKILL_CAPABILITY_BROKER = broker
-    return _SKILL_CAPABILITY_BROKER
+    for executor_id in _BUILTIN_EXECUTOR_REGISTRY._executor_ids_unchecked():
+        capability_broker.register(
+            CapabilityDescriptor(
+                capability_id=executor_id,
+                kind=CapabilityKind.SKILL,
+                version="1",
+                risk_level=5,
+                adapter=_broker_executor_adapter,
+                authorization_policy=_SKILL_EXECUTION_POLICY,
+            ),
+            replace_existing=True,
+        )
 
 
 def get_builtin_tool_executor_registry() -> ToolExecutorRegistry:
@@ -685,12 +676,17 @@ def get_builtin_tool_executor_registry() -> ToolExecutorRegistry:
 def dispatch_executor_payload(
     payload: Any = None,
     *,
+    capability_broker: CapabilityBroker,
     skill_id: str | None = None,
     context: dict[str, Any] | None = None,
     authority: BoundSkillExecutionAuthority | None = None,
     deadline_ms: int = 5 * 60 * 1000,
 ) -> Any:
     """Public governed executor dispatch; missing authority always fails closed."""
+
+    if capability_broker is None:
+        raise ValueError("skill dispatch requires the composed CapabilityBroker")
+    _bind_skill_capabilities(capability_broker)
 
     if skill_id is not None:
         normalized = dict(payload or {}) if isinstance(payload, dict) else {}
@@ -718,7 +714,7 @@ def dispatch_executor_payload(
     with _INVOCATIONS_LOCK:
         _INVOCATIONS[attempt_id] = envelope
     try:
-        receipt = _get_skill_capability_broker().execute(CapabilityRequest(
+        receipt = capability_broker.execute(CapabilityRequest(
             request_id=(authority.request_id if type(authority) is BoundSkillExecutionAuthority else str(payload.get("request_id") or "unbound-skill-request")),
             attempt_id=attempt_id,
             idempotency_key=f"skill-dispatch::{authority_id}::{payload_digest}",

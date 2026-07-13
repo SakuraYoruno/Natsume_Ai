@@ -210,6 +210,8 @@ def build_memory_context_debug(
     request_id: str = "",
     limit: int = 8,
 ) -> dict[str, Any]:
+    from host_brain.app.conversation_event_resolver import resolve_conversation_event_action
+
     now = _now_ms()
     sid = _text(session_id, limit=180)
     pid = _text(person_id, limit=120) or "default"
@@ -222,6 +224,7 @@ def build_memory_context_debug(
         current_user_message=message,
         now_ms=now,
         limit=limit,
+        conversation_event_resolver=resolve_conversation_event_action,
     )
     selected_context: dict[str, Any] = {"current_user_message": message}
     suppressed: list[dict[str, Any]] = []
@@ -444,11 +447,11 @@ def memory_health(*, ledger: Any, person_id: str = "default") -> dict[str, Any]:
         belief_ttl_ms=BELIEF_TTL_MS,
     )
     try:
-        from host_brain.app.memory_event_store import (  # noqa: PLC0415
-            memory_event_health,
+        from host_brain.persistence.context_memory_repository import (  # noqa: PLC0415
+            MemoryEventRepository,
         )
 
-        event_health = memory_event_health(ledger=ledger, person_id=pid)
+        event_health = MemoryEventRepository.from_ledger(ledger).health(person_id=pid)
         health.update(event_health)
         health["conversation_turn_spine_gaps"] = int(
             event_health.get("visible_turn_projection_gaps", 0)

@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import subprocess
 
-from host_brain.app import graph_config_llm_runtime, provider_factory
 from host_brain.integrations import codex_cli_provider, llm_helpers
 
 
@@ -305,37 +304,3 @@ def test_llm_pool_keeps_codex_cli_candidate_without_key(monkeypatch, tmp_path) -
     assert result.pool_exhausted is False
     assert result.final_provider == "codex"
     assert json.loads(result.content)["narrative"]["text"] == "我在。"
-
-
-def test_provider_factory_uses_codex_cli_when_key_missing(monkeypatch) -> None:
-    monkeypatch.setattr(provider_factory, "codex_cli_lm_available", lambda: True)
-    monkeypatch.setattr(provider_factory, "codex_cli_lm_allowed_for_background", lambda: True)
-    monkeypatch.setattr(
-        provider_factory,
-        "invoke_codex_cli_text",
-        lambda **_kwargs: '{"narrative":{"text":"在。"},"intent_draft":{}}',
-    )
-
-    provider_fn = provider_factory.build_host_provider_fn_for_node(
-        provider_name="codex",
-        model_id="gpt-5.4-mini",
-        api_key=None,
-        timeout_ms=1000,
-        node_id="chat_direct_ja",
-    )
-
-    result = json.loads(provider_fn({"input": {"user_message": "在吗"}}))
-
-    assert result["narrative"]["text"] == "在。"
-    assert result["meta"]["draft_only"] is True
-
-
-def test_runtime_marks_codex_cli_available_without_key(monkeypatch) -> None:
-    monkeypatch.setattr(graph_config_llm_runtime, "codex_cli_lm_available", lambda: True)
-    monkeypatch.setattr(graph_config_llm_runtime, "codex_cli_lm_allowed_for_background", lambda: True)
-
-    assert graph_config_llm_runtime._is_provider_available(  # noqa: SLF001
-        provider_name="codex",
-        api_key=None,
-        configured_available=True,
-    )

@@ -13,7 +13,7 @@ from host_brain.app.obs_routes_proactive_autonomy import build_proactive_autonom
 
 def _install_snapshot(monkeypatch, state: dict, *, version: int = 1) -> None:  # noqa: ANN001
     monkeypatch.setattr(
-        "host_brain.app.life_application_boundary.read_life_snapshot",
+        "host_brain.digital_life.application_boundary.read_life_snapshot",
         lambda person_id: {
             "person_id": person_id,
             "version": version,

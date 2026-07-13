@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Iterable, Mapping
 
-from host_brain.app.context.interaction_facts_plane import InteractionFactsPlane
+from host_brain.persona.context.interaction_facts import InteractionFactsPlane
 
 
 def _clean_text(raw: Any) -> str:

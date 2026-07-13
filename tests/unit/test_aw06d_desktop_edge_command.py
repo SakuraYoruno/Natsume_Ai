@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
 from host_brain.capability_plane.policies import issue_grant
@@ -15,17 +15,17 @@ from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
 
 
 @pytest.fixture(autouse=True)
-def _isolated_broker(monkeypatch):  # noqa: ANN001, ANN201
-    monkeypatch.setenv("NATSUME_AUDIT_DB", ":memory:")
+def _isolated_broker(monkeypatch, tmp_path):  # noqa: ANN001, ANN201
+    monkeypatch.setenv("NATSUME_AUDIT_DB", str(tmp_path / "desktop-broker.sqlite3"))
     get_persistence_settings.cache_clear()
-    dependencies._ledger = None  # noqa: SLF001
-    registry_module._SKILL_CAPABILITY_BROKER = None  # noqa: SLF001
+    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
+    dependencies.get_process_service_container().capability_runtime_composition = None  # noqa: SLF001
     yield
-    ledger = dependencies._ledger  # noqa: SLF001
+    dependencies.reset_capability_runtime_composition()
+    ledger = dependencies.get_process_service_container().ledger  # noqa: SLF001
     if ledger is not None:
         ledger.close()
-    dependencies._ledger = None  # noqa: SLF001
-    registry_module._SKILL_CAPABILITY_BROKER = None  # noqa: SLF001
+    dependencies.get_process_service_container().ledger = None  # noqa: SLF001
     get_persistence_settings.cache_clear()
 
 
@@ -82,7 +82,7 @@ def test_desktop_skill_authors_only_edge_commands(
         {"_skill_execution_authority": _authority()},
     )
 
-    assert result["status"] == "OK"
+    assert result["status"] == "QUEUED"
     assert len(calls) == 1
     command = calls[0]
     assert command["action"] == command_action
@@ -127,7 +127,7 @@ def test_caller_forged_desktop_authority_snapshot_is_stripped_before_adapter(
                 "expires_at_ms": 2_000_000_000_000,
             },
         },
-    })
+    }, capability_broker=dependencies.get_capability_broker())
 
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"

@@ -3,13 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from host_brain.eventing import SQLiteGatewayTransportStore as PublicStore
-from host_brain.eventing.gateway_transport import (
-    GatewayTransportStore as CompatibilityAlias,
-)
-from host_brain.eventing.gateway_transport import (
-    SQLiteGatewayTransportStore as CompatibilityStore,
-)
 from host_brain.persistence.gateway_transport_repository import (
     GATEWAY_TRANSPORT_MIGRATION_ASSET_KEY,
     GATEWAY_TRANSPORT_MIGRATION_SHA256,
@@ -31,39 +24,17 @@ def _imports_from(path: Path, module: str) -> set[str]:
     }
 
 
-def test_eventing_compatibility_facade_has_no_persistence_implementation() -> None:
-    source = (ROOT / "host_brain" / "eventing" / "gateway_transport.py").read_text(
-        encoding="utf-8"
-    )
-    forbidden = (
-        "sqlite3",
-        "_connect",
-        ".execute(",
-        "BEGIN IMMEDIATE",
-        "CREATE TABLE",
-        "CREATE INDEX",
-        "SELECT ",
-        "INSERT ",
-        "UPDATE ",
-        "DELETE ",
-    )
-    for token in forbidden:
-        assert token not in source, f"eventing facade still contains {token}"
+def test_eventing_compatibility_facade_is_deleted() -> None:
+    assert not (ROOT / "host_brain" / "eventing" / "gateway_transport.py").exists()
 
 
-def test_legacy_public_and_direct_adapter_imports_preserve_type_identity() -> None:
-    assert CompatibilityStore is SQLiteGatewayTransportStore
-    assert CompatibilityAlias is SQLiteGatewayTransportStore
-    assert PublicStore is SQLiteGatewayTransportStore
-
-
-def test_edge_production_bootstrap_imports_persistence_adapter_directly() -> None:
+def test_edge_production_bootstrap_uses_contract_injected_store_factory() -> None:
     path = ROOT / "edge_client" / "gateway" / "bootstrap.py"
-    assert "SQLiteGatewayTransportStore" in _imports_from(path, ADAPTER_MODULE)
-    assert "SQLiteGatewayTransportStore" not in _imports_from(
-        path,
-        "host_brain.eventing.gateway_transport",
+    source = path.read_text(encoding="utf-8")
+    assert "GatewayTransportStoreFactory" in _imports_from(
+        path, "natsume_contracts.edge.v1"
     )
+    assert "host_brain." not in source
 
 
 def test_adapter_retains_central_0059_schema_authority_and_transaction_boundary() -> None:

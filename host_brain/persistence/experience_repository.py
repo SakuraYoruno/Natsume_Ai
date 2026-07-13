@@ -8,7 +8,7 @@ different database.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import hashlib
 import json
@@ -1061,6 +1061,7 @@ class ExperienceRepository:
         current_user_message: str,
         now_ms: int,
         limit: int,
+        conversation_event_resolver: Callable[..., Mapping[str, Any]],
     ) -> dict[str, Any]:
         pid = _text(person_id) or "default"
         sid = _text(session_id)
@@ -1125,18 +1126,14 @@ class ExperienceRepository:
             lessons = self._experience_lesson_rows(conn, pid)
             life_state = self._digital_life_state(conn, pid)
             try:
-                from host_brain.app.conversation_event_resolver import (  # noqa: PLC0415
-                    resolve_conversation_event_action,
-                )
-
-                resolution = resolve_conversation_event_action(
+                resolution = dict(conversation_event_resolver(
                     ledger=conn,
                     person_id=pid,
                     session_id=sid,
                     current_user_message=current_user_message,
                     now_ms=int(now_ms),
                     before_ms=boundary or None,
-                )
+                ))
             except Exception as exc:
                 resolution = {
                     "schema_version": "Natsume.conversation_event_resolution.v1",

@@ -21,8 +21,8 @@ from natsume_contracts.identity import (
 )
 from host_brain.app.obs_fastapi_app import app as obs_app
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.observability import domain_command_ports
-from host_brain.observability.command_composition import build_obs_command_composition
+from host_brain.app.observability_runtime import domain_command_ports
+from host_brain.app.observability_runtime.command_composition import build_obs_command_composition
 from host_brain.observability.command_http import create_obs_command_http_router
 from host_brain.observability.command_outcome_journal import (
     ObsCommandOutcomeJournal,
@@ -235,7 +235,6 @@ def test_task0489_query_only_secure_command_restart_wave(
         now_ms=now_ms,
     )
     env = {
-        "HOST_OBS_COMMAND_RELOCATION_MODE": "QUERY_ONLY",
         "HOST_SECURE_INGRESS_MODE": "ENFORCE",
         "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON": json.dumps({key_id: secret}),
     }

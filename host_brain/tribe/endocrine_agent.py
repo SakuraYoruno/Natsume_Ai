@@ -5,11 +5,13 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.endocrine import derive_endocrine_state
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 
 
 @dataclass(slots=True)
 class EndocrineAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="endocrine_agent",
@@ -195,10 +197,10 @@ class EndocrineAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.endocrine_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("endocrine_agent.hormonal_state_hint") or {}
+            _tpl = resolve_prompt_contract_json("endocrine_agent.hormonal_state_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -210,6 +212,7 @@ class EndocrineAgent:
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="endocrine_hormonal_hint",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
@@ -252,7 +255,7 @@ class EndocrineAgent:
         使 Governor 在下次裁决时感知当前能量/压力水平。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("BOND_PROGRESS", self._on_bond_progress)

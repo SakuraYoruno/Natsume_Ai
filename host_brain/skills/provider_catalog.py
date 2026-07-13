@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,10 +21,81 @@ class SkillProviderSpec:
     def instantiate(self):
         if self.provider_path not in _TRUSTED_BUILTIN_PROVIDER_PATHS:
             raise ValueError("SKILL_PROVIDER_NOT_TRUSTED_BUILTIN")
-        module_name, class_name = self.provider_path.split(":", 1)
-        module = importlib.import_module(module_name)
-        provider_cls = getattr(module, class_name)
-        return provider_cls()
+        return _instantiate_builtin_provider(self.provider_path)
+
+
+def _instantiate_builtin_provider(provider_path: str):
+    """Construct one statically declared provider without a dynamic importer."""
+
+    if provider_path == "host_brain.skills.file_registry:FileSkillProvider":
+        from host_brain.skills.file_registry import FileSkillProvider
+
+        return FileSkillProvider()
+    if provider_path == "host_brain.skills.shell_registry:ShellSkillProvider":
+        from host_brain.skills.shell_registry import ShellSkillProvider
+
+        return ShellSkillProvider()
+    if provider_path == "host_brain.skills.notification_registry:NotificationSkillProvider":
+        from host_brain.skills.notification_registry import NotificationSkillProvider
+
+        return NotificationSkillProvider()
+    if provider_path == "host_brain.skills.ide_registry:IDESkillProvider":
+        from host_brain.skills.ide_registry import IDESkillProvider
+
+        return IDESkillProvider()
+    if provider_path == "host_brain.skills.agent_runtime_registry:AgentRuntimeSkillProvider":
+        from host_brain.skills.agent_runtime_registry import AgentRuntimeSkillProvider
+
+        return AgentRuntimeSkillProvider()
+    if provider_path == "host_brain.skills.browser_registry:BrowserSkillProvider":
+        from host_brain.skills.browser_registry import BrowserSkillProvider
+
+        return BrowserSkillProvider()
+    if provider_path == "host_brain.skills.personality_registry:PersonalitySkillProvider":
+        from host_brain.skills.personality_registry import PersonalitySkillProvider
+
+        return PersonalitySkillProvider()
+    if provider_path == "host_brain.skills.desktop_registry:DesktopSkillProvider":
+        from host_brain.skills.desktop_registry import DesktopSkillProvider
+
+        return DesktopSkillProvider()
+    if provider_path == "host_brain.skills.memory_registry:MemorySkillProvider":
+        from host_brain.skills.memory_registry import MemorySkillProvider
+
+        return MemorySkillProvider()
+    if provider_path == "host_brain.skills.repo_registry:RepoSkillProvider":
+        from host_brain.skills.repo_registry import RepoSkillProvider
+
+        return RepoSkillProvider()
+    if provider_path == "host_brain.skills.frontend_registry:FrontendSkillProvider":
+        from host_brain.skills.frontend_registry import FrontendSkillProvider
+
+        return FrontendSkillProvider()
+    if provider_path == "host_brain.skills.emotion_registry:EmotionSkillProvider":
+        from host_brain.skills.emotion_registry import EmotionSkillProvider
+
+        return EmotionSkillProvider()
+    if provider_path == "host_brain.skills.scheduler_registry:SchedulerSkillProvider":
+        from host_brain.skills.scheduler_registry import SchedulerSkillProvider
+
+        return SchedulerSkillProvider()
+    if provider_path == "host_brain.skills.system_registry:SystemSkillProvider":
+        from host_brain.skills.system_registry import SystemSkillProvider
+
+        return SystemSkillProvider()
+    if provider_path == "host_brain.skills.token_usage_registry:TokenUsageSkillProvider":
+        from host_brain.skills.token_usage_registry import TokenUsageSkillProvider
+
+        return TokenUsageSkillProvider()
+    if provider_path == "host_brain.skills.web_registry:WebSkillProvider":
+        from host_brain.skills.web_registry import WebSkillProvider
+
+        return WebSkillProvider()
+    if provider_path == "host_brain.skills.hub_skill_registry:HubSkillProvider":
+        from host_brain.skills.hub_skill_registry import HubSkillProvider
+
+        return HubSkillProvider()
+    raise ValueError("SKILL_PROVIDER_NOT_TRUSTED_BUILTIN")
 
 
 BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (

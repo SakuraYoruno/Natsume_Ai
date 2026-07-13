@@ -3,9 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import host_brain.app.dependencies as app_dependencies
+import host_brain.composition.process_services as app_dependencies
 import host_brain.app.graph_config_builder as graph_builder
-import host_brain.app.graph_config_llm_runtime as llm_runtime
 import host_brain.app.model_router as model_router
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
@@ -63,30 +62,7 @@ def _patch_runtime_dependencies(
             )
 
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
-    monkeypatch.setattr(llm_runtime, "codex_cli_lm_available", lambda: bool(codex_cli_available))
     monkeypatch.setattr(app_dependencies, "get_routing_matrix", lambda: _CloudRoutingMatrix())
-    monkeypatch.setattr(
-        llm_runtime,
-        "load_host_config",
-        lambda: _mock_config_result(
-            timeout_ms=timeout_ms,
-            gemini_api_key=gemini_api_key,
-            codex_api_key=codex_api_key,
-            deepseek_api_key=deepseek_api_key,
-            minimax_api_key=minimax_api_key,
-            llm_provider=llm_provider,
-        ),
-    )
-    monkeypatch.setattr(
-        llm_runtime,
-        "_resolve_host_14b_health_status",
-        lambda **kwargs: (True, "ok"),
-    )
-    monkeypatch.setattr(
-        llm_runtime,
-        "_resolve_host_14b_health_status_async",
-        lambda **kwargs: (True, "ok"),
-    )
 
 
 _FORBIDDEN_RUNTIME_KEYS = frozenset(

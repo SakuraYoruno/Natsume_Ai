@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from host_brain.app.context.interaction_state import coerce_interaction_state, build_interaction_state
-from host_brain.app.context.conversation_interpretation import classify_literal_topic, interpret_conversation
-from host_brain.app.context.interaction_thread import (
+from host_brain.persona.context.conversation_interpretation import classify_literal_topic, interpret_conversation
+from host_brain.persona.context.interaction_thread import (
     InteractionThreadState,
     _classify_assistant_topic,
     _classify_user_topic,
@@ -10,7 +10,7 @@ from host_brain.app.context.interaction_thread import (
     detect_image_social_followup_kind,
     resolve_interaction_thread,
 )
-from host_brain.app.context.topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 def test_detect_image_social_followup_kind_covers_followup_variants() -> None:

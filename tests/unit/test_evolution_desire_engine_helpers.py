@@ -6,9 +6,8 @@ import json
 import pytest
 
 import host_brain.persona.evolution_desire_engine as ede
-from host_brain.app import dependencies
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.composition import process_services as dependencies
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.model_runtime import (
     CallableProviderAdapter,
@@ -90,7 +89,7 @@ def test_generate_desire_strict_llm_disables_template_fallback(
 
 
 def test_self_narrative_prompt_spec_has_desire_prompt() -> None:
-    templates = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+    templates = resolve_prompt_contract_json("persona.self_narrative_prompts")
 
     assert isinstance(templates, dict)
     assert str(templates.get("desire_prompt") or "").strip()

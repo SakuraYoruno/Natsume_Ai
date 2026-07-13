@@ -636,6 +636,7 @@ class SystemResourceManager:
         llm_enabled: bool | None = None,
         auto_gc_enabled: bool | None = None,
         auto_trim_enabled: bool | None = None,
+        model_attempt_service: Any = None,
     ) -> None:
         self._interval_s = float(interval_s if interval_s is not None else _parse_float_env(
             "HOST_RESOURCE_MANAGER_INTERVAL_S",
@@ -652,6 +653,7 @@ class SystemResourceManager:
         self._llm_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_LLM_ENABLED", default=True) if llm_enabled is None else bool(llm_enabled)
         self._auto_gc_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_GC_ENABLED", default=True) if auto_gc_enabled is None else bool(auto_gc_enabled)
         self._auto_trim_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_TRIM_ENABLED", default=True) if auto_trim_enabled is None else bool(auto_trim_enabled)
+        self._model_attempt_service = model_attempt_service
         default_status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
         self._status_path = Path(status_path) if status_path is not None else default_status_path
         self._shutdown_event = threading.Event()
@@ -934,6 +936,7 @@ class SystemResourceManager:
                 + json.dumps(payload, ensure_ascii=False, sort_keys=True)[:9000]
             )
             result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
                 prompt_id=RESOURCE_MANAGER_ANALYSIS_PROMPT_ID,
                 request_id=f"resource-manager::{now_ms()}",
                 scene_type="RESOURCE_MANAGEMENT",

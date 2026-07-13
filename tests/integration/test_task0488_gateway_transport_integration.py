@@ -22,7 +22,6 @@ from edge_client.gateway.delivery_runtime import (
 )
 from edge_client.gateway.normalizer import MessageNormalizer
 from edge_client.gateway.outbound import OutboundDispatcher
-from edge_client.gateway.router import GatewayRouter
 from edge_client.gateway.server import create_gateway_app
 from edge_client.gateway.webhook_security import (
     INTERNAL_NONCE_HEADER,
@@ -32,9 +31,10 @@ from edge_client.gateway.webhook_security import (
     VerifierRegistry,
     build_internal_signature,
 )
-from host_brain.app.input_routes import router as host_input_router
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.eventing.gateway_transport import SQLiteGatewayTransportStore
+from host_brain.persistence.gateway_transport_repository import SQLiteGatewayTransportStore
 from host_brain.secure_ingress import IngressSurface, M48B_P0_SURFACE_POLICIES
 from tests.fixtures.m48b_isolation import build_m48b_isolation_harness
 
@@ -125,10 +125,6 @@ class _RecordingReporter:
             receipt_body_sha256=receipt_body_sha256,
         )
 
-    def report_gateway_payload(self, payload):  # noqa: ANN001
-        return self.deliver_gateway_payload(payload, idempotency_key="compat")
-
-
 class _RecordingQQAdapter(QQAdapter):
     def __init__(self) -> None:
         super().__init__("http://127.0.0.1:9", self_id="9000")
@@ -151,7 +147,6 @@ def _gateway_app(
     reply_secret: str,
 ):
     return create_gateway_app(
-        router=GatewayRouter(reporter),
         normalizer=MessageNormalizer(),
         adapters={"qq": adapter},
         outbound=outbound,
@@ -458,7 +453,7 @@ def test_task0488_edge_reporter_to_host_secure_ingress_lost_response_wave(
     monkeypatch.setenv("HOST_EDGE_GATEWAY_HMAC_KEY_ID", key_id)
     monkeypatch.setenv("HOST_EDGE_GATEWAY_HMAC_SECRET", secret)
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         lambda **_kwargs: {
             "decision": "ALLOW",
             "risk_level": "none",
@@ -467,18 +462,17 @@ def test_task0488_edge_reporter_to_host_secure_ingress_lost_response_wave(
         },
     )
     dispatch = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch)
-    monkeypatch.setattr("host_brain.app.input_routes._get_ledger_safe", lambda: None)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch)
     monkeypatch.setattr(
-        "host_brain.app.input_routes._record_feedback_for_latest_persona_reply",
+        "host_brain.input_runtime.ingress._get_ledger_safe",
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(
-        "host_brain.runtime.life_continuity.advance_inner_life_to_now",
-        lambda **_kwargs: {},
+        "host_brain.input_runtime.ingress._record_feedback_for_latest_persona_reply",
+        lambda **_kwargs: None,
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.notify_user_interaction",
+        "host_brain.composition.process_services.notify_user_interaction",
         lambda: None,
     )
 
@@ -486,7 +480,6 @@ def test_task0488_edge_reporter_to_host_secure_ingress_lost_response_wave(
         host_url="http://host.task0488",
         hmac_key=secret,
         timeout_s=1.0,
-        cache_file=None,
         secure_principal_id=principal_id,
         secure_tenant_id=tenant_id,
         secure_key_id=key_id,
@@ -505,7 +498,11 @@ def test_task0488_edge_reporter_to_host_secure_ingress_lost_response_wave(
     }
 
     test_host_app = FastAPI()
-    test_host_app.include_router(host_input_router)
+    test_host_app.include_router(
+        create_input_router(
+            application_ports=build_input_runtime_application_ports(),
+        )
+    )
     with TestClient(test_host_app, raise_server_exceptions=False) as client:
         lose_first_response = [True]
         host_statuses: list[str] = []

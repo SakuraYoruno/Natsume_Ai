@@ -10,7 +10,7 @@ from host_brain.capability_plane.broker import (
     InMemoryCapabilityAuditSink,
 )
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest, ReceiptStatus
-from host_brain.capability_plane.policies import PredicateCapabilityPolicy
+from host_brain.capability_plane.policies import DescriptorCapabilityPolicy, PredicateCapabilityPolicy
 from host_brain.integrations.graph_governed_tool_node import GovernedToolNode
 
 
@@ -30,6 +30,10 @@ def _request(*, key: str = "key-1", args: dict | None = None, deadline: int | No
 
 def _allow_policy() -> PredicateCapabilityPolicy:
     return PredicateCapabilityPolicy(lambda request, _descriptor: (True, "OK", f"policy://{request.request_id}"))
+
+
+def _composed_broker() -> CapabilityBroker:
+    return CapabilityBroker(policy=DescriptorCapabilityPolicy())
 
 
 def test_broker_owns_grant_invocation_idempotency_and_audit() -> None:
@@ -82,7 +86,7 @@ def test_broker_fails_closed_when_policy_returns_no_grant() -> None:
 def test_graph_tool_node_fails_closed_without_governor_or_on_governor_error() -> None:
     calls: list[str] = []
     tool = SimpleNamespace(name="demo", func=lambda **_kwargs: calls.append("called"))
-    missing = GovernedToolNode(tools=[tool])({
+    missing = GovernedToolNode(tools=[tool], capability_broker=_composed_broker())({
         "request_id": "req-missing-governor",
         "tool_calls": [{"tool": "demo", "args": {}}],
     })
@@ -91,7 +95,11 @@ def test_graph_tool_node_fails_closed_without_governor_or_on_governor_error() ->
         def evaluate_tool_call(self, **_kwargs):  # noqa: ANN003
             raise RuntimeError("down")
 
-    broken = GovernedToolNode(tools=[tool], governor=_BrokenGovernor())({
+    broken = GovernedToolNode(
+        tools=[tool],
+        governor=_BrokenGovernor(),
+        capability_broker=_composed_broker(),
+    )({
         "request_id": "req-broken-governor",
         "tool_calls": [{"tool": "demo", "args": {}}],
     })
@@ -222,13 +230,13 @@ def test_hung_capability_pool_cannot_starve_unrelated_capability() -> None:
 
 
 def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_path, monkeypatch) -> None:  # noqa: ANN001
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.audit.sqlite_ledger import SQLiteLedger
-    from host_brain.agent_runtime import production_executor
+    from host_brain.domain_packs import production_runtime as production_executor
     from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-    from host_brain.agent_runtime.production_executor import _execute_worker
+    from host_brain.domain_packs.production_runtime import _execute_worker
     from host_brain.agent_runtime.production_studio import build_production_work_order
-    from host_brain.agent_runtime.work_order import AgentWorkOrder
+    from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
     order = AgentWorkOrder.from_mapping(build_production_work_order(
         {"task": "research", "artifacts_root": str(tmp_path)},
@@ -239,12 +247,21 @@ def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_pat
         "_ledger",
         SQLiteLedger(db_path=":memory:", check_same_thread=False),
     )
-    monkeypatch.setattr(production_executor, "_PRODUCTION_CAPABILITY_BROKER", None)
-    monkeypatch.setattr(production_executor, "_PRODUCTION_DOMAIN_PACK_RUNTIME", None)
+    dependencies.reset_capability_runtime_composition()
+    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+    from host_brain.domain_packs.production_runtime import _compose_production_capabilities
+
+    broker, runtime = _compose_production_capabilities(
+        capability_broker=dependencies.get_capability_broker(),
+        model_attempt_service=ApplicationModelAttemptServicePort(),
+        authority_verifier=lambda _authority, _order: None,
+    )
     receipt = _execute_worker(
         order,
         store=AgentArtifactStore(str(tmp_path)),
         run_dir=tmp_path / "run",
+        capability_broker=broker,
+        domain_pack_runtime=runtime,
     )
     assert receipt["status"] == "FAILED"
     assert receipt["reason_code"] == "AGENT_PRODUCTION_GOVERNOR_GRANT_MISSING"

@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from host_brain.app import asgi, http_hooks
-from host_brain.app import legacy_runtime_shutdown_adapter
+from host_brain.app import process_runtime_shutdown_adapter
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -13,7 +13,7 @@ from host_brain.tribe.tribe_state import TribeStateRegistry
 def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() -> None:
     lifespan_source = inspect.getsource(http_hooks.runtime_lifespan)
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
-    shutdown_source = inspect.getsource(legacy_runtime_shutdown_adapter)
+    shutdown_source = inspect.getsource(process_runtime_shutdown_adapter)
 
     assert asgi_source.count("await scheduler.activate_clock()") == 1
     assert "start_life_continuity_loop" not in lifespan_source
@@ -217,90 +217,48 @@ def test_life_tick_crash_gap_replays_receipt_without_a_second_command() -> None:
 def test_life_command_authority_adopts_legacy_projections_before_return(
     monkeypatch,
 ) -> None:
-    from host_brain.app import life_application_boundary
-    from host_brain.digital_life import reader as reader_module
-    from host_brain.digital_life import service as service_module
-    from host_brain.persistence import life_command_repository as repository_module
+    from host_brain.composition.life import ProcessLifeContainer
 
     events: list[object] = []
     ledger = object()
     repository = object()
-    providers = {}
-
-    class RepositoryType:
-        @classmethod
-        def from_ledger(cls, current):
-            assert current is ledger
-            events.append("repository")
-            return repository
-
-    class ServiceType:
-        def __init__(self, current) -> None:
-            assert current is repository
-            events.append("service")
-
-        def adopt_all_legacy_projections(self, *, adopted_at_ms: int) -> None:
-            events.append(("adopt", adopted_at_ms))
-
-    class ReaderType:
-        def __init__(self, current) -> None:
-            assert current is repository
-            events.append("reader")
-
-    monkeypatch.setattr(repository_module, "LifeCommandRepository", RepositoryType)
-    monkeypatch.setattr(service_module, "LifeCommandService", ServiceType)
-    monkeypatch.setattr(reader_module, "LifeSnapshotReader", ReaderType)
-    monkeypatch.setattr(asgi, "now_ms", lambda: 1_900_000_000_123)
-    monkeypatch.setattr(
-        life_application_boundary,
-        "set_life_application_providers",
-        lambda **kwargs: (providers.update(kwargs), events.append("providers")),
+    service = object()
+    reader = object()
+    container = ProcessLifeContainer(
+        repository=repository,  # type: ignore[arg-type]
+        command_service=service,  # type: ignore[arg-type]
+        snapshot_reader=reader,  # type: ignore[arg-type]
     )
+    provider = SimpleNamespace(install=lambda current: events.append(("install", current)))
 
-    service, reader = asgi._compose_life_command_authority(ledger)
+    def build_container(*, ledger: object, adopted_at_ms: int) -> ProcessLifeContainer:
+        events.append(("build", ledger, adopted_at_ms))
+        return container
 
-    assert isinstance(service, ServiceType)
-    assert isinstance(reader, ReaderType)
+    monkeypatch.setattr(asgi, "build_process_life_container", build_container)
+    monkeypatch.setattr(asgi, "PROCESS_LIFE_PROVIDER", provider)
+    monkeypatch.setattr(asgi, "now_ms", lambda: 1_900_000_000_123)
+
+    resolved_service, resolved_reader = asgi._compose_life_command_authority(ledger)
+
+    assert resolved_service is service
+    assert resolved_reader is reader
     assert events == [
-        "repository",
-        "service",
-        ("adopt", 1_900_000_000_123),
-        "reader",
-        "providers",
+        ("build", ledger, 1_900_000_000_123),
+        ("install", container),
     ]
-    assert providers["command_service_provider"]() is service
-    assert providers["snapshot_reader_provider"]() is reader
 
 
 def test_life_command_authority_shutdown_resets_shared_app_providers(
     monkeypatch,
 ) -> None:
-    from host_brain.app import life_application_boundary
-
     calls = []
-    monkeypatch.setattr(
-        life_application_boundary,
-        "set_life_application_providers",
-        lambda **kwargs: calls.append(("providers", kwargs)),
-    )
-    monkeypatch.setattr(
-        life_application_boundary,
-        "reset_life_application_cache",
-        lambda: calls.append(("cache", None)),
-    )
+    provider = SimpleNamespace(clear=lambda: calls.append("clear"))
+    monkeypatch.setattr(asgi, "PROCESS_LIFE_PROVIDER", provider)
 
     asgi._reset_life_command_authority()
 
-    assert calls == [
-        (
-            "providers",
-            {
-                "command_service_provider": None,
-                "snapshot_reader_provider": None,
-            },
-        ),
-        ("cache", None),
-    ]
+    assert calls == ["clear"]
 
 
 def test_life_periodic_side_effect_definitions_are_retired() -> None:

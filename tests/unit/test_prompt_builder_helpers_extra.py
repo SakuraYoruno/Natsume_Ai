@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import sys
@@ -9,13 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
-from host_brain.app.context.soul_runtime import load_compiled_soul
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.prompt_template_store import (
-    PromptTemplateStore,
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
-)
+from host_brain.persona.context.soul_runtime import load_compiled_soul
 
 
 def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.MonkeyPatch) -> None:

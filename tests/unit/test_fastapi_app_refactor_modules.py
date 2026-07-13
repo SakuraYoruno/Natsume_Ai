@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from host_brain.app import app_factory, asgi
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.chat_immune_gate import (
     log_chat_immune_gate_event,
     schedule_chat_immune_gate_event,
@@ -161,7 +162,7 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
 
         return StreamingResponse(_events(), media_type="text/event-stream")
 
-    monkeypatch.setattr("host_brain.app.dependencies.notify_user_interaction", _notify_raises)
+    monkeypatch.setattr("host_brain.composition.process_services.notify_user_interaction", _notify_raises)
 
     response = await handle_v1_chat_route(
         request_body=ChatRequest(message="hello"),
@@ -205,6 +206,8 @@ async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: p
         chat_endpoint=lambda _body, _request: Response(),
         edge_events_endpoint=lambda _body: None,  # type: ignore[arg-type]
         root_endpoint=lambda: Response(),
+        canon_service_provider=lambda: object(),
+        input_runtime_ports=build_input_runtime_application_ports(),
     )
     handler = app.exception_handlers[Exception]
     request = Request({"type": "http", "method": "GET", "path": "/boom", "headers": []})

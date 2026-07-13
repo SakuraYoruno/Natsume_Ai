@@ -72,8 +72,8 @@ def _install(monkeypatch, responses: list[str]) -> _ScriptedAdapter:  # noqa: AN
         provider_adapters=ProviderAdapterRegistry((adapter,)),
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    monkeypatch.setattr("host_brain.app.dependencies.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_model_attempt_service", lambda: service)
+    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
     return adapter
 
 
@@ -117,7 +117,7 @@ async def test_prefrontal_plan_uses_registered_json_prompt(monkeypatch) -> None:
         [json.dumps({"action": "speak", "task": "回应", "tone_hint": "warm", "urgency": 0.4})],
     )
     monkeypatch.setattr(
-        "host_brain.app.prompt_template_store.resolve_prompt_template_json",
+        "host_brain.model_runtime.prompt_contract.resolve_prompt_contract_json",
         lambda _key: {
             "system_prompt": "只输出 JSON",
             "user_prompt_template": (
@@ -159,7 +159,7 @@ def test_mirror_and_initiative_use_independent_registered_prompts(monkeypatch) -
             ),
         }
 
-    monkeypatch.setattr("host_brain.app.prompt_template_store.resolve_prompt_template_json", _templates)
+    monkeypatch.setattr("host_brain.model_runtime.prompt_contract.resolve_prompt_contract_json", _templates)
     mirror = MirrorNeuronAgent()
     initiative = InitiativeGovernorAgent()
 

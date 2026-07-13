@@ -85,7 +85,7 @@ def classify_outcome_signal(text: str | None) -> str:
 def _get_ledger(ledger: Any | None = None) -> Any:
     if ledger is not None:
         return ledger
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
 
     return get_ledger()
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.observability.projection_ledger_view import (
+from host_brain.app.observability_runtime.projection_ledger_view import (
     LEDGER_STATS_KIND,
     LEDGER_STATS_MAX_AGE_MS,
     LEDGER_STATS_RETENTION_MS,
@@ -105,7 +105,7 @@ def test_view_filters_parameterized_window_and_fails_closed_outside_retention() 
 
 
 def test_get_factory_only_peeks_initialized_store(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
 
     monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: None)
     monkeypatch.setattr(

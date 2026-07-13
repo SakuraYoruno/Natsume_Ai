@@ -5,6 +5,9 @@ import logging
 import pytest
 
 from host_brain.app import http_hooks
+from host_brain.app.lifecycle_runtime_composition import (
+    build_lifecycle_runtime_application_ports,
+)
 
 
 @pytest.mark.asyncio
@@ -30,6 +33,7 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
         async with http_hooks.runtime_lifespan(
             get_ledger=object,
             logger=logging.getLogger("test.aw01.runtime-lifespan"),
+            lifecycle_ports=build_lifecycle_runtime_application_ports(),
         ):
             events.append("body")
             raise RuntimeError("lifespan body failed")
@@ -42,7 +46,7 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from host_brain.app import internal_tribe_routes
-    from host_brain.observability import service_health_heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat
     from host_brain.tribe import cortex_agent
 
     events: list[str] = []

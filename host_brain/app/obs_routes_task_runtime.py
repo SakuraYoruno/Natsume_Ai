@@ -14,12 +14,12 @@ from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreEr
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
-from host_brain.observability.projection_runtime import (
+from host_brain.app.observability_runtime.projection_runtime import (
     ProjectionOperatorReadModelService,
     get_query_projection_worker,
     refresh_task_projections,
 )
-from host_brain.observability.projection_daemon import register_projection_job
+from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.observability.projection_store import QueryProjectionError
 
 
@@ -56,7 +56,7 @@ def _get_operator_read_model_service() -> OperatorReadModelService:
     if _service_provider is not None:
         return _service_provider()
     if _projection_service is None:
-        from host_brain.app.dependencies import get_query_projection_store
+        from host_brain.composition.process_services import get_query_projection_store
 
         _projection_service = ProjectionOperatorReadModelService(
             store=get_query_projection_store(),

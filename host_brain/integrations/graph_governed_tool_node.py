@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
+import threading
 import time
 from typing import Any
 
@@ -11,36 +13,50 @@ from host_brain.capability_plane.adapters import object_tool_adapter
 from host_brain.capability_plane.broker import (
     CapabilityBroker,
     CapabilityDescriptor,
-    InMemoryCapabilityAuditSink,
+    CapabilityInvocationError,
 )
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest
-from host_brain.capability_plane.journal import CapabilityExecutionJournal
-from host_brain.capability_plane.policies import GovernorToolCapabilityPolicy
+from host_brain.capability_plane.policies import GovernorToolCapabilityPolicy, issue_grant
 
 
-class _EvidencePlaneSink(InMemoryCapabilityAuditSink):
-    def __init__(self, evidence_plane: Any) -> None:
-        super().__init__()
-        self._plane = evidence_plane
+@dataclass(frozen=True, slots=True)
+class _GraphInvocationEnvelope:
+    adapter: Any
+    policy: GovernorToolCapabilityPolicy
 
-    def record(self, attempt, evidence, receipt) -> None:  # noqa: ANN001
-        super().record(attempt, evidence, receipt)
-        if self._plane is None:
-            return
-        if callable(getattr(self._plane, "write_capability_execution", None)):
-            self._plane.write_capability_execution(
-                attempt=attempt,
-                evidence=evidence,
-                receipt=receipt,
+
+_INVOCATIONS: dict[str, _GraphInvocationEnvelope] = {}
+_INVOCATIONS_LOCK = threading.RLock()
+
+
+class _GraphInvocationPolicy:
+    """Resolve the call-local Governor without owning a private broker."""
+
+    def authorize(self, request, descriptor, *, now_ms):  # noqa: ANN001, ANN201
+        with _INVOCATIONS_LOCK:
+            envelope = _INVOCATIONS.get(request.attempt_id)
+        if envelope is None:
+            return issue_grant(
+                request,
+                now_ms=now_ms,
+                approved=False,
+                reason_code="GRAPH_TOOL_INVOCATION_NOT_BOUND",
             )
-            return
-        if callable(getattr(self._plane, "write_tool_execution", None)):
-            self._plane.write_tool_execution(
-                request_id=attempt.request_id,
-                tool_calls=[{"tool": attempt.capability_id}],
-                tool_results=[receipt.to_dict()],
-                ts_ms=attempt.finished_at_ms,
-            )
+        return envelope.policy.authorize(request, descriptor, now_ms=now_ms)
+
+
+def _graph_invocation_adapter(request, grant):  # noqa: ANN001, ANN201
+    with _INVOCATIONS_LOCK:
+        envelope = _INVOCATIONS.get(request.attempt_id)
+    if envelope is None:
+        raise CapabilityInvocationError(
+            "GRAPH_TOOL_INVOCATION_NOT_BOUND",
+            "graph tool adapter has no exact invocation binding",
+        )
+    return envelope.adapter(request, grant)
+
+
+_GRAPH_INVOCATION_POLICY = _GraphInvocationPolicy()
 
 
 class GovernedToolNode:
@@ -53,28 +69,33 @@ class GovernedToolNode:
         governor: Any = None,
         evidence_plane: Any = None,
         governor_rules_cache: Any = None,
-        capability_broker: CapabilityBroker | None = None,
-        execution_journal: CapabilityExecutionJournal | None = None,
+        capability_broker: CapabilityBroker,
     ) -> None:
+        if capability_broker is None:
+            raise ValueError("GovernedToolNode requires the composed CapabilityBroker")
+        # The canonical broker journal is the sole capability audit owner.
+        # evidence_plane remains a compatibility input but cannot install a
+        # second audit/execution authority.
+        del evidence_plane
         self._governor_rules_cache = governor_rules_cache
-        policy = GovernorToolCapabilityPolicy(governor, rules_provider=self._get_tribe_params)
-        self._broker = capability_broker or CapabilityBroker(
-            policy=policy,
-            audit_sink=_EvidencePlaneSink(evidence_plane),
-            execution_journal=execution_journal,
-        )
+        self._policy = GovernorToolCapabilityPolicy(governor, rules_provider=self._get_tribe_params)
+        self._broker = capability_broker
+        self._tool_adapters: dict[str, Any] = {}
         for tool in list(tools or []):
             name = str(getattr(tool, "name", None) or "").strip()
             if not name:
                 continue
+            self._tool_adapters[name] = object_tool_adapter(tool)
             self._broker.register(
                 CapabilityDescriptor(
                     capability_id=name,
                     kind=CapabilityKind.TOOL,
                     version=str(getattr(tool, "version", "1") or "1"),
                     risk_level=int(getattr(tool, "risk_level", 5) or 5),
-                    adapter=object_tool_adapter(tool),
-                )
+                    adapter=_graph_invocation_adapter,
+                    authorization_policy=_GRAPH_INVOCATION_POLICY,
+                ),
+                replace_existing=True,
             )
 
     def _get_tribe_params(self) -> dict[str, Any]:
@@ -106,6 +127,13 @@ class GovernedToolNode:
             ).hexdigest()
             attempt_id = f"{request_id}:tool:{index}:{tool_name or 'unknown'}"
             try:
+                adapter = self._tool_adapters.get(tool_name)
+                if adapter is not None:
+                    with _INVOCATIONS_LOCK:
+                        _INVOCATIONS[attempt_id] = _GraphInvocationEnvelope(
+                            adapter=adapter,
+                            policy=self._policy,
+                        )
                 request = CapabilityRequest(
                     request_id=request_id,
                     attempt_id=attempt_id,
@@ -117,7 +145,11 @@ class GovernedToolNode:
                     created_at_ms=int(time.time() * 1000),
                     deadline_at_ms=int(deadline_at_ms) if deadline_at_ms is not None else None,
                 )
-                receipt = self._broker.execute(request)
+                try:
+                    receipt = self._broker.execute(request)
+                finally:
+                    with _INVOCATIONS_LOCK:
+                        _INVOCATIONS.pop(attempt_id, None)
             except Exception as exc:
                 route_token = "CAPABILITY_REQUEST_INVALID"
                 results.append({

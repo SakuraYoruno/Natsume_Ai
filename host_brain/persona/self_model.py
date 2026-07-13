@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.persona.offline_continuity import resolve_absence_band as resolve_offline_absence_band
 from host_brain.persona.runtime_labels import (
     BOND_GROWTH_CLOSER,
@@ -54,7 +54,7 @@ def _normalize_template_lang(render_target_lang: str | None) -> str:
     return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
 
-def _resolve_prompt_template_json_localized(
+def _resolve_prompt_contract_json_localized(
     template_id: str,
     *,
     render_target_lang: str = "zh",
@@ -62,7 +62,7 @@ def _resolve_prompt_template_json_localized(
     lang_key = _normalize_template_lang(render_target_lang)
     for candidate_id in (f"{template_id}.{lang_key}", template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate_id)
+            raw = resolve_prompt_contract_json(candidate_id)
         except Exception:
             continue
         if isinstance(raw, Mapping):
@@ -75,7 +75,7 @@ def _resolve_prompt_template_json_localized(
 
 
 def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_template_json_localized(
+    raw = _resolve_prompt_contract_json_localized(
         "persona.self_narrative_prompts",
         render_target_lang=render_target_lang,
     )
@@ -99,7 +99,7 @@ def _mapping_text(
 
 
 def _load_narrative_text_pools(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_template_json_localized(
+    raw = _resolve_prompt_contract_json_localized(
         "self_model.narrative_text_pools",
         render_target_lang=render_target_lang,
     )
@@ -1109,7 +1109,7 @@ _DEFAULT_STATE_ALIGNMENT_TEXTS: dict[str, Any] = {}
 
 def _load_state_alignment_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_model.state_alignment_texts",
             render_target_lang=render_target_lang,
         )

@@ -28,12 +28,12 @@ def _document(payload: dict, *, cursor: int = 7):
 
 
 def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_core as core
     from host_brain.app import obs_routes_life_body as life
     from host_brain.app import obs_routes_summary as summary
     from host_brain.app import obs_routes_sysmode as sysmode
-    from host_brain.observability import process_state_projection as projection
+    from host_brain.app.observability_runtime import process_state_projection as projection
 
     documents = {
         (projection.INSIGHTS_SUMMARY_KIND, "window:60"): _document(
@@ -61,13 +61,9 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("GET called a live/file/aggregate source")
 
-    monkeypatch.setattr(summary, "_get_warmed_insights_summary_snapshot", forbidden)
     monkeypatch.setattr(summary, "_build_insights_summary_snapshot_sync", forbidden)
-    monkeypatch.setattr(summary, "_get_warmed_digital_life_overview_snapshot", forbidden)
     monkeypatch.setattr(summary, "_build_digital_life_overview_snapshot_async", forbidden)
-    monkeypatch.setattr(sysmode, "_get_warmed_runtime_snapshot", forbidden)
     monkeypatch.setattr(sysmode, "_build_runtime_snapshot_response", forbidden)
-    monkeypatch.setattr(life, "_get_warmed_life_body", forbidden)
     monkeypatch.setattr(life, "_build_life_body_payload", forbidden)
     monkeypatch.setattr(life, "_build_targeted_request_event", forbidden)
     monkeypatch.setattr(core, "_load_resource_manager_status_file", forbidden)
@@ -99,7 +95,7 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
 
 
 def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_agent_bio_ops as routes
 
     payload = {
@@ -165,7 +161,7 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
 
 
 def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_agent_bio_ops as bio
     from host_brain.app import obs_routes_core as core
     from host_brain.app import obs_routes_life_body as life
@@ -191,7 +187,7 @@ def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -
 
 
 def test_bio_ops_projection_sqlite_contains_no_owner_body_or_path(tmp_path) -> None:
-    from host_brain.observability import process_state_projection as projection
+    from host_brain.app.observability_runtime import process_state_projection as projection
 
     run_dir = tmp_path / "observable_effects" / "run-private"
     candidate_dir = run_dir / "candidate"
@@ -296,27 +292,12 @@ def test_process_state_get_handlers_have_no_warm_miss_or_source_calls() -> None:
             assert marker not in source, f"{handler.__name__} contains {marker}"
 
 
-def test_legacy_warm_start_hooks_create_no_threads_or_builders(monkeypatch) -> None:
+def test_legacy_warm_start_authorities_are_deleted() -> None:
     from host_brain.app import obs_routes_life_body as life
     from host_brain.app import obs_routes_summary as summary
     from host_brain.app import obs_routes_sysmode as sysmode
 
-    def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("legacy warm start invoked a source builder")
-
-    monkeypatch.setattr(summary, "_build_insights_summary_snapshot_sync", forbidden)
-    monkeypatch.setattr(summary, "_build_digital_life_overview_snapshot_async", forbidden)
-    monkeypatch.setattr(sysmode, "_build_runtime_snapshot_response", forbidden)
-    monkeypatch.setattr(life, "_build_life_body_payload", forbidden)
-
-    statuses = (
-        summary.start_insights_summary_warm_cache(),
-        summary.start_digital_life_overview_warm_cache(),
-        sysmode.start_runtime_snapshot_warm_cache(),
-        life.start_life_body_warm_cache(),
-    )
-    assert all(status["authority"] == "projection_daemon" for status in statuses)
-    assert summary._insights_summary_warm_thread is None
-    assert summary._digital_life_overview_warm_thread is None
-    assert sysmode._runtime_snapshot_warm_thread is None
-    assert life._life_body_warm_thread is None
+    for module in (life, summary, sysmode):
+        names = set(vars(module))
+        assert not any(name.startswith("start_") and name.endswith("_warm_cache") for name in names)
+        assert not any(name.endswith("_warm_thread") for name in names)

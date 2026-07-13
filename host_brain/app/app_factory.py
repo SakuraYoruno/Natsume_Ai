@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from host_brain.app.http_hooks import add_request_id_and_audit as _add_request_id_fn
 from host_brain.app.http_hooks import global_exception_handler as _global_exception_handler_fn
-from host_brain.app.input_routes import GovernedCommandApplicationProvider
+from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.pentest_secure_run_routes import PentestSecureRunCompositionProvider
 from host_brain.app.router_registry import register_host_routers, wire_route_providers
 from host_brain.app.runtime_metrics import RuntimeMetrics, build_metrics_response
@@ -46,6 +47,7 @@ def create_host_fastapi_app(
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
     canon_service_provider: Callable[[], Any | None] | None = None,
+    input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
     wire_route_providers(
         get_ledger=get_ledger,
@@ -65,6 +67,7 @@ def create_host_fastapi_app(
     )
     register_host_routers(
         app,
+        input_runtime_ports=input_runtime_ports,
         obs_command_ingress_provider=obs_command_ingress_provider,
         pentest_secure_run_composition_provider=(
             pentest_secure_run_composition_provider

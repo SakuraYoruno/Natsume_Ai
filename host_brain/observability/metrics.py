@@ -592,9 +592,13 @@ class MetricsCollector:
         since_ts = now_ts - 60 * 60 * 1000  # 近 60 分钟
         try:
             try:
-                from host_brain.integrations.graph_evidence import get_evidence_plane
-                ep = get_evidence_plane()
-                stream_rows = ep.query_stream_events_by_time(
+                from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+                    GraphEvidenceRepository,
+                )
+
+                stream_rows = GraphEvidenceRepository.from_ledger(
+                    self.ledger
+                ).list_stream_events_by_time(
                     since_ms=since_ts,
                     end_ms=now_ts,
                     event_types=["AGENT_SELECTED", "AGENT_HANDOFF"],

@@ -30,7 +30,7 @@ from host_brain.airlock.image_filter import (
     IMAGE_EGRESS_WARN,
     filter_image_egress,
 )
-from host_brain.app.dependencies import (
+from host_brain.composition.process_services import (
     get_life_memory_service,
     get_ledger,
     get_model_attempt_service,
@@ -41,7 +41,7 @@ from host_brain.app.graph_config_builder import (
     SCENE_VISION_UI,
     resolve_host_llm_runtime_async,
 )
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.schemas import ChatRequest
 from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 from host_brain.model_runtime import (
@@ -77,7 +77,7 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

@@ -255,6 +255,7 @@ class ReflectionChain:
         weights: dict[str, float] | None = None,
         use_llm: bool = False,
         llm_timeout_ms: int = 2800,
+        model_attempt_service: Any = None,
     ) -> None:
         self._threshold = float(pass_threshold)
         self._weights = dict(weights or {
@@ -266,6 +267,7 @@ class ReflectionChain:
         })
         self._use_llm = bool(use_llm)
         self._llm_timeout_ms = max(800, int(llm_timeout_ms))
+        self._model_attempt_service = model_attempt_service
 
     def should_reflect(
         self,
@@ -496,6 +498,7 @@ class ReflectionChain:
                 ),
             )
             result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
                 prompt_id=REFLECTION_EVALUATE_PROMPT_ID,
                 request_id=f"reflection::{int(time.time() * 1000)}",
                 scene_type="REFLECTION",

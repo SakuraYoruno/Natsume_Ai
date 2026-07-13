@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-
-from host_brain.app.prompt_template_store import PromptTemplateStore
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.interaction_pattern_analyzer import InteractionPatternAnalyzer
 from host_brain.persona.personality_traits import PersonalityTraits, TRAIT_NAMES
 

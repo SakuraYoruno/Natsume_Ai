@@ -7,9 +7,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi import HTTPException
 
-import host_brain.app.input_routes as input_routes
-from host_brain.app.input_routes import InputPayload
+import host_brain.input_runtime.ingress as input_ingress
+import host_brain.input_runtime.worker_dispatch as input_worker
+import host_brain.input_runtime.contracts_and_normalization as input_contracts
+from host_brain.input_runtime.contracts_and_normalization import InputPayload, InputResponse
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
 def _run(coro):
@@ -41,7 +44,7 @@ def _gateway_body() -> InputPayload:
 
 def _prepare_receive_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "read_life_snapshot",
         lambda person_id: {
             "person_id": person_id,
@@ -54,21 +57,21 @@ def _prepare_receive_input(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     )
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_evaluate_host_gateway_ingress",
         lambda **_kwargs: _secure_outcome(),
     )
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "ALLOW", "reason_codes": []},
     )
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_record_feedback_for_latest_persona_reply",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(input_routes, "_get_ledger_safe", lambda: None)
+    monkeypatch.setattr(input_ingress, "_get_ledger_safe", lambda **_kwargs: None)
 
 
 def test_router_factory_closure_injects_governed_provider(
@@ -76,7 +79,7 @@ def test_router_factory_closure_injects_governed_provider(
 ) -> None:
     provider = Mock(name="governed_provider")
     delegated = AsyncMock(
-        return_value=input_routes.InputResponse(
+        return_value=InputResponse(
             success=True,
             request_id="request.gateway.aw02.factory",
             source="GATEWAY",
@@ -85,8 +88,9 @@ def test_router_factory_closure_injects_governed_provider(
             ts_ms=1,
         )
     )
-    monkeypatch.setattr(input_routes, "receive_input", delegated)
-    router = input_routes.create_input_router(
+    monkeypatch.setattr(input_ingress, "receive_input", delegated)
+    router = input_worker.create_input_router(
+        application_ports=build_input_runtime_application_ports(),
         governed_command_application_provider=provider,
     )
     endpoint = next(route.endpoint for route in router.routes if route.path.endswith("/input"))
@@ -111,18 +115,18 @@ def test_dispatch_is_awaited_and_carries_authority(
         "commit_event": {"execution_receipt": {"command_id": "command::aw02"}},
     }
     worker = AsyncMock(return_value=expected)
-    monkeypatch.setattr(input_routes, "_dispatch_to_graph_worker", worker)
-    monkeypatch.setattr(input_routes, "_get_ledger_safe", lambda: None)
-    monkeypatch.setattr(input_routes, "_log_input_event", lambda **_kwargs: None)
+    monkeypatch.setattr(input_worker, "_dispatch_to_graph_worker", worker)
+    monkeypatch.setattr(input_worker, "_get_ledger_safe", lambda **_kwargs: None)
+    monkeypatch.setattr(input_worker, "_log_input_event", lambda **_kwargs: None)
     monkeypatch.setattr(
-        input_routes,
+        input_worker,
         "_maybe_schedule_gateway_immediate_ack",
         lambda **_kwargs: None,
     )
-    monkeypatch.setattr(input_routes, "_build_gateway_route_preview", lambda _text: {})
+    monkeypatch.setattr(input_worker, "_build_gateway_route_preview", lambda _text: {})
 
     result = _run(
-        input_routes._dispatch_to_graph(
+        input_worker._dispatch_to_graph(
             request_id="request.gateway.aw02.awaited",
             session_id="conversation-aw02",
             source="GATEWAY",
@@ -131,6 +135,7 @@ def test_dispatch_is_awaited_and_carries_authority(
             ts_ms=1,
             governed_command_application_provider=provider,
             command_authority=authority,
+            ports=build_input_runtime_application_ports(),
         )
     )
 
@@ -158,14 +163,15 @@ def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
         }
     )
     legacy_complete = Mock(side_effect=AssertionError("must not overwrite command id"))
-    monkeypatch.setattr(input_routes, "_dispatch_to_graph", dispatch)
-    monkeypatch.setattr(input_routes, "_complete_host_gateway_ingress", legacy_complete)
+    monkeypatch.setattr(input_ingress, "_dispatch_to_graph", dispatch)
+    monkeypatch.setattr(input_contracts, "_complete_host_gateway_ingress", legacy_complete)
 
     response = _run(
-        input_routes.receive_input(
+        input_ingress.receive_input(
             _gateway_body(),
             SimpleNamespace(),
             governed_command_application_provider=provider,
+            ports=build_input_runtime_application_ports(),
         )
     )
 
@@ -187,7 +193,7 @@ def test_direct_skill_missing_receipt_fails_without_legacy_fallback(
     _prepare_receive_input(monkeypatch)
     provider = Mock(name="governed_provider")
     monkeypatch.setattr(
-        input_routes,
+        input_ingress,
         "_dispatch_to_graph",
         AsyncMock(
             return_value={
@@ -198,14 +204,15 @@ def test_direct_skill_missing_receipt_fails_without_legacy_fallback(
         ),
     )
     legacy_complete = Mock()
-    monkeypatch.setattr(input_routes, "_complete_host_gateway_ingress", legacy_complete)
+    monkeypatch.setattr(input_contracts, "_complete_host_gateway_ingress", legacy_complete)
 
     with pytest.raises(HTTPException) as raised:
         _run(
-            input_routes.receive_input(
+            input_ingress.receive_input(
                 _gateway_body(),
                 SimpleNamespace(),
                 governed_command_application_provider=provider,
+                ports=build_input_runtime_application_ports(),
             )
         )
 

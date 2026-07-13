@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.model_runtime import (
     AttemptStatus,

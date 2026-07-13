@@ -16,7 +16,7 @@ _logger = logging.getLogger("Natsume.input_routes")
 def get_ledger_safe() -> Any:
     """安全获取 ledger 实例，失败时返回 None。"""
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
         return get_ledger()
     except Exception:
         return None

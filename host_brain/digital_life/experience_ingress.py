@@ -7,39 +7,30 @@ command without importing the historical runtime, its private writers, or its lo
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from collections.abc import Mapping
 import math
 import re
-import threading
 import time
 from typing import Any
 
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeCommand,
     LifeCommandReceipt,
     LifeCommandStatus,
     digest_json,
 )
-from host_brain.digital_life.reader import LifeSnapshotReader
-from host_brain.digital_life.service import LifeCommandService
-from host_brain.persistence.life_command_repository import (
+from host_brain.digital_life.application_boundary import (
+    LifeCommandServiceLike,
+    LifeSnapshotReaderLike,
+)
+from natsume_contracts.life import (
     LIFE_COMMAND_DURABLE_DATA_INVALID,
     LIFE_COMMAND_IDEMPOTENCY_CONFLICT,
-    LifeCommandRepository,
     LifeCommandRepositoryError,
 )
 
 
 DEFAULT_PERSON_ID = "default"
-_LIFE_COMMAND_AUTHORITY_CACHE_MAX = 64
-_LIFE_COMMAND_AUTHORITY_LOCK = threading.RLock()
-_LIFE_COMMAND_AUTHORITIES: OrderedDict[
-    str,
-    tuple[LifeCommandService, LifeSnapshotReader],
-] = OrderedDict()
-
-
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -75,26 +66,6 @@ def _stable_json_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, bool)):
         return value
     return str(value)
-
-
-def _life_command_authority(
-    ledger: Any,
-) -> tuple[LifeCommandService, LifeSnapshotReader]:
-    repository = LifeCommandRepository.from_ledger(ledger)
-    cache_key = str(repository.db_path)
-    with _LIFE_COMMAND_AUTHORITY_LOCK:
-        authority = _LIFE_COMMAND_AUTHORITIES.get(cache_key)
-        if authority is None:
-            authority = (
-                LifeCommandService(repository),
-                LifeSnapshotReader(repository),
-            )
-            _LIFE_COMMAND_AUTHORITIES[cache_key] = authority
-            while len(_LIFE_COMMAND_AUTHORITIES) > _LIFE_COMMAND_AUTHORITY_CACHE_MAX:
-                _LIFE_COMMAND_AUTHORITIES.popitem(last=False)
-        else:
-            _LIFE_COMMAND_AUTHORITIES.move_to_end(cache_key)
-        return authority
 
 
 def _occurred_at_ms(evidence: Mapping[str, Any]) -> int:
@@ -183,7 +154,7 @@ def _command_identity(
 
 def _receipt_exact_state(
     *,
-    reader: LifeSnapshotReader,
+    reader: LifeSnapshotReaderLike,
     receipt: LifeCommandReceipt,
 ) -> dict[str, Any]:
     events = reader.list_events(
@@ -209,7 +180,8 @@ def _receipt_exact_state(
 
 def record_life_experience(
     *,
-    ledger: Any,
+    service: LifeCommandServiceLike,
+    reader: LifeSnapshotReaderLike,
     person_id: str = DEFAULT_PERSON_ID,
     session_id: str = "",
     source_kind: str = "manual_ingest",
@@ -334,8 +306,6 @@ def record_life_experience(
             causation_id=causation_id,
             metadata=metadata,
         )
-
-    service, reader = _life_command_authority(ledger)
 
     def validated_replay(existing: LifeCommandReceipt) -> LifeCommandReceipt:
         candidate = command(max(0, int(existing.state_version) - 1))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from host_brain.app.life_projection_handlers import handle_life_projection
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeIntentKind,
     LifeProjectionMessage,
 )
@@ -31,7 +31,7 @@ def test_surface_projection_runs_durable_only_post_process_mode(monkeypatch) -> 
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared._async_post_process",
+        "host_brain.agent_runtime.postprocess._async_post_process",
         _post_process,
     )
     result = asyncio.run(

@@ -25,8 +25,10 @@ def execute_hub_skill(args: dict[str, Any], context: dict[str, Any] | None = Non
             activation_error = ""
             if result.success and bool(payload.get("activate_now", True)):
                 try:
-                    from host_brain.app.tool_routes import _attempt_activate_hub_skill  # noqa: PLC0415
-                    activated, active_skill_names, repair_attempted, repair_succeeded, repair_actions, activation_message = _attempt_activate_hub_skill(
+                    activate = ctx.get("activate_hub_skill")
+                    if not callable(activate):
+                        raise RuntimeError("HUB_SKILL_ACTIVATOR_NOT_COMPOSED")
+                    activated, active_skill_names, repair_attempted, repair_succeeded, repair_actions, activation_message = activate(
                         install_dir=str(result.install_dir),
                         skill_name=str(result.name),
                     )
@@ -95,8 +97,9 @@ def execute_hub_skill(args: dict[str, Any], context: dict[str, Any] | None = Non
             result = remove_skill(str(payload.get("skill_name") or "").strip())
             if result.success:
                 try:
-                    from host_brain.app.dependencies import refresh_skill_registry  # noqa: PLC0415
-                    refresh_skill_registry()
+                    refresh = ctx.get("refresh_skill_registry")
+                    if callable(refresh):
+                        refresh()
                 except Exception:
                     pass
             return {

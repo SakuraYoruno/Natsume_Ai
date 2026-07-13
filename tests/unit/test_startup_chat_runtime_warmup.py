@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.app.settings import get_persistence_settings
 from host_brain.app.startup import (
     warmup_chat_llm_runtime_profiles,
@@ -18,25 +18,25 @@ from host_brain.app.startup import (
 def _isolate_startup_ledger(monkeypatch):
     monkeypatch.setenv("NATSUME_AUDIT_DB", ":memory:")
     get_persistence_settings.cache_clear()
-    dependencies._ledger = None
+    dependencies.get_process_service_container().ledger = None
     yield
-    if dependencies._ledger is not None:
-        dependencies._ledger.close()
-    dependencies._ledger = None
+    if dependencies.get_process_service_container().ledger is not None:
+        dependencies.get_process_service_container().ledger.close()
+    dependencies.get_process_service_container().ledger = None
     get_persistence_settings.cache_clear()
 
 
 def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_routing_matrix",
+        "host_brain.composition.process_services.get_routing_matrix",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_intent_engine",
+        "host_brain.composition.process_services.get_intent_engine",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_state_write_arbiter",
+        "host_brain.composition.process_services.get_state_write_arbiter",
         lambda: object(),
     )
     monkeypatch.setattr(
@@ -48,7 +48,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr(
-        "host_brain.persona.emotional_silence.get_silence_engine",
+        "host_brain.composition.process_services.get_silence_engine",
         lambda: object(),
     )
     monkeypatch.setattr(
@@ -59,7 +59,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     status = warmup_chat_runtime_basics(eager_persona=True)
 
     assert status.startswith("OK")
-    assert "prompt_templates=retired" in status
+    assert "prompt_registry=ready" in status
     assert "routing_matrix=ready" in status
     assert "intent_engine=ready" in status
     assert "state_write_arbiter=ready" in status
@@ -69,7 +69,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
 
 def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_intent_engine",
+        "host_brain.composition.process_services.get_intent_engine",
         lambda: (_ for _ in ()).throw(RuntimeError("intent engine unavailable")),
     )
 
@@ -80,7 +80,7 @@ def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
 
 def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.graph_config_llm_runtime.resolve_host_llm_runtime_async",
+        "host_brain.app.route_catalog_runtime.resolve_host_llm_runtime_async",
         lambda **kwargs: __import__("asyncio").sleep(0, result={  # noqa: PLC421
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash-lite",
@@ -91,18 +91,18 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
         }),
     )
     monkeypatch.setattr(
-        "host_brain.app.graph_config_llm_runtime.resolve_surface_reply_llm_runtime",
+        "host_brain.app.route_catalog_runtime.resolve_surface_reply_llm_runtime",
         lambda *, base_runtime: {
             **base_runtime,
             "model_id": "chat::default",
         },
     )
     monkeypatch.setattr(
-        "host_brain.app.graph_config_llm_runtime.resolve_executive_router_llm_runtime",
+        "host_brain.app.route_catalog_runtime.resolve_executive_router_llm_runtime",
         lambda *, base_runtime: {**base_runtime, "model_id": "router::ready"},
     )
     monkeypatch.setattr(
-        "host_brain.app.graph_config_llm_runtime.resolve_subagent_llm_runtime",
+        "host_brain.app.route_catalog_runtime.resolve_subagent_llm_runtime",
         lambda *, base_runtime: {**base_runtime, "model_id": "subagent::ready"},
     )
 
@@ -179,18 +179,9 @@ def test_warmup_retrieval_runtime_basics_reports_ready(monkeypatch) -> None:
             return 3
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_episodic_store",
+        "host_brain.composition.process_services.get_episodic_store",
         lambda: _FakeStore(),
     )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_retrieval_pipeline",
-        lambda: type("Pipeline", (), {})(),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_retrieval_orchestrator",
-        lambda: type("Orchestrator", (), {})(),
-    )
-
     status = warmup_retrieval_runtime_basics()
 
     assert status.startswith("OK")
@@ -200,3 +191,5 @@ def test_warmup_retrieval_runtime_basics_reports_ready(monkeypatch) -> None:
     assert "collection=episodic" in status
     assert "collection_dim=3" in status
     assert "chroma_hits=1" in status
+    assert "legacy_pipeline=removed" in status
+    assert "legacy_orchestrator=removed" in status

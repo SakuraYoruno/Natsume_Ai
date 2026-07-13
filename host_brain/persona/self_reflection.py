@@ -22,7 +22,7 @@ import random
 import time
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 from host_brain.persona.runtime_labels import (
     BOND_GROWTH_CLOSER,
@@ -50,9 +50,12 @@ class _SelfReflectionModelPort:
 
     canonical_model_attempt_port = True
 
-    def __init__(self, *, request_id: str, deadline_ms: int = 4_000) -> None:
+    def __init__(
+        self, *, request_id: str, attempt_service: Any, deadline_ms: int = 4_000
+    ) -> None:
         self._request_id = str(request_id or "self-reflection")
         self._deadline_ms = max(800, int(deadline_ms))
+        self._attempt_service = attempt_service
         self._traces: list[dict[str, Any]] = []
 
     @property
@@ -65,6 +68,7 @@ class _SelfReflectionModelPort:
             from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
             result = complete_compiled_prompt_sync(
+                attempt_service=self._attempt_service,
                 prompt_id=prompt_id,
                 request_id=f"{self._request_id}:{prompt_id}",
                 scene_type="SELF_REFLECTION",
@@ -89,16 +93,15 @@ def _canonical_self_reflection_port(
 ) -> _SelfReflectionModelPort | None:
     if isinstance(candidate, _SelfReflectionModelPort):
         return candidate
-    if not enabled:
-        return None
-    return _SelfReflectionModelPort(request_id=request_id)
+    del request_id, enabled
+    return None
 
 
 def _normalize_template_lang(render_target_lang: str | None) -> str:
     return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
 
-def _resolve_prompt_template_json_localized(
+def _resolve_prompt_contract_json_localized(
     template_id: str,
     *,
     render_target_lang: str = "zh",
@@ -106,7 +109,7 @@ def _resolve_prompt_template_json_localized(
     lang_key = _normalize_template_lang(render_target_lang)
     for candidate_id in (f"{template_id}.{lang_key}", template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate_id)
+            raw = resolve_prompt_contract_json(candidate_id)
         except Exception:
             continue
         if isinstance(raw, Mapping):
@@ -119,7 +122,7 @@ def _resolve_prompt_template_json_localized(
 
 
 def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_template_json_localized(
+    raw = _resolve_prompt_contract_json_localized(
         "persona.self_narrative_prompts",
         render_target_lang=render_target_lang,
     )
@@ -186,7 +189,7 @@ _DEFAULT_TRIGGER_REASON_TEMPLATES: dict[str, Any] = {
 
 def _load_trigger_reason_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.trigger_reason_templates",
             render_target_lang=render_target_lang,
         )
@@ -570,7 +573,7 @@ _DEFAULT_NARRATIVE_GUARDRAIL_TEXTS: dict[str, Any] = {
 
 def _load_narrative_guardrail_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.narrative_guardrail_texts",
             render_target_lang=render_target_lang,
         )
@@ -1018,7 +1021,7 @@ _DEFAULT_STYLE_TREND_TEMPLATES: dict[str, Any] = {
 
 def _load_style_trend_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.style_trend_templates",
             render_target_lang=render_target_lang,
         )

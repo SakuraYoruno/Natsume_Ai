@@ -10,7 +10,7 @@ from typing import Callable
 import uuid
 
 from host_brain.core.ids import now_ms
-from host_brain.digital_life.contracts import (
+from natsume_contracts.life import (
     LifeAggregateClaim,
     LifeCommand,
     LifeCommandClaim,
@@ -22,20 +22,20 @@ from host_brain.digital_life.contracts import (
     digest_json,
 )
 from host_brain.digital_life.reducer import DeterministicLifeReducer
-from host_brain.persistence.life_command_repository import (
+from natsume_contracts.life import (
     LIFE_AGGREGATE_CLAIM_BUSY,
     LIFE_COMMAND_BASELINE_REQUIRED,
     LIFE_COMMAND_CLAIM_BUSY,
     LIFE_COMMAND_DURABLE_DATA_INVALID,
-    LifeCommandRepository,
     LifeCommandRepositoryError,
 )
+from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
 
 
 class LifeCommandService:
     def __init__(
         self,
-        repository: LifeCommandRepository,
+        repository: LifeCommandRepositoryPort,
         reducer: DeterministicLifeReducer | None = None,
         *,
         clock: Callable[[], int] = now_ms,

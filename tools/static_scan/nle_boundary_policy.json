@@ -111,14 +111,5 @@
       "paths": ["host_brain/life"]
     }
   ],
-  "allowlist": [
-    {
-      "rule_id": "NLE-BND-AGENTRUNTIME-APP",
-      "path": "host_brain/agent_runtime/agent_tools.py",
-      "symbol": "host_brain.app.agents.tool_registry.ToolSpec",
-      "owner": "AGENT_RUNTIME",
-      "reason": "Existing module-level ToolSpec dependency captured by TASK-0461.",
-      "remove_task": "M50_AGENT_RUNTIME"
-    }
-  ]
+  "allowlist": []
 }

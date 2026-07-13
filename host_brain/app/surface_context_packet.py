@@ -5,11 +5,11 @@ from typing import Any
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.app.life_application_boundary import (
+from host_brain.digital_life.application_boundary import (
     project_surface_organ_context,
     read_life_snapshot,
 )
-from host_brain.app.relational_chat_detector import detect_relational_chat_topic
+from host_brain.persona.relational_chat import detect_relational_chat_topic
 from host_brain.persona.organ_influence_contract import build_organ_influence_packet
 from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
 from host_brain.persona.surface_influence_packet import build_surface_influence_packet
@@ -42,6 +42,7 @@ _MEMORY_PACKET_KEYS = (
 
 def build_surface_context_packet(
     *,
+    life_snapshot_reader: Any,
     user_message: str,
     render_target_lang: str = "zh",
     emotion_context: Mapping[str, Any] | None = None,
@@ -70,6 +71,7 @@ def build_surface_context_packet(
         person_id=person_id,
         session_id=session_id,
         request_id=request_id,
+        life_snapshot_reader=life_snapshot_reader,
     )
     runtime_payload = _build_surface_runtime_payload(
         user_message=user_message,
@@ -325,6 +327,7 @@ def _attach_compressed_surface_route(
 
 def _resolve_surface_organ_context(
     *,
+    life_snapshot_reader: Any,
     organ_context: Mapping[str, Any] | None,
     user_message: str,
     person_id: str,
@@ -339,7 +342,10 @@ def _resolve_surface_organ_context(
             "key_count": len(payload),
         }
     try:
-        snapshot = read_life_snapshot(str(person_id or "").strip() or "default")
+        snapshot = read_life_snapshot(
+            str(person_id or "").strip() or "default",
+            reader=life_snapshot_reader,
+        )
         raw = project_surface_organ_context(snapshot)
     except Exception as exc:
         return {}, {

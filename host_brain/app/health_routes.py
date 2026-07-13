@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
-from host_brain.app.dependencies import collect_dependency_probes, get_ledger
+from host_brain.composition.process_services import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,
     build_service_health_report,
@@ -31,7 +31,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.observability.remaining_query_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KEY,
     CANON_SYNC_KIND,
     STARTUP_SNAPSHOT_KEY,

@@ -6,24 +6,14 @@ from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from host_brain.tribe.event_bus import InMemoryTribeEventBus, new_tribe_event
+from host_brain.tribe.event_bus import (
+    InMemoryTribeEventBus,
+    get_tribe_event_bus,
+    new_tribe_event,
+    set_tribe_event_bus,
+)
 
 router = APIRouter(prefix="/internal", tags=["internal-tribe"])
-
-_event_bus: Optional[InMemoryTribeEventBus] = None
-
-
-def get_tribe_event_bus() -> InMemoryTribeEventBus:
-    global _event_bus
-    if _event_bus is None:
-        _event_bus = InMemoryTribeEventBus(max_events=2048)
-    return _event_bus
-
-
-def set_tribe_event_bus(bus: InMemoryTribeEventBus | None) -> None:
-    global _event_bus
-    _event_bus = bus
-
 
 def _validate_internal_token(x_internal_token: str | None) -> None:
     expected = str(os.environ.get("HOST_INTERNAL_TRIBE_TOKEN") or "").strip()

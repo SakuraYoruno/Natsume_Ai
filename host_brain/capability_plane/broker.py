@@ -64,6 +64,11 @@ class CapabilityDescriptor:
     version: str
     risk_level: int
     adapter: CapabilityAdapter
+    # Production uses one broker for every capability kind.  Authorization is
+    # therefore bound to the descriptor at composition time instead of being
+    # hidden in a private broker owned by each facade.  Test brokers may omit
+    # this field and continue to use the policy supplied to CapabilityBroker.
+    authorization_policy: CapabilityPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +131,13 @@ class CapabilityBroker:
             if key in self._descriptors and not replace_existing:
                 raise ValueError(f"capability already registered: {descriptor.kind.value}/{descriptor.capability_id}")
             self._descriptors[key] = descriptor
+
+    def unregister(self, *, kind: CapabilityKind, capability_id: str) -> None:
+        """Remove a facade-owned binding without affecting other kinds."""
+
+        key = (kind, str(capability_id or "").strip())
+        with self._lock:
+            self._descriptors.pop(key, None)
 
     def execute(self, request: CapabilityRequest) -> CapabilityReceipt:
         with self._lock:

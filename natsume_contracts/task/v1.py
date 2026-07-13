@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 
 HOST_COMMAND_SCHEMA_VERSION = "Natsume.task.host_command.v1"
-EXECUTOR_ASSIGNMENT_SCHEMA_VERSION = "Natsume.agent.runtime_assignment.v1"
+EXECUTOR_ASSIGNMENT_SCHEMA_VERSION = "Natsume.agent.runtime_assignment.v2"
 EXECUTOR_ASSIGNMENT_INVALID = "RUNTIME_ASSIGNMENT_INVALID"
 
 
@@ -28,14 +28,7 @@ class HostCommandSurface(StrEnum):
     GATEWAY = "gateway"
 
 
-class TaskRuntimeMode(StrEnum):
-    LEGACY = "legacy"
-    SHADOW = "shadow"
-    CANONICAL = "canonical"
-
-
 class TaskExecutor(StrEnum):
-    LEGACY = "legacy"
     CANONICAL = "canonical"
 
 
@@ -296,12 +289,8 @@ class ExecutorAssignment:
 
     work_order_id: str
     executor: TaskExecutor
-    mode: TaskRuntimeMode
     assignment_id: str
     assigned_at_ms: int
-    canary_percent: int
-    canary_selected: bool
-    kill_switch_active: bool
     is_new_task: bool
     reason_code: str
     schema_version: str = EXECUTOR_ASSIGNMENT_SCHEMA_VERSION
@@ -311,30 +300,14 @@ class ExecutorAssignment:
         _require_identifier(self.work_order_id, "executor_assignment.work_order_id")
         if not isinstance(self.executor, TaskExecutor):
             raise _error(TaskContractReasonCode.FIELD_INVALID, "executor_assignment.executor", "must be a TaskExecutor")
-        if not isinstance(self.mode, TaskRuntimeMode):
-            raise _error(TaskContractReasonCode.FIELD_INVALID, "executor_assignment.mode", "must be a TaskRuntimeMode")
         _require_reference(
             self.assignment_id,
             "executor_assignment.assignment_id",
             prefix="runtime-assignment://",
         )
         _require_epoch_ms(self.assigned_at_ms, "executor_assignment.assigned_at_ms")
-        _require_percent(self.canary_percent, "executor_assignment.canary_percent")
-        _require_bool(self.canary_selected, "executor_assignment.canary_selected")
-        _require_bool(self.kill_switch_active, "executor_assignment.kill_switch_active")
         _require_bool(self.is_new_task, "executor_assignment.is_new_task")
         _require_identifier(self.reason_code, "executor_assignment.reason_code")
-        if self.executor is TaskExecutor.CANONICAL and self.mode is not TaskRuntimeMode.CANONICAL:
-            raise _error(EXECUTOR_ASSIGNMENT_INVALID, "executor_assignment.executor", "canonical executor requires canonical mode")
-        if self.canary_selected and (
-            self.executor is not TaskExecutor.CANONICAL
-            or self.mode is not TaskRuntimeMode.CANONICAL
-            or self.canary_percent <= 0
-            or self.kill_switch_active
-        ):
-            raise _error(EXECUTOR_ASSIGNMENT_INVALID, "executor_assignment.canary_selected", "selected canary must bind an active canonical executor")
-        if self.kill_switch_active and self.executor is not TaskExecutor.LEGACY:
-            raise _error(EXECUTOR_ASSIGNMENT_INVALID, "executor_assignment.kill_switch_active", "kill switch must select legacy executor")
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ExecutorAssignment":
@@ -344,12 +317,8 @@ class ExecutorAssignment:
                 "schema_version",
                 "work_order_id",
                 "executor",
-                "mode",
                 "assignment_id",
                 "assigned_at_ms",
-                "canary_percent",
-                "canary_selected",
-                "kill_switch_active",
                 "is_new_task",
                 "reason_code",
             }
@@ -357,22 +326,17 @@ class ExecutorAssignment:
         _check_fields(data, field_path="executor_assignment", required=required)
         try:
             executor = TaskExecutor(data["executor"])
-            mode = TaskRuntimeMode(data["mode"])
         except (TypeError, ValueError) as exc:
-            raise _error(EXECUTOR_ASSIGNMENT_INVALID, "executor_assignment", "executor or mode is invalid") from exc
+            raise _error(EXECUTOR_ASSIGNMENT_INVALID, "executor_assignment", "executor is invalid") from exc
         return cls(
             work_order_id=_require_identifier(data["work_order_id"], "executor_assignment.work_order_id"),
             executor=executor,
-            mode=mode,
             assignment_id=_require_reference(
                 data["assignment_id"],
                 "executor_assignment.assignment_id",
                 prefix="runtime-assignment://",
             ),
             assigned_at_ms=_require_epoch_ms(data["assigned_at_ms"], "executor_assignment.assigned_at_ms"),
-            canary_percent=_require_percent(data["canary_percent"], "executor_assignment.canary_percent"),
-            canary_selected=_require_bool(data["canary_selected"], "executor_assignment.canary_selected"),
-            kill_switch_active=_require_bool(data["kill_switch_active"], "executor_assignment.kill_switch_active"),
             is_new_task=_require_bool(data["is_new_task"], "executor_assignment.is_new_task"),
             reason_code=_require_identifier(data["reason_code"], "executor_assignment.reason_code"),
         )
@@ -382,12 +346,8 @@ class ExecutorAssignment:
             "schema_version": self.schema_version,
             "work_order_id": self.work_order_id,
             "executor": self.executor.value,
-            "mode": self.mode.value,
             "assignment_id": self.assignment_id,
             "assigned_at_ms": self.assigned_at_ms,
-            "canary_percent": self.canary_percent,
-            "canary_selected": self.canary_selected,
-            "kill_switch_active": self.kill_switch_active,
             "is_new_task": self.is_new_task,
             "reason_code": self.reason_code,
         }
@@ -590,6 +550,5 @@ __all__ = [
     "TaskContractError",
     "TaskContractReasonCode",
     "TaskExecutor",
-    "TaskRuntimeMode",
     "build_host_command",
 ]

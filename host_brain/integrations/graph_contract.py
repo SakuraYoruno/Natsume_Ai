@@ -398,7 +398,7 @@ def validate_agent_handoff_target(
     if allowed_agents is None:
         # 延迟导入，避免循环依赖
         try:
-            from host_brain.app.agents.agent_registry import AGENT_ALLOWLIST  # noqa: PLC0415
+            from host_brain.agent_runtime.agent_registry import AGENT_ALLOWLIST  # noqa: PLC0415
             allowed_agents = AGENT_ALLOWLIST
         except ImportError:
             return False, "AGENT_REGISTRY_UNAVAILABLE"
@@ -421,7 +421,7 @@ def validate_risk_mode(risk_mode: str) -> tuple[bool, str]:
         (is_valid, reason)
     """
     try:
-        from host_brain.app.agents.agent_contract import VALID_RISK_MODES  # noqa: PLC0415
+        from host_brain.agent_runtime.agent_contract import VALID_RISK_MODES  # noqa: PLC0415
         valid_modes = VALID_RISK_MODES
     except ImportError:
         valid_modes = frozenset({"safe", "guarded", "strict"})

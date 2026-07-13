@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from host_brain.observability.api_models import MetricsTimeseriesResponse, TimeseriesPoint
-from host_brain.observability.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 

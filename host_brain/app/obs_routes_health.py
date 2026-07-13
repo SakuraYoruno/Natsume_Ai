@@ -18,7 +18,7 @@ from host_brain.observability.api_models import (
     ServiceHealthItem,
     ServicesHealthResponse,
 )
-from host_brain.observability.health_device_projection import (
+from host_brain.app.observability_runtime.health_device_projection import (
     HEALTH_MAX_AGE_MS,
     LLM_NODE_HEALTH_KEY,
     LLM_NODE_HEALTH_KIND,
@@ -47,7 +47,7 @@ def _read_query_projection(
     max_age_ms: int,
 ) -> tuple[dict | None, dict]:
     try:
-        from host_brain.app.dependencies import get_query_projection_store
+        from host_brain.composition.process_services import get_query_projection_store
 
         return read_projection_payload(
             get_query_projection_store(),

@@ -3,7 +3,7 @@
 覆盖范围：
   T-GW-MODEL-01~06  : UnifiedMessage / UnifiedReply / Platform / MsgType 数据模型
   T-GW-NORM-01~07   : MessageNormalizer 去重 / 脱敏 / 校验 / 统计
-  T-GW-ROUTER-01~04 : GatewayRouter 路由逻辑（Mock Reporter）
+  Gateway durable inbox/outbox owns routing, retry and receipt state.
   T-GW-SERVER-01~07 : create_gateway_app FastAPI 端点（TestClient）
   T-GW-OUTBOUND-01~10: OutboundDispatcher 分发逻辑
 """
@@ -47,7 +47,6 @@ from edge_client.gateway.outbound import (
     OutboundDispatcher,
     OutboundPreparationRejected,
 )
-from edge_client.gateway.router import GatewayRouter
 from edge_client.gateway.server import create_gateway_app
 from edge_client.gateway.webhook_security import (
     InternalHmacWebhookVerifier,
@@ -334,52 +333,6 @@ class TestMessageDeduplicator(unittest.TestCase):
 
 
 # ===========================================================================
-# T-GW-ROUTER: 消息路由器契约
-# ===========================================================================
-
-class TestGatewayRouter(unittest.TestCase):
-    """T-GW-ROUTER-01~04: GatewayRouter 契约。"""
-
-    def test_t_gw_router_01_route_success_increments_routed(self) -> None:
-        """T-GW-ROUTER-01: 路由成功时 stats.routed 递增。"""
-        reporter = _make_mock_reporter(success=True)
-        router = GatewayRouter(reporter)
-        msg = _make_msg()
-        result = router.route(msg)
-        self.assertTrue(result.success)
-        self.assertEqual(1, router.stats()["routed"])
-        self.assertEqual(0, router.stats()["failed"])
-
-    def test_t_gw_router_02_route_failure_increments_failed(self) -> None:
-        """T-GW-ROUTER-02: 路由失败时 stats.failed 递增。"""
-        reporter = _make_mock_reporter(success=False, cached=False)
-        router = GatewayRouter(reporter)
-        msg = _make_msg()
-        result = router.route(msg)
-        self.assertFalse(result.success)
-        self.assertEqual(1, router.stats()["failed"])
-
-    def test_t_gw_router_03_route_cached_increments_cached(self) -> None:
-        """T-GW-ROUTER-03: 路由缓存时 stats.cached 递增。"""
-        reporter = _make_mock_reporter(success=False, cached=True)
-        router = GatewayRouter(reporter)
-        msg = _make_msg()
-        router.route(msg)
-        self.assertEqual(1, router.stats()["cached"])
-
-    def test_t_gw_router_04_payload_contains_gateway_source(self) -> None:
-        """T-GW-ROUTER-04: 上报 payload 中 source 字段为 GATEWAY。"""
-        reporter = _make_mock_reporter(success=True)
-        router = GatewayRouter(reporter)
-        msg = _make_msg()
-        router.route(msg)
-        # 验证公开兼容入口被调用，且 payload 包含 source=GATEWAY
-        call_args = reporter.report_gateway_payload.call_args
-        payload = call_args[0][0]
-        self.assertEqual("GATEWAY", payload["source"])
-
-
-# ===========================================================================
 # T-GW-SERVER: Gateway FastAPI Server 契约
 # ===========================================================================
 
@@ -402,8 +355,6 @@ class TestGatewayServer(unittest.TestCase):
         reply_verifiers: Any | None = None,
         platform: Platform = Platform.WECHAT,
     ) -> tuple[TestClient, MagicMock, MagicMock]:
-        reporter = _make_mock_reporter(success=route_success)
-        router = GatewayRouter(reporter)
         normalizer = MessageNormalizer(dedup_window_s=0)  # 禁用去重，避免测试间干扰
 
         # adapter_msg=_UNSET 表示「未传入」，使用默认消息；adapter_msg=None 表示「适配器返回 None」
@@ -449,7 +400,6 @@ class TestGatewayServer(unittest.TestCase):
         self.reply_verifiers = reply_verifiers or _AllowVerifierRegistry()
 
         app = create_gateway_app(
-            router=router,
             normalizer=normalizer,
             adapters=adapters,
             outbound=outbound,
@@ -664,12 +614,9 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual("failed", resp.json()["status"])
         self.assertEqual("PLATFORM_SEND_FAILED", resp.json()["reason_code"])
 
-    def test_http_intake_defaults_to_legacy_drain_and_rejects(self) -> None:
-        reporter = _make_mock_reporter()
-        router = GatewayRouter(reporter)
+    def test_http_intake_without_durable_runtime_rejects(self) -> None:
         adapter = _make_mock_adapter(parse_result=_make_msg())
         app = create_gateway_app(
-            router=router,
             normalizer=MessageNormalizer(dedup_window_s=0),
             adapters={"wechat": adapter},
             webhook_verifiers=_AllowVerifierRegistry(),
@@ -683,17 +630,14 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual("GW_TRANSPORT_DISABLED", response.json()["reason_code"])
         adapter.parse_inbound.assert_not_called()
 
-    def test_shadow_verifies_then_rejects_without_parse_or_persist(self) -> None:
+    def test_disabled_durable_intake_verifies_then_rejects_without_persist(self) -> None:
         verifier = _AllowVerifierRegistry()
-        reporter = _make_mock_reporter()
-        router = GatewayRouter(reporter)
         adapter = _make_mock_adapter(parse_result=_make_msg())
         delivery = MagicMock()
-        delivery.mode = GatewayTransportMode.SHADOW
+        delivery.mode = GatewayTransportMode.DURABLE
         delivery.verification_enabled = True
         delivery.intake_enabled = False
         app = create_gateway_app(
-            router=router,
             normalizer=MessageNormalizer(dedup_window_s=0),
             adapters={"wechat": adapter},
             delivery_runtime=delivery,
@@ -702,11 +646,11 @@ class TestGatewayServer(unittest.TestCase):
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.post(
                 "/v1/gateway/wechat/webhook",
-                content=b'{"type":"1","content":"shadow"}',
+                content=b'{"type":"1","content":"disabled"}',
                 headers={"Content-Type": "application/json"},
             )
         self.assertEqual(503, response.status_code)
-        self.assertEqual("GW_TRANSPORT_SHADOW_ONLY", response.json()["reason_code"])
+        self.assertEqual("GW_TRANSPORT_DISABLED", response.json()["reason_code"])
         self.assertEqual(1, len(verifier.envelopes))
         adapter.parse_inbound.assert_not_called()
         delivery.accept_inbound.assert_not_called()
@@ -1131,21 +1075,20 @@ class TestGatewayServer(unittest.TestCase):
 # ===========================================================================
 
 class TestGatewayDeliveryRuntime(unittest.TestCase):
-    def test_shadow_only_verifies_and_never_touches_store_or_worker(self) -> None:
+    def test_retired_mode_value_converges_to_durable(self) -> None:
         store = MagicMock()
         store.assert_schema_ready = MagicMock()
         runtime = GatewayDeliveryRuntime(
-            mode=GatewayTransportMode.SHADOW,
+            mode="SHADOW",
             store=store,
             reporter=MagicMock(),
             outbound=MagicMock(),
         )
-        runtime.start()
-        self.assertFalse(runtime.intake_enabled)
+        self.assertEqual(GatewayTransportMode.DURABLE, runtime.mode)
+        self.assertTrue(runtime.intake_enabled)
         self.assertTrue(runtime.verification_enabled)
-        self.assertFalse(runtime.delivery_enabled)
+        self.assertTrue(runtime.delivery_enabled)
         self.assertFalse(runtime.stats()["worker_alive"])
-        store.assert_schema_ready.assert_not_called()
 
     def test_worker_start_failure_leaves_rollback_joinable_and_retryable(self) -> None:
         class _FailingThread:
@@ -1474,7 +1417,7 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
 
     def test_invalid_mode_and_intake_switch_fail_closed(self) -> None:
         self.assertEqual(
-            GatewayTransportMode.LEGACY_DRAIN,
+            GatewayTransportMode.DURABLE,
             load_gateway_transport_mode({GATEWAY_TRANSPORT_MODE_ENV: "typo"}),
         )
         self.assertTrue(load_gateway_accept_new_intake({}))
@@ -1482,18 +1425,8 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
             GATEWAY_ACCEPT_NEW_INTAKE_ENV: "typo",
         }))
 
-    def test_durable_kill_switch_keeps_delivery_and_reports_safe_drain(self) -> None:
+    def test_durable_kill_switch_disables_intake_but_keeps_delivery(self) -> None:
         store = MagicMock()
-        store.transport_counts.return_value = {
-            "inbox_pending": 0,
-            "outbox_pending": 0,
-            "inbox_claimed": 0,
-            "outbox_claimed": 0,
-            "claimed": 0,
-            "inbox_dlq": 0,
-            "outbox_dlq": 0,
-            "reconciliation_required": 0,
-        }
         runtime = GatewayDeliveryRuntime(
             mode=GatewayTransportMode.DURABLE,
             store=store,
@@ -1504,15 +1437,10 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
         self.assertFalse(runtime.intake_enabled)
         self.assertTrue(runtime.delivery_enabled)
         stats = runtime.stats()
-        self.assertTrue(stats["pending_known"])
-        self.assertEqual(0, stats["pending"])
-        self.assertTrue(stats["drained"])
-        self.assertFalse(stats["reconciliation_required"])
-
-        store.transport_counts.return_value["reconciliation_required"] = 1
-        blocked = runtime.stats()
-        self.assertFalse(blocked["drained"])
-        self.assertTrue(blocked["reconciliation_required"])
+        self.assertFalse(stats["intake_enabled"])
+        self.assertNotIn("drained", stats)
+        self.assertNotIn("pending", stats)
+        store.transport_counts.assert_not_called()
 
     def test_non_http_intake_uses_canonical_bytes_and_stable_event_identity(self) -> None:
         store = MagicMock()

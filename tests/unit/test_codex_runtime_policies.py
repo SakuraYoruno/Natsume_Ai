@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.bio_ops import build_proposal_only_policy, is_bio_ops_sensitive_path
 from host_brain.evolution_lab import validate_evolution_branch

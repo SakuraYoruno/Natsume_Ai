@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.model_runtime import (
     AGENT_REACT_STEP_PROMPT_ID,
     AGENT_SUBAGENT_GATEWAY_PROMPT_ID,

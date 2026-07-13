@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 
 from host_brain.app import digital_life_routes
-from host_brain.app.life_application_boundary import (
+from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
+from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     project_life_director_pack,
     project_surface_organ_context,
@@ -17,7 +18,8 @@ from host_brain.app.life_application_boundary import (
 )
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app import surface_main_chain_adapter
-from host_brain.digital_life.contracts import LifeCommand
+from host_brain.surface_runtime import delivery_audit
+from natsume_contracts.life import LifeCommand
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.orchestration.governor_grant import (
     canonical_proactive_intent_args,
@@ -123,6 +125,21 @@ def _snapshot(*, version: int = 4) -> dict[str, Any]:
             "organ_runtime": {"organ_count": 2, "top_organs": [{"organ_id": "limbic"}]},
         },
     }
+
+
+@pytest.fixture
+def composed_life() -> ProcessLifeContainer:
+    container = ProcessLifeContainer(
+        repository=object(),
+        command_service=object(),
+        snapshot_reader=object(),
+    )
+    PROCESS_LIFE_PROVIDER.clear()
+    PROCESS_LIFE_PROVIDER.install(container)
+    try:
+        yield container
+    finally:
+        PROCESS_LIFE_PROVIDER.clear(container)
 
 
 def test_snapshot_projections_are_pure_and_legacy_compatible() -> None:
@@ -301,10 +318,18 @@ def test_deterministic_retry_with_changed_payload_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_digital_life_get_is_pure_and_post_submits_command(monkeypatch) -> None:  # noqa: ANN001
+async def test_digital_life_get_is_pure_and_post_submits_command(
+    monkeypatch,
+    composed_life,
+) -> None:  # noqa: ANN001
+    del composed_life
     snapshot = _snapshot(version=3)
     submit_calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(digital_life_routes, "read_life_snapshot", lambda _person_id: copy.deepcopy(snapshot))
+    monkeypatch.setattr(
+        digital_life_routes,
+        "read_life_snapshot",
+        lambda _person_id, **_: copy.deepcopy(snapshot),
+    )
     monkeypatch.setattr(digital_life_routes, "read_life_events", lambda *_args, **_kwargs: [])
 
     def _submit(**kwargs):  # noqa: ANN003
@@ -373,7 +398,9 @@ async def test_digital_life_get_is_pure_and_post_submits_command(monkeypatch) ->
 @pytest.mark.asyncio
 async def test_http_proactive_rebuilds_authority_from_durable_grant(
     monkeypatch,
+    composed_life,
 ) -> None:
+    del composed_life
     request_id = "http-proactive-authorized"
     intent_args = canonical_proactive_intent_args(
         person_id="person-aw04",
@@ -474,7 +501,7 @@ def test_surface_foreground_completion_is_one_governed_command(monkeypatch) -> N
             "replayed": False,
         }
 
-    monkeypatch.setattr(surface_main_chain_adapter, "submit_life_command", _submit)
+    monkeypatch.setattr(delivery_audit, "submit_life_command", _submit)
     result = SimpleNamespace(
         selected_text="收到",
         natsume_emotion_tag="HAPPY",
@@ -517,12 +544,18 @@ def test_surface_foreground_completion_is_one_governed_command(monkeypatch) -> N
     envelope = ReplyEnvelope.final_reply(text="收到", source="surface_main_chain")
 
     receipt = surface_main_chain_adapter._submit_surface_foreground_completed(
+        life_command_service=object(),
+        life_snapshot_reader=object(),
         agent_input=agent_input,
         result=result,
         envelope=envelope,
         narrative="收到",
         trace_stage_meta={
-            "life_director": {"embodiment_target": {"emotion_tag": "HAPPY"}}
+            "life_director": {"embodiment_target": {"emotion_tag": "HAPPY"}},
+            "surface_model_attempt": {
+                "final_model": "mock-chat",
+                "final_provider": "mock",
+            },
         },
         timings_ms={"surface_main_chain_ms": 5},
         total_latency_ms=5,
@@ -567,7 +600,7 @@ def test_surface_without_official_grant_commits_foreground_without_embodiment(
 ) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        surface_main_chain_adapter,
+        delivery_audit,
         "submit_life_command",
         lambda **kwargs: calls.append(kwargs) or {"status": "APPLIED"},
     )
@@ -597,6 +630,8 @@ def test_surface_without_official_grant_commits_foreground_without_embodiment(
     )
 
     surface_main_chain_adapter._submit_surface_foreground_completed(
+        life_command_service=object(),
+        life_snapshot_reader=object(),
         agent_input=agent_input,
         result=result,
         envelope=ReplyEnvelope.final_reply(text="收到", source="surface_main_chain"),

@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 
 def test_device_projection_observes_receipt_after_submission(monkeypatch) -> None:
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.channels import embodiment
-    from host_brain.observability.health_device_projection import (
+    from host_brain.app.observability_runtime.health_device_projection import (
         load_device_status_projection_sources,
     )
-    from host_brain.observability import health_device_projection
+    from host_brain.app.observability_runtime import health_device_projection
     from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
 
     with health_device_projection._receipt_lock:
@@ -44,11 +44,17 @@ def test_device_projection_observes_receipt_after_submission(monkeypatch) -> Non
                 event={"device": "avatar", "connected": True, "token": "must-not-project"},
             )
 
-    embodiment.configure_embodiment_command_port(Port())
+    unsubscribe = embodiment.register_embodiment_receipt_observer(
+        embodiment.build_embodiment_receipt_audit_observer(
+            lambda row: durable_facts.append(dict(row))
+        )
+    )
     try:
-        receipt = asyncio.run(embodiment.submit_embodiment_command(command))
+        receipt = asyncio.run(
+            embodiment.submit_embodiment_command(command, command_port=Port())
+        )
     finally:
-        embodiment.configure_embodiment_command_port(None)
+        unsubscribe()
 
     sources = load_device_status_projection_sources()
     assert receipt.status == "APPLIED"
@@ -67,8 +73,8 @@ def test_device_projection_observes_receipt_after_submission(monkeypatch) -> Non
 
 
 def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
-    from host_brain.observability import service_health_heartbeat as heartbeat
-    from host_brain.observability.health_device_projection import (
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime.health_device_projection import (
         load_health_projection_sources,
     )
 
@@ -115,7 +121,7 @@ def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
 
 
 def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:
-    from host_brain.observability.health_device_projection import (
+    from host_brain.app.observability_runtime.health_device_projection import (
         load_device_status_projection_sources,
     )
 
@@ -150,7 +156,7 @@ def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:
 
 
 def test_organ_source_reads_existing_process_state_without_getter(monkeypatch) -> None:
-    from host_brain.observability.health_device_projection import (
+    from host_brain.app.observability_runtime.health_device_projection import (
         load_organ_tribe_projection_source,
     )
     from host_brain.tribe import tribe_state

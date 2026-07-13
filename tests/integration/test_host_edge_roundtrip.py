@@ -11,7 +11,7 @@ from edge_client.app.fastapi_app import create_edge_fastapi_app
 from edge_client.config import EdgeConfig
 from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge
 from edge_client.tribe.peripheral_agent import PeripheralAgent as EdgePeripheralAgent
-from edge_client.tribe.registry import get_edge_tribe_registry
+from edge_client.tribe.registry import EdgeTribeRegistry
 from edge_client.tribe.somatic_agent import SomaticAgent as EdgeSomaticAgent
 from host_brain.app.internal_tribe_routes import router, set_tribe_event_bus
 from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
@@ -53,6 +53,11 @@ class _FakeVtsDriver:
 
 
 def _build_edge_app() -> FastAPI:
+    bridge = EdgeTribeBridge(host_base_url="", enabled=False)
+    runtime = SimpleNamespace(
+        tribe_bridge=bridge,
+        tribe_registry=EdgeTribeRegistry(bridge),
+    )
     return create_edge_fastapi_app(
         config=EdgeConfig(
             env="test",
@@ -73,7 +78,7 @@ def _build_edge_app() -> FastAPI:
             max_vram_mb=1024,
             max_queue_length=32,
         ),
-        runtime=SimpleNamespace(),
+        runtime=runtime,
         startup_hook=lambda _runtime: None,
         shutdown_hook=lambda _runtime: None,
         health_collector=lambda _runtime: {},
@@ -111,8 +116,7 @@ def test_host_to_edge_command_roundtrip_dispatch(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "tribe-token")
 
     app = _build_edge_app()
-    registry = get_edge_tribe_registry()
-    registry.reinitialize(bridge=EdgeTribeBridge(host_base_url="", enabled=False))
+    registry = app.state.edge_runtime.tribe_registry
     registry.channel.on_gate_control_command(gate_open=True, reason="reset")
     fake_vts = _FakeVtsDriver()
     registry.somatic.set_vts_driver(fake_vts)

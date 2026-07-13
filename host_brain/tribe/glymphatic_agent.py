@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -63,6 +64,7 @@ def _should_suppress_noop_cycle_event(
 
 @dataclass(slots=True)
 class GlymphaticAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="glymphatic_agent",
@@ -79,7 +81,7 @@ class GlymphaticAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_circadian_phase_updated)
@@ -270,10 +272,10 @@ class GlymphaticAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
             from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("glymphatic_agent.consolidation_summary") or {}
+            _tpl = resolve_prompt_contract_json("glymphatic_agent.consolidation_summary") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -286,6 +288,7 @@ class GlymphaticAgent:
                 recovery_quality=round(float(recovery_quality), 3),
             )
             _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
                 semantic_id="glymphatic_consolidation_summary",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,

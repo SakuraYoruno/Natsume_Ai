@@ -1,4 +1,4 @@
-﻿"""Deterministic probes for the canonical tool execution loop.
+"""Deterministic probes for the canonical tool execution loop.
 
 The matrix exercises Thalamus-facing skills through the same executive
 runtime path used by chat/Gateway requests:
@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from host_brain.app.executive_runtime_core import _execute_skill
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.executive_runtime.skill_execution import _execute_skill
 
 
 SAFE_SUCCESS_STATUSES = frozenset({"OK", "EXECUTED", "SUCCESS"})
@@ -77,6 +78,7 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
         ToolExecutionProbe(
             probe_id="builtin-read-only-status",
             skill_name="read_only_status",
+            args={"scope": "host"},
             expected_scope="host",
             value_tier="liveness",
         ),
@@ -307,6 +309,47 @@ def _is_raw_status_success(raw_result: dict[str, Any]) -> bool:
     return raw_status in SAFE_SUCCESS_STATUSES
 
 
+def _govern_skill_probe(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    skill_name: str,
+    target: str,
+    args: dict[str, Any],
+    seq: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Issue the durable Governor token required by the canonical executor."""
+
+    from host_brain.composition.process_services import get_intent_engine
+    from host_brain.core.ids import now_ms
+
+    timestamp = now_ms()
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": f"intent::{request_id}",
+        "ts_ms": timestamp,
+        "session_id": session_id,
+        "seq": max(1, int(seq)),
+        "type": "query",
+        "action": skill_name,
+        "target": str(target or "host"),
+        "args": dict(args),
+        "nonce": f"nonce::{request_id}",
+        "person_id": person_id,
+        "principal_id": person_id,
+        "route": "skill",
+        "target_id": skill_name,
+    }
+    decision = get_intent_engine().evaluate_intent(
+        raw_intent=intent,
+        request_id=request_id,
+        current_ms=timestamp,
+        governance_snapshot={"trust_level": 100, "energy_level": 100},
+    )
+    return decision, intent
+
+
 def run_tool_execution_matrix(
     probes: Iterable[ToolExecutionProbe] | None = None,
     *,
@@ -316,7 +359,7 @@ def run_tool_execution_matrix(
 ) -> dict[str, Any]:
     """Execute probes through the canonical executive skill path."""
 
-    from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+    from host_brain.composition.process_services import get_skill_registry  # noqa: PLC0415
 
     selected = list(probes) if probes is not None else build_default_tool_execution_matrix()
     registry = get_skill_registry()
@@ -374,17 +417,27 @@ def run_tool_execution_matrix(
                     results.append(result)
                     continue
 
+            governor_result, governed_intent = _govern_skill_probe(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                skill_name=skill_name,
+                target=str(meta.scope or "host"),
+                args=dict(probe.args),
+                seq=index,
+            )
             outcome = _execute_skill(
+                ports=build_executive_runtime_application_ports(),
                 request_body={"args": dict(probe.args)},
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,
-                intent_id=f"intent::{request_id}",
+                intent_id=str(governed_intent["id"]),
                 skill_id=skill_name,
                 task_text=f"tool execution probe {probe.probe_id}",
                 user_message=f"tool execution probe {probe.probe_id}",
-                governor_result={"decision": "approve", "tokens": {}},
-                intent_draft={"route": "skill", "target_id": skill_name, "args": dict(probe.args)},
+                governor_result=governor_result,
+                intent_draft=governed_intent,
                 emotion_context={"mood_state": "NEUTRAL", "emotion_tag": "NEUTRAL"},
                 render_target_lang="zh",
             )
@@ -457,69 +510,66 @@ def run_memory_tool_closed_loop(
     search_query = str(query or content).strip()
     store_request_id = f"{request_prefix}-store"
     search_request_id = f"{request_prefix}-search"
-    store_outcome = _execute_skill(
-        request_body={
-            "args": {
-                "content": content,
-                "memory_type": "episodic",
-                "tags": ["task", "event"],
-                "importance": 0.7,
-                "source": "tool_execution_matrix",
-            }
-        },
+    store_args = {
+        "content": content,
+        "memory_type": "episodic",
+        "tags": ["task", "event"],
+        "importance": 0.7,
+        "source": "tool_execution_matrix",
+    }
+    search_args = {
+        "query": search_query,
+        "memory_type": "episodic",
+        "search_scope": "recent_episode",
+        "top_k": 5,
+        "threshold": 0.0,
+        "tags": ["task", "event"],
+    }
+    store_governor, store_intent = _govern_skill_probe(
         request_id=store_request_id,
         session_id=session_id,
         person_id=person_id,
-        intent_id=f"intent::{store_request_id}",
+        skill_name="memory_store",
+        target="memory",
+        args=store_args,
+        seq=1,
+    )
+    search_governor, search_intent = _govern_skill_probe(
+        request_id=search_request_id,
+        session_id=session_id,
+        person_id=person_id,
+        skill_name="memory_search",
+        target="memory",
+        args=search_args,
+        seq=2,
+    )
+    store_outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
+        request_body={"args": dict(store_args)},
+        request_id=store_request_id,
+        session_id=session_id,
+        person_id=person_id,
+        intent_id=str(store_intent["id"]),
         skill_id="memory_store",
         task_text=f"store memory probe: {content}",
         user_message=f"store memory probe: {content}",
-        governor_result={"decision": "approve", "tokens": {}},
-        intent_draft={
-            "route": "skill",
-            "target_id": "memory_store",
-            "args": {
-                "content": content,
-                "memory_type": "episodic",
-                "tags": ["task", "event"],
-                "importance": 0.7,
-                "source": "tool_execution_matrix",
-            },
-        },
+        governor_result=store_governor,
+        intent_draft=store_intent,
         emotion_context={"mood_state": "NEUTRAL", "emotion_tag": "FOCUSED"},
         render_target_lang="zh",
     )
     search_outcome = _execute_skill(
-        request_body={
-            "args": {
-                "query": search_query,
-                "memory_type": "episodic",
-                "search_scope": "recent_episode",
-                "top_k": 5,
-                "threshold": 0.0,
-                "tags": ["task", "event"],
-            }
-        },
+        ports=build_executive_runtime_application_ports(),
+        request_body={"args": dict(search_args)},
         request_id=search_request_id,
         session_id=session_id,
         person_id=person_id,
-        intent_id=f"intent::{search_request_id}",
+        intent_id=str(search_intent["id"]),
         skill_id="memory_search",
         task_text=f"search memory probe: {search_query}",
         user_message=f"search memory probe: {search_query}",
-        governor_result={"decision": "approve", "tokens": {}},
-        intent_draft={
-            "route": "skill",
-            "target_id": "memory_search",
-            "args": {
-                "query": search_query,
-                "memory_type": "episodic",
-                "search_scope": "recent_episode",
-                "top_k": 5,
-                "threshold": 0.0,
-                "tags": ["task", "event"],
-            },
-        },
+        governor_result=search_governor,
+        intent_draft=search_intent,
         emotion_context={"mood_state": "NEUTRAL", "emotion_tag": "FOCUSED"},
         render_target_lang="zh",
     )
@@ -555,4 +605,3 @@ def run_memory_tool_closed_loop(
         },
         "results": search_results,
     }
-

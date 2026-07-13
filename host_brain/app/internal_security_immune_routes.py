@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body
 
-from host_brain.app.dependencies import get_ledger
+from host_brain.composition.process_services import get_ledger
 from host_brain.security_immune.agent import get_security_immune_agent
 
 router = APIRouter(prefix="/internal/security", tags=["internal-security"])

@@ -5,7 +5,8 @@ import json
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import CHROMA_ENDPOINT_UNAVAILABLE
 from host_brain.memory.chroma_client import embed_text
-from host_brain.memory.life_memory import EPISODE_ACTION, EPISODE_BACKGROUND, LifeMemoryStore
+from host_brain.memory.life_memory import EPISODE_ACTION, EPISODE_BACKGROUND
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract, load_recall_runtime_config
 from host_brain.retrieval.recall_fusion_stores import STORE_EPISODIC_VECTOR, STORE_LIFE_EPISODE, STORE_LIFE_MEMORY_COLLECTION
 from tests.fakes.chroma_client import FakeChromaClient
@@ -47,6 +48,7 @@ def test_life_episode_route_returns_episode_packet_candidate() -> None:
         service = RecallFusionServiceContract(
             chroma_client=FakeChromaClient(),
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,
@@ -161,6 +163,7 @@ def test_anaphoric_selection_prefers_latest_three_item_delivery_over_recent_coll
         service = RecallFusionServiceContract(
             chroma_client=FakeChromaClient(),
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,
@@ -230,6 +233,7 @@ def test_life_episode_route_still_runs_when_chroma_is_down(monkeypatch) -> None:
 
         service = RecallFusionServiceContract(
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,
@@ -346,6 +350,7 @@ def test_anaphoric_selection_fusion_keeps_latest_delivery_not_old_recommendation
         service = RecallFusionServiceContract(
             chroma_client=FakeChromaClient(),
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,
@@ -453,6 +458,7 @@ def test_deep_review_followup_prefers_review_episode_over_delivery() -> None:
         service = RecallFusionServiceContract(
             chroma_client=FakeChromaClient(),
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,
@@ -562,6 +568,7 @@ def test_anaphoric_selection_fusion_prefers_life_action_and_drops_self_echo_nois
         service = RecallFusionServiceContract(
             chroma_client=chroma,
             ledger=ledger,
+            life_memory_store=store,
             runtime_config=cfg_result.config,
             node_id="host-01",
             available=True,

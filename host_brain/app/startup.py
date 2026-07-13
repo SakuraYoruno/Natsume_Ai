@@ -61,7 +61,7 @@ def _resolve_edge_probe_timeout_s() -> float:
 
 
 def _build_edge_rpc_skip_detail() -> str:
-    from host_brain.app.dependencies import get_edge_base_url  # noqa: PLC0415
+    from host_brain.composition.process_services import get_edge_base_url  # noqa: PLC0415
     return f"edge rpc skipped: gateway-only mode ({get_edge_base_url()})"
 
 
@@ -71,7 +71,7 @@ async def probe_edge_rpc_health() -> dict:
     从 dependencies.py 迁移，供 startup 和 health_routes 调用。
     """
     import time
-    from host_brain.app.dependencies import get_edge_base_url, get_edge_base_urls  # noqa: PLC0415
+    from host_brain.composition.process_services import get_edge_base_url, get_edge_base_urls  # noqa: PLC0415
 
     t0 = int(time.time() * 1000)
     if not _is_edge_rpc_enabled():
@@ -362,7 +362,7 @@ def warmup_emotion_timeline() -> str:
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
+        from host_brain.composition.process_services import get_emotion_timeline  # noqa: PLC0415
         get_emotion_timeline()
         return "OK"
     except Exception as exc:
@@ -376,7 +376,7 @@ def warmup_skill_registry() -> str:
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+        from host_brain.composition.process_services import get_skill_registry  # noqa: PLC0415
         registry = get_skill_registry()
         skill_count = len(list(registry.all() or []))
         _logger.info("SkillRegistry 预热完成，已加载 %d 个技能", skill_count)
@@ -392,7 +392,7 @@ def warmup_graph_runtime() -> str:
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.app.dependencies import get_graph_runtime  # noqa: PLC0415
+        from host_brain.composition.process_services import get_graph_runtime  # noqa: PLC0415
         get_graph_runtime()
         return "OK"
     except Exception as exc:
@@ -430,7 +430,7 @@ def _persist_runtime_soul_state(*, soul_id: str, source_path: str) -> None:
 
 def _reset_short_term_continuity_for_soul_change(*, previous_soul_id: str, current_soul_id: str) -> str:
     try:
-        from host_brain.app.dependencies import (  # noqa: PLC0415
+        from host_brain.composition.process_services import (  # noqa: PLC0415
             get_ledger,
         )
 
@@ -475,12 +475,13 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
 def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
     """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
     try:
-        from host_brain.app.dependencies import (  # noqa: PLC0415
+        from host_brain.composition.process_services import (  # noqa: PLC0415
             get_intent_engine,
             get_routing_matrix,
+            get_silence_engine,
             get_state_write_arbiter,
         )
-        from host_brain.app.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
+        from host_brain.persona.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
         from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
 
         get_routing_matrix()
@@ -493,7 +494,7 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             source_path=str(getattr(compiled_soul, "source_path", "") or "").strip(),
         )
         warmed_parts = [
-            "prompt_templates=retired",
+            "prompt_registry=ready",
             "routing_matrix=ready",
             "intent_engine=ready",
             "state_write_arbiter=ready",
@@ -504,7 +505,6 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
 
         if eager_persona:
             from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-            from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
             from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
             PersonaEngine.get_instance()
@@ -525,7 +525,7 @@ def warmup_chat_llm_runtime_profiles() -> str:
     """预热聊天主链最常用的 LLM runtime 解析路径，压低首轮 direct/context chat 冷启动。"""
     try:
         from host_brain.app.graph_config_builder import SCENE_CHAT  # noqa: PLC0415
-        from host_brain.app.graph_config_llm_runtime import (  # noqa: PLC0415
+        from host_brain.app.route_catalog_runtime import (  # noqa: PLC0415
             resolve_surface_reply_llm_runtime,
             resolve_executive_router_llm_runtime,
             resolve_host_llm_runtime_async,
@@ -600,12 +600,14 @@ def warmup_codex_exec_intent_pool() -> str:
         return "SKIPPED (disabled)"
     try:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import STARTUP_MODEL_WARMUP_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         timeout_ms = int(settings.codex_exec_intent_warmup_timeout_ms)
         started_at = time.perf_counter()
         result = complete_compiled_prompt_sync(
+            attempt_service=get_model_attempt_service(),
             prompt_id=STARTUP_MODEL_WARMUP_PROMPT_ID,
             request_id=f"startup-model-warmup::{int(time.time() * 1000)}",
             scene_type="STARTUP_MODEL_WARMUP",
@@ -678,7 +680,7 @@ def warmup_retrieval_runtime_basics() -> str:
             except Exception as gate_exc:
                 _logger.debug("Retrieval warmup resource gate skipped: %s", gate_exc)
 
-        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+        from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
         from host_brain.memory.chroma_client import hash_embed_text  # noqa: PLC0415
 
         store = get_episodic_store()

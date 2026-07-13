@@ -5,9 +5,10 @@ from types import SimpleNamespace
 
 
 def test_services_health_get_never_primes_or_probes(monkeypatch) -> None:
-    from host_brain.app import dependencies, obs_routes_health as routes
-    from host_brain.observability import health_device_projection as projection
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.composition import process_services as dependencies
+    from host_brain.app import obs_routes_health as routes
+    from host_brain.app.observability_runtime import health_device_projection as projection
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
     from natsume_contracts.operator.v1 import ProjectionDegradedState
 
     async def _forbidden_prime() -> None:
@@ -49,9 +50,10 @@ def test_services_health_get_never_primes_or_probes(monkeypatch) -> None:
 
 
 def test_avatar_state_get_reads_projection_without_device_command(monkeypatch) -> None:
-    from host_brain.app import dependencies, obs_routes_stats_system as routes
+    from host_brain.composition import process_services as dependencies
+    from host_brain.app import obs_routes_stats_system as routes
     from host_brain.channels import embodiment
-    from host_brain.observability import health_device_projection as projection
+    from host_brain.app.observability_runtime import health_device_projection as projection
     from natsume_contracts.operator.v1 import ProjectionDegradedState
 
     async def _forbidden_command(**_kwargs):  # noqa: ANN003
@@ -91,8 +93,9 @@ def test_avatar_state_get_reads_projection_without_device_command(monkeypatch) -
 
 
 def test_llm_and_organ_gets_do_not_call_background_loaders(monkeypatch) -> None:
-    from host_brain.app import dependencies, obs_routes_health as routes
-    from host_brain.observability import health_device_projection as projection
+    from host_brain.composition import process_services as dependencies
+    from host_brain.app import obs_routes_health as routes
+    from host_brain.app.observability_runtime import health_device_projection as projection
 
     def _forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("GET must not call a projection source loader")

@@ -336,7 +336,7 @@ def persist_background_event_memory(
     life_store = life_memory_store
     if life_store is None:
         try:
-            from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
 
             life_store = get_life_memory_store()
         except Exception as exc:
@@ -400,7 +400,7 @@ def persist_background_event_memory(
     store = episodic_store
     if store is _DEFAULT_EPISODIC_STORE:
         try:
-            from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+            from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
 
             store = get_episodic_store()
         except Exception as exc:
@@ -601,7 +601,7 @@ def persist_life_action_event_memory(
     life_store = life_memory_store
     if life_store is None:
         try:
-            from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
 
             life_store = get_life_memory_store()
         except Exception as exc:
@@ -646,7 +646,7 @@ def persist_life_action_event_memory(
     store = episodic_store
     if store is _DEFAULT_EPISODIC_STORE:
         try:
-            from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+            from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
 
             store = get_episodic_store()
         except Exception as exc:
@@ -719,7 +719,7 @@ def persist_owner_directive_memory(
     store = life_memory_store
     if store is None:
         try:
-            from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
 
             store = get_life_memory_store()
         except Exception as exc:

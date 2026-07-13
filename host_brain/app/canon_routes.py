@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import json
-import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -24,7 +23,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from host_brain.canon.application import CanonApplicationService
-from host_brain.app.settings import get_persistence_settings
 from host_brain.core.errors import (
     CANON_SYNC_FAILED,
     WCANON_DOC_NOT_FOUND,
@@ -40,10 +38,7 @@ from host_brain.memory.canon_apply_service import (
     CANON_SUBJECT_PROPOSAL,
     CanonApplyCommand,
     CanonApplyError,
-    CanonApplyService,
-    resolve_world_canon_root,
 )
-from host_brain.persistence.canon_repository import CanonRepository
 
 _logger = logging.getLogger("Natsume.canon_routes")
 
@@ -57,56 +52,24 @@ router = APIRouter(prefix="/canon", tags=["canon"])
 # domain store; production composition injects one explicit application service.
 # ---------------------------------------------------------------------------
 _canon_service_provider: Optional[Any] = None
-_compat_canon_service: Optional[CanonApplicationService] = None
-_compat_canon_service_key: tuple[str, str] | None = None
-_canon_service_lock = threading.Lock()
-_ledger_provider: Optional[Any] = None
 
 
 def set_canon_service_provider(provider: Any) -> None:
     """Inject the production Canon application service provider."""
 
-    global _canon_service_provider, _compat_canon_service, _compat_canon_service_key
+    global _canon_service_provider
     if provider is not None and not callable(provider):
         raise TypeError("Canon service provider must be callable")
     _canon_service_provider = provider
-    _compat_canon_service = None
-    _compat_canon_service_key = None
-
-
-def set_ledger_provider(provider: Any) -> None:
-    """Compatibility wiring until router registry injects the Canon service."""
-    global _ledger_provider, _compat_canon_service, _compat_canon_service_key
-    _ledger_provider = provider
-    _compat_canon_service = None
-    _compat_canon_service_key = None
 
 
 def _get_canon_service() -> CanonApplicationService:
-    global _compat_canon_service, _compat_canon_service_key
-    if _canon_service_provider is not None:
-        service = _canon_service_provider()
-        if not isinstance(service, CanonApplicationService):
-            raise RuntimeError("Canon service provider returned an invalid service")
-        return service
-    if _ledger_provider is None:
+    if _canon_service_provider is None:
         raise RuntimeError("Canon application service is not configured")
-    ledger = _ledger_provider()
-    world_root = resolve_world_canon_root(
-        get_persistence_settings().world_canon_root
-    )
-    db_path = str(getattr(ledger, "canonical_db_path", "") or "")
-    key = (str(world_root), db_path)
-    if _compat_canon_service is None or _compat_canon_service_key != key:
-        with _canon_service_lock:
-            if _compat_canon_service is None or _compat_canon_service_key != key:
-                _compat_canon_service = CanonApplicationService(
-                    repository=CanonRepository(db_path),
-                    world_root=world_root,
-                    apply_service=CanonApplyService(world_root=world_root, ledger=ledger),
-                )
-                _compat_canon_service_key = key
-    return _compat_canon_service
+    service = _canon_service_provider()
+    if not isinstance(service, CanonApplicationService):
+        raise RuntimeError("Canon service provider returned an invalid service")
+    return service
 
 
 # ---------------------------------------------------------------------------

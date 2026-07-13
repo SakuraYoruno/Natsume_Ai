@@ -7,20 +7,21 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
-from host_brain.app.dependencies import get_ledger
-from host_brain.app.life_application_boundary import (
+from host_brain.composition.process_services import get_ledger
+from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
+from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     read_life_events,
     read_life_snapshot,
     submit_life_command,
 )
-from host_brain.digital_life.contracts import LifeDeliveryAuthorization
+from natsume_contracts.life import LifeDeliveryAuthorization
 from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
     canonical_proactive_intent_args,
     durable_governor_binding,
 )
-from host_brain.observability.remaining_query_projection import (
+from host_brain.app.observability_runtime.remaining_query_projection import (
     WORLD_SNAPSHOT_KIND,
     read as read_query_projection,
     response_meta,
@@ -46,15 +47,32 @@ def _life_projection_enabled() -> bool:
     return life_projection_enabled()
 
 
-def _state(person_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    snapshot = read_life_snapshot(str(person_id or "default"))
+def _state(
+    person_id: str,
+    *,
+    life: ProcessLifeContainer,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    snapshot = read_life_snapshot(
+        str(person_id or "default"),
+        reader=life.snapshot_reader,
+    )
     return snapshot, dict(snapshot.get("state") or {})
 
 
-def _recent_events(person_id: str, *, limit: int) -> list[dict[str, Any]]:
+def _recent_events(
+    person_id: str,
+    *,
+    limit: int,
+    life: ProcessLifeContainer,
+) -> list[dict[str, Any]]:
     # Reader order is canonical ASC.  Fetching up to the bounded journal maximum
     # and slicing here preserves the historical "most recent first" HTTP contract.
-    rows = read_life_events(person_id, after_sequence=0, limit=1000)
+    rows = read_life_events(
+        person_id,
+        after_sequence=0,
+        limit=1000,
+        reader=life.snapshot_reader,
+    )
     return list(reversed(rows[-max(1, int(limit or 1)) :]))
 
 
@@ -215,6 +233,7 @@ async def _submit_route_command(
     command_type: str,
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    life = PROCESS_LIFE_PROVIDER.require()
     body = dict(payload or {})
     person_id = str(body.get("person_id") or "default")
     body["person_id"] = person_id
@@ -233,6 +252,8 @@ async def _submit_route_command(
     )
     receipt = await asyncio.to_thread(
         submit_life_command,
+        service=life.command_service,
+        reader=life.snapshot_reader,
         command_type=command_type,
         person_id=person_id,
         payload=command_payload,
@@ -268,13 +289,13 @@ async def _submit_route_command(
 
 @router.get("/state")
 async def digital_life_state(person_id: str = Query("default")) -> dict[str, Any]:
-    _snapshot, state = _state(person_id)
+    _snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     return state
 
 
 @router.get("/runtime/health")
 async def digital_life_runtime_health(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     runtime = dict(state.get("runtime") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -291,7 +312,7 @@ async def digital_life_runtime_health(person_id: str = Query("default")) -> dict
 
 @router.get("/environment/current")
 async def digital_life_environment_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     return {
         "person_id": snapshot["person_id"],
         "environment": dict(state.get("environment") or {}),
@@ -305,8 +326,9 @@ async def digital_life_causality_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
-    snapshot, _state_payload = _state(person_id)
-    events = _recent_events(person_id, limit=limit)
+    life = PROCESS_LIFE_PROVIDER.require()
+    snapshot, _state_payload = _state(person_id, life=life)
+    events = _recent_events(person_id, limit=limit, life=life)
     return {
         "person_id": snapshot["person_id"],
         "items": events,
@@ -356,7 +378,7 @@ async def digital_life_world_snapshot(
 
 @router.get("/growth/state")
 async def digital_life_growth_state(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     growth = dict(state.get("self_growth") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -377,11 +399,12 @@ async def digital_life_learning_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    life = PROCESS_LIFE_PROVIDER.require()
+    snapshot, state = _state(person_id, life=life)
     learning = dict(state.get("learning_state") or {})
     events = [
         row
-        for row in _recent_events(person_id, limit=1000)
+        for row in _recent_events(person_id, limit=1000, life=life)
         if str(row.get("event_type") or "")
         in {"experience_ingest", "tick", "foreground_completed"}
     ][:limit]
@@ -424,7 +447,7 @@ async def digital_life_inner_drive_current(
     person_id: str = Query("default"),
     force: bool = Query(False),
 ) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     return {
         "status": "OK" if snapshot["version"] > 0 else "EMPTY",
         "reason_code": None if snapshot["version"] > 0 else "LIFE_SNAPSHOT_NOT_FOUND",
@@ -443,7 +466,7 @@ async def digital_life_inner_drive_current(
 
 @router.get("/embodiment/current")
 async def digital_life_embodiment_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     return {
         "person_id": snapshot["person_id"],
         "embodiment": dict(state.get("embodiment") or {}),
@@ -455,7 +478,7 @@ async def digital_life_embodiment_current(person_id: str = Query("default")) -> 
 
 @router.get("/action/current")
 async def digital_life_action_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     return {
         "person_id": snapshot["person_id"],
         "life_action": dict(state.get("life_action") or {}),
@@ -478,7 +501,11 @@ async def digital_life_proactive_recent(
 ) -> dict[str, Any]:
     events = [
         row
-        for row in _recent_events(person_id, limit=1000)
+        for row in _recent_events(
+            person_id,
+            limit=1000,
+            life=PROCESS_LIFE_PROVIDER.require(),
+        )
         if str(row.get("event_type") or "") == "proactive_attempt"
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}
@@ -486,7 +513,7 @@ async def digital_life_proactive_recent(
 
 @router.get("/organs/state")
 async def digital_life_organs_state(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id)
+    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
     organ = dict(state.get("organ_runtime") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -506,7 +533,11 @@ async def digital_life_experience_recent(
 ) -> dict[str, Any]:
     events = [
         row
-        for row in _recent_events(person_id, limit=1000)
+        for row in _recent_events(
+            person_id,
+            limit=1000,
+            life=PROCESS_LIFE_PROVIDER.require(),
+        )
         if str(row.get("event_type") or "") == "experience_ingest"
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}
@@ -526,7 +557,11 @@ async def digital_life_proactive_episodes_recent(
 ) -> dict[str, Any]:
     events = [
         row
-        for row in _recent_events(person_id, limit=1000)
+        for row in _recent_events(
+            person_id,
+            limit=1000,
+            life=PROCESS_LIFE_PROVIDER.require(),
+        )
         if str(row.get("event_type") or "") in {"proactive_attempt", "foreground_completed"}
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}

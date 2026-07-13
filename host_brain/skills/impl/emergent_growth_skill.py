@@ -20,8 +20,9 @@ def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> st
 class _EmergentGrowthModelPort:
     canonical_model_attempt_port = True
 
-    def __init__(self, *, request_id: str) -> None:
+    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
         self._request_id = str(request_id or "emergent-growth")
+        self._attempt_service = attempt_service
         self.last_trace: dict[str, Any] = {}
 
     def __call__(self, prompt: str) -> str:
@@ -32,6 +33,7 @@ class _EmergentGrowthModelPort:
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         result = complete_compiled_prompt_sync(
+            attempt_service=self._attempt_service,
             prompt_id=EMERGENT_GROWTH_PATTERN_PROMPT_ID,
             request_id=self._request_id,
             scene_type="EMERGENT_GROWTH",
@@ -47,31 +49,31 @@ class _EmergentGrowthModelPort:
 
 def _resolve_llm_fn(args: dict[str, Any], context: dict[str, Any] | None) -> Callable[[str], str] | None:
     candidate = (context or {}).get("emergent_growth_llm_fn")
-    if isinstance(candidate, _EmergentGrowthModelPort):
+    if callable(candidate):
         return candidate
-    try:
-        user_id = _resolve_user_id(args, context)
-        return _EmergentGrowthModelPort(
-            request_id=str((context or {}).get("request_id") or f"emergent_growth::{user_id}"),
-        )
-    except Exception:
+    attempt_service = (context or {}).get("model_attempt_service")
+    if attempt_service is None:
         return None
+    user_id = _resolve_user_id(args, context)
+    return _EmergentGrowthModelPort(
+        request_id=str((context or {}).get("request_id") or f"emergent_growth::{user_id}"),
+        attempt_service=attempt_service,
+    )
 
 
 def execute_emergent_growth_weekly(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
-    from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-
     user_id = _resolve_user_id(args, context)
     try:
         lookback_days = max(1, int((args or {}).get("lookback_days") or 7))
     except (TypeError, ValueError):
         lookback_days = 7
     llm_fn = _resolve_llm_fn(args, context)
-    if llm_fn is None:
+    prefrontal_agent = (context or {}).get("prefrontal_agent")
+    episodic_store = (context or {}).get("episodic_store")
+    if llm_fn is None or prefrontal_agent is None or episodic_store is None:
         return {
             "status": "SKIPPED",
             "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
@@ -82,10 +84,10 @@ def execute_emergent_growth_weekly(
         }
 
     result = dict(
-        get_prefrontal_agent().run_emergent_growth_weekly(
+        prefrontal_agent.run_emergent_growth_weekly(
             user_id=user_id,
             lookback_days=lookback_days,
-            episodic_store=get_episodic_store(),
+            episodic_store=episodic_store,
             llm_fn=llm_fn,
         )
         or {

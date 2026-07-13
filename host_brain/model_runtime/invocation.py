@@ -17,12 +17,7 @@ from host_brain.model_runtime.contracts import (
     PromptRef,
     RetryEvaluator,
 )
-
-
-def _model_attempt_service():  # noqa: ANN202
-    from host_brain.app.dependencies import get_model_attempt_service  # noqa: PLC0415
-
-    return get_model_attempt_service()
+from host_brain.model_runtime.model_attempt_service import ModelAttemptService
 
 
 def compiled_prompt_request(
@@ -54,6 +49,7 @@ def compiled_prompt_request(
 
 async def complete_compiled_prompt(
     *,
+    attempt_service: ModelAttemptService,
     prompt_id: str,
     messages: Sequence[Mapping[str, Any]],
     request_id: str,
@@ -77,11 +73,12 @@ async def complete_compiled_prompt(
         retry_evaluator=retry_evaluator,
         metadata=metadata,
     )
-    return await _model_attempt_service().complete(request)
+    return await attempt_service.complete(request)
 
 
 def complete_compiled_prompt_sync(
     *,
+    attempt_service: ModelAttemptService,
     prompt_id: str,
     messages: Sequence[Mapping[str, Any]],
     request_id: str,
@@ -105,7 +102,7 @@ def complete_compiled_prompt_sync(
         retry_evaluator=retry_evaluator,
         metadata=metadata,
     )
-    return _model_attempt_service().complete_sync(request)
+    return attempt_service.complete_sync(request)
 
 
 __all__ = [

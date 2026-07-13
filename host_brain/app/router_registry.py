@@ -17,13 +17,11 @@ from host_brain.app.bond_routes import (
 from host_brain.app.canon_routes import (
     router as canon_router,
     set_canon_service_provider as _set_canon_service_provider,
-    set_ledger_provider as _set_canon_ledger_provider,
 )
 from host_brain.app.health_routes import router as health_router
-from host_brain.app.input_routes import (
-    GovernedCommandApplicationProvider,
-    create_input_router,
-)
+from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.app.internal_agent_routes import router as internal_codex_router
 from host_brain.app.internal_security_immune_routes import router as internal_security_immune_router
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
@@ -59,16 +57,15 @@ def wire_route_providers(
     canon_service_provider: Callable[[], Any | None] | None = None,
 ) -> None:
     if canon_service_provider is None:
-        _set_canon_ledger_provider(get_ledger)
-    else:
-        _set_canon_service_provider(canon_service_provider)
+        raise RuntimeError("Canon composition provider is required")
+    _set_canon_service_provider(canon_service_provider)
     _set_tool_providers(
         broker_provider=get_tool_broker,
         catalog_provider=get_tool_catalog,
         ledger_provider=get_ledger,
     )
     _set_bond_engine_provider(get_bond_engine)
-    from host_brain.app.dependencies import get_bond_dynamics_writer  # noqa: PLC0415
+    from host_brain.composition.process_services import get_bond_dynamics_writer  # noqa: PLC0415
 
     _set_bond_writer_provider(get_bond_dynamics_writer)
 
@@ -76,6 +73,7 @@ def wire_route_providers(
 def register_host_routers(
     app: FastAPI,
     *,
+    input_runtime_ports: InputRuntimeApplicationPorts,
     obs_command_ingress_provider: ObsCommandIngressProvider | None = None,
     pentest_secure_run_composition_provider: (
         PentestSecureRunCompositionProvider | None
@@ -92,7 +90,7 @@ def register_host_routers(
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
 ) -> None:
     operator_query_gateway = OperatorQueryGateway.from_environment()
-    app.state.operator_query_gateway = operator_query_gateway
+
     async def require_internal_agent_authority(request: Request) -> Any:
         ingress = (
             internal_agent_ingress_provider()
@@ -180,6 +178,7 @@ def register_host_routers(
     app.include_router(agent_router)
     app.include_router(
         create_input_router(
+            application_ports=input_runtime_ports,
             governed_command_application_provider=(
                 governed_command_application_provider
             ),

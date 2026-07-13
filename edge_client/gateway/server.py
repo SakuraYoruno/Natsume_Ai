@@ -33,7 +33,6 @@ from edge_client.gateway.delivery_runtime import (
 from edge_client.gateway.models import MsgType, Platform
 from edge_client.gateway.normalizer import MessageNormalizer
 from edge_client.gateway.outbound import ReplyPayloadRejected, sanitize_reply_payload
-from edge_client.gateway.router import GatewayRouter
 from edge_client.gateway.webhook_security import (
     RawWebhookEnvelope,
     VerifierRegistry,
@@ -334,20 +333,8 @@ def _delivery_rejection(exc: Exception, *, status_code: int = 503) -> JSONRespon
     )
 
 
-def _shadow_rejection() -> JSONResponse:
-    return JSONResponse(
-        status_code=503,
-        content={
-            "status": "shadow_observed",
-            "reason_code": "GW_TRANSPORT_SHADOW_ONLY",
-            "detail": "request verified in SHADOW but was not acknowledged or persisted",
-        },
-    )
-
-
 def create_gateway_app(
     *,
-    router: GatewayRouter,
     normalizer: MessageNormalizer | None = None,
     adapters: dict[str, Any] | None = None,
     outbound: Any | None = None,
@@ -358,7 +345,6 @@ def create_gateway_app(
     """创建 Gateway FastAPI 应用。
 
     Args:
-        router: GatewayRouter 实例（必填）
         normalizer: MessageNormalizer 实例，None 时使用默认配置
         adapters: {platform_value: AbstractPlatformAdapter} 字典
         outbound: OutboundDispatcher 实例（Phase 2 接入）
@@ -416,7 +402,7 @@ def create_gateway_app(
             return _delivery_rejection(
                 GatewayDeliveryError(
                     GW_TRANSPORT_DISABLED,
-                    "new HTTP webhook intake is disabled in LEGACY_DRAIN",
+                    "durable HTTP webhook intake is disabled",
                 ),
                 status_code=503,
             )
@@ -443,7 +429,12 @@ def create_gateway_app(
             logger.warning("Gateway webhook verification rejected platform=%s reason=%s", normalized_platform, exc.reason_code)
             return _security_rejection(exc)
         if not _delivery.intake_enabled:
-            return _shadow_rejection()
+            return _delivery_rejection(
+                GatewayDeliveryError(
+                    GW_TRANSPORT_DISABLED,
+                    "durable HTTP webhook intake is disabled",
+                )
+            )
 
         try:
             parsed = json.loads(
@@ -683,7 +674,7 @@ def create_gateway_app(
             return _delivery_rejection(
                 GatewayDeliveryError(
                     GW_TRANSPORT_DISABLED,
-                    "new HTTP webhook intake is disabled in LEGACY_DRAIN",
+                    "durable HTTP webhook intake is disabled",
                 )
             )
         try:
@@ -696,7 +687,12 @@ def create_gateway_app(
         except WebhookVerificationError as exc:
             return _security_rejection(exc)
         if not _delivery.intake_enabled:
-            return _shadow_rejection()
+            return _delivery_rejection(
+                GatewayDeliveryError(
+                    GW_TRANSPORT_DISABLED,
+                    "durable HTTP webhook intake is disabled",
+                )
+            )
         claims = dict(verified.claims or {})
         if (
             claims.get("url_verification") is not True
@@ -742,7 +738,7 @@ def create_gateway_app(
             return _delivery_rejection(
                 GatewayDeliveryError(
                     GW_TRANSPORT_DISABLED,
-                    "new HTTP reply intake is disabled in LEGACY_DRAIN",
+                    "durable HTTP reply intake is disabled",
                 )
             )
         raw_body = await request.body()
@@ -761,7 +757,12 @@ def create_gateway_app(
         except WebhookVerificationError as exc:
             return _security_rejection(exc)
         if not _delivery.intake_enabled:
-            return _shadow_rejection()
+            return _delivery_rejection(
+                GatewayDeliveryError(
+                    GW_TRANSPORT_DISABLED,
+                    "durable HTTP reply intake is disabled",
+                )
+            )
 
         try:
             parsed = json.loads(

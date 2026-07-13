@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.agent_runtime import AgentRuntimeExecutor
+from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 

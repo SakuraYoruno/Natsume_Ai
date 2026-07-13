@@ -139,7 +139,7 @@ def _is_direct_affection_turn(user_message: str) -> bool:
 
 
 def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[str, Any]:
-    from host_brain.app.dependencies import (
+    from host_brain.composition.process_services import (
         get_bond_aware_style_engine,
         get_meta_learning_loop,
         get_multimodal_processor,
@@ -208,13 +208,20 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
         _smi: Any = None
         _mt: Any = None
         try:
-            from host_brain.app.dependencies import get_shared_memory_index, get_milestone_tracker  # noqa: PLC0415
+            from host_brain.composition.process_services import get_shared_memory_index, get_milestone_tracker  # noqa: PLC0415
             _smi = get_shared_memory_index()
             _mt = get_milestone_tracker()
         except (ImportError, AttributeError):
             pass
         if _smi is not None:
-            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt, use_llm=True)
+            from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
+
+            _bnl = BondNarrativeLayer(
+                memory_index=_smi,
+                milestone_tracker=_mt,
+                use_llm=True,
+                model_attempt_service=get_model_attempt_service(),
+            )
             _uid = str(getattr(runtime_input, "user_id", "") or "default")
             _bn_result = _bnl.build_narrative(user_id=_uid, bond_stage=bond_stage)
             _shared_memory_hints = [
@@ -345,7 +352,7 @@ def apply_response_intelligence(
     render_lang: str,
     allow_rewrite: bool = True,
 ) -> tuple[str, dict[str, Any]]:
-    from host_brain.app.dependencies import (
+    from host_brain.composition.process_services import (
         get_meta_learning_loop,
         get_multimodal_processor,
         get_reflection_chain,
@@ -457,7 +464,7 @@ def resolve_tts_route(
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    from host_brain.app.dependencies import get_meta_learning_loop, get_tts_context_router
+    from host_brain.composition.process_services import get_meta_learning_loop, get_tts_context_router
 
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
     bond_stage = str((bond_summary or {}).get("stage") or "FRIEND").strip().upper() or "FRIEND"
@@ -556,7 +563,7 @@ def _build_skill_execution_context(runtime_input: Any) -> dict[str, Any]:
 
 
 def _build_safe_skill_runners(*, runtime_input: Any) -> tuple[dict[str, Any], list[str]]:
-    from host_brain.app.dependencies import get_skill_registry
+    from host_brain.composition.process_services import get_skill_registry
 
     registry = get_skill_registry()
     context = _build_skill_execution_context(runtime_input)

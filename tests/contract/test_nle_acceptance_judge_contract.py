@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from host_brain.agent_runtime.acceptance_judge import (
+from host_brain.contracts.agent_runtime.acceptance_judge import (
     ACCEPTANCE_CRITERION_FAILED,
     AcceptanceCriterionStatus,
     AcceptanceDecision,
@@ -82,6 +82,9 @@ def test_t_nle_09_running_execution_never_accepts_matching_output() -> None:
 
 def test_t_nle_09_executor_attaches_acceptance_judgement(monkeypatch, tmp_path: Path) -> None:
     class FakeAgentExecutor:
+        def __init__(self, **_ports) -> None:  # noqa: ANN003
+            pass
+
         def execute(self, order, *, workspace: Path) -> AgentResult:
             return AgentResult(
                 status="EXECUTED",
@@ -94,7 +97,11 @@ def test_t_nle_09_executor_attaches_acceptance_judgement(monkeypatch, tmp_path: 
 
     monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
 
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
+    result = AgentRuntimeExecutor(
+        artifact_store=AgentArtifactStore(tmp_path / "runs"),
+        model_attempt_service=object(),
+        prompt_registry=object(),
+    ).execute(
         {
             "work_order_id": "wo-accept",
             "domain": "code",

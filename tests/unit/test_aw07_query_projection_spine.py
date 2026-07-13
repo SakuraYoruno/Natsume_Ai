@@ -9,7 +9,7 @@ import pytest
 
 from host_brain.app.obs_routes_trace import get_trace
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.observability.projection_runtime import ProjectionOperatorReadModelService
+from host_brain.app.observability_runtime.projection_runtime import ProjectionOperatorReadModelService
 from host_brain.observability.projection_store import (
     PROJECTION_CURSOR_CONFLICT,
     PROJECTION_CURSOR_REGRESSION,
@@ -19,7 +19,7 @@ from host_brain.observability.projection_store import (
     digest_json,
 )
 from host_brain.observability.projection_worker import ProjectionSource, QueryProjectionWorker
-from host_brain.observability.session_query import SessionQueryService
+from host_brain.app.observability_runtime.session_query import SessionQueryService
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 
@@ -121,7 +121,7 @@ def test_two_store_instances_compete_on_durable_lease_and_stale_fence_cannot_wri
 
 
 def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_path, monkeypatch):
-    from host_brain.observability import projection_daemon
+    from host_brain.app.observability_runtime import projection_daemon
 
     now = [1000]
     db_path = tmp_path / "projection-daemon.sqlite3"
@@ -181,7 +181,7 @@ def test_task_session_and_trace_gets_never_call_source_loader(tmp_path, monkeypa
     ledger.fetch_by_time_range.assert_not_called()
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_query_projection_store",
+        "host_brain.composition.process_services.get_query_projection_store",
         lambda: store,
     )
     monkeypatch.setattr(
@@ -216,7 +216,7 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
 
     store = _store(tmp_path)
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_query_projection_store",
+        "host_brain.composition.process_services.get_query_projection_store",
         lambda: store,
     )
     forbidden = Mock(side_effect=AssertionError("GET/SSE touched a source"))
@@ -297,9 +297,9 @@ def test_projection_get_handlers_have_no_source_builder_calls():
 
 
 def test_embodiment_receipt_observer_projects_secret_free_device_status(tmp_path, monkeypatch):
-    from host_brain.app import dependencies
+    from host_brain.composition import process_services as dependencies
     from host_brain.channels import embodiment
-    from host_brain.observability import projection_runtime
+    from host_brain.app.observability_runtime import projection_runtime
     from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
 
     store = _store(tmp_path)

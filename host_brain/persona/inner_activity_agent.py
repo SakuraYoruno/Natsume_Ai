@@ -244,6 +244,8 @@ def generate_inner_activity_note(
     inner_state: Mapping[str, Any] | None,
     now_ms: int,
     topic_phrase: str = "",
+    model_attempt_service: Any = None,
+    prompt_registry: Any = None,
 ) -> tuple[str, str, str, dict[str, Any]]:
     """Generate one inner activity note via standalone inner-activity agent.
 
@@ -252,6 +254,8 @@ def generate_inner_activity_note(
     """
     if not _inner_activity_llm_enabled():
         return "", "", _inner_activity_llm_disabled_reason(), {}
+    if model_attempt_service is None or prompt_registry is None:
+        return "", "", "INNER_ACTIVITY_MODEL_PORT_NOT_COMPOSED", {}
 
     timeout_ms = max(
         800,
@@ -473,6 +477,8 @@ def generate_inner_activity_note(
             system_prompt=system_prompt,
             model_attempt_sink=model_attempt_trace,
             retry_evaluator=_evaluate_inner_activity,
+            model_attempt_service=model_attempt_service,
+            prompt_registry=prompt_registry,
         )
     except Exception as exc:
         return "", "", f"INNER_ACTIVITY_LLM_ERROR:{str(exc)[:96]}", {
@@ -954,11 +960,9 @@ def _run_inner_activity_llm(
     system_prompt: str,
     model_attempt_sink: dict[str, Any] | None = None,
     retry_evaluator: Any | None = None,
+    model_attempt_service: Any,
+    prompt_registry: Any,
 ) -> str:
-    from host_brain.app.dependencies import (  # noqa: PLC0415
-        get_model_attempt_service,
-        get_prompt_registry,
-    )
     from host_brain.model_runtime import (  # noqa: PLC0415
         ModelAttemptRequest,
         OutputContract,
@@ -978,8 +982,8 @@ def _run_inner_activity_llm(
         variables={"messages": tuple(messages)},
         output_contract=OutputContract(kind="json_object"),
     )
-    get_prompt_registry().render(prompt_ref)
-    result = get_model_attempt_service().complete_sync(
+    prompt_registry.render(prompt_ref)
+    result = model_attempt_service.complete_sync(
         ModelAttemptRequest(
             request_id=request_id,
             scene_type="INNER_ACTIVITY",

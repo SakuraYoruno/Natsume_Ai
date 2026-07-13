@@ -17,6 +17,7 @@ from host_brain.model_runtime.contracts import (
 from host_brain.model_runtime.model_attempt_service import ModelAttemptService
 from host_brain.model_runtime.prompt_registry import PromptRegistry
 from host_brain.model_runtime.provider_adapters import ProviderAdapterRegistry
+from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.route_policy import RejectingRoutePolicy
 
 
@@ -55,6 +56,7 @@ class LedgerAttemptAuditRepository:
 class ModelRuntimeComposition:
     prompt_registry: PromptRegistry
     route_policy: RoutePolicy
+    route_catalog: ServerRouteCatalog | None
     provider_adapters: ProviderAdapterRegistry
     audit_repository: AttemptAuditRepository
     attempt_service: ModelAttemptService
@@ -64,6 +66,7 @@ def build_model_runtime_composition(
     *,
     prompt_registry: PromptRegistry | None = None,
     route_policy: RoutePolicy | None = None,
+    route_catalog: ServerRouteCatalog | None = None,
     provider_adapters: ProviderAdapterRegistry | Iterable[ProviderAdapter] | None = None,
     audit_repository: AttemptAuditRepository | None = None,
     ledger: Any | None = None,
@@ -96,6 +99,7 @@ def build_model_runtime_composition(
     return ModelRuntimeComposition(
         prompt_registry=registry,
         route_policy=resolved_route_policy,
+        route_catalog=route_catalog,
         provider_adapters=adapters,
         audit_repository=audit,
         attempt_service=service,

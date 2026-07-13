@@ -27,7 +27,7 @@ from host_brain.agent_runtime.agent_tools import (
     is_tool_allowed_for_run_mode,
 )
 from host_brain.agent_runtime.result_contract import AgentResult
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.core.trace_redaction import (
     build_redacted_trace,
     build_redacted_trace_step,
@@ -370,7 +370,9 @@ class AgentExecutor:
     scene=NATSUME_AGENT 和 run_mode 对应 tier 接入。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, model_attempt_service: Any, prompt_registry: Any) -> None:
+        self._model_attempt_service = model_attempt_service
+        self._prompt_registry = prompt_registry
         self._max_steps = _env_int(
             "HOST_NATSUME_AGENT_MAX_STEPS",
             default=_DEFAULT_MAX_STEPS,
@@ -429,11 +431,6 @@ class AgentExecutor:
         )
 
         # 3. ReAct 循环
-        from host_brain.app.dependencies import (  # noqa: PLC0415
-            get_model_attempt_service,
-            get_prompt_registry,
-        )
-
         steps: list[AgentStep] = []
         model_attempt_traces: list[dict[str, Any]] = []
         final_answer = ""
@@ -465,11 +462,11 @@ class AgentExecutor:
 
             try:
                 prompt_ref = build_agent_model_prompt_ref(
-                    get_prompt_registry(),
+                    self._prompt_registry,
                     prompt_id=AGENT_REACT_PROMPT_ID,
                     messages=messages,
                 )
-                attempt_result = get_model_attempt_service().complete_sync(
+                attempt_result = self._model_attempt_service.complete_sync(
                     ModelAttemptRequest(
                         request_id=f"{request_id}:agent-step:{step_num}",
                         scene_type=_NATSUME_AGENT_SCENE,

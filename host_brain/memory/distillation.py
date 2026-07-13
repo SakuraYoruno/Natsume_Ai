@@ -16,14 +16,15 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import now_ms, new_request_id
 from host_brain.integrations.codex_cli_provider import resolve_codex_cli_model
 from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
 from host_brain.model_runtime.live_prompts import MEMORY_DISTILLATION_PROMPT_ID
 from host_brain.memory.episodic import EpisodicStore
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 DEFAULT_CODEX_DISTILLATION_MODEL = "gpt-5.5"
@@ -44,7 +45,7 @@ class LlmSummaryClient(Protocol):
 
 
 def _load_distillation_llm_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("memory_distillation.llm_summary.prompt")
+    raw = resolve_prompt_contract_json("memory_distillation.llm_summary.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -73,11 +74,13 @@ class PoolSummaryClient:
         cognitive_tier: str = "B",
         timeout_ms: int = 2600,
         render_target_lang: str = "zh",
+        model_attempt_service: Any,
     ) -> None:
         self._scene_type = str(scene_type or "MEMORY_DISTILLATION").strip().upper() or "MEMORY_DISTILLATION"
         self._cognitive_tier = str(cognitive_tier or "B").strip().upper() or "B"
         self._timeout_ms = max(800, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+        self._model_attempt_service = model_attempt_service
 
     def summarize(
         self,
@@ -115,6 +118,7 @@ class PoolSummaryClient:
             max_tokens=max(64, min(int(max_tokens or 200), 400)),
         )
         result = complete_compiled_prompt_sync(
+            attempt_service=self._model_attempt_service,
             prompt_id=MEMORY_DISTILLATION_PROMPT_ID,
             request_id=new_request_id(),
             scene_type=self._scene_type,
@@ -147,10 +151,12 @@ class CodexCliSummaryClient:
         model_id: str | None = None,
         timeout_ms: int = 120_000,
         render_target_lang: str = "zh",
+        model_attempt_service: Any,
     ) -> None:
         del model_id
         self._timeout_ms = max(5_000, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+        self._model_attempt_service = model_attempt_service
 
     def summarize(
         self,
@@ -184,6 +190,7 @@ class CodexCliSummaryClient:
             "请输出 JSON：{\"summary\":\"...\"}"
         )
         result = complete_compiled_prompt_sync(
+            attempt_service=self._model_attempt_service,
             prompt_id=MEMORY_DISTILLATION_PROMPT_ID,
             request_id=new_request_id(),
             scene_type="MEMORY_DISTILLATION_BACKGROUND",
@@ -234,12 +241,14 @@ def build_default_llm_summary_client(
     *,
     render_target_lang: str = "zh",
     timeout_ms: int = 2600,
+    model_attempt_service: Any,
 ) -> LlmSummaryClient:
     return PoolSummaryClient(
         scene_type="MEMORY_DISTILLATION",
         cognitive_tier="B",
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
+        model_attempt_service=model_attempt_service,
     )
 
 
@@ -248,11 +257,13 @@ def build_codex_cli_summary_client(
     model_id: str | None = None,
     render_target_lang: str = "zh",
     timeout_ms: int = 120_000,
+    model_attempt_service: Any,
 ) -> LlmSummaryClient:
     return CodexCliSummaryClient(
         model_id=model_id,
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
+        model_attempt_service=model_attempt_service,
     )
 
 

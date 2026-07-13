@@ -8,9 +8,11 @@ from typing import Any
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.surface_reply_preprocessor import _build_deterministic_sub_agent_reply
 from host_brain.app.surface_main_chain_adapter import (
+    surface_main_chain_sse_generator,
+)
+from host_brain.surface_runtime.eligibility import (
     surface_main_chain_enabled,
     surface_main_chain_required,
-    surface_main_chain_sse_generator,
 )
 
 

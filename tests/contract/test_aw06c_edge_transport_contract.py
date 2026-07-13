@@ -51,6 +51,9 @@ def test_session_lease_wire_contract_and_command_fence_binding() -> None:
 def test_edge_transport_runtime_is_host_independent_and_owns_durable_semantics() -> None:
     path = ROOT / "edge_client/gateway/embodiment_runtime.py"
     source = path.read_text(encoding="utf-8")
+    persistence_source = (
+        ROOT / "edge_client/persistence/sqlite.py"
+    ).read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     imports = []
     for node in ast.walk(tree):
@@ -60,7 +63,9 @@ def test_edge_transport_runtime_is_host_independent_and_owns_durable_semantics()
             imports.append(str(node.module or ""))
 
     assert not any(name == "host_brain" or name.startswith("host_brain.") for name in imports)
-    assert "BEGIN IMMEDIATE" in source
+    assert "BEGIN IMMEDIATE" in persistence_source
+    assert "sqlite3.connect" not in source
+    assert "EdgeSqliteDatabase(" in source
     assert "DISPATCHING" in source
     assert "IN_DOUBT" in source
     assert "fencing_token" in source
@@ -70,10 +75,15 @@ def test_edge_transport_runtime_is_host_independent_and_owns_durable_semantics()
 
 def test_production_endpoint_and_host_port_use_session_fenced_durable_runtime() -> None:
     endpoint = (ROOT / "edge_client/app/fastapi_app.py").read_text(encoding="utf-8")
+    migration = (ROOT / "edge_client/gateway/migration_runner.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "edge_client/gateway/embodiment_runtime.py").read_text(encoding="utf-8")
     host_port = (ROOT / "host_brain/channels/embodiment.py").read_text(encoding="utf-8")
 
     assert '@app.post("/v1/edge/embodiment/session")' in endpoint
     assert "SQLiteEdgeEmbodimentStore(" in endpoint
+    assert "apply_edge_gateway_migrations(" in endpoint
+    assert "CREATE TABLE" not in runtime
+    assert "executescript" in migration
     assert "DurableEmbodimentRuntime(" in endpoint
     assert "transport_runtime.execute(" in endpoint
     assert "embodiment_receipts" not in endpoint

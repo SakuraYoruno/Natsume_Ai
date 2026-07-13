@@ -32,6 +32,26 @@ class PredicateCapabilityPolicy:
         return issue_grant(request, now_ms=now_ms, approved=allowed, reason_code=reason, authority_ref=authority_ref)
 
 
+class DescriptorCapabilityPolicy:
+    """Dispatch authorization through the policy explicitly bound to a descriptor.
+
+    This is the production broker policy.  It keeps one durable execution
+    authority while allowing Graph, Skill, MCP and Domain capabilities to
+    retain their distinct, fail-closed admission rules.
+    """
+
+    def authorize(self, request: CapabilityRequest, descriptor: CapabilityDescriptor, *, now_ms: int) -> CapabilityGrant:
+        policy = descriptor.authorization_policy
+        if policy is None:
+            return issue_grant(
+                request,
+                now_ms=now_ms,
+                approved=False,
+                reason_code="CAPABILITY_POLICY_NOT_COMPOSED",
+            )
+        return policy.authorize(request, descriptor, now_ms=now_ms)
+
+
 class GovernorToolCapabilityPolicy:
     def __init__(self, governor: Any, *, rules_provider: Callable[[], Mapping[str, Any]] | None = None) -> None:
         self._governor = governor
@@ -56,4 +76,9 @@ class GovernorToolCapabilityPolicy:
         )
 
 
-__all__ = ["GovernorToolCapabilityPolicy", "PredicateCapabilityPolicy", "issue_grant"]
+__all__ = [
+    "DescriptorCapabilityPolicy",
+    "GovernorToolCapabilityPolicy",
+    "PredicateCapabilityPolicy",
+    "issue_grant",
+]

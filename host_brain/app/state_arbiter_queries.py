@@ -87,7 +87,7 @@ async def _resolve_state_arbiter_world_fact(
         "fact_key": "world_canon_facts",
     }
     try:
-        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+        from host_brain.composition.process_services import get_state_arbiter  # noqa: PLC0415
 
         arbiter = get_state_arbiter()
         result = await arbiter.resolve("world_canon_facts", session_id=session_id)
@@ -224,7 +224,7 @@ async def _resolve_state_arbiter_episodic_fact(
         "fact_key": "episodic_latest",
     }
     try:
-        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
+        from host_brain.composition.process_services import get_state_arbiter  # noqa: PLC0415
 
         arbiter = get_state_arbiter()
         result = await arbiter.resolve("episodic_latest", session_id=session_id)

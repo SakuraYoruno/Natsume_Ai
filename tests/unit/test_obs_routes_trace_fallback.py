@@ -26,7 +26,7 @@ def _projection_only_runtime(tmp_path, monkeypatch):
     assert migrated.success, migrated
     store = QueryProjectionStore(db_path)
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_query_projection_store",
+        "host_brain.composition.process_services.get_query_projection_store",
         lambda: store,
     )
 

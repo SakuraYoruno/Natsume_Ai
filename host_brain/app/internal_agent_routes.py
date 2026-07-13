@@ -10,12 +10,9 @@ from typing import Any, Mapping
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from host_brain.agent_runtime import (
-    AgentWorkOrder,
-    ReviewItem,
-    ReviewStore,
-    ReviewStoreError,
-)
+from host_brain.contracts.agent_runtime.review_policy import ReviewItem
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.internal_task_runtime import (
     GovernedInternalRuntimeError,
@@ -265,7 +262,7 @@ def _persist_owner_directive_from_payload(
 
     store = None
     try:
-        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
 
         store = get_life_memory_store()
     except Exception:
@@ -299,7 +296,7 @@ def _persist_owner_directive_from_payload(
     }
     if directive.get("distill") and memory.get("status") == "OK" and store is not None:
         try:
-            from host_brain.memory.life_memory import LifeMemoryConsolidator  # noqa: PLC0415
+            from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator  # noqa: PLC0415
 
             result["distillation"] = LifeMemoryConsolidator(store=store).distill_semantic_memories(
                 limit=80,

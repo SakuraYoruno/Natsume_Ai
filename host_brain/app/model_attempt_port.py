@@ -38,7 +38,10 @@ def complete_compiled_model_sync(
     foreground: bool = False,
     metadata: Mapping[str, Any] | None = None,
 ) -> CompiledModelCompletion:
+    from host_brain.composition.process_services import get_model_attempt_service
+
     result = complete_compiled_prompt_sync(
+        attempt_service=get_model_attempt_service(),
         prompt_id=prompt_id,
         messages=messages,
         request_id=request_id,
@@ -62,7 +65,10 @@ async def complete_compiled_model(
     foreground: bool = False,
     metadata: Mapping[str, Any] | None = None,
 ) -> CompiledModelCompletion:
+    from host_brain.composition.process_services import get_model_attempt_service
+
     result = await complete_compiled_prompt(
+        attempt_service=get_model_attempt_service(),
         prompt_id=prompt_id,
         messages=messages,
         request_id=request_id,

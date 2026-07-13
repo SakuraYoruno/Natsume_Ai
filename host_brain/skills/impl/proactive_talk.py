@@ -117,15 +117,20 @@ def _render_policy_blocks_proactive(render_policy: Mapping[str, Any] | None) -> 
     return not bool(policy.get("allow_proactive_after_reply", True))
 
 
-def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str, Any] | None) -> str:
+def _apply_render_policy_to_proactive_text(
+    text: str,
+    render_policy: Mapping[str, Any] | None,
+    *,
+    hard_guard: Any = None,
+) -> str:
     normalized = str(text or "").strip()
     policy = _coerce_render_policy(render_policy)
     if not normalized or not policy:
         return normalized
     try:
-        from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard  # noqa: PLC0415
-
-        guarded = _apply_render_policy_hard_guard(normalized, policy)
+        if not callable(hard_guard):
+            raise RuntimeError("RENDER_POLICY_HARD_GUARD_NOT_COMPOSED")
+        guarded = hard_guard(normalized, policy)
         intimacy_ceiling = float(policy.get("intimacy_ceiling", 1.0) or 1.0)
         if intimacy_ceiling <= 0.35 and any(marker in str(guarded or "") for marker in ("亲爱的", "宝贝", "宝宝", "抱抱", "亲亲")):
             return "你先缓一缓。"
@@ -578,7 +583,11 @@ def execute_proactive_talk(
                 scene_awareness=scene_awareness,
             )
 
-    greeting = _apply_render_policy_to_proactive_text(greeting, render_policy)
+    greeting = _apply_render_policy_to_proactive_text(
+        greeting,
+        render_policy,
+        hard_guard=ctx.get("render_policy_hard_guard"),
+    )
 
     if not greeting.strip():
         return {

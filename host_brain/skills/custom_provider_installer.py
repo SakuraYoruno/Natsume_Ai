@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import ast
-import importlib
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,10 +63,9 @@ def build_provider_module_name(filename: str) -> str:
 
 
 def invalidate_provider_module(filename: str) -> str:
-    module_name = build_provider_module_name(filename)
-    importlib.invalidate_caches()
-    sys.modules.pop(module_name, None)
-    return module_name
+    """Return the retired module identity without mutating Python import state."""
+
+    return build_provider_module_name(filename)
 
 
 def validate_provider_source(source_code: str, *, filename: str) -> None:
@@ -77,7 +74,6 @@ def validate_provider_source(source_code: str, *, filename: str) -> None:
         raise ValueError("source_code is required")
     try:
         tree = ast.parse(source, filename=filename)
-        compile(tree, filename, "exec")
     except SyntaxError as exc:
         raise ValueError(f"provider source syntax error: {exc.msg} (line {exc.lineno})") from exc
 

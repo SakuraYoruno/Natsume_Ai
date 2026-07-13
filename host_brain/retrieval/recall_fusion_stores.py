@@ -172,11 +172,10 @@ def search_life_episode(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Route 0: life_episode SSOT recall with evidence and correction state."""
-    if self.ledger is None:
-        raise RuntimeError("life episode ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_episode_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life episode store unavailable")
+    packet = store.recall_episode_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,
@@ -197,11 +196,10 @@ def search_life_memory_collection(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Collection-level recall for repeated lived experiences."""
-    if self.ledger is None:
-        raise RuntimeError("life memory collection ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_collection_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life memory collection store unavailable")
+    packet = store.recall_collection_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,
@@ -221,11 +219,10 @@ def search_life_memory_entity(
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Entity-level recall for repeated items inside lived collections."""
-    if self.ledger is None:
-        raise RuntimeError("life memory entity ledger unavailable")
-    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-    packet = LifeMemoryStore(ledger=self.ledger).recall_entity_packet(
+    store = getattr(self, "life_memory_store", None)
+    if store is None:
+        raise RuntimeError("life memory entity store unavailable")
+    packet = store.recall_entity_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,

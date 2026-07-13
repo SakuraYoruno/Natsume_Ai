@@ -1,4 +1,4 @@
-﻿"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
+"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
 
 包含：GET/POST /obs/sys-mode / history / auto-rules / event
 """
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_host_proxy import fetch_host_json
-from host_brain.observability.live_source_projection import (
+from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_HISTORY_KEY,
     SYS_MODE_HISTORY_KIND,
     SYS_MODE_MAX_AGE_MS,
@@ -23,12 +23,13 @@ from host_brain.observability.live_source_projection import (
     SYS_MODE_STATUS_KIND,
     read_operator_live_projection,
 )
-from host_brain.observability.process_state_projection import (
+from host_brain.app.observability_runtime.process_state_projection import (
     RUNTIME_MAX_AGE_MS,
     RUNTIME_SNAPSHOT_KEY,
     RUNTIME_SNAPSHOT_KIND,
     read_process_projection,
 )
+from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -50,31 +51,6 @@ import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
 _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
 _RUNTIME_SNAPSHOT_CACHE_TTL_MS = _env_int("OBS_RUNTIME_SNAPSHOT_CACHE_TTL_MS", 2500, minimum=0)
-_RUNTIME_SNAPSHOT_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_runtime_snapshot_warm_enabled
-)
-_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS = _env_int(
-    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS",
-    15000,
-    minimum=1000,
-)
-_RUNTIME_SNAPSHOT_WARM_STALE_MS = _env_int(
-    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_STALE_MS",
-    max(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS * 3, 45000),
-    minimum=2000,
-)
-_runtime_snapshot_warm_thread: threading.Thread | None = None
-_runtime_snapshot_warm_stop = threading.Event()
-_runtime_snapshot_warm_lock = threading.Lock()
-_runtime_snapshot_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
 
 
 def _sync_obs_routes_compat_handles() -> None:
@@ -103,7 +79,7 @@ def _get_mode_transition_service():
 
         try:
             from host_brain.core.mode_transition import ModeTransitionService
-            from host_brain.app.dependencies import (
+            from host_brain.composition.process_services import (
                 get_hard_state as _dep_get_hard_state,
                 set_sys_mode as _dep_set_sys_mode,
             )
@@ -155,7 +131,7 @@ class _FallbackModeService:
             return {"success": False, "error": f"invalid mode: {target}"}
         # 优先通过 set_sys_mode 切换（保持 _hard_state 一致性）
         try:
-            from host_brain.app.dependencies import set_sys_mode as _dep_set  # noqa: PLC0415
+            from host_brain.composition.process_services import set_sys_mode as _dep_set  # noqa: PLC0415
             result = _dep_set(target)
             return {
                 "success": True,
@@ -291,22 +267,19 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-def _clone_runtime_snapshot_response(
-    value: "DigitalLifeRuntimeSnapshotResponse",
-) -> "DigitalLifeRuntimeSnapshotResponse":
-    if hasattr(value, "model_copy"):
-        return value.model_copy(deep=True)
-    return value.copy(deep=True)
-
-
-def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse:
-    from host_brain.app.http_hooks_runtime_helpers import (  # noqa: PLC0415
-        _build_background_runtime_snapshot,
-        build_digital_life_runtime_snapshot,
-    )
+def _build_runtime_snapshot_response(
+    current_topic: str,
+    *,
+    lifecycle_ports: LifecycleRuntimeApplicationPorts,
+) -> DigitalLifeRuntimeSnapshotResponse:
+    from host_brain.lifecycle_runtime.background_projection import _build_background_runtime_snapshot  # noqa: PLC0415
+    from host_brain.lifecycle_runtime.runtime_snapshot import build_digital_life_runtime_snapshot  # noqa: PLC0415
 
     service = _get_mode_transition_service()
-    payload = build_digital_life_runtime_snapshot(current_topic=current_topic)
+    payload = build_digital_life_runtime_snapshot(
+        ports=lifecycle_ports,
+        current_topic=current_topic,
+    )
     host_scheduler_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
     if host_scheduler_snapshot is not None:
         try:
@@ -335,110 +308,6 @@ def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSn
         slot_status["sys_mode_status"] = "live"
         payload["slot_status"] = slot_status
     return DigitalLifeRuntimeSnapshotResponse(**payload)
-
-
-def _refresh_runtime_snapshot_warm_once() -> None:
-    started_at = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="runtime_snapshot")
-        if deferred:
-            with _runtime_snapshot_warm_lock:
-                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
-                _runtime_snapshot_warm_state["last_duration_ms"] = 0
-            return
-        acquired, reason = try_acquire_obs_warm_slot(task_name="runtime_snapshot")
-        if not acquired:
-            with _runtime_snapshot_warm_lock:
-                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
-                _runtime_snapshot_warm_state["last_duration_ms"] = 0
-            return
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = _build_runtime_snapshot_response("")
-    except Exception as exc:
-        with _runtime_snapshot_warm_lock:
-            _runtime_snapshot_warm_state["last_error"] = str(exc)[:200]
-            _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        logger.warning("runtime snapshot warm refresh degraded: %s", exc)
-        return
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-    with _runtime_snapshot_warm_lock:
-        _runtime_snapshot_warm_state["value"] = _clone_runtime_snapshot_response(payload)
-        _runtime_snapshot_warm_state["updated_ts_ms"] = _now_ms()
-        _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        _runtime_snapshot_warm_state["last_error"] = None
-
-
-def _runtime_snapshot_warm_loop() -> None:
-    while not _runtime_snapshot_warm_stop.is_set():
-        _refresh_runtime_snapshot_warm_once()
-        wait_seconds = max(float(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS) / 1000.0, 0.25)
-        _runtime_snapshot_warm_stop.wait(wait_seconds)
-
-
-def start_runtime_snapshot_warm_cache() -> dict[str, Any]:
-    """Compatibility hook; the unified projection daemon owns refreshes."""
-    return {**get_runtime_snapshot_warm_status(), "authority": "projection_daemon"}
-
-
-def stop_runtime_snapshot_warm_cache() -> dict[str, Any]:
-    global _runtime_snapshot_warm_thread
-    _runtime_snapshot_warm_stop.set()
-    thread = _runtime_snapshot_warm_thread
-    if thread is not None:
-        thread.join(timeout=2.0)
-    _runtime_snapshot_warm_thread = None
-    return get_runtime_snapshot_warm_status()
-
-
-def get_runtime_snapshot_warm_status() -> dict[str, Any]:
-    with _runtime_snapshot_warm_lock:
-        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
-        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
-        has_value = _runtime_snapshot_warm_state.get("value") is not None
-        last_duration_ms = int(_runtime_snapshot_warm_state.get("last_duration_ms") or 0)
-        last_error = str(_runtime_snapshot_warm_state.get("last_error") or "").strip() or None
-    running = _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive()
-    return {
-        "enabled": bool(_RUNTIME_SNAPSHOT_WARM_ENABLED),
-        "running": bool(running),
-        "has_value": bool(has_value),
-        "updated_ts_ms": updated_ts_ms or None,
-        "age_ms": age_ms,
-        "interval_ms": int(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS),
-        "stale_after_ms": int(_RUNTIME_SNAPSHOT_WARM_STALE_MS),
-        "last_duration_ms": last_duration_ms,
-        "last_error": last_error,
-    }
-
-
-def _get_warmed_runtime_snapshot(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse | None:
-    if str(current_topic or "").strip():
-        return None
-    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
-        return None
-
-    with _runtime_snapshot_warm_lock:
-        value = _runtime_snapshot_warm_state.get("value")
-        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
-
-    if value is None or updated_ts_ms <= 0:
-        return None
-    if max(0, _now_ms() - updated_ts_ms) > int(_RUNTIME_SNAPSHOT_WARM_STALE_MS):
-        return None
-    return _clone_runtime_snapshot_response(value)
 
 
 @router.get("/sys-mode", response_model=SysModeStatusResponse)

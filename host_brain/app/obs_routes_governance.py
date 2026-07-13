@@ -52,7 +52,7 @@ def _truthy_env(name: str) -> bool:
 
 
 async def _default_snapshot() -> dict[str, Any]:
-    from host_brain.app.dependencies import get_capability_scorecard_provider
+    from host_brain.composition.process_services import get_capability_scorecard_provider
     from host_brain.observability.degradation_state import get_degradation_state
 
     try:
@@ -73,7 +73,7 @@ async def _default_snapshot() -> dict[str, Any]:
         pentest_environment={
             "lab_mode": _truthy_env("PENTEST_WEB_LAB_MODE"),
             "allow_exploit": _truthy_env("PENTEST_ALLOW_EXPLOIT"),
-            "domain_mode": os.environ.get("HOST_PENTEST_KNOWLEDGE_MODE", "domain"),
+            "domain_mode": "domain",
         },
         generated_at_ms=int(time.time() * 1000),
     )

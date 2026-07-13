@@ -24,8 +24,8 @@ from host_brain.app.vision.clawdbot_protocol import (
     ActionReport,
     ActionStatus,
 )
-from host_brain.channels.edge_rpc_client import _post_to_edge
-from host_brain.core.ids import new_request_id
+from host_brain.channels.embodiment import submit_desktop_command
+from host_brain.core.ids import new_request_id, now_ms
 
 _logger = logging.getLogger("Natsume.edge_rpc_client")
 
@@ -57,13 +57,11 @@ class EdgeRpcClient(ClawdbotClient):
     async def capture_screenshot(self, session_id: str) -> dict[str, Any]:
         """通过 Edge RPC 截图，返回 {image_b64, image_mime, width, height}。"""
         try:
-            result = await _post_to_edge(
-                path="/v1/edge/screenshot",
+            result = await submit_desktop_command(
+                action="screenshot",
                 payload={"monitor_index": self._monitor_index, "session_id": session_id},
                 request_id=new_request_id(),
-                request_timeout_ms=int(max(1000, float(self.timeout_sec) * 1000)),
-                base_url_override=self._edge_base_url,
-                shared_key_override=self._hmac_key,
+                deadline_ms=now_ms() + int(max(1000, float(self.timeout_sec) * 1000)),
             )
 
             if not result.success:
@@ -104,17 +102,15 @@ class EdgeRpcClient(ClawdbotClient):
         try:
             # 将 ActionPlan 的 actions 转换为 DesktopAction 格式
             desktop_actions = _convert_plan_to_desktop_actions(plan)
-            result = await _post_to_edge(
-                path="/v1/edge/automate",
+            result = await submit_desktop_command(
+                action="automate",
                 payload={
                     "session_id": plan.session_id,
                     "actions": desktop_actions,
                     "stop_on_error": plan.stop_on_error,
                 },
                 request_id=plan.request_id,
-                request_timeout_ms=int(max(1000, float(self.timeout_sec) * 1000)),
-                base_url_override=self._edge_base_url,
-                shared_key_override=self._hmac_key,
+                deadline_ms=now_ms() + int(max(1000, float(self.timeout_sec) * 1000)),
             )
 
             event = result.event or {}

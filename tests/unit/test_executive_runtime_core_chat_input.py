@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.executive_runtime_core import _build_chat_input
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.executive_runtime.conversation_execution import _build_chat_input
 from host_brain.orchestration.governor_grant import governor_grant_ref
 
 
@@ -16,6 +17,7 @@ def test_build_chat_input_preserves_gateway_voice_delivery_flags() -> None:
     )
 
     chat_input = _build_chat_input(
+        ports=build_executive_runtime_application_ports(),
         request_body=request_body,
         request_id="req-test",
         session_id="sess-test",
@@ -61,6 +63,7 @@ def test_build_chat_input_upgrades_base_runtime_to_surface_reply_runtime(monkeyp
     )
 
     chat_input = _build_chat_input(
+        ports=build_executive_runtime_application_ports(),
         request_body=request_body,
         request_id="req-test",
         session_id="sess-test",
@@ -87,6 +90,7 @@ def test_build_chat_input_upgrades_base_runtime_to_surface_reply_runtime(monkeyp
 def test_build_chat_input_carries_only_official_approved_surface_grant() -> None:
     governor = {"decision": "APPROVE", "intent_id": "intent-1", "ts_ms": 123}
     chat_input = _build_chat_input(
+        ports=build_executive_runtime_application_ports(),
         request_body=SimpleNamespace(),
         request_id="req-grant",
         session_id="sess-test",

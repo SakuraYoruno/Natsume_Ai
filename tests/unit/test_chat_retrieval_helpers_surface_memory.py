@@ -115,7 +115,7 @@ async def test_run_retrieval_uses_collection_fastpath_without_embedding(monkeypa
 
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
-    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: _LifeMemoryStore())
+    monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: _LifeMemoryStore())
 
     summary, evidence_items = await helpers._run_retrieval(
         request_id="req-collection-fastpath",
@@ -199,7 +199,7 @@ async def test_run_retrieval_dated_quality_followup_bypasses_collection_fastpath
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_maybe_apply_lightnovel_deep_review", _identity_review)
     monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
-    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: _UnexpectedLifeMemoryStore())
+    monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: _UnexpectedLifeMemoryStore())
 
     summary, evidence_items = await helpers._run_retrieval(
         request_id="req-dated-quality-selection",
@@ -489,7 +489,7 @@ async def test_run_retrieval_prefers_recent_explicit_memory_write(monkeypatch) -
 
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
-    monkeypatch.setattr("host_brain.app.dependencies.get_conversation_history", lambda: _History())
+    monkeypatch.setattr("host_brain.composition.process_services.get_conversation_history", lambda: _History())
 
     summary, evidence_items = await helpers._run_retrieval(
         request_id="req-current",

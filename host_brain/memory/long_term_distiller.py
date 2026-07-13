@@ -136,6 +136,7 @@ class LongTermMemoryDistiller:
         llm_client: LlmSummaryClient | None = None,
         render_target_lang: str = "zh",
         llm_timeout_ms: int = 2600,
+        model_attempt_service: Any = None,
         target_doc_id: str = DISTILL_TARGET_DOC_ID,
     ) -> None:
         self._engine = distillation_engine
@@ -144,10 +145,13 @@ class LongTermMemoryDistiller:
         self._topics = list(topics or DEFAULT_DISTILL_TOPICS)
         self._top_k = max(1, min(top_k, 20))
         self._max_proposals = max(1, min(max_proposals_per_cycle, MAX_PROPOSALS_PER_CYCLE))
-        self._llm_client = llm_client or self._build_default_llm_client(
-            render_target_lang=render_target_lang,
-            timeout_ms=llm_timeout_ms,
-        )
+        self._llm_client = llm_client
+        if self._llm_client is None and model_attempt_service is not None:
+            self._llm_client = self._build_default_llm_client(
+                render_target_lang=render_target_lang,
+                timeout_ms=llm_timeout_ms,
+                model_attempt_service=model_attempt_service,
+            )
         self._target_doc_id = str(target_doc_id).strip() or DISTILL_TARGET_DOC_ID
 
     # ── 公开接口 ──────────────────────────────────────────────────────────────
@@ -296,6 +300,7 @@ class LongTermMemoryDistiller:
         *,
         render_target_lang: str,
         timeout_ms: int,
+        model_attempt_service: Any,
     ) -> LlmSummaryClient | None:
         if not any(
             str(os.environ.get(name) or "").strip()
@@ -313,6 +318,7 @@ class LongTermMemoryDistiller:
             return build_default_llm_summary_client(
                 render_target_lang=render_target_lang,
                 timeout_ms=timeout_ms,
+                model_attempt_service=model_attempt_service,
             )
         except Exception as exc:
             _logger.debug("default distillation llm client unavailable: %s", exc)

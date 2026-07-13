@@ -1,4 +1,4 @@
-﻿"""Chat 核心业务逻辑模块。
+"""Chat 核心业务逻辑模块。
 
 拆分后的主入口，仅保留：
   - handle_chat：POST /v1/chat 统一入口
@@ -23,7 +23,7 @@ from typing import Any, AsyncGenerator, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
-from host_brain.app.dependencies import get_intent_engine
+from host_brain.composition.process_services import get_intent_engine
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.app.emotion_context import (
     build_chat_emotion_snapshot,

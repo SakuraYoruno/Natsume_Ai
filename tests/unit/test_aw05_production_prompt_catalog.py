@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.app.prompt_specs import list_prompt_specs
+from host_brain.model_runtime.prompt_specs import list_prompt_specs
 from host_brain.model_runtime import (
     PromptRef,
     PromptSchemaError,
