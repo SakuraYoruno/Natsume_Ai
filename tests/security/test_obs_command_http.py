@@ -202,7 +202,7 @@ async def _asgi_post(
     return status_code, json.loads(response_body), receive_calls
 
 
-def test_router_exposes_only_the_single_unregistered_command_path() -> None:
+def test_router_exposes_only_contract_query_and_single_command_path() -> None:
     router = create_obs_command_http_router(ingress_provider=None)
 
     paths = [
@@ -211,6 +211,10 @@ def test_router_exposes_only_the_single_unregistered_command_path() -> None:
     ]
 
     assert paths == [
+        (
+            "/v1/host/operator-command-gateway/openapi.json",
+            frozenset({"GET"}),
+        ),
         ("/v1/host/obs-commands/{command_id}", frozenset({"POST"}))
     ]
 

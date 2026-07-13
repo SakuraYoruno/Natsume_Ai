@@ -99,6 +99,7 @@ _EDGE_RPC_COMPONENT_BY_SERVICE_ID = {
 
 # 全局单例
 _ledger: Optional[SQLiteLedger] = None
+_query_projection_store = None
 _token_service: Optional[TokenService] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
 _skill_registry: Optional[SkillRegistry] = None
@@ -322,6 +323,40 @@ def get_capability_execution_journal():
     )
 
     return SQLiteCapabilityExecutionJournal(get_ledger())
+
+
+def get_query_projection_store():
+    """Return the generic AW07 durable query projection repository.
+
+    The canonical ledger startup applies migration 0082 before this accessor
+    is constructed, so every production projection kind shares one governed
+    durable database and schema contract.
+    """
+
+    global _query_projection_store
+    ledger = get_ledger()
+    canonical_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
+    if not canonical_path or canonical_path == ":memory:":
+        raise RuntimeError("OPERATOR_PROJECTION_DURABLE_DB_REQUIRED")
+    if (
+        _query_projection_store is None
+        or str(getattr(_query_projection_store, "db_path", "")) != canonical_path
+    ):
+        from host_brain.observability.projection_store import QueryProjectionStore  # noqa: PLC0415
+
+        _query_projection_store = QueryProjectionStore(canonical_path)
+    return _query_projection_store
+
+
+def peek_query_projection_store():
+    """Return the initialized query store without constructing runtime state.
+
+    Operator GET handlers use this non-owning accessor so a read request can
+    never open the ledger, assert migrations or initialize a repository.
+    Projection workers remain the owners of ``get_query_projection_store``.
+    """
+
+    return _query_projection_store
 
 
 def get_model_runtime_composition() -> "ModelRuntimeComposition":

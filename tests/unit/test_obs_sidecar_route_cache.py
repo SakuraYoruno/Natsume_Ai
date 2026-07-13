@@ -65,9 +65,13 @@ def test_obs_sessions_route_uses_short_ttl_cache(monkeypatch) -> None:
     assert ledger.calls == 4
 
 
-def test_webui_search_requests_uses_short_ttl_cache(monkeypatch) -> None:
+def test_webui_search_requests_never_falls_back_to_ledger(monkeypatch) -> None:
     ledger = _SearchLedger()
     monkeypatch.setattr("host_brain.app.web_ui.get_ledger", lambda: ledger)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.peek_query_projection_store",
+        lambda: None,
+    )
 
     app = FastAPI()
     app.include_router(web_ui_router, prefix="/api")
@@ -99,6 +103,7 @@ def test_webui_search_requests_uses_short_ttl_cache(monkeypatch) -> None:
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["total"] == 1
-    assert second.json()["results"][0]["request_id"] == "req-search"
-    assert ledger.calls == 1
+    assert first.json()["total"] == 0
+    assert second.json()["results"] == []
+    assert second.json()["degraded_state"] == "REBUILDING"
+    assert ledger.calls == 0

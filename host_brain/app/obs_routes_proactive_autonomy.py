@@ -11,7 +11,12 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from host_brain.app.obs_routes_core import _get_ledger, _now_ms
+from host_brain.app.obs_routes_core import _now_ms
+from host_brain.observability.live_source_projection import (
+    PROACTIVE_AUTONOMY_KIND,
+    PROACTIVE_AUTONOMY_MAX_AGE_MS,
+    read_operator_live_projection,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -97,4 +102,22 @@ def build_proactive_autonomy_snapshot(ledger: Any, person_id: str = "default") -
 
 @router.get("/proactive-autonomy")
 def get_proactive_autonomy(person_id: str = Query("default")) -> dict[str, Any]:
-    return build_proactive_autonomy_snapshot(_get_ledger(), person_id)
+    key = str(person_id or "default").strip() or "default"
+    payload, projection = read_operator_live_projection(
+        PROACTIVE_AUTONOMY_KIND,
+        key,
+        max_age_ms=PROACTIVE_AUTONOMY_MAX_AGE_MS,
+    )
+    if payload is None:
+        payload = {
+            "person_id": key,
+            "available": False,
+            "inner_weather": {},
+            "reach_out_calibration": {},
+            "active_projects": [],
+            "proactive_readiness": None,
+            "top_intention": None,
+            "dialogue_closure": {},
+            "timestamp": _now_ms(),
+        }
+    return {**payload, "projection": projection}

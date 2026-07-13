@@ -152,29 +152,33 @@ async def _get_life_evolution_snapshot(
     session_id: str = Query(""),
 ) -> dict[str, Any]:
     _require_life_views_enabled()
-    now = int(time.time() * 1000)
-    provider = _snapshot_provider or _default_snapshot
-    try:
-        payload = await _resolve(
-            provider(
-                person_id=str(person_id or "default"),
-                session_id=str(session_id or ""),
-                # Public UI never accepts arbitrary StateArbiter fact keys.
-                fact_keys=[],
-                now_ms=now,
-            )
+    del session_id
+    from host_brain.observability.domain_state_projection import (
+        LIFE_EVOLUTION_KIND,
+        LIFE_MAX_AGE_MS,
+        read_domain_projection,
+    )
+
+    key = str(person_id or "default").strip() or "default"
+    payload, projection = read_domain_projection(
+        kind=LIFE_EVOLUTION_KIND,
+        key=key,
+        max_age_ms=LIFE_MAX_AGE_MS,
+    )
+    if payload is None:
+        now = int(time.time() * 1000)
+        payload = build_life_evolution_view(
+            person_id=key,
+            world_snapshot={},
+            appraisal_records=(),
+            bond_projection={},
+            scene_decision={},
+            action_arbiter_decision={},
+            action_preview={},
+            now_ms=now,
         )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "reason_code": "LIFE_EVOLUTION_READ_MODEL_UNAVAILABLE",
-                "detail": str(exc)[:400],
-            },
-        ) from exc
-    return dict(payload or {})
+    payload["projection"] = projection
+    return payload
 
 
 @router.get("/life-evolution/snapshot")

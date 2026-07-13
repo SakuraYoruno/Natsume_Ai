@@ -1,13 +1,18 @@
 import { endpointPath } from './endpointRegistry.js'
 import { httpRequest } from './httpClient.js'
 import { obsRequest } from './obsClient.js'
+import { submitOperatorCommand } from './operatorCommandGateway.js'
 
 function assertEndpointEntry(entry) {
-  if (!entry || typeof entry !== 'object' || !entry.path || !entry.service) {
+  if (!entry || typeof entry !== 'object' || (!entry.path && !entry.queryPath && !entry.commandId)) {
     throw new Error('Invalid endpoint registry entry')
   }
 }
 
+/**
+ * @param {Record<string, any>} entry
+ * @param {{method?: string, pathParams?: Record<string, any>, query?: Record<string, any>, body?: any, options?: Record<string, any>}} [config]
+ */
 export function endpointRequest(entry, {
   method = 'GET',
   pathParams = {},
@@ -16,10 +21,28 @@ export function endpointRequest(entry, {
   options = {},
 } = {}) {
   assertEndpointEntry(entry)
+  const normalizedMethod = String(method || 'GET').toUpperCase()
+  if (normalizedMethod !== 'GET' && entry.commandId) {
+    return submitOperatorCommand(entry.commandId, {
+      body: body || {},
+      pathParams,
+      query,
+      options,
+    })
+  }
+  if (normalizedMethod !== 'GET') {
+    const safeQueryMethods = Array.isArray(entry.queryMethods)
+      ? entry.queryMethods.map((value) => String(value).toUpperCase())
+      : []
+    if (entry.queryOnly !== true || !safeQueryMethods.includes(normalizedMethod)) {
+      throw new Error('DIRECT_MUTATION_ENDPOINT_DENIED')
+    }
+  }
   const url = endpointPath(entry, pathParams, query)
+  /** @type {Record<string, any>} */
   const requestOptions = {
     ...options,
-    method: String(method || 'GET').toUpperCase(),
+    method: normalizedMethod,
   }
   if (body !== undefined) {
     requestOptions.body = body

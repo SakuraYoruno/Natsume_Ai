@@ -24,19 +24,15 @@ export const PAGE_LOADERS = Object.freeze({
   '/observability/bio-ops': () => import('../pages/CodexBioOpsObservability.jsx'),
   '/observability/metrics': () => import('../pages/Metrics.jsx'),
   '/observability/insights': () => import('../pages/Insights.jsx'),
-  '/observability/chat-debug': () => import('../pages/ChatDebug.jsx'),
   '/observability/alerts': () => import('../pages/Alerts.jsx'),
   '/observability/logs': () => import('../pages/LogStream.jsx'),
   '/execution/gateway': () => import('../pages/Gateway.jsx'),
   '/execution/skills': () => import('../pages/SkillsHub.jsx'),
   '/execution/tools': () => import('../pages/Tools.jsx'),
   '/execution/automation': () => import('../pages/Automation.jsx'),
-  '/execution/agent-loop': () => import('../pages/AgentLoop.jsx'),
   '/execution/task-runtime': () => import('../pages/TaskRuntime.jsx'),
   '/execution/tribe': () => import('../pages/TribeConsole.jsx'),
   '/execution/edge-command': () => import('../pages/EdgeCommand.jsx'),
-  '/security/pentest': () => import('../pages/SecurityPentest.jsx'),
-  '/security/pentest/runs/:runId': () => import('../pages/SecurityPentestRunDetail.jsx'),
   '/security/immune': () => import('../pages/SecurityImmune.jsx'),
   '/integrations/body': () => import('../pages/BodyIntegration.jsx'),
 })
@@ -46,7 +42,6 @@ function resolveLoader(path) {
   if (PAGE_LOADERS[normalizedPath]) return PAGE_LOADERS[normalizedPath]
   if (normalizedPath.startsWith('/observability/trace')) return PAGE_LOADERS['/observability/trace']
   if (normalizedPath.startsWith('/observability/insights')) return PAGE_LOADERS['/observability/insights']
-  if (normalizedPath.startsWith('/security/pentest/runs/')) return PAGE_LOADERS['/security/pentest/runs/:runId']
   if (normalizedPath.startsWith('/life/pathologies/')) return PAGE_LOADERS['/life/pathologies/:pathologyId']
   return null
 }
@@ -66,7 +61,6 @@ export const Sessions = lazyPage('/observability/sessions')
 export const Trace = lazyPage('/observability/trace')
 export const Metrics = lazyPage('/observability/metrics')
 export const Insights = lazyPage('/observability/insights')
-export const ChatDebug = lazyPage('/observability/chat-debug')
 export const Alerts = lazyPage('/observability/alerts')
 export const LogStream = lazyPage('/observability/logs')
 export const EmotionDashboard = lazyPage('/life/emotion')
@@ -83,15 +77,12 @@ export const Canon = lazyPage('/operations/canon')
 export const Bond = lazyPage('/life/relationship')
 export const Tools = lazyPage('/execution/tools')
 export const Automation = lazyPage('/execution/automation')
-export const AgentLoop = lazyPage('/execution/agent-loop')
 export const TaskRuntime = lazyPage('/execution/task-runtime')
 export const Gateway = lazyPage('/execution/gateway')
 export const SkillsHub = lazyPage('/execution/skills')
 export const LifeRuntime = lazyPage('/life/runtime')
 export const TribeConsole = lazyPage('/execution/tribe')
 export const EdgeCommand = lazyPage('/execution/edge-command')
-export const SecurityPentest = lazyPage('/security/pentest')
-export const SecurityPentestRunDetail = lazyPage('/security/pentest/runs/:runId')
 export const SecurityImmune = lazyPage('/security/immune')
 export const BodyIntegration = lazyPage('/integrations/body')
 

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_KIND_AVATAR,
@@ -41,6 +41,10 @@ _port_override: EmbodimentCommandPort | None = None
 _pending_tasks: set[asyncio.Task[EmbodimentReceipt]] = set()
 _transport_lease: EdgeSessionLease | None = None
 _transport_lease_state_lock = threading.Lock()
+_receipt_observers: set[
+    Callable[[EmbodimentCommand, EmbodimentReceipt], None]
+] = set()
+_receipt_observers_lock = threading.Lock()
 
 
 class _TransportLeaseUnavailable(RuntimeError):
@@ -209,6 +213,106 @@ def configure_embodiment_command_port(port: EmbodimentCommandPort | None) -> Non
     _port_override = port
 
 
+def register_embodiment_receipt_observer(
+    observer: Callable[[EmbodimentCommand, EmbodimentReceipt], None],
+) -> Callable[[], None]:
+    """Observe completed transport receipts without gaining command authority.
+
+    Observers are deliberately synchronous, best-effort projections.  They
+    cannot alter the receipt returned to the caller and are never consulted
+    before a command is submitted.
+    """
+
+    if not callable(observer):
+        raise TypeError("embodiment receipt observer must be callable")
+    with _receipt_observers_lock:
+        _receipt_observers.add(observer)
+
+    def unsubscribe() -> None:
+        with _receipt_observers_lock:
+            _receipt_observers.discard(observer)
+
+    return unsubscribe
+
+
+def _publish_embodiment_receipt(
+    command: EmbodimentCommand,
+    receipt: EmbodimentReceipt,
+) -> None:
+    with _receipt_observers_lock:
+        observers = tuple(_receipt_observers)
+    for observer in observers:
+        try:
+            observer(command, receipt)
+        except Exception as exc:  # pragma: no cover - observer isolation
+            _logger.warning("Embodiment receipt observer failed: %s", exc)
+    _append_durable_receipt_fact(command, receipt)
+
+
+_PUBLIC_RECEIPT_EVENT_FIELDS = frozenset(
+    {
+        "action", "available", "behavior_id", "component", "connected",
+        "device", "emotion_tag", "enabled", "external_side_effects", "kind",
+        "model", "state", "status",
+    }
+)
+_SENSITIVE_RECEIPT_DETAIL_MARKERS = (
+    "api_key", "approval::", "authorization", "bearer ", "confirm::",
+    "credential", "password", "secret", "token",
+)
+
+
+def _public_receipt_detail(value: Any) -> str:
+    detail = str(value or "")[:300]
+    lowered = detail.lower()
+    if any(marker in lowered for marker in _SENSITIVE_RECEIPT_DETAIL_MARKERS):
+        return "[redacted receipt detail]"
+    return detail
+
+
+def _append_durable_receipt_fact(
+    command: EmbodimentCommand,
+    receipt: EmbodimentReceipt,
+) -> None:
+    """Append a secret-free cross-process receipt fact to the shared ledger."""
+
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+        public_event = {
+            str(key): value
+            for key, value in dict(receipt.event or {}).items()
+            if str(key) in _PUBLIC_RECEIPT_EVENT_FIELDS
+            and isinstance(value, (str, int, float, bool, type(None)))
+        }
+        get_ledger().log_voice_event(
+            {
+                "request_id": command.request_id,
+                "event_type": f"EMBODIMENT_RECEIPT_{command.kind.upper()}",
+                "direction": "EDGE_TO_HOST",
+                "status": str(receipt.status or "UNKNOWN").upper(),
+                "reason_code": receipt.reason_code,
+                "stage": "embodiment.receipt",
+                "detail": _public_receipt_detail(receipt.detail),
+                "payload": {
+                    "kind": command.kind,
+                    "action": command.action,
+                    "command_id": receipt.command_id,
+                    "accepted": bool(receipt.accepted),
+                    "success": bool(receipt.success),
+                    "received_at_ms": int(receipt.received_at_ms),
+                    "completed_at_ms": receipt.completed_at_ms,
+                    "latency_ms": receipt.latency_ms,
+                    "receipt_ref": receipt.receipt_ref,
+                    "event": public_event,
+                },
+                "ts_ms": int(receipt.completed_at_ms or receipt.received_at_ms),
+            }
+        )
+    except Exception as exc:  # pragma: no cover - audit sink isolation
+        _logger.debug("Embodiment receipt audit append skipped: %s", exc)
+
+
 def build_host_embodiment_command(
     *,
     kind: str,
@@ -244,7 +348,9 @@ def build_host_embodiment_command(
 
 async def submit_embodiment_command(command: EmbodimentCommand) -> EmbodimentReceipt:
     port = _port_override or EdgeRpcEmbodimentCommandPort()
-    return await port.submit(command)
+    receipt = await port.submit(command)
+    _publish_embodiment_receipt(command, receipt)
+    return receipt
 
 
 def queue_embodiment_command(command: EmbodimentCommand) -> EmbodimentReceipt:
@@ -328,5 +434,5 @@ __all__ = [
     "build_host_embodiment_command", "submit_embodiment_command",
     "queue_embodiment_command", "submit_voice_command", "submit_avatar_command",
     "queue_mateengine_command", "queue_desktop_command", "submit_desktop_command",
-    "reset_embodiment_transport_session",
+    "reset_embodiment_transport_session", "register_embodiment_receipt_observer",
 ]

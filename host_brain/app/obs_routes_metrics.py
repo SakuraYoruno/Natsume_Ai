@@ -10,7 +10,8 @@ import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from host_brain.observability.api_models import MetricsTimeseriesResponse, TimeseriesPoint
+from host_brain.observability.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -18,36 +19,10 @@ router = APIRouter(prefix="/obs", tags=["observability"])
 
 
 # ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class TimeseriesPoint(BaseModel):
-    ts_ms: int
-    requests: int
-    rejections: int
-    errors: int
-    avg_latency_ms: Optional[float] = None
-
-
-class MetricsTimeseriesResponse(BaseModel):
-    range_ms: int
-    interval_ms: int
-    points: List[TimeseriesPoint]
-    total_requests: int
-    total_rejections: int
-    rejection_rate: float
-    timestamp: int
-
-
-# ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _get_ledger():
-    from host_brain.app.obs_routes_core import _get_ledger as _core_get_ledger
-    return _core_get_ledger()
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +36,8 @@ def get_metrics_timeseries(
     """多维度时序数据（请求量/拒绝/延迟）。"""
     from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 
-    ledger = _get_ledger()
-    svc = MetricsTimeseriesService(ledger)
+    projection_view = get_projection_ledger_view()
+    svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000
     interval_map = {1: "1m", 5: "5m", 60: "1h"}

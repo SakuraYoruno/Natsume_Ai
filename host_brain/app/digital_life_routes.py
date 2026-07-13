@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
-from host_brain.app.dependencies import get_ledger, get_state_arbiter
+from host_brain.app.dependencies import get_ledger
 from host_brain.app.life_application_boundary import (
     project_inner_life_snapshot,
     read_life_events,
@@ -20,7 +20,11 @@ from host_brain.orchestration.governor_grant import (
     canonical_proactive_intent_args,
     durable_governor_binding,
 )
-from host_brain.runtime.world_model import build_world_snapshot
+from host_brain.observability.remaining_query_projection import (
+    WORLD_SNAPSHOT_KIND,
+    read as read_query_projection,
+    response_meta,
+)
 
 
 router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
@@ -318,16 +322,36 @@ async def digital_life_world_snapshot(
     session_id: str = Query(""),
     fact_key: list[str] | None = Query(None),
 ) -> dict[str, Any]:
-    # WorldModelQueryRepository is independently read-only; unlike the retired
-    # Life getters it neither initializes state nor advances a clock.
-    return await build_world_snapshot(
-        ledger=get_ledger(),
-        person_id=person_id,
-        state_arbiter=get_state_arbiter(),
-        fact_keys=list(fact_key or []),
-        session_id=session_id,
-        enabled=_life_projection_enabled(),
-    )
+    """Read the background world projection without opening canonical stores."""
+
+    resolved_person = str(person_id or "default")
+    payload, meta = read_query_projection(WORLD_SNAPSHOT_KIND, resolved_person)
+    requested_keys = {str(item) for item in list(fact_key or []) if str(item).strip()}
+    facts = [
+        dict(item)
+        for item in list((payload or {}).get("facts") or [])
+        if isinstance(item, Mapping)
+        and (not requested_keys or str(item.get("key") or "") in requested_keys)
+    ]
+    return {
+        "schema_version": str(
+            (payload or {}).get("schema_version") or "Natsume.world_projection.v1"
+        ),
+        "person_id": resolved_person,
+        "generated_at_ms": int((payload or {}).get("generated_at_ms") or 0),
+        "read_only": True,
+        "write_api_available": False,
+        "write_methods": [],
+        "status": str((payload or {}).get("status") or "DEGRADED"),
+        "reason_code": None if payload is not None else str(meta.get("reason_code") or "WORLD_PROJECTION_NOT_READY"),
+        "facts": facts,
+        "source_summary": dict((payload or {}).get("source_summary") or {}),
+        "conflict_count": int((payload or {}).get("conflict_count") or 0),
+        "expired_count": int((payload or {}).get("expired_count") or 0),
+        "inferred_count": int((payload or {}).get("inferred_count") or 0),
+        "session_filter_applied": bool(session_id),
+        **response_meta(meta),
+    }
 
 
 @router.get("/growth/state")

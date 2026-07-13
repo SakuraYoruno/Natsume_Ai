@@ -1,3 +1,7 @@
+import time
+
+import pytest
+
 from host_brain.app.obs_routes_trace import (
     LiveTraceFeedItem,
     TraceLiveFeedSnapshot,
@@ -7,6 +11,22 @@ from host_brain.app.obs_routes_trace import (
     get_trace_live_feed_snapshot,
 )
 from host_brain.app.obs_routes import SessionItem
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.observability.projection_runtime import TRACE_FEED_INDEX_KEY, TRACE_FEED_KIND
+from host_brain.observability.projection_store import QueryProjectionStore
+
+
+@pytest.fixture
+def projection_store(tmp_path, monkeypatch):
+    db_path = tmp_path / "projection.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="trace-feed-unit")
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_query_projection_store",
+        lambda: store,
+    )
+    return store
 
 
 def _reset_trace_feed_warm_state() -> None:
@@ -18,14 +38,15 @@ def _reset_trace_feed_warm_state() -> None:
         _trace_feed_warm_state["session_signature"] = None
 
 
-def test_trace_feed_snapshot_prefers_warmed_payload(monkeypatch):
+def test_trace_feed_snapshot_prefers_durable_projection(monkeypatch, projection_store):
+    now = int(time.time() * 1000)
     warmed = TraceLiveFeedSnapshot(
         items=[
             LiveTraceFeedItem(
                 session=SessionItem(
                     request_id="req-warm-trace",
                     session_id="sess-warm-trace",
-                    ts_ms=1700000000000,
+                    ts_ms=now,
                     status="OK",
                     total_latency_ms=120,
                     input_preview="warm trace",
@@ -35,12 +56,13 @@ def test_trace_feed_snapshot_prefers_warmed_payload(monkeypatch):
             )
         ],
         count=1,
-        timestamp=1700000000001,
+        timestamp=now,
     )
-
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_trace._get_warmed_trace_feed_snapshot",
-        lambda **kwargs: warmed,
+    projection_store.upsert(
+        TRACE_FEED_KIND,
+        TRACE_FEED_INDEX_KEY,
+        warmed.model_dump() if hasattr(warmed, "model_dump") else warmed.dict(),
+        source_cursor=now,
     )
 
     def _unexpected_builder(**kwargs):
@@ -51,19 +73,21 @@ def test_trace_feed_snapshot_prefers_warmed_payload(monkeypatch):
         _unexpected_builder,
     )
 
-    result = get_trace_live_feed_snapshot()
+    result = get_trace_live_feed_snapshot(limit=6, window_minutes=1440, active_within_ms=60000, keyword=None)
 
     assert result.count == 1
-    assert result.items[0].session.request_id == "req-warm-trace"
+    assert result.items[0].session["request_id"] == "req-warm-trace"
 
 
-def test_trace_feed_snapshot_uses_stale_warm_payload_under_pressure(monkeypatch):
-    warmed = TraceLiveFeedSnapshot(items=[], count=0, timestamp=1700000000001)
-    captured: dict[str, object] = {}
-
-    def _fake_warmed(**kwargs):
-        captured.update(kwargs)
-        return warmed
+def test_trace_feed_snapshot_ignores_warm_payload_under_pressure(monkeypatch, projection_store):
+    now = int(time.time() * 1000)
+    projected = TraceLiveFeedSnapshot(items=[], count=0, timestamp=now)
+    projection_store.upsert(
+        TRACE_FEED_KIND,
+        TRACE_FEED_INDEX_KEY,
+        projected.model_dump() if hasattr(projected, "model_dump") else projected.dict(),
+        source_cursor=now,
+    )
 
     monkeypatch.setattr(
         "host_brain.app.obs_routes_trace._trace_feed_should_defer_build",
@@ -71,7 +95,7 @@ def test_trace_feed_snapshot_uses_stale_warm_payload_under_pressure(monkeypatch)
     )
     monkeypatch.setattr(
         "host_brain.app.obs_routes_trace._get_warmed_trace_feed_snapshot",
-        _fake_warmed,
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("GET read warm cache")),
     )
 
     def _unexpected_builder(**kwargs):
@@ -82,13 +106,13 @@ def test_trace_feed_snapshot_uses_stale_warm_payload_under_pressure(monkeypatch)
         _unexpected_builder,
     )
 
-    result = get_trace_live_feed_snapshot()
+    result = get_trace_live_feed_snapshot(limit=6, window_minutes=1440, active_within_ms=60000, keyword=None)
 
-    assert result is warmed
-    assert int(captured["allow_stale_ms"]) > 45000
+    assert result.count == 0
+    assert result.projection["available"] is True
 
 
-def test_trace_feed_snapshot_returns_empty_when_pressure_and_no_cache(monkeypatch):
+def test_trace_feed_snapshot_returns_degraded_when_projection_empty(monkeypatch, projection_store):
     monkeypatch.setattr(
         "host_brain.app.obs_routes_trace._trace_feed_should_defer_build",
         lambda: (True, "natsume_runtime_cpu_pressure"),
@@ -106,10 +130,11 @@ def test_trace_feed_snapshot_returns_empty_when_pressure_and_no_cache(monkeypatc
         _unexpected_builder,
     )
 
-    result = get_trace_live_feed_snapshot()
+    result = get_trace_live_feed_snapshot(limit=6, window_minutes=1440, active_within_ms=60000, keyword=None)
 
     assert result.count == 0
     assert result.items == []
+    assert result.projection["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
 
 
 def test_trace_feed_warm_refresh_skips_full_build_without_active_sessions(monkeypatch):

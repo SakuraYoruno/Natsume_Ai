@@ -58,12 +58,22 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
         error_code="FAILED",
     )
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_gap_telemetry",
-        lambda: telemetry,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_forge_service",
-        lambda: forge_service,
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection",
+        lambda: (
+            {
+                "gap": telemetry.snapshot(
+                    limit_recent=200,
+                    limit_hotspots=50,
+                    limit_candidates=200,
+                    min_candidate_detected=1,
+                    min_candidate_sessions=1,
+                    min_candidate_failure_rate=0.0,
+                    min_candidate_failed=0,
+                ),
+                "runtime_quality": forge_service.runtime_quality_stats(limit=200),
+            },
+            {},
+        ),
     )
 
     app = FastAPI()
@@ -114,8 +124,21 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_capability_gap_telemetry",
-        lambda: telemetry,
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection",
+        lambda: (
+            {
+                "gap": telemetry.snapshot(
+                    limit_recent=200,
+                    limit_hotspots=50,
+                    limit_candidates=200,
+                    min_candidate_detected=1,
+                    min_candidate_sessions=1,
+                    min_candidate_failure_rate=0.0,
+                    min_candidate_failed=0,
+                )
+            },
+            {},
+        ),
     )
     app = FastAPI()
     app.include_router(router)
@@ -136,7 +159,7 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
     assert payload["candidate_thresholds"]["min_detected_count"] == 2
 
 
-def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) -> None:
+def test_obs_capability_gaps_stats_endpoint_never_calls_live_services(monkeypatch) -> None:
     class _FakeTelemetry:
         def __init__(self) -> None:
             self.calls = 0
@@ -186,8 +209,16 @@ def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) ->
 
     telemetry = _FakeTelemetry()
     forge_service = _FakeForgeService()
+    projected_gap = telemetry.snapshot()
+    projected_quality = forge_service.runtime_quality_stats()
+    telemetry.calls = 0
+    forge_service.calls = 0
     monkeypatch.setattr("host_brain.app.dependencies.get_capability_gap_telemetry", lambda: telemetry)
     monkeypatch.setattr("host_brain.app.dependencies.get_capability_forge_service", lambda: forge_service)
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection",
+        lambda: ({"gap": projected_gap, "runtime_quality": projected_quality}, {}),
+    )
 
     app = FastAPI()
     app.include_router(router)
@@ -198,6 +229,5 @@ def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) ->
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert telemetry.calls == 1
-    assert forge_service.calls == 1
-
+    assert telemetry.calls == 0
+    assert forge_service.calls == 0

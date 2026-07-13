@@ -14,9 +14,17 @@ from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreEr
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
+from host_brain.observability.projection_runtime import (
+    ProjectionOperatorReadModelService,
+    get_query_projection_worker,
+    refresh_task_projections,
+)
+from host_brain.observability.projection_daemon import register_projection_job
+from host_brain.observability.projection_store import QueryProjectionError
 
 
 _service_provider: Callable[[], OperatorReadModelService] | None = None
+_projection_service: ProjectionOperatorReadModelService | None = None
 
 
 def _text(value: Any) -> str:
@@ -37,19 +45,37 @@ def set_operator_read_model_service_provider(
 ) -> None:
     """Install a test/composition provider without changing the read contract."""
 
-    global _service_provider
+    global _projection_service, _service_provider
     _service_provider = provider
+    _projection_service = None
 
 
 def _get_operator_read_model_service() -> OperatorReadModelService:
+    global _projection_service
     _require_operator_views_enabled()
     if _service_provider is not None:
         return _service_provider()
-    return OperatorReadModelService(
+    if _projection_service is None:
+        from host_brain.app.dependencies import get_query_projection_store
+
+        _projection_service = ProjectionOperatorReadModelService(
+            store=get_query_projection_store(),
+        )
+    return _projection_service  # type: ignore[return-value]
+
+
+def refresh_task_runtime_query_projections() -> dict[str, int]:
+    """Background-only Task/Review projection entry."""
+
+    source = OperatorReadModelService(
         task_store=DurableTaskStore(_db_path("HOST_TASK_RUNTIME_DB_PATH")),
         review_store=ReviewStore(_db_path("HOST_AGENT_REVIEW_DB_PATH")),
         event_store=RuntimeEventStore(_db_path("HOST_RUNTIME_EVENT_DB_PATH")),
     )
+    return refresh_task_projections(source, get_query_projection_worker())
+
+
+register_projection_job("task-runtime", refresh_task_runtime_query_projections)
 
 
 def _require_operator_views_enabled() -> None:
@@ -86,7 +112,7 @@ async def list_task_runtime_executions(
     _require_operator_views_enabled()
     try:
         return service.list_executions(limit=limit)
-    except (TaskStoreError, ReviewStoreError, RuntimeEventError) as exc:
+    except (TaskStoreError, ReviewStoreError, RuntimeEventError, QueryProjectionError) as exc:
         _raise_read_model_error(exc)
 
 
@@ -98,7 +124,7 @@ async def get_task_runtime_review_locator(
     _require_operator_views_enabled()
     try:
         return service.get_review(review_id)
-    except (TaskStoreError, ReviewStoreError, RuntimeEventError) as exc:
+    except (TaskStoreError, ReviewStoreError, RuntimeEventError, QueryProjectionError) as exc:
         _raise_read_model_error(exc)
 
 
@@ -118,7 +144,7 @@ async def get_task_runtime_execution(
             after_cursor=after_cursor,
             event_limit=event_limit,
         )
-    except (TaskStoreError, ReviewStoreError, RuntimeEventError) as exc:
+    except (TaskStoreError, ReviewStoreError, RuntimeEventError, QueryProjectionError) as exc:
         _raise_read_model_error(exc)
 
 

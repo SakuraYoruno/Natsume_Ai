@@ -7,16 +7,34 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.app import obs_routes_core
 from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes_trace import router as trace_router
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.observability.projection_store import QueryProjectionStore
+
+
+@pytest.fixture(autouse=True)
+def _projection_only_runtime(tmp_path, monkeypatch):
+    db_path = tmp_path / "projection.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="trace-route-unit")
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_query_projection_store",
+        lambda: store,
+    )
 
 
 def _make_app(ledger):
     app = FastAPI()
     app.include_router(router)
+    app.include_router(trace_router)
     set_ledger_provider(lambda: ledger)
     return app
 
@@ -74,8 +92,10 @@ def test_trace_fallback_returns_ok():
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-fallback-01"
-    assert data["node_count"] >= 1
-    assert data["status"] in ("OK", "FAIL", "DEGRADED")
+    assert data["node_count"] == 0
+    assert data["status"] == "DEGRADED"
+    assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
+    ledger.fetch_by_request_id.assert_not_called()
 
 
 def test_trace_fallback_not_found_returns_404():
@@ -83,10 +103,10 @@ def test_trace_fallback_not_found_returns_404():
     client = TestClient(_make_app(ledger))
 
     resp = client.get("/obs/trace/nonexistent-req-xyz")
-    assert resp.status_code == 404
-    detail = resp.json().get("detail", {})
-    assert detail.get("error") == "not_found"
-    assert detail.get("request_id") == "nonexistent-req-xyz"
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["request_id"] == "nonexistent-req-xyz"
+    assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
 
 
 def test_trace_fallback_uses_method_not_attribute():
@@ -102,9 +122,9 @@ def test_trace_fallback_uses_method_not_attribute():
 
     resp = client.get("/obs/trace/req-fallback-03")
     assert resp.status_code == 200
-    calls = [str(c) for c in ledger.fetch_by_request_id.call_args_list]
-    assert any("governor_log" in c for c in calls)
-    ledger.fetch_by_request_id.assert_called()
+    data = resp.json()
+    assert data["status"] == "DEGRADED"
+    ledger.fetch_by_request_id.assert_not_called()
 
 
 def test_trace_timeout_degrades_to_lightweight(monkeypatch):
@@ -129,7 +149,7 @@ def test_trace_timeout_degrades_to_lightweight(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-timeout-001"
-    assert data["summary"]["degraded"] is True
+    assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
 
 
 def test_trace_error_degrades_to_lightweight(monkeypatch):
@@ -153,4 +173,4 @@ def test_trace_error_degrades_to_lightweight(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["request_id"] == "req-error-001"
-    assert data["summary"]["degraded"] is True
+    assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"

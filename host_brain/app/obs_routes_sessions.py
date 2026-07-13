@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from host_brain.observability.api_models import SessionItem, SessionsResponse
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -27,29 +27,6 @@ from host_brain.app.settings.observability import get_observability_settings  # 
 _SESSIONS_CACHE_TTL_MS = max(int(get_observability_settings().obs_sessions_cache_ttl_ms), 0)
 
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
-
-
-# ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class SessionItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    ts_ms: int
-    status: str
-    decision: Optional[str] = None
-    reason_code: Optional[str] = None
-    node_count: Optional[int] = None
-    total_latency_ms: Optional[int] = None
-    input_preview: Optional[str] = None
-
-
-class SessionsResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[SessionItem]
-    timestamp: int
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +117,7 @@ def _sanitize_session_items_for_export(
 
 
 def _build_sessions_response(
-    ledger,
+    ledger=None,
     *,
     page: int,
     page_size: int,
@@ -149,7 +126,12 @@ def _build_sessions_response(
     keyword: Optional[str],
 ) -> SessionsResponse:
     from host_brain.observability.session_query import SessionQueryService
-    svc = SessionQueryService(ledger)
+    if ledger is None:
+        from host_brain.app.dependencies import get_query_projection_store
+
+        svc = SessionQueryService(None, projection_store=get_query_projection_store())
+    else:
+        svc = SessionQueryService(ledger)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -180,6 +162,7 @@ def _build_sessions_response(
         page_size=result["page_size"],
         items=items,
         timestamp=_now_ms(),
+        projection=result.get("projection"),
     )
 
 
@@ -208,7 +191,7 @@ def get_sessions(
         },
         ttl_ms=_SESSIONS_CACHE_TTL_MS,
         builder=lambda: _build_sessions_response(
-            _get_ledger(),
+            None,
             page=page,
             page_size=page_size,
             status=status,
@@ -229,10 +212,8 @@ def export_sessions_csv(
     max_rows: int = Query(5000, ge=1, le=10000, description="最大导出行数"),
 ):
     """导出会话列表为 CSV 文件（支持时间范围 + 状态过滤）。"""
-    ledger = _get_ledger()
-
     sessions_response = _build_sessions_response(
-        ledger,
+        None,
         page=1,
         page_size=max_rows,
         status=status,

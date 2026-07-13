@@ -28,11 +28,17 @@ from pydantic import BaseModel, Field
 from host_brain.app.obs_routes_core import (
     router,
     _env_int,
-    _get_ledger,
     _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
 )
+from host_brain.observability.remaining_query_projection import (
+    AGENT_LOOP_INDEX_KEY,
+    AGENT_LOOP_KIND,
+    read,
+    response_meta,
+)
+from host_brain.observability.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 _PROMPT_BUILDER_STATS_CACHE_TTL_MS = _env_int("OBS_PROMPT_BUILDER_STATS_CACHE_TTL_MS", 5000, minimum=0)
@@ -99,7 +105,7 @@ class UIAssertionStatsResponse(BaseModel):
 @router.get("/ui-assertion/stats", response_model=UIAssertionStatsResponse)
 def get_ui_assertion_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #50: UIAssertionGuard 统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     try:
@@ -153,7 +159,7 @@ class FailureStatsResponse(BaseModel):
 @router.get("/failure/stats", response_model=FailureStatsResponse)
 def get_failure_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #53: FailureMatrix 失败事件统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(ledger, "failure_log", "error_log", start_ms=since_ms, end_ms=now)
@@ -209,7 +215,7 @@ class PermissionStatsResponse(BaseModel):
 @router.get("/permission/stats", response_model=PermissionStatsResponse)
 def get_permission_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #54: PermissionGuard 权限拒绝统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -298,7 +304,7 @@ class SchedulerHistoryResponse(BaseModel):
 @router.get("/scheduler/history", response_model=SchedulerHistoryResponse)
 def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #55: TaskScheduler 执行历史趋势。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -411,7 +417,7 @@ class ActionPlanStatsResponse(BaseModel):
 @router.get("/action-plan/stats", response_model=ActionPlanStatsResponse)
 def get_action_plan_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #56: ActionPlan 执行成功率/指令类型分布。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -487,7 +493,7 @@ class MemoryGuardStatsResponse(BaseModel):
 @router.get("/memory-guard/stats", response_model=MemoryGuardStatsResponse)
 def get_memory_guard_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #59: MemoryGuard 宪法校验统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -557,7 +563,7 @@ class StateArbiterStatsResponse(BaseModel):
 @router.get("/state-arbiter/stats", response_model=StateArbiterStatsResponse)
 def get_state_arbiter_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #60: StateArbiter 事实仲裁统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -610,7 +616,7 @@ class ContextCompressorStatsResponse(BaseModel):
 @router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
 def get_context_compressor_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #61: ContextCompressor 压缩效率统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -673,7 +679,7 @@ class PromptBuilderStatsResponse(BaseModel):
 def get_prompt_builder_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #65: PromptBuilder 构建统计。"""
     def _build_response() -> PromptBuilderStatsResponse:
-        ledger = _get_ledger()
+        ledger = get_projection_ledger_view()
         now = _now_ms()
         since_ms = now - window_minutes * 60 * 1000
         rows = _fetch_first_available_rows(
@@ -740,7 +746,7 @@ class EpisodicStoreStatsResponse(BaseModel):
 @router.get("/episodic-store/stats", response_model=EpisodicStoreStatsResponse)
 def get_episodic_store_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #66: EpisodicStore 写入统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -811,7 +817,7 @@ class ChainStatsResponse(BaseModel):
 @router.get("/chain/stats", response_model=ChainStatsResponse)
 def get_chain_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #82: 请求处理阶段统计（Phase XIV v4 cortex_orchestrator 架构）。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
@@ -894,26 +900,32 @@ class AgentLoopHistoryResponse(BaseModel):
     total: int
     window_minutes: int
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 
 @router.get("/agent-loop/history", response_model=AgentLoopHistoryResponse)
 def get_agent_loop_history(window_minutes: int = Query(1440, ge=1, le=10080), limit: int = Query(10, ge=1, le=50)):
-    """Ref #86: Agent Loop 历史执行记录。"""
-    ledger = _get_ledger()
+    """Ref #86: 只读 Agent Loop 历史投影。"""
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
-    loop_rows = [r for r in rows if str(r.get("stage") or "").upper() == "LOOP_DONE"]
-    loop_rows.sort(key=lambda r: r.get("ts_ms") or 0, reverse=True)
-    loop_rows = loop_rows[:limit]
-    items = []
-    for row in loop_rows:
-        try:
-            detail = json.loads(row.get("detail") or "{}") if isinstance(row.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        items.append(AgentLoopHistoryItem(request_id=str(row.get("request_id") or ""), goal=detail.get("goal") or row.get("goal"), final_status=detail.get("final_status") or row.get("final_status"), goal_achieved=detail.get("goal_achieved"), total_rounds=detail.get("total_rounds"), total_latency_ms=detail.get("total_latency_ms"), ts_ms=row.get("ts_ms"), client_mode=detail.get("client_mode")))
-    return AgentLoopHistoryResponse(items=items, total=len(items), window_minutes=window_minutes, timestamp=now)
+    payload, meta = read(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)
+    rows = [
+        dict(row)
+        for row in list((payload or {}).get("history") or [])
+        if isinstance(row, dict) and int(row.get("ts_ms") or 0) >= since_ms
+    ][:limit]
+    items = [AgentLoopHistoryItem(**row) for row in rows]
+    return AgentLoopHistoryResponse(
+        items=items,
+        total=len(items),
+        window_minutes=window_minutes,
+        timestamp=now,
+        **response_meta(meta),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -941,7 +953,7 @@ class ErrorHeatmapResponse(BaseModel):
 def get_error_heatmap(window_hours: int = Query(24, ge=1, le=168)):
     """Ref #88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。"""
     import datetime as _dt
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_hours * 3600 * 1000
     try:

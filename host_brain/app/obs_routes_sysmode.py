@@ -15,6 +15,20 @@ from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_host_proxy import fetch_host_json
+from host_brain.observability.live_source_projection import (
+    SYS_MODE_HISTORY_KEY,
+    SYS_MODE_HISTORY_KIND,
+    SYS_MODE_MAX_AGE_MS,
+    SYS_MODE_STATUS_KEY,
+    SYS_MODE_STATUS_KIND,
+    read_operator_live_projection,
+)
+from host_brain.observability.process_state_projection import (
+    RUNTIME_MAX_AGE_MS,
+    RUNTIME_SNAPSHOT_KEY,
+    RUNTIME_SNAPSHOT_KIND,
+    read_process_projection,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -23,7 +37,7 @@ from typing import Literal
 import threading
 
 from .obs_routes_core import router, _get_ledger, _now_ms
-from .obs_routes_core import _env_int, _get_obs_route_cached_response
+from .obs_routes_core import _env_int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,6 +201,7 @@ class SysModeStatusResponse(BaseModel):
     ts_ms: int
     degraded: bool = False
     degraded_reason: Optional[str] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SysModeSwitchRequest(BaseModel):
@@ -223,6 +238,7 @@ class SysModeHistoryResponse(BaseModel):
     items: List[SysModeHistoryItem]
     total: int
     timestamp: int
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AutoRulesUpdateRequest(BaseModel):
@@ -272,6 +288,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     degraded: bool = False
     degraded_reasons: List[str] = Field(default_factory=list)
     timestamp: int
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _clone_runtime_snapshot_response(
@@ -372,21 +389,8 @@ def _runtime_snapshot_warm_loop() -> None:
 
 
 def start_runtime_snapshot_warm_cache() -> dict[str, Any]:
-    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
-        return {"enabled": False, "status": "disabled"}
-
-    global _runtime_snapshot_warm_thread
-    with _runtime_snapshot_warm_lock:
-        if _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive():
-            return get_runtime_snapshot_warm_status()
-        _runtime_snapshot_warm_stop.clear()
-        _runtime_snapshot_warm_thread = threading.Thread(
-            target=_runtime_snapshot_warm_loop,
-            name="obs-runtime-snapshot-warm",
-            daemon=True,
-        )
-        _runtime_snapshot_warm_thread.start()
-    return get_runtime_snapshot_warm_status()
+    """Compatibility hook; the unified projection daemon owns refreshes."""
+    return {**get_runtime_snapshot_warm_status(), "authority": "projection_daemon"}
 
 
 def stop_runtime_snapshot_warm_cache() -> dict[str, Any]:
@@ -439,10 +443,26 @@ def _get_warmed_runtime_snapshot(current_topic: str) -> DigitalLifeRuntimeSnapsh
 
 @router.get("/sys-mode", response_model=SysModeStatusResponse)
 def get_sys_mode():
-    """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
-    service = _get_mode_transition_service()
-    status = service.get_current_status()
-    return SysModeStatusResponse(**status)
+    """Read mode state without constructing the writer-capable service."""
+    status, projection = read_operator_live_projection(
+        SYS_MODE_STATUS_KIND,
+        SYS_MODE_STATUS_KEY,
+        max_age_ms=SYS_MODE_MAX_AGE_MS,
+    )
+    if status is None:
+        status = {
+            "sys_mode": "unknown",
+            "auto_rules": {},
+            "idle_ms": 0,
+            "idle_minutes": 0.0,
+            "last_interaction_ts_ms": 0,
+            "is_night_time": False,
+            "valid_transitions": [],
+            "ts_ms": _now_ms(),
+            "degraded": True,
+            "degraded_reason": projection["reason_code"],
+        }
+    return SysModeStatusResponse(**status, projection=projection)
 
 
 @router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
@@ -450,16 +470,22 @@ def get_digital_life_runtime_snapshot(
     current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
 ):
     """获取统一数字生命 runtime snapshot（只读观测面）。"""
-    warmed = _get_warmed_runtime_snapshot(current_topic)
-    if warmed is not None:
-        return warmed
-
-    return _get_obs_route_cached_response(
-        cache_name="runtime_snapshot",
-        cache_key={"current_topic": str(current_topic or "").strip()},
-        ttl_ms=_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
-        builder=lambda: _build_runtime_snapshot_response(current_topic),
+    payload, projection = read_process_projection(
+        RUNTIME_SNAPSHOT_KIND,
+        RUNTIME_SNAPSHOT_KEY,
+        max_age_ms=RUNTIME_MAX_AGE_MS,
     )
+    if payload is None:
+        payload = {
+            "persona_user_id": "user_1",
+            "current_topic": "",
+            "sys_mode": "unknown",
+            "degraded": True,
+            "degraded_reasons": [projection["reason_code"]],
+            "timestamp": _now_ms(),
+        }
+    payload = {**payload, "projection": projection}
+    return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
 def switch_sys_mode(body: SysModeSwitchRequest):
@@ -501,14 +527,19 @@ def switch_sys_mode(body: SysModeSwitchRequest):
 def get_sys_mode_history(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
 ):
-    """获取模式切换历史记录。"""
-    service = _get_mode_transition_service()
-    history = service.get_history(limit=limit)
+    """Read projected mode transitions; slicing is request-local and pure."""
+    payload, projection = read_operator_live_projection(
+        SYS_MODE_HISTORY_KIND,
+        SYS_MODE_HISTORY_KEY,
+        max_age_ms=SYS_MODE_MAX_AGE_MS,
+    )
+    history = list((payload or {}).get("items") or [])[:limit]
     items = [SysModeHistoryItem(**h) for h in history]
     return SysModeHistoryResponse(
         items=items,
         total=len(items),
-        timestamp=_now_ms(),
+        timestamp=int((payload or {}).get("timestamp") or _now_ms()),
+        projection=projection,
     )
 
 

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.observability.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -25,7 +26,6 @@ from .obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -59,7 +59,7 @@ def get_governor_stats(
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
     """P1: Governor 决策漏斗 — 批准/拒绝数量、拒绝率、reason_code 分布、时序趋势。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -154,7 +154,7 @@ def get_errors(
     limit: int = Query(20, ge=1, le=100, description="最近错误条数"),
 ):
     """P1: 全局错误日志统计 — 错误总量、stage 分布、reason_code Top10、时序趋势、最近错误列表。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -370,7 +370,7 @@ def get_subsystems_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
     """P2/P3: 子系统健康统计 — Memory/Retrieval/Skill/Agent Loop/Airlock/Bond/Vision/Sandbox/Channel。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -474,4 +474,3 @@ def get_subsystems_stats(
         subsystems=subsystems,
         timestamp=now,
     )
-

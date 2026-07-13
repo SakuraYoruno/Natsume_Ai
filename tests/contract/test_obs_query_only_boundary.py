@@ -61,15 +61,7 @@ EXPECTED_BASELINE_MUTATION_ROUTES = {
     HttpRouteKey("POST", "/obs/codex-bio-ops/owner-state/{candidate_id}/reject"),
 }
 
-EXPECTED_DUPLICATE_QUERY_ROUTES = {
-    HttpRouteKey("GET", "/obs/graph/schema"),
-    HttpRouteKey("GET", "/obs/llm/nodes"),
-    HttpRouteKey("GET", "/obs/services/health"),
-    HttpRouteKey("GET", "/obs/trace-feed/live"),
-    HttpRouteKey("GET", "/obs/trace/{request_id}"),
-    HttpRouteKey("GET", "/obs/trace/{request_id}/stream_events"),
-    HttpRouteKey("GET", "/obs/tribe/events"),
-}
+EXPECTED_DUPLICATE_QUERY_ROUTES: set[HttpRouteKey] = set()
 
 
 def test_task0489_baseline_manifest_covers_all_18_observed_mutation_handlers() -> None:
@@ -84,10 +76,9 @@ def test_task0489_baseline_manifest_covers_all_18_observed_mutation_handlers() -
 def test_actual_obs_fastapi_route_entries_are_query_only_after_writer_detach() -> None:
     audit = audit_fastapi_route_entries(obs_app)
 
-    # Original inventory: 129 entries / 122 unique routes.  Detaching the 18
-    # unique mutation decorators leaves 111 entries / 104 unique routes.
-    assert audit.entry_count == 129 - len(OBS_BASELINE_MUTATION_ROUTES)
-    assert audit.unique_route_count == 122 - len(OBS_BASELINE_MUTATION_ROUTES)
+    # Each query route has one canonical owner after the split-router cutover.
+    assert audit.entry_count == 104
+    assert audit.unique_route_count == 104
     assert {entry.key for entry in audit.pure_query_non_get_entries} == EXPECTED_PURE_QUERY_POSTS
     assert OBS_PURE_QUERY_NON_GET_ROUTES == frozenset(EXPECTED_PURE_QUERY_POSTS)
     assert {group.key for group in audit.duplicate_routes} == EXPECTED_DUPLICATE_QUERY_ROUTES

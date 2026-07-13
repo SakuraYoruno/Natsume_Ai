@@ -54,6 +54,7 @@ export async function httpRequest(path, options = {}) {
   }
   try {
     const response = await fetch(path, {
+      credentials: 'same-origin',
       ...rest,
       headers: normalizeHeaders(headers, body),
       body: normalizeBody(body),
@@ -103,6 +104,7 @@ export async function httpStreamRequest(path, options = {}) {
   }
   try {
     const response = await fetch(path, {
+      credentials: 'same-origin',
       ...rest,
       headers: normalizeHeaders(headers, body),
       body: normalizeBody(body),
@@ -133,6 +135,7 @@ export function httpStreamPost(path, body, options = {}) {
 
 export async function httpText(path, options = {}) {
   const response = await fetch(path, {
+    credentials: 'same-origin',
     ...options,
     headers: normalizeHeaders({ Accept: 'text/plain, text/markdown;q=0.9' }, undefined),
     method: options.method || 'GET',
@@ -150,6 +153,7 @@ export async function httpText(path, options = {}) {
 
 export async function httpBlob(path, options = {}) {
   const response = await fetch(path, {
+    credentials: 'same-origin',
     ...options,
     headers: normalizeHeaders(options.headers || { Accept: '*/*' }, undefined),
     method: options.method || 'GET',

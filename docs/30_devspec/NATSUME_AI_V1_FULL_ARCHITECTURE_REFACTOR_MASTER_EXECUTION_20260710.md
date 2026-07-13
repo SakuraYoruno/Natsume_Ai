@@ -7,7 +7,7 @@
 日期：2026-07-12
 状态：`ACTIVE_ARCHITECTURE_EXECUTION`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-06 已完成，AW-07 正式实施
+当前代码基线：`codex/m48-integration`，AW-00～AW-07 已完成，AW-08 正式实施
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
@@ -273,7 +273,7 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 ### AW-07：Query/Observability 与 Operator Plane
 
-状态：`IN_PROGRESS`
+状态：`DONE`（durable projection/query gateway、默认拒绝的 Operator 权限与隐私边界、generated command client/BFF 已完成 production cutover）
 
 目标：Obs 只读，统一 versioned read model、projection、trace、metrics、replay，并让 Operator Console 只使用生成 client 和受治理 command。
 
@@ -285,9 +285,13 @@ AW-02 与 AW-03 在合同冻结后可并行；AW-06 的 Edge 内部 foundation �
 
 退出指标：projection 可从 journal 重建并对账；read model 带 version/cursor/freshness/degraded state；generated client drift 会使 CI 失败；权限、a11y 和一条端到端操作路径通过。
 
+完成事实：迁移 `0082_operator_query_projection.sql` 建立了 versioned projection、不可变 source journal、rebuild/reconcile、leader lease/fence 与 cursor CAS；Task/Trace/Session/Health/Device/Life/Memory/Pack/Model/进程状态及原 41 个统计 GET 均切为 `QueryProjectionStore` 只读，decorated GET 对 canonical ledger、live probe、writer-capable service 和文件 warm-miss builder 的调用归零。Projection daemon 是 Obs lifecycle 唯一刷新 owner，旧 warm hook 不再创建线程；重建失败保持 last-good，同 cursor 异 digest、cursor 回退和丢 lease 均 fail-closed。`OperatorQueryGateway` 在 handler、SSE 和 WebSocket source 前完成 principal/scope 校验，operator namespace 默认拒绝，公共面仅保留明确 health/metrics/summary；统一 serializer 在写 journal/document 与返回响应前去除 snake_case、camelCase、secret alias、正文和 private reasoning，并只保留引用摘要。UI mutation 的手写 URL、浏览器 proof/signer 与 placeholder command 已删除，generated OpenAPI client 通过同源 HttpOnly session、CSRF 校验的 Host BFF，由服务端 HMAC 进入同一 `SecureObsCommandIngress` 和 durable receipt；104 个 FastAPI method/path owner 唯一，23 个重复 DTO 收敛到单一模块。
+
+验收事实：各切片定向 unit/contract/static 已覆盖 projection spine、lease/CAS/rebuild、domain/process projections、query privacy/auth transport、command gateway、generated-client drift 与 GET 副作用边界；汇合 contract wave `164 passed / 3 failed`，三个失败分别为测试间 receipt 全局状态与旧 trace endpoint 直查 ledger，修复后仅失败节点 `3 passed`。单次 integration wave 使用隔离迁移数据库通过 `10 passed`；最终 P0/P1 复审为 `P0=0`、两类 P1（残余 live GET 与 camelCase 脱敏绕过）完成修复后受影响验证 `60 passed`。UI Node tests、TypeScript check、client drift gate 和 production build 均通过。
+
 ### AW-08：兼容层退役与 Core Release
 
-状态：`WAITING_FOR_AW_07`
+状态：`IN_PROGRESS`
 
 目标：在单一生产架构成立后删除全部旧 authority，完成核心架构的唯一完整验收和可回滚发布。Evolution Lab、Skill Compiler、Counterfactual、Knowledge OS 与 Identity Migration 的新增能力移到 Core Release 之后的独立 Follow-up Goal，不能反向阻塞核心架构封板。
 
@@ -448,9 +452,9 @@ AW-08 只有在以下全部成立时才完成：
 | AW-04 | `DONE` | LifeCommand/Event/Reducer/Projection/Outbox/Receipt 单脊柱、SchedulerClock 单时钟与 execution-time grant/lease fencing 已切流；无 P0/P1 |
 | AW-05 | `DONE` | ModelAttempt/Prompt/Route、Capability Broker、durable Skill/MCP authority 与三类 Domain Pack 已完成 production cutover；无 P0/P1 |
 | AW-06 | `DONE` | Edge/Host 显式实现导入归零，设备单 authority、durable lease/fence/receipt 与 reconnect no-replay 已切流；无 P0/P1 |
-| AW-07 | `IN_PROGRESS` | 建立 versioned projection/query gateway，Obs GET 零副作用，UI mutation 统一回 Secure Ingress |
-| AW-08 | `WAITING` | 旧架构删除、`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`、一次最终实测与 Core Release |
+| AW-07 | `DONE` | durable projection/lease/fence/rebuild、Query auth/privacy、generated BFF command client 已切流；无 P0/P1 |
+| AW-08 | `IN_PROGRESS` | 删除 compatibility facade、旧 writer/runtime/scheduler/flag 与生成污染，进入 `CODE_COMPLETE` 后一次最终实测与 Core Release |
 
 Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
 
-AW-07 的立即执行顺序：并行建立可重建/对账的 versioned projection spine、带 principal/scope 与字段 allowlist 的 `OperatorQueryGateway`、统一回 Secure Ingress 的 `OperatorCommandGateway`，以及公共 `ReadModelEnvelope.v1`/OpenAPI generated client；先切 Task/Trace/Session/Health/Device 状态，再删除 Obs GET 探针/命令副作用、业务 store 直查、重复 router/DTO 和 UI 手写 mutation URL。四条生产切流汇合后只运行一次 AW-07 integration wave，无需用户再次确认。
+AW-08 的立即执行顺序：按 `Model/Prompt → Life/Memory/Evidence → Capability/Agent/Task → Edge/Gateway → Obs/release hygiene` 五个删除包并行；每个 facade 先以 production reference scan 证明 usage=0，再删除实现、re-export、flag 和 dead fallback。所有删除汇合后生成唯一 Core Release Manifest/SBOM/Rollback Matrix，进入 `CODE_COMPLETE`，随后只执行一次 Program Acceptance。

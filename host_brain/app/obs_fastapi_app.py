@@ -22,37 +22,32 @@ from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.app.obs_routes_health import router as obs_health_router
 from host_brain.app.obs_routes_trace import router as obs_trace_router
-from host_brain.app.obs_routes_summary import (
-    router as obs_summary_router,
-    get_digital_life_overview_warm_status,
-    get_insights_summary_warm_status,
-    start_digital_life_overview_warm_cache,
-    start_insights_summary_warm_cache,
-    stop_digital_life_overview_warm_cache,
-    stop_insights_summary_warm_cache,
-)
-from host_brain.app.obs_routes_life_body import (
-    router as obs_life_body_router,
-    get_life_body_warm_status,
-    start_life_body_warm_cache,
-    stop_life_body_warm_cache,
-)
+from host_brain.app.obs_routes_summary import router as obs_summary_router
+from host_brain.app.obs_routes_life_body import router as obs_life_body_router
 from host_brain.app.obs_routes_digital_life_soak import router as obs_digital_life_soak_router
 from host_brain.app.obs_routes_proactive_autonomy import router as obs_proactive_autonomy_router
-from host_brain.app.obs_routes_sysmode import (
-    get_runtime_snapshot_warm_status,
-    start_runtime_snapshot_warm_cache,
-    stop_runtime_snapshot_warm_cache,
+from host_brain.app.dependencies import (
+    get_ledger as _get_ledger_dep,
+    get_obs_metrics_collector,
+    get_query_projection_store,
 )
-from host_brain.app.obs_routes_trace import (
-    get_trace_feed_warm_status,
-    start_trace_feed_warm_cache,
-    stop_trace_feed_warm_cache,
-)
-from host_brain.app.dependencies import get_ledger as _get_ledger_dep, get_obs_metrics_collector
-from host_brain.app.main import build_request_observability_report
 from host_brain.app.schemas import ObservabilityRequest, ObservabilityResponse
 from host_brain.observability.routes import build_obs_metrics_response
+from host_brain.observability.operator_query_gateway import (
+    OperatorQueryGateway,
+    OperatorQueryMiddleware,
+)
+from host_brain.observability.projection_runtime import TRACE_KIND
+from host_brain.observability.projection_runtime import projection_meta
+from host_brain.observability.projection_daemon import (
+    start_projection_jobs,
+    stop_projection_jobs,
+)
+from host_brain.observability.health_device_projection import (
+    HEALTH_MAX_AGE_MS,
+    SERVICE_HEALTH_KEY,
+    SERVICE_HEALTH_KIND,
+)
 
 _logger = logging.getLogger("Natsume.obs_app")
 
@@ -66,29 +61,13 @@ _set_obs_ledger_provider(_get_obs_ledger)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    warm_status = start_runtime_snapshot_warm_cache()
-    _logger.info("obs runtime snapshot warm cache startup: %s", warm_status)
-    trace_warm_status = start_trace_feed_warm_cache()
-    _logger.info("obs trace feed warm cache startup: %s", trace_warm_status)
-    insights_warm_status = start_insights_summary_warm_cache()
-    _logger.info("obs insights summary warm cache startup: %s", insights_warm_status)
-    digital_life_warm_status = start_digital_life_overview_warm_cache()
-    _logger.info("obs digital life overview warm cache startup: %s", digital_life_warm_status)
-    life_body_warm_status = start_life_body_warm_cache()
-    _logger.info("obs life body warm cache startup: %s", life_body_warm_status)
+    projection_status = start_projection_jobs(interval_ms=5000)
+    _logger.info("operator projection daemon startup: %s", projection_status)
     try:
         yield
     finally:
-        life_body_stop_status = stop_life_body_warm_cache()
-        _logger.info("obs life body warm cache shutdown: %s", life_body_stop_status)
-        digital_life_stop_status = stop_digital_life_overview_warm_cache()
-        _logger.info("obs digital life overview warm cache shutdown: %s", digital_life_stop_status)
-        insights_stop_status = stop_insights_summary_warm_cache()
-        _logger.info("obs insights summary warm cache shutdown: %s", insights_stop_status)
-        trace_stop_status = stop_trace_feed_warm_cache()
-        _logger.info("obs trace feed warm cache shutdown: %s", trace_stop_status)
-        stop_status = stop_runtime_snapshot_warm_cache()
-        _logger.info("obs runtime snapshot warm cache shutdown: %s", stop_status)
+        stop_status = stop_projection_jobs()
+        _logger.info("operator projection daemon shutdown: %s", stop_status)
 
 
 app = FastAPI(
@@ -108,6 +87,15 @@ app.include_router(obs_summary_router)
 app.include_router(obs_life_body_router)
 app.include_router(obs_digital_life_soak_router)
 app.include_router(obs_proactive_autonomy_router)
+
+# Every query response crosses one server-owned auth/privacy boundary.  Keep
+# the gateway inside ``app.state`` so deployments can replace credentials
+# during composition without allowing individual route handlers to bypass it.
+app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
+app.add_middleware(
+    OperatorQueryMiddleware,
+    gateway_provider=lambda: app.state.operator_query_gateway,
+)
 
 _cors_origins_raw = os.environ.get(
     "Natsume_CORS_ORIGINS",
@@ -133,7 +121,9 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
         status_code=500,
         content={
             "status": "ERROR",
-            "detail": str(exc),
+            # Exception text may contain query parameters, private bodies or
+            # credential material.  Keep it in server logs only.
+            "detail": "OBS_INTERNAL_ERROR",
             "timestamp": int(time.time() * 1000),
         },
     )
@@ -141,16 +131,16 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    ledger = _get_obs_ledger()
+    document = get_query_projection_store().get(SERVICE_HEALTH_KIND, SERVICE_HEALTH_KEY)
     return {
         "status": "OK",
         "service": "obs",
-        "ledger_available": ledger is not None,
-        "runtime_snapshot_warm_cache": get_runtime_snapshot_warm_status(),
-        "trace_feed_warm_cache": get_trace_feed_warm_status(),
-        "insights_summary_warm_cache": get_insights_summary_warm_status(),
-        "digital_life_overview_warm_cache": get_digital_life_overview_warm_status(),
-        "life_body_warm_cache": get_life_body_warm_status(),
+        "projection": projection_meta(
+            SERVICE_HEALTH_KIND,
+            SERVICE_HEALTH_KEY,
+            document,
+            max_age_ms=HEALTH_MAX_AGE_MS,
+        ),
         "timestamp": int(time.time() * 1000),
     }
 
@@ -170,28 +160,30 @@ async def obs_metrics(request_id: str | None = None) -> dict[str, Any]:
 @app.post("/observability/trace", response_model=ObservabilityResponse)
 async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResponse:
     ts_ms = int(time.time() * 1000)
-    try:
-        trace_report = build_request_observability_report(
-            request_id=request_body.request_id,
-            ledger=_get_obs_ledger(),
-        )
-    except ValueError as exc:
+    request_id = str(request_body.request_id or "").strip()
+    if not request_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except Exception as exc:
-        _logger.error("request trace failed", extra={"request_id": request_body.request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve request trace",
-        ) from exc
+            detail="request_id is required",
+        )
+    document = get_query_projection_store().get(TRACE_KIND, request_id)
+    payload = dict(document.payload) if document is not None else {}
+    timeline = payload.get("timeline")
+    if not isinstance(timeline, list):
+        timeline = [dict(row) for row in payload.get("nodes", []) if isinstance(row, dict)]
+    sources = payload.get("sources")
+    if not isinstance(sources, dict) or any(not isinstance(value, int) for value in sources.values()):
+        source_counts: dict[str, int] = {}
+        for row in timeline:
+            source = str(row.get("source") or row.get("node_type") or row.get("node_id") or "trace")
+            source_counts[source] = source_counts.get(source, 0) + 1
+        sources = source_counts
     return ObservabilityResponse(
-        request_id=request_body.request_id,
-        trace_status=trace_report.get("trace_status", "UNKNOWN"),
-        timeline_total=trace_report.get("timeline_total", 0),
-        sources=trace_report.get("sources", {}),
-        timeline=trace_report.get("timeline", []),
+        request_id=request_id,
+        trace_status=str(payload.get("trace_status") or payload.get("status") or "DEGRADED"),
+        timeline_total=len(timeline),
+        sources=sources,
+        timeline=timeline,
         timestamp=ts_ms,
     )
 

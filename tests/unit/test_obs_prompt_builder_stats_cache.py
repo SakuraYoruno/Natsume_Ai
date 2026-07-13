@@ -35,7 +35,10 @@ def teardown_function() -> None:
 
 def test_obs_prompt_builder_stats_uses_short_ttl_cache(monkeypatch) -> None:
     ledger = _CountingLedger()
-    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_skill._get_ledger", lambda: ledger)
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_stats_capability_skill.get_projection_ledger_view",
+        lambda: ledger,
+    )
 
     app = FastAPI()
     app.include_router(router)

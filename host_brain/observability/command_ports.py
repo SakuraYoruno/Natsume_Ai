@@ -366,11 +366,172 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         "obs:sys-mode:write",
         _schema(required=("event_type",), strings=("event_type",)),
     ),
+    _spec(
+        "capability_forge.runtime.match",
+        "obs:capability-forge:write",
+        _schema(
+            required=("suggested_family",),
+            optional=("missing_capability_tags", "reason_code"),
+            strings=("suggested_family", "reason_code"),
+        ),
+    ),
+    _spec(
+        "canon.proposal.submit",
+        "canon:write",
+        _schema(
+            required=("proposal_id", "target_doc_id", "proposed_title", "proposed_body"),
+            optional=("proposed_tags", "summary"),
+            strings=("proposal_id", "target_doc_id", "proposed_title", "proposed_body", "summary"),
+        ),
+        authority_field="proposer_node_id",
+    ),
+    _spec(
+        "canon.proposal.approve",
+        "canon:write",
+        _schema(
+            required=(
+                "proposal_id", "apply_id", "subject_version", "subject_hash",
+                "target_doc_id", "base_version", "approval_token_ref",
+                "session_id", "trace_id", "evidence_refs",
+            ),
+            strings=(
+                "proposal_id", "apply_id", "subject_hash", "target_doc_id",
+                "approval_token_ref", "session_id", "trace_id",
+            ),
+            integers=("subject_version", "base_version"),
+        ),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "canon.proposal.reject",
+        "canon:write",
+        _schema(
+            required=("proposal_id",),
+            optional=("reason",),
+            strings=("proposal_id", "reason"),
+        ),
+        authority_field="rejector_node_id",
+    ),
+    _spec(
+        "canon.proposal.rollback",
+        "canon:write",
+        _schema(
+            required=(
+                "proposal_id", "apply_id", "subject_version", "subject_hash",
+                "target_doc_id", "base_version", "approval_token_ref",
+                "session_id", "trace_id", "evidence_refs",
+            ),
+            strings=(
+                "proposal_id", "apply_id", "subject_hash", "target_doc_id",
+                "approval_token_ref", "session_id", "trace_id",
+            ),
+            integers=("subject_version", "base_version"),
+        ),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "scheduler.task.enable",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("expected_head_version",), strings=("task_id",), integers=("expected_head_version",)),
+    ),
+    _spec(
+        "scheduler.task.disable",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("expected_head_version",), strings=("task_id",), integers=("expected_head_version",)),
+    ),
+    _spec(
+        "scheduler.task.trigger",
+        "scheduler:write",
+        _schema(required=("task_id",), optional=("payload",), strings=("task_id",), mappings=("payload",)),
+    ),
+    _spec(
+        "tool.execute",
+        "tool:execute",
+        _schema(
+            required=("tool_id", "intent_id", "session_id"),
+            optional=("seq", "args", "context", "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id"),
+            strings=("tool_id", "intent_id", "session_id", "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id"),
+            mappings=("args", "context"),
+            integers=("seq",),
+        ),
+    ),
+    _spec(
+        "skill_provider.install",
+        "skill-provider:write",
+        _schema(
+            required=("filename", "source_code"),
+            optional=("activate_now",),
+            strings=("filename",),
+            booleans=("activate_now",),
+        ),
+    ),
+    _spec(
+        "mate.action.submit",
+        "device:mate:write",
+        _schema(
+            optional=(
+                "action", "state", "touch_type", "emotion_tag", "expression",
+                "preset", "text", "enabled", "ttl", "duration", "intensity",
+                "scale", "position_x", "position_y",
+            ),
+            strings=("action", "state", "touch_type", "emotion_tag", "expression", "preset", "text"),
+            booleans=("enabled",),
+            numbers=("ttl", "duration", "intensity", "scale", "position_x", "position_y"),
+        ),
+    ),
+    _spec(
+        "mate.say.submit",
+        "device:mate:write",
+        _schema(required=("text",), optional=("emotion", "ttl"), strings=("text", "emotion"), numbers=("ttl",)),
+    ),
+    _spec(
+        "bond.event.submit",
+        "bond:write",
+        _schema(
+            required=("user_id", "update_kind"),
+            optional=("evidence_refs", "emotion_tag", "emotion_intensity"),
+            strings=("user_id", "update_kind", "emotion_tag"),
+            numbers=("emotion_intensity",),
+        ),
+    ),
+    _spec(
+        "edge.command.push",
+        "device:edge:write",
+        _schema(
+            required=("command_type", "target_agent"),
+            optional=("payload",),
+            strings=("command_type", "target_agent"),
+            mappings=("payload",),
+        ),
+        authority_field="source_agent",
+    ),
+    _spec("security.hunt.run_once", "security:hunt:write", _schema(optional=("reason",), strings=("reason",))),
+    _spec(
+        "task_review.approve",
+        "task-review:write",
+        _schema(
+            required=("review_id", "subject_ref", "subject_version", "resume_phase", "checkpoint_id"),
+            strings=("review_id", "subject_ref", "resume_phase", "checkpoint_id"),
+            integers=("subject_version",),
+        ),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "task_review.reject",
+        "task-review:write",
+        _schema(required=("review_id",), strings=("review_id",)),
+        authority_field="actor_id",
+    ),
+    _spec(
+        "task_review.resume",
+        "task-review:write",
+        _schema(required=("review_id", "resume_token_ref", "subject_ref", "subject_version", "resume_phase", "checkpoint_id"), optional=("resume_result_ref",), strings=("review_id", "resume_token_ref", "subject_ref", "resume_phase", "checkpoint_id", "resume_result_ref"), integers=("subject_version",)),
+    ),
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 16:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_16_ACTIVE_FAMILIES")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 34:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_34_ACTIVE_FAMILIES")
 
 
 __all__ = [

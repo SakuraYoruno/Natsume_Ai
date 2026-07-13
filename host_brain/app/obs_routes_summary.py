@@ -33,6 +33,14 @@ from host_brain.app.obs_routes_stats_input_humanoid import (
 )
 from host_brain.app.obs_routes_stats_system import get_llm_call_stats, get_qa_stats, get_vts_stats
 from host_brain.app.obs_routes_health import get_services_health
+from host_brain.observability.process_state_projection import (
+    DIGITAL_LIFE_MAX_AGE_MS,
+    DIGITAL_LIFE_OVERVIEW_KIND,
+    INSIGHTS_SUMMARY_KIND,
+    SUMMARY_MAX_AGE_MS,
+    read_process_projection,
+    window_key,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -88,6 +96,7 @@ class InsightsSummarySnapshotResponse(BaseModel):
     vtsData: Optional[Dict[str, Any]] = None
     qaData: Optional[Dict[str, Any]] = None
     llmCallData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DigitalLifeOverviewSnapshotResponse(BaseModel):
@@ -106,6 +115,7 @@ class DigitalLifeOverviewSnapshotResponse(BaseModel):
     humanoidLoopHotspotsData: Optional[Dict[str, Any]] = None
     humanoidLoopHotspotTrendData: Optional[Dict[str, Any]] = None
     humanoidLoopSourceCorrelationData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 _INSIGHTS_SUMMARY_WARM_ENABLED = bool(
@@ -371,20 +381,8 @@ def _digital_life_overview_warm_loop() -> None:
 
 
 def start_insights_summary_warm_cache() -> dict[str, Any]:
-    global _insights_summary_warm_thread
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED:
-        return get_insights_summary_warm_status()
-    with _insights_summary_warm_lock:
-        if _insights_summary_warm_thread and _insights_summary_warm_thread.is_alive():
-            return get_insights_summary_warm_status()
-        _insights_summary_warm_stop.clear()
-        _insights_summary_warm_thread = threading.Thread(
-            target=_insights_summary_warm_loop,
-            name="obs-insights-summary-warm",
-            daemon=True,
-        )
-        _insights_summary_warm_thread.start()
-    return get_insights_summary_warm_status()
+    """Compatibility hook; the unified projection daemon owns refreshes."""
+    return {**get_insights_summary_warm_status(), "authority": "projection_daemon"}
 
 
 def stop_insights_summary_warm_cache() -> dict[str, Any]:
@@ -398,20 +396,8 @@ def stop_insights_summary_warm_cache() -> dict[str, Any]:
 
 
 def start_digital_life_overview_warm_cache() -> dict[str, Any]:
-    global _digital_life_overview_warm_thread
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
-        return get_digital_life_overview_warm_status()
-    with _digital_life_overview_warm_lock:
-        if _digital_life_overview_warm_thread and _digital_life_overview_warm_thread.is_alive():
-            return get_digital_life_overview_warm_status()
-        _digital_life_overview_warm_stop.clear()
-        _digital_life_overview_warm_thread = threading.Thread(
-            target=_digital_life_overview_warm_loop,
-            name="obs-digital-life-overview-warm",
-            daemon=True,
-        )
-        _digital_life_overview_warm_thread.start()
-    return get_digital_life_overview_warm_status()
+    """Compatibility hook; the unified projection daemon owns refreshes."""
+    return {**get_digital_life_overview_warm_status(), "authority": "projection_daemon"}
 
 
 def stop_digital_life_overview_warm_cache() -> dict[str, Any]:
@@ -488,17 +474,23 @@ def _get_warmed_digital_life_overview_snapshot(window_minutes: int) -> dict[str,
 def get_insights_summary_snapshot(
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
-    warmed = _get_warmed_insights_summary_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return _build_insights_summary_snapshot_sync(window_minutes)
+    payload, projection = read_process_projection(
+        INSIGHTS_SUMMARY_KIND,
+        window_key(window_minutes),
+        max_age_ms=SUMMARY_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return InsightsSummarySnapshotResponse(**response).model_dump()
 
 
 @router.get("/digital-life/overview-snapshot", response_model=DigitalLifeOverviewSnapshotResponse)
 async def get_digital_life_overview_snapshot(
     window_minutes: int = Query(360, ge=1, le=10080),
 ):
-    warmed = _get_warmed_digital_life_overview_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return await _build_digital_life_overview_snapshot_async(window_minutes)
+    payload, projection = read_process_projection(
+        DIGITAL_LIFE_OVERVIEW_KIND,
+        window_key(window_minutes),
+        max_age_ms=DIGITAL_LIFE_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return DigitalLifeOverviewSnapshotResponse(**response).model_dump()

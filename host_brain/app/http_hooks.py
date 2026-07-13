@@ -587,6 +587,14 @@ def runtime_lifespan(
                 ledger=ledger,
                 ts_ms=int(time.time() * 1000),
             )
+            from host_brain.app.startup_snapshot import (  # noqa: PLC0415
+                build_startup_snapshot,
+                set_current_startup_snapshot,
+            )
+
+            set_current_startup_snapshot(
+                build_startup_snapshot(report, ts_ms=int(report.get("ts_ms") or time.time() * 1000))
+            )
             emit_runtime_bootstrap_logs(startup_report=report)
             logger.info("Startup probe completed", extra={"status": report.get("status", "UNKNOWN")})
 

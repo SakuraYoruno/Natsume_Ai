@@ -9,14 +9,39 @@ import time
 import logging
 from typing import Any, Dict, List, Optional
 
+from host_brain.observability.projection_runtime import (
+    SESSION_INDEX_KEY,
+    SESSION_KIND,
+    projection_meta,
+)
+from host_brain.observability.projection_daemon import register_projection_job
+from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+
 logger = logging.getLogger("Natsume.obs.session")
 
 
 class SessionQueryService:
     """从 governor/intention/voice 审计表聚合会话列表。"""
 
-    def __init__(self, ledger):
+    def __init__(
+        self,
+        ledger,
+        *,
+        projection_store: QueryProjectionStore | None = None,
+        source_only: bool = False,
+    ):
         self._ledger = ledger
+        canonical_path = getattr(ledger, "canonical_db_path", None)
+        if source_only:
+            self._projection_store = None
+        elif projection_store is not None:
+            self._projection_store = projection_store
+        elif isinstance(canonical_path, str) and canonical_path.strip() and canonical_path != ":memory:":
+            from host_brain.app.dependencies import get_query_projection_store
+
+            self._projection_store = get_query_projection_store()
+        else:
+            self._projection_store = None
 
     def query(
         self,
@@ -37,6 +62,74 @@ class SessionQueryService:
             start_time = now_ms - seconds * 1000
         if end_time is None:
             end_time = now_ms
+
+        if self._projection_store is None:
+            return self._query_source(
+                page=page,
+                page_size=page_size,
+                status=status,
+                channel=channel,
+                keyword=keyword,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        document = self._projection_store.get(SESSION_KIND, SESSION_INDEX_KEY)
+        meta = projection_meta(
+            SESSION_KIND,
+            SESSION_INDEX_KEY,
+            document,
+            max_age_ms=15000,
+        )
+        if document is None or not meta["available"]:
+            return {
+                "total": 0,
+                "page": max(1, int(page)),
+                "page_size": min(max(1, int(page_size)), 10_000),
+                "items": [],
+                "timestamp": now_ms,
+                "projection": meta,
+            }
+        items = [
+            dict(row)
+            for row in list(document.payload.get("items") or [])
+            if isinstance(row, dict)
+            and int(row.get("ts_ms") or 0) >= int(start_time or 0)
+            and int(row.get("ts_ms") or 0) <= int(end_time)
+        ]
+        items = self._apply_filters(
+            items,
+            status=status,
+            channel=channel,
+            keyword=keyword,
+        )
+        total = len(items)
+        bounded_page_size = min(max(1, int(page_size)), 10_000)
+        bounded_page = max(1, int(page))
+        offset = (bounded_page - 1) * bounded_page_size
+        return {
+            "total": total,
+            "page": bounded_page,
+            "page_size": bounded_page_size,
+            "items": items[offset : offset + bounded_page_size],
+            "timestamp": now_ms,
+            "projection": meta,
+        }
+
+    def _query_source(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        status: Optional[str],
+        channel: Optional[str],
+        keyword: Optional[str],
+        start_time: Optional[int],
+        end_time: int,
+    ) -> Dict[str, Any]:
+        """Worker-only source scan; production GETs consume its durable output."""
+
+        now_ms = int(time.time() * 1000)
 
         try:
             rows = self._fetch_rows("governor_log", start_ms=start_time or 0, end_ms=end_time)
@@ -126,7 +219,7 @@ class SessionQueryService:
         items_raw = self._apply_filters(items_raw, status=status, channel=channel, keyword=keyword)
 
         total = len(items_raw)
-        page_size = min(max(1, page_size), 100)
+        page_size = min(max(1, page_size), 10_000)
         page = max(1, page)
         offset = (page - 1) * page_size
         page_items = items_raw[offset: offset + page_size]
@@ -272,3 +365,37 @@ def _fmt_ts(ts_ms: Optional[int]) -> Optional[str]:
 
     dt = datetime.datetime.fromtimestamp(ts_ms / 1000)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def refresh_session_query_projection() -> dict[str, int]:
+    """Background-only source scan for the durable session index."""
+
+    from host_brain.app.dependencies import get_ledger, get_query_projection_store
+
+    ledger = get_ledger()
+    service = SessionQueryService(ledger, source_only=True)
+    now_ms = int(time.time() * 1000)
+    snapshot = service._query_source(
+        page=1,
+        page_size=10_000,
+        status=None,
+        channel=None,
+        keyword=None,
+        start_time=0,
+        end_time=now_ms,
+    )
+    rows = list(snapshot.get("items") or [])
+    cursor = max((int(row.get("ts_ms") or 0) for row in rows), default=0)
+    payload = {"items": rows, "timestamp": cursor}
+    get_query_projection_store().upsert(
+        SESSION_KIND,
+        SESSION_INDEX_KEY,
+        payload,
+        source_cursor=cursor,
+        source_digest=digest_json(payload),
+        source_ref="session-background-worker",
+    )
+    return {"session_count": len(rows)}
+
+
+register_projection_job("sessions", refresh_session_query_projection)

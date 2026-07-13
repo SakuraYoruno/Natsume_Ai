@@ -41,6 +41,7 @@ from host_brain.observability.command_http import (
     ObsCommandIngressProvider,
     create_obs_command_http_router,
 )
+from host_brain.observability.operator_query_gateway import OperatorQueryGateway
 from host_brain.scheduler.scheduler_routes import router as scheduler_router
 from host_brain.skills.signed_intake_http import (
     SignedSkillProviderIntakeProvider,
@@ -90,6 +91,8 @@ def register_host_routers(
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
 ) -> None:
+    operator_query_gateway = OperatorQueryGateway.from_environment()
+    app.state.operator_query_gateway = operator_query_gateway
     async def require_internal_agent_authority(request: Request) -> Any:
         ingress = (
             internal_agent_ingress_provider()
@@ -197,6 +200,7 @@ def register_host_routers(
     app.include_router(
         create_obs_command_http_router(
             ingress_provider=obs_command_ingress_provider,
+            operator_query_gateway_provider=lambda: operator_query_gateway,
         )
     )
     app.include_router(

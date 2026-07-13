@@ -16,11 +16,44 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from host_brain.observability.api_models import (
+    GraphSchemaEdge,
+    GraphSchemaNode,
+    GraphSchemaResponse,
+    LiveTraceFeedItem,
+    StreamEventItem,
+    TraceEdge,
+    TraceLiveFeedDelta,
+    TraceLiveFeedDeltaItem,
+    TraceLiveFeedNodeDelta,
+    TraceLiveFeedSnapshot,
+    TraceNode,
+    TraceResponse,
+    TraceStreamEventsResponse,
+    TribeEventItem,
+    TribeEventsResponse,
+)
+
+from host_brain.observability.projection_runtime import (
+    TRACE_FEED_INDEX_KEY,
+    TRACE_FEED_KIND,
+    TRACE_KIND,
+    TRACE_STREAM_KIND,
+    TRIBE_EVENTS_INDEX_KEY,
+    TRIBE_EVENTS_KIND,
+    projection_meta,
+    trace_source,
+)
+from host_brain.observability.projection_daemon import (
+    register_projection_job,
+    start_projection_jobs,
+    stop_projection_jobs,
+)
+from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -156,140 +189,6 @@ def _payload_contains_recall_content(payload: Dict[str, Any]) -> bool:
     if isinstance(evidence_refs, str) and evidence_refs.strip():
         return True
     return False
-
-
-# ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class TraceNode(BaseModel):
-    node_id: str
-    node_type: str
-    display_name: str
-    side: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    reason_code: Optional[str] = None
-    latency_ms: Optional[int] = None
-    input_data: Optional[Any] = None
-    output_data: Optional[Any] = None
-    ts_ms: Optional[int] = None
-    error: Optional[str] = None
-    group_id: Optional[str] = None
-    owner_node_id: Optional[str] = None
-    subgraph_id: Optional[str] = None
-    parent_node_id: Optional[str] = None
-
-
-class TraceEdge(BaseModel):
-    source: str
-    target: str
-
-
-class TraceResponse(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    status: str
-    total_latency_ms: Optional[int] = None
-    node_count: int
-    nodes: List[TraceNode]
-    edges: List[TraceEdge]
-    summary: Optional[Dict[str, Any]] = None
-    subgraphs: List[Dict[str, Any]] = Field(default_factory=list)
-    stream_events: List[Dict[str, Any]] = Field(default_factory=list)
-    ts_ms: int
-    timestamp: int
-
-
-class TribeEventItem(BaseModel):
-    event_id: str
-    event_type: str
-    source_agent: str
-    target_agent: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    schema_version: str
-    ts_ms: int
-
-
-class TribeEventsResponse(BaseModel):
-    total: int
-    items: List[TribeEventItem]
-    timestamp: int
-
-
-class LiveTraceFeedItem(BaseModel):
-    session: Any
-    trace: Optional[TraceResponse] = None
-    error: Optional[str] = None
-
-
-class TraceLiveFeedSnapshot(BaseModel):
-    type: Literal["snapshot"] = "snapshot"
-    items: List[LiveTraceFeedItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class TraceLiveFeedNodeDelta(BaseModel):
-    change_type: Literal["added", "updated"]
-    node: TraceNode
-    previous_status: Optional[str] = None
-
-
-class TraceLiveFeedDeltaItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    session: Optional[Any] = None
-    trace_status: Optional[str] = None
-    total_latency_ms: Optional[int] = None
-    latest_node: Optional[TraceNode] = None
-    changes: List[TraceLiveFeedNodeDelta] = Field(default_factory=list)
-    change_count: int = 0
-
-
-class TraceLiveFeedDelta(BaseModel):
-    type: Literal["delta"] = "delta"
-    items: List[TraceLiveFeedDeltaItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class StreamEventItem(BaseModel):
-    request_id: str
-    graph_id: str
-    phase: str
-    event_type: str
-    node_id: Optional[str] = None
-    chunk: Optional[str] = None
-    ts_ms: int
-
-
-class TraceStreamEventsResponse(BaseModel):
-    request_id: str
-    events: List[StreamEventItem]
-    count: int
-    timestamp: int
-
-
-class GraphSchemaNode(BaseModel):
-    node_id: str
-    display_name: Optional[str] = None
-
-
-class GraphSchemaEdge(BaseModel):
-    source: str
-    target: str
-
-
-class GraphSchemaResponse(BaseModel):
-    graph_id: str
-    version: str
-    entry_node: Optional[str] = None
-    active_nodes: List[str] = Field(default_factory=list)
-    nodes: List[GraphSchemaNode] = Field(default_factory=list)
-    edges: List[GraphSchemaEdge] = Field(default_factory=list)
-    graph_meta: Optional[Dict[str, Any]] = None
-    timestamp: int
 
 
 # ---------------------------------------------------------------------------
@@ -506,30 +405,38 @@ def _trace_feed_warm_loop() -> None:
 
 
 def start_trace_feed_warm_cache() -> dict[str, Any]:
-    if not _TRACE_FEED_WARM_ENABLED:
-        return {"enabled": False, "status": "disabled"}
+    """Start the single durable projection authority.
 
-    global _trace_feed_warm_thread
-    with _trace_feed_warm_lock:
-        if _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive():
-            return get_trace_feed_warm_status()
-        _trace_feed_warm_stop.clear()
-        _trace_feed_warm_thread = threading.Thread(
-            target=_trace_feed_warm_loop,
-            name="obs-trace-feed-warm",
-            daemon=True,
-        )
-        _trace_feed_warm_thread.start()
-    return get_trace_feed_warm_status()
+    The legacy trace warm-cache loop is intentionally not started.  Query
+    handlers read the durable projection store, so a second process-local
+    refresher would be both wasted work and a competing read authority.
+    """
+    start_projection_jobs(interval_ms=5000)
+    try:
+        from host_brain.observability.projection_runtime import configure_embodiment_receipt_projection
+
+        configure_embodiment_receipt_projection()
+    except Exception as exc:
+        logger.warning("embodiment receipt projection startup failed: %s", exc)
+    return {**get_trace_feed_warm_status(), "authority": "projection_daemon"}
 
 
 def stop_trace_feed_warm_cache() -> dict[str, Any]:
     global _trace_feed_warm_thread
+    # Defensive cleanup for processes upgraded from the legacy implementation;
+    # new processes never create this thread.
     _trace_feed_warm_stop.set()
     thread = _trace_feed_warm_thread
     if thread is not None:
         thread.join(timeout=2.0)
     _trace_feed_warm_thread = None
+    stop_projection_jobs()
+    try:
+        from host_brain.observability.projection_runtime import stop_embodiment_receipt_projection
+
+        stop_embodiment_receipt_projection()
+    except Exception as exc:
+        logger.debug("embodiment receipt projection shutdown failed: %s", exc)
     return get_trace_feed_warm_status()
 
 
@@ -603,49 +510,201 @@ def _trace_feed_should_defer_build() -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)
 async def get_trace(request_id: str):
-    """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    (
-        _build_trace_response,
-        _build_trace_response_lightweight,
-        *_,
-    ) = _get_trace_builders()
+    """Read one durable Trace projection; this path never invokes source builders."""
+
+    from host_brain.app.dependencies import get_query_projection_store
+
+    document = get_query_projection_store().get(TRACE_KIND, request_id)
+    meta = projection_meta(TRACE_KIND, request_id, document, max_age_ms=15000)
+    if document is None or not meta["available"]:
+        return TraceResponse(
+            request_id=request_id,
+            status="DEGRADED",
+            node_count=0,
+            nodes=[],
+            edges=[],
+            summary={
+                "reason_code": meta.get("reason_code"),
+                "message": "trace projection is rebuilding or stale",
+            },
+            ts_ms=_now_ms(),
+            timestamp=_now_ms(),
+            projection=meta,
+        )
+    payload = dict(document.payload)
+    payload["projection"] = meta
+    return TraceResponse(**payload)
+
+
+def refresh_trace_query_projections() -> dict[str, int]:
+    """Background-only Trace journal scan and projection refresh."""
+
+    from host_brain.app.dependencies import get_query_projection_store
+
     ledger = _get_ledger()
+    store = get_query_projection_store()
+    build_full, _, build_feed, *_ = _get_trace_builders()
+    now = _now_ms()
+    since = now - 7 * 24 * 60 * 60 * 1000
+    request_cursors: dict[str, int] = {}
+    for table in ("graph_run_trace", "governor_log", "voice_event_log"):
+        try:
+            rows = ledger.fetch_by_time_range(
+                table,
+                start_ms=since,
+                end_ms=now,
+                limit=500,
+                offset=0,
+            )
+        except Exception:
+            rows = []
+        for row in rows:
+            request_id = str(row.get("request_id") or "").strip()
+            if request_id:
+                request_cursors[request_id] = max(
+                    request_cursors.get(request_id, 0),
+                    int(row.get("ts_ms") or 0),
+                )
+    refreshed = 0
+    failed = 0
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_build_trace_response, ledger, request_id),
-            timeout=_TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "trace full build timeout: request_id=%s timeout_sec=%.2f, degrade to lightweight",
-            request_id,
-            _TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("trace full build failed: request_id=%s err=%s, degrade to lightweight", request_id, exc)
+        from host_brain.integrations.graph_evidence import get_evidence_plane
+
+        evidence_plane = get_evidence_plane()
+    except Exception:
+        evidence_plane = None
+    for request_id, source_cursor in sorted(request_cursors.items()):
+        try:
+            current = store.get(TRACE_KIND, request_id)
+            if current is not None and current.source_cursor >= source_cursor:
+                store.upsert(
+                    TRACE_KIND,
+                    request_id,
+                    current.payload,
+                    source_cursor=current.source_cursor,
+                    source_digest=current.source_digest,
+                    source_ref="trace-background-reconcile",
+                )
+            else:
+                source = trace_source(request_id, build_full(ledger, request_id))
+                store.upsert(
+                    TRACE_KIND,
+                    request_id,
+                    source.payload,
+                    source_cursor=source_cursor,
+                    source_digest=source.source_digest(),
+                    source_ref="trace-background-worker",
+                )
+                refreshed += 1
+        except Exception as exc:
+            failed += 1
+            if store.get(TRACE_KIND, request_id) is not None:
+                store.mark_degraded(
+                    TRACE_KIND,
+                    request_id,
+                    state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+        if evidence_plane is not None:
+            try:
+                stream_rows = evidence_plane.query_stream_events(request_id=request_id)
+            except Exception:
+                stream_rows = []
+            stream_events = [
+                {
+                    "request_id": str(row.get("request_id") or request_id),
+                    "graph_id": str(row.get("graph_id") or ""),
+                    "phase": str(row.get("phase") or ""),
+                    "event_type": str(row.get("event_type") or ""),
+                    "node_id": row.get("node_id"),
+                    "chunk": row.get("chunk"),
+                    "ts_ms": int(row.get("ts_ms") or 0),
+                }
+                for row in stream_rows
+                if isinstance(row, dict)
+            ]
+            stream_cursor = max(
+                (int(event.get("ts_ms") or 0) for event in stream_events),
+                default=source_cursor,
+            )
+            store.upsert(
+                TRACE_STREAM_KIND,
+                request_id,
+                {
+                    "request_id": request_id,
+                    "events": stream_events,
+                    "count": len(stream_events),
+                    "timestamp": stream_cursor,
+                },
+                source_cursor=stream_cursor,
+                source_ref="trace-stream-background-worker",
+            )
 
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _build_trace_response_lightweight,
-                ledger,
-                request_id,
-                reason="TRACE_DETAIL_DEGRADED",
-                message="trace detail built in lightweight mode due to timeout or downstream pressure",
-            ),
-            timeout=_TRACE_BUILD_FALLBACK_TIMEOUT_SEC,
+        feed = build_feed(
+            ledger,
+            limit=12,
+            window_minutes=10080,
+            keyword=None,
+            active_within_ms=3600000,
         )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": "trace_timeout",
-                "request_id": request_id,
-                "message": "trace detail build timed out in both full and lightweight modes",
-            },
-        ) from exc
+        feed_payload = _model_dump_compat(feed)
+        feed_items = list(feed_payload.get("items") or []) if isinstance(feed_payload, dict) else []
+        feed_cursor = max(
+            (
+                max(
+                    int((item.get("session") or {}).get("ts_ms") or 0),
+                    int((item.get("trace") or {}).get("ts_ms") or 0),
+                )
+                for item in feed_items
+                if isinstance(item, dict)
+            ),
+            default=0,
+        )
+        if isinstance(feed_payload, dict):
+            feed_payload["timestamp"] = feed_cursor
+            store.upsert(
+                TRACE_FEED_KIND,
+                TRACE_FEED_INDEX_KEY,
+                feed_payload,
+                source_cursor=feed_cursor,
+                source_ref="trace-feed-background-worker",
+            )
+    except Exception as exc:
+        failed += 1
+        if store.get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY) is not None:
+            store.mark_degraded(
+                TRACE_FEED_KIND,
+                TRACE_FEED_INDEX_KEY,
+                state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+
+    try:
+        from host_brain.app.internal_tribe_routes import get_tribe_event_bus
+
+        tribe_rows = [event.to_dict() for event in get_tribe_event_bus().recent(limit=200)]
+        tribe_cursor = max((int(row.get("ts_ms") or 0) for row in tribe_rows), default=0)
+        store.upsert(
+            TRIBE_EVENTS_KIND,
+            TRIBE_EVENTS_INDEX_KEY,
+            {"items": tribe_rows, "total": len(tribe_rows), "timestamp": tribe_cursor},
+            source_cursor=tribe_cursor,
+            source_ref="tribe-events-background-worker",
+        )
+    except Exception as exc:
+        failed += 1
+        if store.get(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY) is not None:
+            store.mark_degraded(
+                TRIBE_EVENTS_KIND,
+                TRIBE_EVENTS_INDEX_KEY,
+                state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+    return {"refreshed_count": refreshed, "failed_count": failed}
+
+
+register_projection_job("trace", refresh_trace_query_projections)
 
 
 # ---------------------------------------------------------------------------
@@ -653,31 +712,20 @@ async def get_trace(request_id: str):
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
 def get_trace_stream_events(request_id: str):
-    """获取单次请求的 Chat Stream SSE 事件流，供链路详情展示。"""
-    try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-        ep = get_evidence_plane()
-        rows = ep.query_stream_events(request_id=request_id)
-    except Exception as exc:
-        logger.debug("get_trace_stream_events: %s", exc)
-        rows = []
-    events = [
-        StreamEventItem(
-            request_id=str(r.get("request_id", "")),
-            graph_id=str(r.get("graph_id", "")),
-            phase=str(r.get("phase", "")),
-            event_type=str(r.get("event_type", "")),
-            node_id=r.get("node_id"),
-            chunk=r.get("chunk"),
-            ts_ms=int(r.get("ts_ms") or 0),
-        )
-        for r in rows
-    ]
+    """Read the durable stream-event projection without EvidencePlane access."""
+
+    from host_brain.app.dependencies import get_query_projection_store
+
+    document = get_query_projection_store().get(TRACE_STREAM_KIND, request_id)
+    meta = projection_meta(TRACE_STREAM_KIND, request_id, document, max_age_ms=15000)
+    rows = list(document.payload.get("events") or []) if document is not None and meta["available"] else []
+    events = [StreamEventItem(**dict(row)) for row in rows if isinstance(row, dict)]
     return TraceStreamEventsResponse(
         request_id=request_id,
         events=events,
         count=len(events),
         timestamp=_now_ms(),
+        projection=meta,
     )
 
 
@@ -691,23 +739,40 @@ def get_trace_live_feed_snapshot(
     active_within_ms: int = Query(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
     keyword: Optional[str] = Query(None),
 ):
-    deferred, _reason = _trace_feed_should_defer_build()
-    warmed = _get_warmed_trace_feed_snapshot(
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
-        allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
-    )
-    if warmed is not None:
-        return warmed
-    if deferred:
-        return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
-    return _build_trace_live_feed_snapshot_sync(
-        limit=limit,
-        window_minutes=window_minutes,
-        keyword=keyword,
-        active_within_ms=active_within_ms,
+    from host_brain.app.dependencies import get_query_projection_store
+
+    document = get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
+    meta = projection_meta(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY, document, max_age_ms=15000)
+    if document is None or not meta["available"]:
+        return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms(), projection=meta)
+    now = _now_ms()
+    window_cutoff = now - int(window_minutes) * 60 * 1000
+    active_cutoff = now - int(active_within_ms)
+    keyword_text = str(keyword or "").strip().lower()
+    filtered: list[LiveTraceFeedItem] = []
+    for raw in list(document.payload.get("items") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = LiveTraceFeedItem(**raw)
+        serialized = _model_dump_compat(item)
+        session = serialized.get("session") if isinstance(serialized, dict) else {}
+        trace = serialized.get("trace") if isinstance(serialized, dict) else {}
+        event_ts = max(
+            int(session.get("ts_ms") or 0) if isinstance(session, dict) else 0,
+            int(trace.get("ts_ms") or 0) if isinstance(trace, dict) else 0,
+        )
+        if event_ts and (event_ts < window_cutoff or event_ts < active_cutoff):
+            continue
+        if keyword_text and keyword_text not in json.dumps(serialized, ensure_ascii=False).lower():
+            continue
+        filtered.append(item)
+        if len(filtered) >= int(limit):
+            break
+    return TraceLiveFeedSnapshot(
+        items=filtered,
+        count=len(filtered),
+        timestamp=now,
+        projection=meta,
     )
 
 
@@ -722,65 +787,48 @@ async def stream_trace_live_feed(
     once: bool = Query(False),
 ):
     """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
-    (
-        _,
-        __,
-        _build_trace_live_feed_snapshot,
-        _build_trace_live_feed_delta,
-        _trace_live_feed_signature,
-    ) = _get_trace_builders()
-
     async def _event_stream():
         last_signature: Optional[str] = None
-        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
         first_event = True
-        ledger = _get_ledger()
         while True:
             if await request.is_disconnected():
                 break
             try:
-                deferred, reason = _trace_feed_should_defer_build()
-                snapshot = _get_warmed_trace_feed_snapshot(
+                snapshot = get_trace_live_feed_snapshot(
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
                     active_within_ms=active_within_ms,
-                    allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
                 )
-                if snapshot is None and deferred:
-                    snapshot = last_snapshot or TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
-                if snapshot is None:
-                    snapshot = await asyncio.to_thread(
-                        _build_trace_live_feed_snapshot,
-                        ledger,
-                        limit=limit,
-                        window_minutes=window_minutes,
-                        keyword=keyword,
-                        active_within_ms=active_within_ms,
-                    )
-                signature = _trace_live_feed_signature(snapshot)
+                snapshot_dict = _model_dump_compat(snapshot)
+                signature = json.dumps(
+                    snapshot_dict.get("items") if isinstance(snapshot_dict, dict) else [],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
                 if signature != last_signature:
-                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
                     yield _format_sse_event(
                         "snapshot",
                         _model_dump_compat(snapshot),
                         retry_ms=interval_ms if first_event else None,
                     )
-                    if delta is not None:
-                        yield _format_sse_event("delta", _model_dump_compat(delta))
                     last_signature = signature
-                    last_snapshot = snapshot
                     first_event = False
                 else:
                     yield _format_sse_event(
                         "heartbeat",
-                        {"type": "heartbeat", "count": snapshot.count, "deferred_reason": reason if deferred else None, "timestamp": _now_ms()},
+                        {"type": "heartbeat", "count": snapshot.count, "timestamp": _now_ms()},
                     )
             except Exception as exc:
-                logger.warning("trace live feed push error: %s", exc)
+                logger.warning("trace live feed push error: %s", type(exc).__name__)
                 yield _format_sse_event(
                     "trace_error",
-                    {"type": "error", "detail": str(exc), "timestamp": _now_ms()},
+                    {
+                        "type": "error",
+                        "detail": "OBS_TRACE_STREAM_UNAVAILABLE",
+                        "timestamp": _now_ms(),
+                    },
                 )
             if once:
                 break
@@ -810,28 +858,37 @@ def get_tribe_events(
     session_id: Optional[str] = Query(None, description="按 session_id 过滤"),
     conversation_id: Optional[str] = Query(None, description="按 conversation_id 过滤"),
 ):
-    """Tribe 事件观测窗口（Host 内存总线最近事件）。"""
-    try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus
-        bus = get_tribe_event_bus()
-        items = [
-            TribeEventItem(**event.to_dict())
-            for event in bus.recent(
-                limit=limit,
-                event_type=event_type,
-                source_agent=source_agent,
-                target_agent=target_agent,
-                request_id=request_id,
-                session_id=session_id,
-                conversation_id=conversation_id,
-            )
-        ]
-    except Exception as exc:
-        logger.debug("get_tribe_events degraded: %s", exc)
-        items = []
+    """Read and filter the durable Tribe-event projection."""
+
+    from host_brain.app.dependencies import get_query_projection_store
+
+    document = get_query_projection_store().get(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY)
+    meta = projection_meta(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY, document, max_age_ms=15000)
+    raw_items = list(document.payload.get("items") or []) if document is not None and meta["available"] else []
+    filters = {
+        "event_type": event_type,
+        "source_agent": source_agent,
+        "target_agent": target_agent,
+        "request_id": request_id,
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+    }
+    items: list[TribeEventItem] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        if any(
+            str(raw.get(field) or "") != str(expected)
+            for field, expected in filters.items()
+            if expected is not None
+        ):
+            continue
+        items.append(TribeEventItem(**raw))
+        if len(items) >= int(limit):
+            break
 
     timestamp = items[0].ts_ms if items else _now_ms()
-    return TribeEventsResponse(total=len(items), items=items, timestamp=int(timestamp))
+    return TribeEventsResponse(total=len(items), items=items, timestamp=int(timestamp), projection=meta)
 
 
 # ---------------------------------------------------------------------------

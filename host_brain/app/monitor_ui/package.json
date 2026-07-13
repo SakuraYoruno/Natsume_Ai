@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "generate:operator-client": "python scripts/generate_operator_command_client.py",
+    "check:operator-client": "python scripts/generate_operator_command_client.py --check",
     "preview": "vite preview",
     "lint": "eslint src/features/execution/taskRuntimeModel.js src/features/execution/taskRuntimeApi.js src/features/execution/taskRuntimeQueries.js src/features/execution/components/TaskRuntimeConsole.jsx src/pages/TaskRuntime.jsx",
-    "typecheck": "tsc --noEmit --allowJs --checkJs --skipLibCheck --moduleResolution bundler --module esnext --target es2022 src/features/execution/taskRuntimeModel.js",
+    "typecheck": "tsc --noEmit --allowJs --checkJs --allowImportingTsExtensions --skipLibCheck --moduleResolution bundler --module esnext --target es2022 src/shared/api/generated/operatorCommandClient.ts src/shared/api/operatorCommandGateway.js src/shared/api/endpointClient.js src/features/execution/taskRuntimeModel.js",
+    "test:operator-client": "node --test src/shared/api/operatorCommandGateway.test.js",
     "test:read-model": "node --test src/features/execution/taskRuntimeModel.test.js",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:routes": "npm run build && playwright test e2e/monitor-route-smoke.spec.js",

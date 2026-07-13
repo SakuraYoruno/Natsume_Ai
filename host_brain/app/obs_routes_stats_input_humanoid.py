@@ -24,12 +24,12 @@ from host_brain.app.obs_routes_core import (
     _build_trace_summary,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
     _safe_json,
 )
+from host_brain.observability.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -467,7 +467,7 @@ def get_input_humanoid_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #48B: Gateway 人体闭环统计（ACK / 进度回报 / 偏航恢复）。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -565,7 +565,7 @@ def get_input_humanoid_loop_trend(
     interval_minutes: int = Query(5, ge=1, le=360, description="时序聚合间隔（分钟）"),
 ):
     """Ref #48C: Gateway 人体闭环趋势统计（按请求归一化聚合）。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -833,7 +833,7 @@ def get_input_humanoid_loop_remediation(
 
     # 收集代表性请求
     if alerts_resp.evaluated_bucket_index is not None:
-        ledger = _get_ledger()
+        ledger = get_projection_ledger_view()
         since_ms = now - window_minutes * 60 * 1000
         interval_ms = interval_minutes * 60 * 1000
         bucket_start = since_ms + int(alerts_resp.evaluated_bucket_index) * interval_ms
@@ -1063,7 +1063,7 @@ def get_input_humanoid_loop_diagnostics(
         summary = ("当前窗口未发现需要回放归因的代表性异常请求。" if str(remediation.status or "").lower() in {"healthy", "no_data"} else "当前窗口存在闭环异常，但暂时没有提取到可归纳的代表性请求，请继续结合修复建议排查。")
         return InputHumanoidLoopDiagnosticsResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=remediation.status, severity=remediation.severity, summary=summary, diagnosed_count=0, diagnostics=[], timestamp=now)
 
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     diagnostics: List[InputHumanoidLoopDiagnosticItem] = []
     for item in remediation.representative_requests[:5]:
         request_id = str(item.request_id or "").strip()
@@ -1161,7 +1161,7 @@ def get_input_humanoid_loop_hotspot_trend(
     interval_minutes: int = Query(30, ge=1, le=360),
 ):
     """Ref #48H: Gateway 人体闭环病灶热区时间演化趋势。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     interval_ms = interval_minutes * 60 * 1000
@@ -1284,7 +1284,7 @@ async def get_input_humanoid_loop_source_correlation(
     if not hotspots_resp.hotspots:
         return InputHumanoidLoopSourceCorrelationResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=hotspots_resp.status, severity=hotspots_resp.severity, summary="当前窗口尚未形成可归因的人体闭环病灶源头。", primary_source_system=None, primary_source_label=None, source_count=0, items=[], timestamp=now)
 
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
 
     # 各源头快照（简化版，保持与原逻辑一致）
     def _gateway_snap():

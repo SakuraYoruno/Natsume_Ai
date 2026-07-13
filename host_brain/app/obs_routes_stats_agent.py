@@ -5,9 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional
@@ -16,6 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.observability.remaining_query_projection import (
+    AGENT_LOOP_INDEX_KEY,
+    AGENT_LOOP_KIND,
+    RESIDENT_CONTEXT_INDEX_KEY,
+    RESIDENT_CONTEXT_KIND,
+    read,
+    response_meta,
+)
+from host_brain.observability.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -36,7 +43,6 @@ from .obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -50,7 +56,7 @@ from .obs_routes_core import (
 class AgentLoopRoundItem(BaseModel):
     request_id: str
     session_id: Optional[str]
-    goal: str
+    goal: Optional[str]
     total_rounds: int
     goal_achieved: bool
     total_actions: int
@@ -68,6 +74,11 @@ class AgentLoopStatsResponse(BaseModel):
     avg_rounds: Optional[float]
     recent_loops: List[AgentLoopRoundItem]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 @router.get("/agent_loop/stats", response_model=AgentLoopStatsResponse)
 def get_agent_loop_stats(
@@ -75,46 +86,14 @@ def get_agent_loop_stats(
     limit: int = Query(10, ge=1, le=50),
 ):
     """P3: Agent Loop 详细统计 — 目标达成率、平均轮次、最近执行列表。"""
-    ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-
-    try:
-        rows = ledger.fetch_by_time_range("agent_loop_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 按 request_id 聚合（取 LOOP_END 或最后一行）
-    from collections import defaultdict
-    loop_map: Dict[str, List] = defaultdict(list)
-    for r in rows:
-        loop_map[r.get("request_id", "")].append(r)
-
-    loops = []
-    for req_id, loop_rows in loop_map.items():
-        # 找 LOOP_END 行
-        end_rows = [r for r in loop_rows if str(r.get("phase", "")).upper() in ("LOOP_END", "LOOP_SUCCESS", "LOOP_FAILED")]
-        summary_row = end_rows[-1] if end_rows else loop_rows[-1]
-
-        total_rounds = max((r.get("round") or 0 for r in loop_rows), default=0)
-        goal_achieved = bool(summary_row.get("goal_achieved"))
-        total_actions = sum(r.get("action_count") or 0 for r in loop_rows)
-        success_actions = sum(r.get("success_count") or 0 for r in loop_rows)
-        failed_actions = sum(r.get("failed_count") or 0 for r in loop_rows)
-        total_latency = sum(r.get("latency_ms") or 0 for r in loop_rows if r.get("latency_ms"))
-
-        loops.append({
-            "request_id": req_id,
-            "session_id": summary_row.get("session_id"),
-            "goal": (summary_row.get("goal") or "")[:80],
-            "total_rounds": total_rounds,
-            "goal_achieved": goal_achieved,
-            "total_actions": total_actions,
-            "success_actions": success_actions,
-            "failed_actions": failed_actions,
-            "total_latency_ms": total_latency or None,
-            "ts_ms": summary_row.get("ts_ms") or 0,
-        })
+    payload, meta = read(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)
+    loops = [
+        dict(item)
+        for item in list((payload or {}).get("loops") or [])
+        if isinstance(item, dict) and int(item.get("ts_ms") or 0) >= since_ms
+    ]
 
     total_loops = len(loops)
     achieved = sum(1 for l in loops if l["goal_achieved"])
@@ -134,6 +113,7 @@ def get_agent_loop_stats(
         avg_rounds=avg_rounds,
         recent_loops=[AgentLoopRoundItem(**l) for l in recent],
         timestamp=now,
+        **response_meta(meta),
     )
 
 
@@ -173,7 +153,7 @@ def get_memory_stats(
     - ContextCompressor：压缩率（压缩前/后 token 数比值）
     - LongTermDistiller：蒸馏次数、蒸馏成功率
     """
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -324,15 +304,6 @@ def get_memory_stats(
 # ---------------------------------------------------------------------------
 # Ref #126: GET /obs/memory/resident-context — 常驻设定 / 风格绑定上下文
 # ---------------------------------------------------------------------------
-def _truncate_memory_preview(value: Any, limit: int = 96) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit].rstrip()}…"
-
-
 class ResidentCanonFileItem(BaseModel):
     kind: str
     doc_id: str
@@ -349,63 +320,46 @@ class ResidentMemoryContextResponse(BaseModel):
     world_canon_documents: List[ResidentCanonFileItem]
     persona_resident_documents: List[ResidentCanonFileItem]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 
 @router.get("/memory/resident-context", response_model=ResidentMemoryContextResponse)
 def get_memory_resident_context():
-    """Ref #126: 常驻设定文件、风格绑定与最新常驻上下文快照。"""
+    """Ref #126: 只读常驻上下文元数据投影，不扫描 canon 文件。"""
     now = _now_ms()
-    ledger = _get_ledger()
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    character_profile_path = str(
-        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
-        or os.path.join("host_brain", "canon", "character", "character_profile.json")
-    ).strip()
+    payload, meta = read(RESIDENT_CONTEXT_KIND, RESIDENT_CONTEXT_INDEX_KEY)
 
-    world_docs: List[ResidentCanonFileItem] = []
-    try:
-        from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
-
-        world_store = WorldCanonStore(world_root=world_root, ledger=ledger)
-        for doc in world_store.list_documents():
-            world_docs.append(
-                ResidentCanonFileItem(
-                    kind="world",
-                    doc_id=str(getattr(doc, "doc_id", "") or ""),
-                    title=str(getattr(doc, "title", "") or "").strip() or None,
-                    source_path=str(getattr(doc, "source_path", "") or "").strip() or None,
-                    version=int(getattr(doc, "version", 0) or 0) or None,
-                    status=str(getattr(doc, "status", "") or "").strip() or None,
-                    updated_by=str(getattr(doc, "updated_by", "") or "").strip() or None,
-                    ts_ms=int(getattr(doc, "ts_ms", 0) or 0) or None,
-                    preview=_truncate_memory_preview(getattr(doc, "body", ""), limit=120) or None,
-                )
-            )
-    except Exception as exc:
-        logger.debug("resident world canon context degraded: %s", exc)
-
-    persona_docs: List[ResidentCanonFileItem] = []
-    try:
-        with open(character_profile_path, "r", encoding="utf-8-sig") as fp:
-            character_payload = json.load(fp)
-        persona_docs.append(
-            ResidentCanonFileItem(
-                kind="persona",
-                doc_id=str(character_payload.get("doc_id") or "character-profile").strip(),
-                title=str(character_payload.get("title") or "角色人设常驻文件").strip() or None,
-                source_path=character_profile_path,
-                version=(int(character_payload.get("version")) if character_payload.get("version") not in (None, "") else None),
-                status=str(character_payload.get("status") or "ACTIVE").strip() or None,
-                updated_by="character_profile",
-                ts_ms=(int(os.path.getmtime(character_profile_path) * 1000) if os.path.exists(character_profile_path) else None),
-                preview=_truncate_memory_preview(character_payload.get("instruction_cn"), limit=120) or None,
-            )
+    def item(value: Mapping[str, Any]) -> ResidentCanonFileItem:
+        return ResidentCanonFileItem(
+            kind=str(value.get("kind") or "unknown"),
+            doc_id=str(value.get("doc_id") or ""),
+            title=value.get("title"),
+            source_path=value.get("source_ref"),
+            version=value.get("version"),
+            status=value.get("status"),
+            updated_by=value.get("updated_by"),
+            ts_ms=value.get("ts_ms"),
+            preview=None,
         )
-    except Exception as exc:
-        logger.debug("resident persona context degraded: %s", exc)
+
+    world_docs = [
+        item(value)
+        for value in list((payload or {}).get("world_canon_documents") or [])
+        if isinstance(value, Mapping)
+    ]
+    persona_docs = [
+        item(value)
+        for value in list((payload or {}).get("persona_resident_documents") or [])
+        if isinstance(value, Mapping)
+    ]
 
     return ResidentMemoryContextResponse(
         world_canon_documents=world_docs,
         persona_resident_documents=persona_docs,
         timestamp=now,
+        **response_meta(meta),
     )

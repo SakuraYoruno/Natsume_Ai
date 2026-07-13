@@ -20,8 +20,6 @@ from host_brain.app.dependencies import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,
     build_service_health_report,
-    build_startup_report,
-    emit_runtime_bootstrap_logs,
 )
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.app.schemas import (
@@ -29,12 +27,18 @@ from host_brain.app.schemas import (
     ReadinessResponse,
 )
 from host_brain.core.errors import (
-    CANON_SYNC_FAILED,
     STARTUP_MCP_DEGRADED,
 )
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.memory.canon_sync import detect_world_version_drift
+from host_brain.observability.remaining_query_projection import (
+    CANON_SYNC_KEY,
+    CANON_SYNC_KIND,
+    STARTUP_SNAPSHOT_KEY,
+    STARTUP_SNAPSHOT_KIND,
+    read as read_query_projection,
+    response_meta,
+)
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()
@@ -301,73 +305,36 @@ async def mcp_health_check() -> HealthResponse:
 
 @router.get("/health/canon_sync", response_model=HealthResponse)
 async def canon_sync_health_check() -> HealthResponse:
-    """World canon sync health endpoint."""
+    """Read the independently refreshed canon-sync projection."""
     ts_ms = int(time.time() * 1000)
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    status_text = "OK"
-    reason_code = None
-    detail = "canon sync healthy"
-    drift_count = 0
-    drift_sample: list[dict[str, Any]] = []
-    try:
-        drifts = detect_world_version_drift(world_root=world_root, ledger=get_ledger())
-        drift_count = len(drifts)
-        if drift_count > 0:
-            status_text = "DEGRADED"
-            reason_code = CANON_SYNC_FAILED
-            detail = "world canon version drift detected"
-            drift_sample = [dict(row) for row in drifts[:5]]
-    except Exception as exc:
-        status_text = "DEGRADED"
-        reason_code = CANON_SYNC_FAILED
-        detail = str(exc)
+    payload, meta = read_query_projection(CANON_SYNC_KIND, CANON_SYNC_KEY)
     return HealthResponse(
-        status=status_text,
+        status=str((payload or {}).get("status") or "DEGRADED"),
         version="0.1.0",
         timestamp=ts_ms,
         details={
-            "world_root": world_root,
-            "drift_count": drift_count,
-            "drift_sample": drift_sample,
-            "reason_code": reason_code,
-            "detail": detail,
+            "drift_count": int((payload or {}).get("drift_count") or 0),
+            "drift_sample": list((payload or {}).get("drift_sample") or []),
+            "reason_code": (payload or {}).get("reason_code") or meta.get("reason_code"),
+            "detail": (payload or {}).get("detail") or "canon sync projection unavailable",
+            **response_meta(meta),
         },
     )
 
 
 @router.get("/startup")
 async def startup_report() -> Dict[str, Any]:
-    """Startup report endpoint."""
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
+    """Return the immutable startup snapshot; never rerun startup probes."""
 
-    try:
-        dependency_probes = await collect_dependency_probes()
-        report = build_startup_report(
-            runtime_statuses={},
-            dependency_probes=dependency_probes,
-            request_id=request_id,
-            ledger=get_ledger(),
-            ts_ms=ts_ms,
-        )
-        emit_runtime_bootstrap_logs(startup_report=report)
-        try:
-            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
-
-            report["degradation_state"] = get_degradation_state()
-        except Exception as degradation_exc:
-            _logger.warning("Startup degradation read model skipped: %s", degradation_exc)
-        return {
-            "request_id": request_id,
-            "timestamp": ts_ms,
-            "report": report,
-        }
-    except Exception as exc:
-        _logger.error("Startup report failed", extra={"request_id": request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate startup report",
-        )
+    payload, meta = read_query_projection(STARTUP_SNAPSHOT_KIND, STARTUP_SNAPSHOT_KEY)
+    ts_ms = int((payload or {}).get("ts_ms") or 0)
+    request_id = str((payload or {}).get("request_id") or "startup-projection")
+    return {
+        "request_id": request_id,
+        "timestamp": ts_ms,
+        "report": dict(payload or {}),
+        **response_meta(meta),
+    }
 
 
 @router.get("/health/env-readiness")
