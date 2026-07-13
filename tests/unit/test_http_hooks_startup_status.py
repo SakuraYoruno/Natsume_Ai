@@ -6,8 +6,8 @@ import logging
 from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import compute_world_canon_hash
+from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 def test_startup_status_marks_only_real_degraded_values() -> None:
@@ -71,16 +71,18 @@ def test_world_canon_sync_on_startup_backfills_world_canon_index(tmp_path) -> No
         encoding="utf-8",
     )
 
-    ledger = SQLiteLedger(db_path=str(tmp_path / "audit.sqlite3"))
-
-    status = _sync_world_canon_index_on_startup(
-        ledger=ledger,
-        logger=logging.getLogger("tests.world_canon_startup_sync"),
-        world_root=str(world_root),
-        ts_ms=1741000001234,
-    )
-
-    indexed = ledger.get_world_canon_doc("startup-world-doc")
+    with compose_canon_test_runtime(
+        tmp_path,
+        request_id="http-hooks-startup-sync",
+        world_root=world_root,
+    ) as runtime:
+        status = _sync_world_canon_index_on_startup(
+            service=runtime.container.application,
+            logger=logging.getLogger("tests.world_canon_startup_sync"),
+            world_root=str(world_root),
+            ts_ms=1741000001234,
+        )
+        indexed = runtime.container.application.get_document("startup-world-doc")
 
     assert status == "OK (synced=1, changed=1)"
     assert indexed is not None

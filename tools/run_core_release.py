@@ -4,6 +4,9 @@
 rollback matrix without executing tests.  ``--accept`` is available only once
 AW-08 has reached ``CODE_COMPLETE`` (or ``PROGRAM_ACCEPTANCE``) and then runs a
 single, fail-fast acceptance plan.  No failed command is retried automatically.
+An operator may explicitly continue a completed failed run with
+``--accept --resume --run-id <existing-run>``.  A resume preserves the passed
+prefix, archives the failed attempt, and starts again at the first failed stage.
 
 All durable output owned by this runner stays under ``docs/50_release/core``.
 Subprocesses receive the same run id and every outcome is recorded in one JSON
@@ -22,6 +25,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -466,6 +470,7 @@ def run_acceptance_plan(
         "source_commit": _git_commit(root_path),
         "stage_count": len(plan),
         "stages": outcomes,
+        "stage_source_commits": {},
         "automatic_retry_count": 0,
     }
     _notify(on_update, receipt)
@@ -505,6 +510,8 @@ def run_acceptance_plan(
             if outcome.status != STATUS_PASS:
                 failed = True
         outcomes.append(outcome.as_dict())
+        if outcome.status in {STATUS_PASS, STATUS_FAIL} and receipt["source_commit"]:
+            receipt["stage_source_commits"][stage.stage_id] = receipt["source_commit"]
         receipt["completed_stage_count"] = index + 1
         receipt["status"] = STATUS_FAIL if failed else "RUNNING"
         _notify(on_update, receipt)
@@ -517,14 +524,365 @@ def run_acceptance_plan(
     return receipt
 
 
+def resume_acceptance_plan(
+    *,
+    root: str | Path,
+    run_id: str,
+    run_dir: str | Path,
+    prior_receipt: Mapping[str, Any],
+    stages: Sequence[AcceptanceStage] | None = None,
+    stage_runner: StageRunner | None = None,
+    on_update: ReceiptUpdate | None = None,
+    source_commit: str | None = None,
+    revalidate_pass_prefix_on_source_change: bool = False,
+) -> dict[str, Any]:
+    """Explicitly continue one failed fail-fast plan without replaying PASS stages.
+
+    The prior receipt must describe exactly one completed fail-fast attempt:
+    a PASS prefix, one FAIL stage, and a SKIPPED suffix.  The failed stage is
+    executed again because the operator explicitly requested ``--resume``;
+    this is recorded separately and never counted as an automatic retry.  A
+    different committed HEAD is allowed and stage-to-commit provenance remains
+    explicit; the public ``accept_release`` boundary separately rejects a dirty
+    worktree before calling this low-level plan executor.
+    """
+
+    root_path = Path(root).resolve()
+    run_path = Path(run_dir).resolve()
+    _require_under(root_path, run_path)
+    if not run_path.is_dir():
+        raise RuntimeError(f"Core Release resume run directory does not exist: {run_path}")
+    resolved_run_id = _normalize_run_id(run_id)
+    plan = tuple(stages or build_acceptance_plan())
+    previous = json.loads(json.dumps(dict(prior_receipt), ensure_ascii=False))
+    failed_index = _validate_resume_receipt(
+        previous,
+        run_id=resolved_run_id,
+        plan=plan,
+    )
+    _validate_resume_evidence_paths(
+        root=root_path,
+        run_dir=run_path,
+        stages=previous["stages"],
+    )
+    current_commit = str(source_commit or _git_commit(root_path) or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", current_commit):
+        raise RuntimeError("Core Release resume requires a committed Git HEAD")
+    previous_source_commit = str(previous["source_commit"]).lower()
+    restart_index = (
+        0
+        if revalidate_pass_prefix_on_source_change
+        and current_commit != previous_source_commit
+        else failed_index
+    )
+
+    previous_history = previous.get("resume_history", [])
+    if not isinstance(previous_history, list) or any(
+        not isinstance(row, Mapping) for row in previous_history
+    ):
+        raise ValueError("Core Release resume_history is invalid")
+    for expected_attempt, row in enumerate(previous_history, start=1):
+        if row.get("attempt_number") != expected_attempt:
+            raise ValueError("Core Release resume_history attempt sequence is invalid")
+        if str(row.get("status") or "").upper() != STATUS_FAIL:
+            raise ValueError("Core Release resume_history contains a non-FAIL attempt")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(row.get("source_commit") or "").lower()):
+            raise ValueError("Core Release resume_history contains an invalid source_commit")
+        if str(row.get("failed_stage_id") or "") not in {stage.stage_id for stage in plan}:
+            raise ValueError("Core Release resume_history contains an invalid failed stage")
+    previous_resume_count = previous.get("resume_count", len(previous_history))
+    if type(previous_resume_count) is not int or previous_resume_count < 0:
+        raise ValueError("Core Release resume_count is invalid")
+    if previous_resume_count != len(previous_history):
+        raise ValueError("Core Release resume_count does not match resume_history")
+    attempt_number = previous_resume_count + 1
+
+    previous_stages = json.loads(json.dumps(previous["stages"], ensure_ascii=False))
+    previous_stage_sources = previous.get("stage_source_commits", {})
+    if not isinstance(previous_stage_sources, Mapping):
+        raise ValueError("Core Release stage_source_commits is invalid")
+    stage_source_commits = {
+        str(stage_id): str(commit).lower()
+        for stage_id, commit in previous_stage_sources.items()
+    }
+    plan_stage_ids = {stage.stage_id for stage in plan}
+    for stage_id, commit in stage_source_commits.items():
+        if stage_id not in plan_stage_ids or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("Core Release stage_source_commits contains invalid provenance")
+    for row in previous_stages:
+        if row.get("status") in {STATUS_PASS, STATUS_FAIL}:
+            stage_source_commits.setdefault(str(row["stage_id"]), previous_source_commit)
+
+    archived_receipt_path = run_path / f"acceptance_receipt.attempt-{attempt_number}.json"
+    if archived_receipt_path.exists():
+        raise RuntimeError(f"Core Release resume archive already exists: {archived_receipt_path}")
+    archived_stage_logs: dict[str, str] = {}
+    for stage_index in range(restart_index, failed_index + 1):
+        archived_ref = _archive_stage_log(
+            root=root_path,
+            run_dir=run_path,
+            stage_row=previous_stages[stage_index],
+            attempt_number=attempt_number,
+        )
+        if archived_ref is not None:
+            previous_stages[stage_index]["log_ref"] = archived_ref
+            archived_stage_logs[plan[stage_index].stage_id] = archived_ref
+    archived_log_ref = archived_stage_logs.get(plan[failed_index].stage_id)
+    archived_log_sha256 = (
+        _sha256((root_path / Path(archived_log_ref)).resolve())
+        if archived_log_ref is not None
+        else None
+    )
+
+    archived_receipt = json.loads(json.dumps(previous, ensure_ascii=False))
+    archived_receipt["stages"] = previous_stages
+    archived_receipt["archived_for_resume_at"] = _utc_now()
+    archived_receipt["archived_failed_log_sha256"] = archived_log_sha256
+    _atomic_write_json(archived_receipt_path, archived_receipt)
+
+    history_entry = {
+        "attempt_number": attempt_number,
+        "status": STATUS_FAIL,
+        "source_commit": str(previous["source_commit"]),
+        "started_at": previous.get("started_at"),
+        "finished_at": previous.get("finished_at"),
+        "failed_stage_id": plan[failed_index].stage_id,
+        "failed_stage_log_ref": archived_log_ref,
+        "failed_stage_log_sha256": archived_log_sha256,
+        "restart_stage_id": plan[restart_index].stage_id,
+        "revalidated_pass_prefix": restart_index < failed_index,
+        "archived_stage_logs": archived_stage_logs,
+        "receipt_ref": _repo_ref(root_path, archived_receipt_path),
+        "stages": previous_stages,
+        "stage_source_commits": dict(stage_source_commits),
+    }
+    history = json.loads(json.dumps(previous_history, ensure_ascii=False))
+    history.append(history_entry)
+
+    resumed_at = _utc_now()
+    active_stages = previous_stages[:restart_index]
+    active_stages.extend(
+        _skipped_outcome(stage, f"pending explicit resume attempt {attempt_number}").as_dict()
+        for stage in plan[restart_index:]
+    )
+    receipt: dict[str, Any] = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "run_id": resolved_run_id,
+        "status": "RUNNING",
+        "started_at": previous.get("started_at"),
+        "finished_at": None,
+        "source_commit": current_commit,
+        "initial_source_commit": str(
+            previous.get("initial_source_commit") or previous["source_commit"]
+        ),
+        "resumed_from_source_commit": str(previous["source_commit"]),
+        "resume_started_at": resumed_at,
+        "resume_count": attempt_number,
+        "resume_history": history,
+        "stage_count": len(plan),
+        "stages": active_stages,
+        "stage_source_commits": {
+            stage.stage_id: stage_source_commits[stage.stage_id]
+            for stage in plan[:restart_index]
+        },
+        "completed_stage_count": restart_index,
+        "automatic_retry_count": 0,
+    }
+    _set_stage_counts(receipt)
+    _notify(on_update, receipt)
+
+    runner = stage_runner or _default_stage_runner
+    failed = False
+    for index in range(restart_index, len(plan)):
+        stage = plan[index]
+        execute_stage = not failed
+        if not execute_stage:
+            outcome = _skipped_outcome(stage, "skipped after a failure in this explicit resume attempt")
+        else:
+            try:
+                outcome = runner(stage, root_path, run_path, resolved_run_id)
+            except BaseException as exc:  # CLI boundary must preserve a receipt.
+                now = _utc_now()
+                outcome = StageOutcome(
+                    stage_id=stage.stage_id,
+                    status=STATUS_FAIL,
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    exit_code=None,
+                    command=stage.command,
+                    log_ref=None,
+                    detail=f"stage runner raised {type(exc).__name__}: {exc}",
+                )
+            if outcome.stage_id != stage.stage_id:
+                now = _utc_now()
+                outcome = StageOutcome(
+                    stage_id=stage.stage_id,
+                    status=STATUS_FAIL,
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    exit_code=None,
+                    command=stage.command,
+                    log_ref=None,
+                    detail="stage runner returned an outcome for a different stage",
+                )
+            elif outcome.status not in {STATUS_PASS, STATUS_FAIL}:
+                now = _utc_now()
+                outcome = StageOutcome(
+                    stage_id=stage.stage_id,
+                    status=STATUS_FAIL,
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=0,
+                    exit_code=None,
+                    command=stage.command,
+                    log_ref=None,
+                    detail=f"stage runner returned invalid status: {outcome.status}",
+                )
+            if outcome.status != STATUS_PASS:
+                failed = True
+        active_stages[index] = outcome.as_dict()
+        if execute_stage:
+            receipt["stage_source_commits"][stage.stage_id] = current_commit
+        receipt["completed_stage_count"] = index + 1
+        receipt["status"] = STATUS_FAIL if failed else "RUNNING"
+        _set_stage_counts(receipt)
+        _notify(on_update, receipt)
+
+    receipt["status"] = STATUS_FAIL if failed else STATUS_PASS
+    receipt["finished_at"] = _utc_now()
+    _set_stage_counts(receipt)
+    _notify(on_update, receipt)
+    return receipt
+
+
+def _validate_resume_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    run_id: str,
+    plan: Sequence[AcceptanceStage],
+) -> int:
+    """Validate a durable fail-fast receipt and return its sole FAIL index."""
+
+    if str(receipt.get("schema_version") or "") != RECEIPT_SCHEMA_VERSION:
+        raise ValueError("Core Release resume receipt schema is unsupported")
+    if str(receipt.get("run_id") or "") != run_id:
+        raise ValueError("Core Release resume receipt run_id does not match --run-id")
+    if str(receipt.get("status") or "").upper() != STATUS_FAIL:
+        raise ValueError("Core Release resume requires an existing FAIL receipt")
+    source_commit = str(receipt.get("source_commit") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("Core Release resume receipt has no valid source_commit")
+    if receipt.get("finished_at") in {None, ""}:
+        raise ValueError("Core Release resume receipt is not a finished fail-fast attempt")
+    if receipt.get("started_at") in {None, ""}:
+        raise ValueError("Core Release resume receipt has no started_at timestamp")
+    if receipt.get("automatic_retry_count") != 0:
+        raise ValueError("Core Release resume receipt reports an automatic retry")
+
+    rows = receipt.get("stages")
+    if not isinstance(rows, list) or len(rows) != len(plan):
+        raise ValueError("Core Release resume receipt stage count does not match the current plan")
+    if receipt.get("stage_count") != len(plan):
+        raise ValueError("Core Release resume receipt stage_count is invalid")
+    if receipt.get("completed_stage_count") != len(plan):
+        raise ValueError("Core Release resume receipt is not a completed fail-fast plan")
+
+    failed_indexes: list[int] = []
+    for index, (row, stage) in enumerate(zip(rows, plan, strict=True)):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"Core Release resume stage {index} is not an object")
+        if str(row.get("stage_id") or "") != stage.stage_id:
+            raise ValueError("Core Release resume receipt stage order does not match the current plan")
+        command = row.get("command")
+        if not isinstance(command, list) or tuple(str(value) for value in command) != stage.command:
+            raise ValueError(f"Core Release resume stage command drifted: {stage.stage_id}")
+        status = str(row.get("status") or "").upper()
+        if status not in {STATUS_PASS, STATUS_FAIL, STATUS_SKIPPED}:
+            raise ValueError(f"Core Release resume stage has invalid status: {stage.stage_id}")
+        if status == STATUS_FAIL:
+            failed_indexes.append(index)
+    if len(failed_indexes) != 1:
+        raise ValueError("Core Release resume receipt must contain exactly one FAIL stage")
+    failed_index = failed_indexes[0]
+    statuses = [str(row["status"]).upper() for row in rows]
+    if statuses[:failed_index] != [STATUS_PASS] * failed_index:
+        raise ValueError("Core Release resume receipt must have only PASS stages before FAIL")
+    if statuses[failed_index + 1 :] != [STATUS_SKIPPED] * (len(plan) - failed_index - 1):
+        raise ValueError("Core Release resume receipt must have only SKIPPED stages after FAIL")
+
+    expected_counts = {
+        "passed_stage_count": statuses.count(STATUS_PASS),
+        "failed_stage_count": 1,
+        "skipped_stage_count": statuses.count(STATUS_SKIPPED),
+    }
+    for key, expected in expected_counts.items():
+        if receipt.get(key) != expected:
+            raise ValueError(f"Core Release resume receipt {key} is inconsistent")
+    return failed_index
+
+
+def _archive_stage_log(
+    *,
+    root: Path,
+    run_dir: Path,
+    stage_row: Mapping[str, Any],
+    attempt_number: int,
+) -> str | None:
+    log_ref = str(stage_row.get("log_ref") or "").strip()
+    if not log_ref:
+        return None
+    source = (root / Path(log_ref)).resolve()
+    _require_under(run_dir, source)
+    if not source.is_file():
+        raise RuntimeError(f"Core Release stage evidence log is missing: {source}")
+    suffix = source.suffix or ".log"
+    stage_id = str(stage_row.get("stage_id") or "")
+    if not _RUN_ID_RE.fullmatch(stage_id):
+        raise ValueError("Core Release stage id is unsafe for evidence archival")
+    destination = run_dir / f"{stage_id}.attempt-{attempt_number}{suffix}"
+    if destination.exists():
+        raise RuntimeError(f"Core Release failed-stage evidence archive already exists: {destination}")
+    shutil.copy2(source, destination)
+    return _repo_ref(root, destination)
+
+
+def _validate_resume_evidence_paths(
+    *,
+    root: Path,
+    run_dir: Path,
+    stages: Sequence[Mapping[str, Any]],
+) -> None:
+    for row in stages:
+        log_ref = str(row.get("log_ref") or "").strip()
+        if not log_ref:
+            continue
+        log_path = (root / Path(log_ref)).resolve()
+        _require_under(run_dir, log_path)
+        if not log_path.is_file():
+            raise RuntimeError(f"Core Release stage evidence log is missing: {log_path}")
+
+
+def _set_stage_counts(receipt: dict[str, Any]) -> None:
+    rows = list(receipt.get("stages") or [])
+    receipt["passed_stage_count"] = sum(row.get("status") == STATUS_PASS for row in rows)
+    receipt["failed_stage_count"] = sum(row.get("status") == STATUS_FAIL for row in rows)
+    receipt["skipped_stage_count"] = sum(row.get("status") == STATUS_SKIPPED for row in rows)
+
+
 def accept_release(
     *,
     root: str | Path,
     run_id: str | None = None,
+    resume: bool = False,
     stages: Sequence[AcceptanceStage] | None = None,
     stage_runner: StageRunner | None = None,
 ) -> dict[str, Any]:
-    """Execute the fail-closed Core Release acceptance and finalize artifacts."""
+    """Execute or explicitly resume Core Release acceptance and finalize artifacts."""
+
+    if resume and not run_id:
+        raise ValueError("--resume requires both --accept and an explicit --run-id")
 
     from host_brain.release.compatibility_registry import (
         RETIRED_CORE_PATHS,
@@ -554,7 +912,24 @@ def accept_release(
     resolved_run_id = _normalize_run_id(run_id or _new_run_id(root_path, prefix="accept"))
     run_dir = (output / "runs" / resolved_run_id).resolve()
     _require_under(output, run_dir)
-    run_dir.mkdir(parents=True, exist_ok=False)
+    plan = tuple(stages or build_acceptance_plan())
+    receipt_path = run_dir / "acceptance_receipt.json"
+    prior_receipt: dict[str, Any] | None = None
+    if resume:
+        if not run_dir.is_dir():
+            raise RuntimeError(f"Core Release resume run does not exist: {run_dir}")
+        if not receipt_path.is_file():
+            raise RuntimeError(f"Core Release resume receipt does not exist: {receipt_path}")
+        try:
+            decoded = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Core Release resume receipt is unreadable: {exc}") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError("Core Release resume receipt must be a JSON object")
+        prior_receipt = decoded
+        _validate_resume_receipt(prior_receipt, run_id=resolved_run_id, plan=plan)
+    else:
+        run_dir.mkdir(parents=True, exist_ok=False)
     generated_at = _utc_now()
     rollback = _generate_rollback_matrix(root_path, run_id=resolved_run_id, generated_at=generated_at)
     sbom = generate_core_sbom(root=root_path)
@@ -567,13 +942,16 @@ def accept_release(
         ),
     )
     if list(dict(draft.get("git") or {}).get("dirty_paths") or []):
-        raise RuntimeError(f"Core Release acceptance requires a clean tree: {draft['git']['dirty_paths'][:10]}")
+        action = "resume" if resume else "acceptance"
+        raise RuntimeError(
+            f"Core Release {action} requires a clean committed tree; commit the repair and "
+            f"existing receipt evidence first: {draft['git']['dirty_paths'][:10]}"
+        )
 
     _atomic_write_json(output / SBOM_NAME, sbom)
     _atomic_write_json(output / ROLLBACK_MATRIX_NAME, rollback)
     lock = output / RUN_LOCK_NAME
     _acquire_lock(lock, run_id=resolved_run_id, source_commit=str(draft["git"]["commit"]))
-    receipt_path = run_dir / "acceptance_receipt.json"
 
     def persist_progress(payload: dict[str, Any]) -> None:
         snapshot = json.loads(json.dumps(payload, ensure_ascii=False))
@@ -590,14 +968,28 @@ def accept_release(
         _atomic_write_json(output / ACCEPTANCE_RECEIPT_NAME, snapshot)
 
     try:
-        receipt = run_acceptance_plan(
-            root=root_path,
-            run_id=resolved_run_id,
-            run_dir=run_dir,
-            stages=stages,
-            stage_runner=stage_runner,
-            on_update=persist_progress,
-        )
+        if resume:
+            assert prior_receipt is not None
+            receipt = resume_acceptance_plan(
+                root=root_path,
+                run_id=resolved_run_id,
+                run_dir=run_dir,
+                prior_receipt=prior_receipt,
+                stages=plan,
+                stage_runner=stage_runner,
+                on_update=persist_progress,
+                source_commit=str(draft["git"]["commit"]),
+                revalidate_pass_prefix_on_source_change=True,
+            )
+        else:
+            receipt = run_acceptance_plan(
+                root=root_path,
+                run_id=resolved_run_id,
+                run_dir=run_dir,
+                stages=plan,
+                stage_runner=stage_runner,
+                on_update=persist_progress,
+            )
         receipt["aw08_state_at_start"] = state
         receipt["compatibility_registry"] = compatibility
         receipt["retired_paths"] = retired_paths
@@ -2062,6 +2454,11 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare", action="store_true", help="generate draft release artifacts only")
     mode.add_argument("--accept", action="store_true", help="run Program Acceptance after CODE_COMPLETE")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an existing failed --accept run (requires an explicit --run-id)",
+    )
     parser.add_argument("--root", default=str(ROOT), help="repository root")
     parser.add_argument("--run-id", help="optional explicit run id for receipt correlation")
     return parser
@@ -2070,8 +2467,12 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(list(argv) if argv is not None else None)
     try:
+        if args.resume and not args.accept:
+            raise ValueError("--resume requires --accept")
+        if args.resume and not args.run_id:
+            raise ValueError("--resume requires an explicit --run-id")
         if args.accept:
-            receipt = accept_release(root=args.root, run_id=args.run_id)
+            receipt = accept_release(root=args.root, run_id=args.run_id, resume=args.resume)
             print(json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2))
             return 0 if receipt.get("status") == STATUS_PASS else 1
         receipt = prepare_release(root=args.root, run_id=args.run_id)

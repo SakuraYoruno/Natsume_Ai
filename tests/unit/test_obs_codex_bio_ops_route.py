@@ -6,11 +6,30 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import host_brain.app.obs_routes_agent_bio_ops as route_module
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 def _write_json(path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _materialize_bio_ops_projection(tmp_path, monkeypatch) -> QueryProjectionStore:
+    from host_brain.app.observability_runtime import process_state_projection
+    from host_brain.composition import process_services
+
+    db_path = tmp_path / "operator-projection.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="bio-ops-route-projection",
+    )
+    assert result.success, result.as_dict()
+    store = QueryProjectionStore(db_path)
+    monkeypatch.setattr(process_services, "get_query_projection_store", lambda: store)
+    monkeypatch.setattr(process_services, "peek_query_projection_store", lambda: store)
+    refreshed = process_state_projection.refresh_bio_ops_projection()
+    assert refreshed["document_count"] >= 2
+    return store
 
 
 def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) -> None:
@@ -150,6 +169,7 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})
 
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
+    _materialize_bio_ops_projection(tmp_path, monkeypatch)
     app = FastAPI()
     app.include_router(route_module.router)
 
@@ -159,140 +179,19 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     payload = response.json()
     assert payload["ok"] is True
     assert payload["run_id"] == run_dir.name
-    assert payload["codex_runtime"]["inspect"]["status"] == "EXECUTED"
-    assert payload["codex_runtime"]["blocked_write"]["status"] == "BLOCKED"
-    assert payload["codex_runtime"]["hard_cut_scan"]["passed"] is True
+    assert payload["artifact_ref"] == f"bio-ops://{run_dir.name}"
+    assert payload["codex_runtime"] == {}
+    assert payload["benefits"] == []
+    assert payload["runtime_traces"] == []
     assert payload["bio_ops"]["status_counts"]["CANDIDATE"] == 5
-    assert payload["bio_ops"]["pending_adoptions"][0]["owner_organ"] == "social_brain_agent"
-    assert payload["bio_ops"]["inner_mechanisms"]["capability_count"] == 6
-    assert payload["bio_ops"]["inner_mechanisms"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["inner_mechanisms"]["capabilities"]} == {
-        "promise_ledger",
-        "capability_self_awareness",
-        "reflex_arc_compiler",
-        "shadow_persona_test",
-        "idea_fermentation_pool",
-        "inner_outer_world_boundary",
-    }
-    assert payload["bio_ops"]["trust_foundation"]["capability_count"] == 6
-    assert payload["bio_ops"]["trust_foundation"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["trust_foundation"]["capabilities"]} == {
-        "promise_ledger",
-        "truthfulness_cortex",
-        "capability_self_awareness",
-        "consent_gradient",
-        "competence_humility",
-        "uncertainty_ritual",
-    }
-    assert payload["bio_ops"]["natural_interaction"]["capability_count"] == 6
-    assert payload["bio_ops"]["natural_interaction"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["natural_interaction"]["capabilities"]} == {
-        "reflex_arc_compiler",
-        "response_breathing_policy",
-        "mood_inertia",
-        "context_gravity",
-        "subjective_time",
-        "self_interrupt",
-    }
-    assert payload["bio_ops"]["relationship_layer"]["capability_count"] == 6
-    assert payload["bio_ops"]["relationship_layer"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["relationship_layer"]["capabilities"]} == {
-        "social_contract",
-        "relationship_friction",
-        "repair_curve",
-        "attachment_style_calibrator",
-        "silence_memory",
-        "relationship_boundary_guardian",
-    }
-    assert payload["bio_ops"]["inner_life"]["capability_count"] == 7
-    assert payload["bio_ops"]["inner_life"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["inner_life"]["capabilities"]} == {
-        "dream_rehearsal",
-        "symbolic_memory",
-        "memory_texture",
-        "internal_weather_system",
-        "self_model",
-        "life_pulse",
-        "personal_mythology",
-    }
-    assert payload["bio_ops"]["self_governance"]["capability_count"] == 6
-    assert payload["bio_ops"]["self_governance"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["self_governance"]["capabilities"]} == {
-        "inner_parliament",
-        "value_hierarchy",
-        "inner_ethics_review",
-        "self_boundary_membrane",
-        "dignity_guard",
-        "identity_fork_guard",
-    }
-    assert payload["bio_ops"]["growth_closure"]["capability_count"] == 5
-    assert payload["bio_ops"]["growth_closure"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["growth_closure"]["capabilities"]} == {
-        "idea_fermentation_pool",
-        "growth_stage_system",
-        "existential_load",
-        "open_loop_manager",
-        "cognitive_load_shedding",
-    }
-    assert payload["bio_ops"]["memory_narrative"]["capability_count"] == 6
-    assert payload["bio_ops"]["memory_narrative"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["memory_narrative"]["capabilities"]} == {
-        "episode_memory",
-        "inner_library",
-        "cognitive_landmarks",
-        "narrative_identity",
-        "self_continuity_checksum",
-        "memory_dream_distillation",
-    }
-    assert payload["bio_ops"]["affect_learning"]["capability_count"] == 6
-    assert payload["bio_ops"]["affect_learning"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["affect_learning"]["capabilities"]} == {
-        "affective_temperature",
-        "immune_tolerance",
-        "emotional_digestion",
-        "regret_signal",
-        "joy_reinforcement",
-        "failure_quarantine",
-    }
-    assert payload["bio_ops"]["presence_channel"]["capability_count"] == 7
-    assert payload["bio_ops"]["presence_channel"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["presence_channel"]["capabilities"]} == {
-        "channel_soul",
-        "long_task_companion_mode",
-        "attention_topography",
-        "quiet_presence",
-        "social_mask_system",
-        "ritual_system",
-        "gentle_degradation",
-    }
-    assert payload["bio_ops"]["drive_trust"]["capability_count"] == 6
-    assert payload["bio_ops"]["drive_trust"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["drive_trust"]["capabilities"]} == {
-        "trust_gradient",
-        "trust_thermostat",
-        "intention_metabolism",
-        "drive_conflict_layer",
-        "desire_lattice",
-        "need_want_impulse",
-    }
-    assert payload["bio_ops"]["adaptive_repair"]["capability_count"] == 6
-    assert payload["bio_ops"]["adaptive_repair"]["direct_write_allowed"] is False
-    assert {item["capability"] for item in payload["bio_ops"]["adaptive_repair"]["capabilities"]} == {
-        "user_mirror_model",
-        "body_plasticity",
-        "social_recovery",
-        "narrative_debugger",
-        "latent_preference_miner",
-        "self_repair_story",
-    }
-    assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
-    assert {item["id"] for item in payload["benefits"]} == {
-        "codex_runtime_control",
-        "bio_ops_owner_gate",
-        "runtime_behavior_trace",
-        "verification_surface",
-    }
-
+    adoption = payload["bio_ops"]["pending_adoptions"][0]
+    assert adoption["candidate_id"] == "candidate-1"
+    assert adoption["owner_organ"] == "social_brain_agent"
+    assert adoption["output_kind"] == "habit_candidate"
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "Habit candidate." not in serialized
+    assert "result_text" not in serialized
+    assert str(run_dir) not in serialized
 
 def _tree_snapshot(root) -> dict[str, bytes]:
     return {
@@ -328,6 +227,7 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
         },
     )
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
+    _materialize_bio_ops_projection(tmp_path, monkeypatch)
     app = FastAPI()
     app.include_router(route_module.router)
     client = TestClient(app)

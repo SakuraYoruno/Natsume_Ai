@@ -156,7 +156,8 @@ def test_monitor_ui_has_manifest_driven_playwright_route_smoke() -> None:
     config = PLAYWRIGHT_CONFIG.read_text(encoding="utf-8")
     assert "defineConfig" in config
     assert "MONITOR_UI_BASE_URL" in config
-    assert "npm run preview -- --host 127.0.0.1 --port 4173" in config
+    assert "MONITOR_UI_PREVIEW_PORT" in config
+    assert "npm run preview -- --host 127.0.0.1 --port ${previewPort}" in config
     assert "reuseExistingServer: true" in config
 
     spec = ROUTE_SMOKE_SPEC.read_text(encoding="utf-8")

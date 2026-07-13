@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from host_brain.composition.process_services import (
-    get_ledger,
     get_session_tactic_ledger_store,
     get_session_topic_ledger_store,
 )
@@ -14,13 +13,15 @@ from host_brain.persona.context.soul_runtime import get_compiled_soul
 from host_brain.app.reply_envelope import can_persist
 from host_brain.core.soft_fail import soft_fail
 from host_brain.conversation.memory_spine import append_visible_conversation_turn
-from host_brain.composition.life import PROCESS_LIFE_PROVIDER
 
 _logger = logging.getLogger("Natsume.conversation.writer")
 
 
 def record_user_turn(
     *,
+    ledger: Any,
+    life_service: Any,
+    life_reader: Any,
     request_id: str,
     session_id: str,
     person_id: str | None,
@@ -42,11 +43,10 @@ def record_user_turn(
         merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     resolved_ts_ms = int(ts_ms or int(time.time() * 1000))
     with soft_fail("conversation.record_user_turn", fallback=None):
-        life = PROCESS_LIFE_PROVIDER.require()
         result = append_visible_conversation_turn(
-            ledger=get_ledger(),
-            life_service=life.command_service,
-            life_reader=life.snapshot_reader,
+            ledger=ledger,
+            life_service=life_service,
+            life_reader=life_reader,
             request_id=request_id,
             session_id=session_id,
             person_id=person_id,
@@ -97,6 +97,9 @@ def record_user_turn(
 
 def record_assistant_turn(
     *,
+    ledger: Any,
+    life_service: Any,
+    life_reader: Any,
     request_id: str,
     session_id: str,
     person_id: str | None,
@@ -140,11 +143,10 @@ def record_assistant_turn(
             merged_metadata.setdefault(metadata_key, value)
     resolved_ts_ms = int(ts_ms or int(time.time() * 1000))
     with soft_fail("conversation.record_assistant_turn", fallback=None):
-        life = PROCESS_LIFE_PROVIDER.require()
         result = append_visible_conversation_turn(
-            ledger=get_ledger(),
-            life_service=life.command_service,
-            life_reader=life.snapshot_reader,
+            ledger=ledger,
+            life_service=life_service,
+            life_reader=life_reader,
             request_id=request_id,
             session_id=session_id,
             person_id=person_id,

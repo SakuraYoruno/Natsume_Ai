@@ -21,6 +21,7 @@ from host_brain.skills.impl.proactive_talk import (
     STATUS_DEGRADED,
 )
 from host_brain.core.errors import SCHED_CONDITION_UNMET
+from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard
 
 
 # ── 辅助工厂 ──
@@ -436,6 +437,7 @@ class TestProactiveTalkRenderPolicy:
                     "intimacy_ceiling": 0.2,
                     "humor_ceiling": 0.1,
                 },
+                render_policy_hard_guard=_apply_render_policy_hard_guard,
             ),
         )
 

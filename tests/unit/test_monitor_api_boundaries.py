@@ -341,7 +341,7 @@ def test_execution_feature_api_uses_endpoint_aware_client_for_json_requests() ->
     assert "endpointGet(" in source
     assert "endpointPost(" in source
     assert "endpointRequest(" in source
-    assert "httpStreamPost" in source
+    assert "httpStreamPost" not in source
     assert "httpGet" not in source
     assert "httpPost" not in source
     assert "httpRequest" not in source
@@ -3591,7 +3591,7 @@ def test_gateway_view_model_lives_in_execution_feature() -> None:
     assert "GATEWAY_WINDOW_OPTIONS" in gateway_surface
     assert "metricCards.map((card)" in gateway_surface
     assert "GATEWAY_METRIC_ICONS[card.key]" in gateway_surface
-    assert "resetWeChatChannel({ reason: 'manual_ui' })" in gateway_controller
+    assert "resetWeChatChannel" not in gateway_controller
 
     for forbidden in [
         "const WINDOW_OPTIONS = [",

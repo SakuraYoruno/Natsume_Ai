@@ -7,9 +7,19 @@
                   "version":  "v1",
                   "entry_node":  "respond",
                   "model_profile_id":  "chat_ja_24x7_v1",
+                  "model_nodes":  {
+                                      "renderer_ja_c_style":  {
+                                                                  "provider":  "mock",
+                                                                  "model_id":  "gemini-2.5-flash",
+                                                                  "temperature":  0.55,
+                                                                  "max_output_tokens":  360,
+                                                                  "timeout_ms":  1200
+                                                              }
+                                  },
                   "node_bindings":  [
                                         {
                                             "node_id":  "respond",
+                                            "model_node_id":  "renderer_ja_c_style",
                                             "task":  "CHAT",
                                             "require_approval_token":  true,
                                             "required":  true

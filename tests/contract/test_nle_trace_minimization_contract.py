@@ -159,7 +159,10 @@ def test_t_nle_12_agent_executor_persists_only_redacted_trace(monkeypatch, tmp_p
         }
     )
 
-    result = AgentExecutor().execute(order, workspace=tmp_path)
+    result = AgentExecutor(
+        model_attempt_service=_AttemptService(),
+        prompt_registry=registry,
+    ).execute(order, workspace=tmp_path)
     public = result.to_dict()
     serialized = json.dumps(public, ensure_ascii=False)
     trace = public["metadata"]["trace"]

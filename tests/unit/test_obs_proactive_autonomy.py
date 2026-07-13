@@ -11,18 +11,20 @@ import time
 from host_brain.app.obs_routes_proactive_autonomy import build_proactive_autonomy_snapshot
 
 
-def _install_snapshot(monkeypatch, state: dict, *, version: int = 1) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        "host_brain.digital_life.application_boundary.read_life_snapshot",
-        lambda person_id: {
-            "person_id": person_id,
-            "version": version,
-            "state": {"person_id": person_id, "version": version, **state},
-        },
-    )
+def _snapshot_reader(state: dict, *, version: int = 1):
+    class SnapshotReader:
+        @staticmethod
+        def get_snapshot(person_id: str) -> dict:
+            return {
+                "person_id": person_id,
+                "version": version,
+                "state": {"person_id": person_id, "version": version, **state},
+            }
+
+    return SnapshotReader()
 
 
-def test_snapshot_surfaces_proactive_signals(monkeypatch) -> None:
+def test_snapshot_surfaces_proactive_signals() -> None:
     state: dict = {}
     state["inner_weather"] = {"label": "空·想找人", "reach_out_bias": 0.7}
     state["reach_out_calibration"] = {"value": 0.45, "samples": 3, "last_outcome": "annoyed"}
@@ -32,9 +34,11 @@ def test_snapshot_surfaces_proactive_signals(monkeypatch) -> None:
              "title": "陪你追天文", "progress": 0.5, "last_worked_at_ms": int(time.time() * 1000)}
         ]
     }
-    _install_snapshot(monkeypatch, state, version=4)
-
-    snap = build_proactive_autonomy_snapshot(object(), "default")
+    snap = build_proactive_autonomy_snapshot(
+        object(),
+        "default",
+        life_snapshot_reader=_snapshot_reader(state, version=4),
+    )
     assert snap["available"] is True
     assert snap["inner_weather"]["label"] == "空·想找人"
     assert snap["reach_out_calibration"]["value"] == 0.45
@@ -44,18 +48,24 @@ def test_snapshot_surfaces_proactive_signals(monkeypatch) -> None:
     assert snap["top_intention"]["project_id"] == "emergent_天文"
 
 
-def test_snapshot_low_calibration_damps_readiness(monkeypatch) -> None:
+def test_snapshot_low_calibration_damps_readiness() -> None:
     state: dict = {}
     state["inner_weather"] = {"reach_out_bias": 0.8}
     state["reach_out_calibration"] = {"value": 0.15}  # 被冷落
-    _install_snapshot(monkeypatch, state, version=2)
-    snap = build_proactive_autonomy_snapshot(object(), "default")
+    snap = build_proactive_autonomy_snapshot(
+        object(),
+        "default",
+        life_snapshot_reader=_snapshot_reader(state, version=2),
+    )
     assert snap["proactive_readiness"] < 0.8  # 校准阻尼
 
 
-def test_snapshot_missing_state_is_explicitly_unavailable(monkeypatch) -> None:
-    _install_snapshot(monkeypatch, {}, version=0)
-    snap = build_proactive_autonomy_snapshot(object(), "default")
+def test_snapshot_missing_state_is_explicitly_unavailable() -> None:
+    snap = build_proactive_autonomy_snapshot(
+        object(),
+        "default",
+        life_snapshot_reader=_snapshot_reader({}, version=0),
+    )
     assert snap["available"] is False
     assert "proactive_readiness" in snap
     assert snap["top_intention"] is None

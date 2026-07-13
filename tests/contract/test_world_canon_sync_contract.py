@@ -14,13 +14,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import CANON_SYNC_FAILED
 from host_brain.memory.canon_sync import (
-    WORLD_CANON_INVALID_DOC,
     sync_world_canon_index,
 )
 from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
+from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,20 +78,31 @@ class TestWorldCanonSyncIdempotency(unittest.TestCase):
                 src = SSOT_WORLD / f"{doc_id}.json"
                 (world_root / f"{doc_id}.json").write_bytes(src.read_bytes())
 
-            ledger = SQLiteLedger(db_path=db_path)
-            try:
-                records = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1741000001000)
+            with compose_canon_test_runtime(
+                Path(tmp),
+                request_id="world-canon-seed-sync",
+                world_root=world_root,
+            ) as runtime:
+                records = sync_world_canon_index(
+                    service=runtime.container.application,
+                    ts_ms=1741000001000,
+                )
                 self.assertEqual(len(SEED_IDS), len(records), msg="同步记录数与种子数不符")
                 for rec in records:
                     self.assertTrue(rec.changed, msg=f"{rec.doc_id} 首次同步应标记为 changed")
-                    indexed = ledger.get_world_canon_doc(rec.doc_id)
+                    indexed = runtime.container.application.get_document(rec.doc_id)
                     self.assertIsNotNone(indexed, msg=f"{rec.doc_id} 未写入索引")
                     assert indexed is not None
                     # 字段完整性（DevSpec §19.1.2）
-                    for field in ("doc_id", "version", "hash", "status", "source_path", "updated_ts"):
+                    for field in (
+                        "doc_id",
+                        "version",
+                        "hash",
+                        "status",
+                        "source_path",
+                        "projected_ts_ms",
+                    ):
                         self.assertIn(field, indexed, msg=f"{rec.doc_id} 索引缺少字段: {field}")
-            finally:
-                ledger.close()
 
     def test_t_wcanon_04c_idempotent_sync_no_duplicate_change_log(self) -> None:
         """相同 hash 的条目重复同步不产生重复 canon_change_log 条目（幂等）。"""
@@ -106,35 +116,36 @@ class TestWorldCanonSyncIdempotency(unittest.TestCase):
             src = SSOT_WORLD / f"{doc_id}.json"
             (world_root / f"{doc_id}.json").write_bytes(src.read_bytes())
 
-            ledger = SQLiteLedger(db_path=db_path)
-            try:
+            with compose_canon_test_runtime(
+                Path(tmp),
+                request_id="world-canon-idempotent-sync",
+                world_root=world_root,
+            ) as runtime:
                 # 第一次同步
-                records1 = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1741000002000)
+                records1 = sync_world_canon_index(
+                    service=runtime.container.application,
+                    ts_ms=1741000002000,
+                )
                 self.assertEqual(1, len(records1))
                 self.assertTrue(records1[0].changed)
 
-                change_log_after_first = [
-                    row for row in ledger.canon_change_log
-                    if row["canon_kind"] == "world" and row["target_id"] == doc_id
-                ]
-                self.assertEqual(1, len(change_log_after_first), msg="首次同步应产生 1 条 change_log")
+                journal_count_after_first = runtime.container.repository.journal_count()
+                self.assertEqual(1, journal_count_after_first, msg="首次同步应产生 1 条 Canon journal")
 
                 # 第二次同步（相同文件，相同 hash）
-                records2 = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1741000003000)
+                records2 = sync_world_canon_index(
+                    service=runtime.container.application,
+                    ts_ms=1741000003000,
+                )
                 self.assertEqual(1, len(records2))
                 self.assertFalse(records2[0].changed, msg="相同 hash 重复同步不应标记为 changed")
 
-                change_log_after_second = [
-                    row for row in ledger.canon_change_log
-                    if row["canon_kind"] == "world" and row["target_id"] == doc_id
-                ]
+                journal_count_after_second = runtime.container.repository.journal_count()
                 self.assertEqual(
-                    len(change_log_after_first),
-                    len(change_log_after_second),
-                    msg="相同 hash 重复同步不得产生重复 change_log 条目（幂等性违反）",
+                    journal_count_after_first,
+                    journal_count_after_second,
+                    msg="相同 hash 重复同步不得产生重复 Canon journal 条目（幂等性违反）",
                 )
-            finally:
-                ledger.close()
 
     def test_t_wcanon_04d_sync_failure_is_observable_via_error_log(self) -> None:
         """同步失败（无效 JSON）时 WORLD_CANON_INVALID_DOC 可统计，CANON_SYNC_FAILED 错误码已定义。"""
@@ -150,22 +161,28 @@ class TestWorldCanonSyncIdempotency(unittest.TestCase):
             broken = world_root / "broken_doc.json"
             broken.write_text("{invalid_json_content", encoding="utf-8-sig")
 
-            ledger = SQLiteLedger(db_path=db_path)
-            try:
-                synced = sync_world_canon_index(world_root=world_root, ledger=ledger, ts_ms=1741000004000)
+            with compose_canon_test_runtime(
+                Path(tmp),
+                request_id="world-canon-invalid-sync",
+                world_root=world_root,
+            ) as runtime:
+                synced = sync_world_canon_index(
+                    service=runtime.container.application,
+                    ts_ms=1741000004000,
+                )
                 # 损坏文件不应被同步
                 self.assertEqual([], synced)
-                # error_log 中应有 WORLD_CANON_INVALID_DOC 记录
+                # Explicit sync reports scan issues without writing through a
+                # second audit/ledger authority.
+                issues = runtime.container.application.preview_sync().issues
                 self.assertTrue(
                     any(
-                        row["reason_code"] == WORLD_CANON_INVALID_DOC
-                        and row["stage"] == "S_CANON_SYNC"
-                        for row in ledger.error_log
+                        issue.code == "WORLD_CANON_JSON_INVALID"
+                        and Path(issue.source_path).name == broken.name
+                        for issue in issues
                     ),
-                    msg=f"error_log 中未找到 WORLD_CANON_INVALID_DOC 记录: {ledger.error_log}",
+                    msg=f"同步结果未暴露损坏文档问题: {issues}",
                 )
-            finally:
-                ledger.close()
 
     def test_t_wcanon_04e_fixture_files_match_ssot(self) -> None:
         """fixture 副本字段与 SSOT 文件一致（doc_id/title/tags/body/status）。"""

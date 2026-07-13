@@ -27,10 +27,8 @@ def test_t_nle_01_production_boundary_baseline_is_exact_and_current() -> None:
     assert report["policy_id"] == "TASK-0465_NLE_BOUNDARY_CANON_APPLY"
     assert report["violations"] == []
     counts = Counter(row["rule_id"] for row in report["existing_debt"])
-    assert counts == {
-        "NLE-BND-AGENTRUNTIME-APP": 1,
-    }
-    assert len(report["existing_debt"]) == 1
+    assert counts == {}
+    assert report["existing_debt"] == []
     for row in report["existing_debt"]:
         assert row["path"].endswith(".py")
         assert row["symbol"]
@@ -98,6 +96,16 @@ def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
             "host_brain/memory/canon_world_store.py",
             "CanonFile.unlink",
             423,
+        ),
+        (
+            "host_brain/app/observability_runtime/domain_command_ports.py",
+            "WorldCanonStore.approve_proposal",
+            384,
+        ),
+        (
+            "host_brain/app/observability_runtime/domain_command_ports.py",
+            "WorldCanonStore.rollback_proposal",
+            406,
         ),
     }
 

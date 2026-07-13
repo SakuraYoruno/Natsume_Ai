@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-from pathlib import Path
 import sqlite3
-from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.canon.application import CanonApplicationService
 from host_brain.memory.canon_world_store import WorldCanonStore
 from host_brain.memory.long_term_distiller import LongTermMemoryDistiller
 from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
 )
+from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -28,38 +28,7 @@ def _isolated_degradation_machine(monkeypatch: pytest.MonkeyPatch):
         set_global_degradation_state_machine(None)
 
 
-def _install_canon_apply_schema(db_path: Path) -> None:
-    migration = (
-        Path(__file__).resolve().parents[2]
-        / "host_brain"
-        / "audit"
-        / "migrations"
-        / "0053_canon_apply.sql"
-    )
-    sql = migration.read_text(encoding="utf-8-sig")
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                migration_id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                checksum TEXT NOT NULL,
-                applied_ts_ms INTEGER NOT NULL
-            )
-            """
-        )
-        conn.executescript(sql)
-        conn.execute(
-            "INSERT INTO schema_migrations VALUES (53, 'canon_apply', ?, 1000)",
-            (hashlib.sha256(sql.encode("utf-8")).hexdigest(),),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def test_sqlite_ledger_migrates_canon_proposal_content_columns(tmp_path) -> None:
+def test_migration_runner_adds_canon_proposal_content_columns(tmp_path) -> None:
     db_path = tmp_path / "old_canon.sqlite3"
     conn = sqlite3.connect(str(db_path))
     conn.execute(
@@ -83,12 +52,16 @@ def test_sqlite_ledger_migrates_canon_proposal_content_columns(tmp_path) -> None
     conn.commit()
     conn.close()
 
-    ledger = SQLiteLedger(db_path=str(db_path), check_same_thread=False)
-
-    columns = {
-        str(row["name"])
-        for row in ledger._conn.execute("PRAGMA table_info(canon_proposal_log)").fetchall()
-    }
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="canon-proposal-content-upgrade",
+    )
+    assert migrated.success, migrated.as_dict()
+    with sqlite3.connect(db_path) as migrated_db:
+        migrated_db.row_factory = sqlite3.Row
+        columns = {
+            str(row["name"])
+            for row in migrated_db.execute("PRAGMA table_info(canon_proposal_log)").fetchall()
+        }
     assert {"proposed_title", "proposed_tags", "proposed_body"} <= columns
 
 
@@ -115,57 +88,64 @@ def test_world_canon_proposal_persists_reviewable_content(tmp_path) -> None:
     assert row["proposed_body"] == "候选长期记忆事实，等待审核。"
 
 
-def test_canon_approve_route_uses_stored_proposal_content(tmp_path, monkeypatch) -> None:
+def test_canon_approve_route_uses_stored_proposal_content(tmp_path) -> None:
     import host_brain.app.canon_routes as cr
-
-    ledger = SQLiteLedger(db_path=str(tmp_path / "audit.sqlite3"), check_same_thread=False)
-    store = WorldCanonStore(world_root=str(tmp_path / "world"), ledger=ledger)
-    proposal = store.submit_proposal(
-        proposal_id="prop-approve-stored",
-        target_doc_id="wc-stored-approve",
-        proposed_title="待审核长期记忆",
-        proposed_tags=["long_term_distill"],
-        proposed_body="候选长期记忆事实，等待审核。",
-        proposer_node_id="unit-test",
-        summary="approval can use stored body",
-        ts_ms=1000,
-    )
 
     from host_brain.governor.tokens import CanonApprovalTokenIssuer
     from host_brain.memory.canon_apply_service import CanonApplyService
 
-    key = Ed25519PrivateKey.generate()
-    _install_canon_apply_schema((tmp_path / "audit.sqlite3").resolve())
-    issuer = CanonApprovalTokenIssuer(
-        (tmp_path / "audit.sqlite3").resolve(),
-        authority_key_id="unit-key",
-        private_key=key,
-        reviewer_id="unit-owner",
-    )
-    binding = {
-        "operation": "APPLY",
-        "subject_type": "CANON_PROPOSAL",
-        "subject_id": proposal["proposal_id"],
-        "subject_version": proposal["proposed_version"],
-        "subject_hash": proposal["proposed_hash"],
-        "target_doc_id": proposal["target_id"],
-        "base_version": proposal["base_version"],
-        "actor_id": "unit-owner",
-        "session_id": "unit-session",
-        "trace_id": "unit-trace",
-        "evidence_refs": ("audit://unit/review",),
-    }
-    token = issuer.issue_approved_token(**binding)
-    service = CanonApplyService(
-        world_root=(tmp_path / "world").resolve(),
-        ledger=ledger,
-        trusted_approval_keys={"unit-key": key.public_key()},
-    )
-
-    cr._canon_store = store
-    cr._ledger_provider = lambda: ledger
-    try:
-        with patch("host_brain.app.canon_routes._get_canon_apply_service", return_value=service):
+    world_root = (tmp_path / "world").resolve()
+    with compose_canon_test_runtime(
+        tmp_path,
+        request_id="canon-approve-stored-content",
+        world_root=world_root,
+    ) as runtime:
+        key = Ed25519PrivateKey.generate()
+        apply_service = CanonApplyService(
+            world_root=world_root,
+            ledger=runtime.ledger,
+            db_path=runtime.db_path,
+            trusted_approval_keys={"unit-key": key.public_key()},
+            repository=runtime.container.apply_repository,
+        )
+        service = CanonApplicationService(
+            repository=runtime.container.repository,
+            world_root=world_root,
+            apply_service=apply_service,
+        )
+        proposal = service.submit_proposal(
+            proposal_id="prop-approve-stored",
+            target_doc_id="wc-stored-approve",
+            proposed_title="待审核长期记忆",
+            proposed_tags=["long_term_distill"],
+            proposed_body="候选长期记忆事实，等待审核。",
+            proposer_node_id="unit-test",
+            summary="approval can use stored body",
+            trace_id="unit-submit-trace",
+            ts_ms=1000,
+        )
+        issuer = CanonApprovalTokenIssuer(
+            runtime.db_path,
+            authority_key_id="unit-key",
+            private_key=key,
+            reviewer_id="unit-owner",
+        )
+        binding = {
+            "operation": "APPLY",
+            "subject_type": "CANON_PROPOSAL",
+            "subject_id": proposal["proposal_id"],
+            "subject_version": proposal["proposed_version"],
+            "subject_hash": proposal["proposed_hash"],
+            "target_doc_id": proposal["target_id"],
+            "base_version": proposal["base_version"],
+            "actor_id": "unit-owner",
+            "session_id": "unit-session",
+            "trace_id": "unit-trace",
+            "evidence_refs": ("audit://unit/review",),
+        }
+        token = issuer.issue_approved_token(**binding)
+        cr.set_canon_service_provider(lambda: service)
+        try:
             response = asyncio.run(
                 cr.approve_proposal(
                     "prop-approve-stored",
@@ -183,16 +163,15 @@ def test_canon_approve_route_uses_stored_proposal_content(tmp_path, monkeypatch)
                     ),
                 )
             )
-    finally:
-        cr._canon_store = None
-        cr._ledger_provider = None
+        finally:
+            cr.set_canon_service_provider(None)
 
-    doc = store.get("wc-stored-approve")
-    assert response.status == "APPLIED"
-    assert response.proposed_title == "待审核长期记忆"
-    assert response.proposed_body == "候选长期记忆事实，等待审核。"
-    assert doc is not None
-    assert doc.title == "待审核长期记忆"
+        doc = service.get_document("wc-stored-approve")
+        assert response.status == "APPLIED"
+        assert response.proposed_title == "待审核长期记忆"
+        assert response.proposed_body == "候选长期记忆事实，等待审核。"
+        assert doc is not None
+        assert doc["title"] == "待审核长期记忆"
 
 
 def test_long_term_distiller_backfills_old_pending_proposal_content(tmp_path) -> None:

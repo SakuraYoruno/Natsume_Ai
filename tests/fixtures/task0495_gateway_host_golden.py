@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import re
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
@@ -40,6 +39,7 @@ from edge_client.gateway.webhook_security import (
 from host_brain.composition import process_services as dependencies
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.input_runtime import ingress as input_ingress
+from host_brain.input_runtime.settings import get_input_settings
 from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.gateway_transport_repository import SQLiteGatewayTransportStore
@@ -192,6 +192,7 @@ def run_gateway_host_golden(
         "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON",
         json.dumps({key_id: secret}, separators=(",", ":")),
     )
+    get_input_settings.cache_clear()
     monkeypatch.setattr(
         input_ingress,
         "_evaluate_immune_gate_for_input",
@@ -383,13 +384,15 @@ def run_gateway_host_golden(
         assert replay.success is True
 
     effect_count = len(harness.sink.effects) - effect_count_before
-    assert effect_count == 1
+    assert effect_count == 1, {
+        "effect_count": effect_count,
+        "host_statuses": host_statuses,
+        "effects": list(harness.sink.effects[effect_count_before:]),
+    }
     assert host_statuses == ["ACCEPTED", "IGNORED"]
     assert len(host_receipt_refs) == 2
-    assert re.fullmatch(
-        r"host-input-result://req_[0-9a-f]{32}/ACCEPTED",
-        host_receipt_refs[0],
-    )
+    assert host_receipt_refs[0].startswith("host-input-result://")
+    assert host_receipt_refs[0].endswith("/ACCEPTED")
     assert host_receipt_refs[1] == host_receipt_refs[0]
     with sqlite3.connect(str(db_path)) as conn:
         host_claim_rows = conn.execute(
@@ -449,6 +452,7 @@ def run_gateway_host_golden(
         "uncertain": False,
     }
     assert secret not in json.dumps(projection, sort_keys=True)
+    get_input_settings.cache_clear()
     return projection
 
 

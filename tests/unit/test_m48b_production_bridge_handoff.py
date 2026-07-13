@@ -7,32 +7,17 @@ import pytest
 
 from edge_client.channels import wechat_command_queue
 from host_brain.channels import mateengine
+from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.service_catalog import AuthKind
 from host_brain.service_catalog.defaults import build_local_catalog
-from natsume_contracts.bridge_auth import build_http_auth_headers
 from tools import wxautox4_bridge
 
 
-MATE_SECRET = "m" * 32
 WECHAT_SECRET = "w" * 32
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class _Response:
-    status = 200
-
-    def __enter__(self) -> "_Response":
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-    @staticmethod
-    def read() -> bytes:
-        return b'{"success":true}'
-
-
-def test_mate_producer_defaults_off_and_sends_exact_signed_http(
+def test_mate_producer_defaults_off_and_queues_one_edge_embodiment_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("HOST_MATEENGINE_SIGNAL_ENABLED", raising=False)
@@ -40,62 +25,51 @@ def test_mate_producer_defaults_off_and_sends_exact_signed_http(
     assert mateengine._mateengine_enabled() is False
     assert mateengine._mateengine_bridge_enabled() is False
 
-    monkeypatch.setenv("HOST_MATEENGINE_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID", "mate.client.v1")
-    monkeypatch.setenv("NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET", MATE_SECRET)
-    monkeypatch.setenv(
-        "NATSUME_MATEENGINE_BRIDGE_CLIENT_PRINCIPAL",
-        "host.mateengine.bridge",
-    )
     monkeypatch.setattr(mateengine.time, "time", lambda: 1_783_828_800.123)
-    monkeypatch.setattr(mateengine.secrets, "token_urlsafe", lambda _size: "nonce-client-1")
     captured: dict[str, object] = {}
 
-    def _urlopen(request, timeout):  # noqa: ANN001
-        captured["request"] = request
-        captured["timeout"] = timeout
-        return _Response()
+    def _enqueue(**kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return EmbodimentOutboxAck(
+            outbox_id="outbox-mate-1",
+            command_id="command-mate-1",
+            idempotency_key="mate-key-1",
+        )
 
-    monkeypatch.setattr(mateengine.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(mateengine, "queue_mateengine_command", _enqueue)
     result = mateengine.send_mateengine_command({"action": "say", "text": "safe"})
 
     assert result.ok is True
-    request = captured["request"]
-    raw_body = bytes(request.data)
-    actual_headers = {key.lower(): value for key, value in request.header_items()}
-    expected_headers = build_http_auth_headers(
-        secret=MATE_SECRET.encode("utf-8"),
-        key_id="mate.client.v1",
-        method="POST",
-        path="/command",
-        timestamp_ms=1_783_828_800_123,
-        nonce="nonce-client-1",
-        principal="host.mateengine.bridge",
-        scope="bridge:mateengine:admin",
-        raw_body=raw_body,
-    )
-    for key, value in expected_headers.items():
-        assert actual_headers[key.lower()] == value
+    assert result.backend == "edge_embodiment_v1"
+    assert result.target == "edge://mateengine/command"
+    assert captured == {
+        "action": "command",
+        "payload": {"command": {"action": "say", "text": "safe"}},
+        "request_id": "mateengine_1783828800123",
+    }
 
 
-def test_mate_http_never_falls_back_to_unsigned_request(
+def test_mate_queue_rejection_is_returned_without_host_device_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOST_MATEENGINE_BRIDGE_ENABLED", "true")
-    monkeypatch.delenv("NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET", raising=False)
-    monkeypatch.delenv("NATSUME_MATEENGINE_BRIDGE_HMAC_KEY_ID", raising=False)
-    calls: list[object] = []
     monkeypatch.setattr(
-        mateengine.urllib.request,
-        "urlopen",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
+        mateengine,
+        "queue_mateengine_command",
+        lambda **_kwargs: EmbodimentOutboxAck(
+            outbox_id="outbox-mate-rejected",
+            command_id="command-mate-rejected",
+            idempotency_key="mate-key-rejected",
+            status="REJECTED",
+            reason_code="EDGE_EMBODIMENT_REJECTED",
+            detail="edge rejected command",
+        ),
     )
 
     result = mateengine.send_mateengine_command({"action": "say", "text": "blocked"})
 
     assert result.ok is False
-    assert result.error == "HOST_MATEENGINE_BRIDGE_CREDENTIAL_REQUIRED"
-    assert calls == []
+    assert result.backend == "edge_embodiment_v1"
+    assert result.error == "edge rejected command"
 
 
 def test_wechat_queue_producer_emits_consumer_compatible_signed_row(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -15,10 +16,15 @@ from host_brain.input_runtime.audit import log_input_event as _log_input_event
 from host_brain.input_runtime.gateway_delivery import _send_gateway_voice_reply
 from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.input_runtime.ingress import receive_input
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _ports(**overrides):  # noqa: ANN003
+    return replace(build_input_runtime_application_ports(), **overrides)
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +72,7 @@ def test_receive_input_rejects_placeholder_gateway_conversation_id() -> None:
         content="hello",
     )
 
-    response = _run(receive_input(body, SimpleNamespace()))
+    response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "REJECTED"
     assert "invalid gateway conversation_id" in response.detail
@@ -85,7 +91,7 @@ def test_receive_input_dispatches_final_asr_payload() -> None:
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ):
-        response = _run(receive_input(body, SimpleNamespace()))
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
@@ -106,7 +112,7 @@ def test_receive_input_rejects_when_immune_gate_blocks() -> None:
         "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         return_value={"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     ):
-        response = _run(receive_input(body, SimpleNamespace()))
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "REJECTED"
     assert "immune gate blocked" in response.detail
@@ -132,8 +138,9 @@ def test_dispatch_to_graph_ignores_low_confidence_asr() -> None:
                 session_id="asr-session-noise-gate",
                 source="ASR",
                 text="字幕志愿者 杨茜茜",
-                payload={"confidence": 0.80, "is_final": True, "text": "字幕志愿者 杨茜茜"},
-                ts_ms=1234567890,
+                    payload={"confidence": 0.80, "is_final": True, "text": "字幕志愿者 杨茜茜"},
+                    ts_ms=1234567890,
+                    ports=_ports(),
             )
         )
 
@@ -185,11 +192,8 @@ def test_receive_input_gateway_progress_fastpath_is_retired() -> None:
     )
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=True),
-    ):
-        response = _run(receive_input(body, SimpleNamespace()))
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
     assert response.detail == "input accepted for processing"
@@ -205,11 +209,8 @@ def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None
     )
     dispatch_mock = AsyncMock(return_value=None)
 
-    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=False),
-    ):
-        response = _run(receive_input(body, SimpleNamespace()))
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
@@ -252,14 +253,11 @@ def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
     ]
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=False),
-    ), patch(
         "host_brain.input_runtime.ingress._evaluate_host_gateway_ingress",
         side_effect=ingress_results,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
-        first = _run(receive_input(body, SimpleNamespace()))
-        second = _run(receive_input(body, SimpleNamespace()))
+        first = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
+        second = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert first.status == "ACCEPTED"
     assert second.status == "IGNORED"
@@ -297,13 +295,12 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=False),
-    ), patch("host_brain.composition.process_services.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
+    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
-        response = _run(receive_input(body, SimpleNamespace()))
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
@@ -321,8 +318,9 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
                 source="GATEWAY",
                 text="",
                 payload=dispatched_payload,
-                ts_ms=1,
-                ledger=SimpleNamespace(),
+                    ts_ms=1,
+                    ledger=SimpleNamespace(),
+                    ports=_ports(get_multimodal_observer=lambda: observer),
             )
         )
     assert should_continue is True
@@ -360,13 +358,12 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=False),
-    ), patch("host_brain.composition.process_services.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
+    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
-        response = _run(receive_input(body, SimpleNamespace()))
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_args.kwargs["text"] == "[语音消息]"
@@ -383,8 +380,9 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
                 source="GATEWAY",
                 text="",
                 payload=dispatched_payload,
-                ts_ms=1,
-                ledger=SimpleNamespace(),
+                    ts_ms=1,
+                    ledger=SimpleNamespace(),
+                    ports=_ports(get_multimodal_observer=lambda: observer),
             )
         )
     assert should_continue is True
@@ -423,12 +421,11 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
         "host_brain.composition.process_services.get_multimodal_observer",
         return_value=observer,
-    ), patch("host_brain.input_runtime.ingress._schedule_gateway_multimodal_async_job") as schedule_mock, patch(
+    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
-        schedule_mock.return_value = {"job_id": "mmjob_test"}
-        response = _run(receive_input(body, SimpleNamespace()))
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
         assert response.status == "ACCEPTED"
         assert response.detail == "input accepted for processing"
         assert dispatch_mock.await_count == 1
@@ -445,11 +442,11 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
                 payload=dispatched_payload,
                 ts_ms=1,
                 ledger=SimpleNamespace(),
+                ports=_ports(get_multimodal_observer=lambda: observer),
             )
         )
         assert should_continue is True
         assert dispatched_payload["attachment_processing_mode"] == "governed_waited"
-        assert schedule_mock.call_count == 0
 
 
 def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> None:
@@ -490,13 +487,12 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
 
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.input_runtime.ingress._try_handle_gateway_progress_fastpath",
-        new=AsyncMock(return_value=False),
-    ), patch("host_brain.composition.process_services.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
+    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
-        first_response = _run(receive_input(first_body, SimpleNamespace()))
+        first_response = _run(receive_input(first_body, SimpleNamespace(), ports=_ports()))
         first_payload = dispatch_mock.await_args.kwargs["payload"]
         _run(
             input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
@@ -507,9 +503,10 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
                 payload=first_payload,
                 ts_ms=1,
                 ledger=SimpleNamespace(),
+                ports=_ports(get_multimodal_observer=lambda: observer),
             )
         )
-        second_response = _run(receive_input(second_body, SimpleNamespace()))
+        second_response = _run(receive_input(second_body, SimpleNamespace(), ports=_ports()))
 
     assert first_response.status == "ACCEPTED"
     assert second_response.status == "ACCEPTED"

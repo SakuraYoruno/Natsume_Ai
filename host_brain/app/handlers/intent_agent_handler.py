@@ -1,38 +1,23 @@
+"""Intent plan projection and governed-execution handoff.
+
+The application Agent may describe an execution request, but it cannot run a
+skill or dispatch another Agent.  Effects enter the composed Executive Runtime
+where durable principal, Governor grant, CapabilityBroker and receipt checks
+are available.
+"""
+
 from __future__ import annotations
 
-import os
-import time
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.agent_runtime.agent_registry import AGENT_ID_INTENT
-from host_brain.app.agents.react_loop import run_react_loop
-from host_brain.app.agents.tool_registry import get_tools_for_agent
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_text
-from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
-_INTENT_EXECUTION_ENFORCEMENT = (
-    "Execution discipline: when the user asks for an action, use tools before final_answer. "
-    "Use list_skills to discover callable skills, run_skill for direct skill execution, "
-    "and dispatch_sub_agent for delegated tasks. "
-    "Do not return final_answer without at least one executable attempt unless the request is purely conversational."
-)
+from .agent_boundary import finalize_agent_boundary, first_public_text, nested_payload, request_id_for
 
 
-def _parse_bool_env(key: str, default: bool = False) -> bool:
-    raw = str(os.environ.get(key, "")).strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _resolve_intent_agent_system_prompt() -> str:
-    return resolve_prompt_contract_text("intent_agent_handler.system_prompt_extra")
-
-
-def _resolve_intent_agent_error_summary() -> str:
-    return resolve_prompt_contract_text("intent_agent_handler.error_summary")
+INTENT_HANDOFF_SCHEMA = "Natsume.intent.execution-handoff.v1"
+INTENT_GOVERNED_EXECUTION_REQUIRED = "INTENT_GOVERNED_EXECUTION_REQUIRED"
 
 
 def intent_agent_handler(
@@ -40,105 +25,111 @@ def intent_agent_handler(
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ctx = dict(context or {})
-    request_id = str(ctx.get("request_id") or payload.get("request_id") or "").strip()
-    intent_subgraph_enabled = _parse_bool_env("INTENT_SUBGRAPH_ENABLED", default=True)
+    out = dict(payload or {})
+    request_id = request_id_for(out, ctx, prefix="intent")
 
-    out = dict(payload)
+    planner_raw = out.get("tool_planner")
+    reasoner_raw = out.get("core_reasoner_primary")
+    planner = nested_payload(planner_raw)
+    reasoner = nested_payload(reasoner_raw)
+    summary = (
+        first_public_text(planner_raw)
+        or first_public_text(reasoner_raw)
+        or "执行意图已形成受治理交接；尚未执行任何工具或子 Agent。"
+    )
+    gateway_status = str(
+        (planner_raw.get("gateway_status") if isinstance(planner_raw, Mapping) else "")
+        or (reasoner_raw.get("gateway_status") if isinstance(reasoner_raw, Mapping) else "")
+        or "NOT_EXECUTED"
+    ).strip().upper()
 
-    try:
-        if intent_subgraph_enabled:
-            user_input = str(payload.get("user_input") or payload.get("query") or "").strip()
-            tools = get_tools_for_agent(AGENT_ID_INTENT, allow_side_effects=True)
-            gateway = ctx.get("gateway") or payload.get("gateway") or payload.get("_gateway")
-            system_prompt_extra = f"{_resolve_intent_agent_system_prompt().strip()}\n\n{_INTENT_EXECUTION_ENFORCEMENT}"
+    safety_raw = out.get("safety_verifier")
+    safety = nested_payload(safety_raw)
+    safety_risk = str(safety.get("risk_level") or "NONE").strip().upper()
+    risk_flags = ["EXEC_INTENT_SCENE", INTENT_GOVERNED_EXECUTION_REQUIRED]
+    confidence = 0.7 if planner or reasoner else 0.4
+    if gateway_status not in {"OK", "NOT_EXECUTED"}:
+        risk_flags.append(f"GATEWAY_STATUS:{gateway_status}")
+        confidence = min(confidence, 0.3)
+    if safety_risk in {"HIGH", "CRITICAL"}:
+        risk_flags.append(f"SAFETY_RISK:{safety_risk}")
+        confidence = min(confidence, 0.2)
 
-            react_result = run_react_loop(
-                agent_id=AGENT_ID_INTENT,
-                user_input=user_input,
-                tools=tools,
-                gateway=gateway,
-                system_prompt_extra=system_prompt_extra,
-                max_steps=int(os.environ.get("INTENT_REACT_MAX_STEPS") or "5"),
-                allow_side_effects=True,
-                context=ctx,
-            )
+    out["intent_execution_handoff"] = _build_execution_handoff(
+        request_id=request_id,
+        plan_summary=summary,
+        requested_tools=_requested_tools(planner),
+        safety_risk=safety_risk,
+    )
+    return finalize_agent_boundary(
+        out,
+        agent_id=AGENT_ID_INTENT,
+        trace_key="intent_agent_trace",
+        request_id=request_id,
+        summary=summary,
+        mode="governed_execution_handoff",
+        reason_code=INTENT_GOVERNED_EXECUTION_REQUIRED,
+        confidence=confidence,
+        risk_flags=risk_flags,
+        trace_fields={
+            "gateway_status": gateway_status,
+            "safety_risk": safety_risk,
+            "execution_surface": "executive_runtime",
+        },
+        artifact_suffix="handoff",
+    )
 
-            out["react_scratchpad"] = react_result.to_scratchpad_dict()
-            out["agent_output"] = react_result.to_public_output_dict()
 
-            artifact_ref = f"artifact://{request_id}/{AGENT_ID_INTENT}_{int(time.time() * 1000)}"
-            write_agent_artifact_to_state(
-                out,
-                agent_id=AGENT_ID_INTENT,
-                artifact_ref=artifact_ref,
-                summary=react_result.final_answer[:200],
-                confidence=react_result.confidence,
-                risk_flags=react_result.risk_flags + ["EXEC_INTENT_SCENE"],
-            )
-
-            out["intent_agent_trace"] = {
-                "agent_id": AGENT_ID_INTENT,
-                "mode": "react_loop",
-                "artifact_ref": artifact_ref,
-                "total_steps": react_result.total_steps,
-                "stopped_reason": react_result.stopped_reason,
-                "intent_subgraph_enabled": True,
-                "ts_ms": int(time.time() * 1000),
-            }
+def _requested_tools(planner: Mapping[str, Any]) -> list[str]:
+    raw = planner.get("tool_ids") or planner.get("tools") or []
+    if isinstance(raw, str):
+        values: Sequence[Any] = [raw]
+    elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+        values = raw
+    else:
+        values = []
+    resolved: list[str] = []
+    for value in values:
+        if isinstance(value, Mapping):
+            tool_id = str(value.get("tool_id") or value.get("tool") or value.get("name") or "").strip()
         else:
-            tool_planner_output = dict(payload.get("tool_planner") or {})
-            core_reasoner_output = dict(payload.get("core_reasoner_primary") or {})
+            tool_id = str(value or "").strip()
+        if tool_id and tool_id not in resolved:
+            resolved.append(tool_id)
+    return resolved[:64]
 
-            draft_summary = str(
-                tool_planner_output.get("payload", {}).get("plan_summary")
-                or tool_planner_output.get("payload", {}).get("response_text")
-                or core_reasoner_output.get("payload", {}).get("response_text")
-                or "执行意图计划已生成"
-            ).strip()[:200]
 
-            gateway_status = str(
-                tool_planner_output.get("gateway_status") or core_reasoner_output.get("gateway_status") or "OK"
-            ).strip().upper()
+def _build_execution_handoff(
+    *,
+    request_id: str,
+    plan_summary: str,
+    requested_tools: list[str],
+    safety_risk: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": INTENT_HANDOFF_SCHEMA,
+        "request_id": request_id,
+        "execution_surface": "executive_runtime",
+        "authority_path": "SecureIngress -> Governor -> CapabilityBroker -> Receipt",
+        "request_material": {
+            "plan_summary": plan_summary,
+            "requested_tools": list(requested_tools),
+            "safety_risk": safety_risk,
+            "trusted_authority": False,
+            "authority_source": "UNTRUSTED_APPLICATION_REQUEST",
+        },
+        "requirements": {
+            "durable_principal": True,
+            "governor_grant": True,
+            "capability_broker": True,
+            "durable_receipt": True,
+        },
+        "side_effects_executed": False,
+    }
 
-            confidence = 0.75 if gateway_status == "OK" else 0.15
-            risk_flags = ["EXEC_INTENT_SCENE"]
-            if gateway_status != "OK":
-                risk_flags.append(f"GATEWAY_STATUS:{gateway_status}")
 
-            safety_output = dict(payload.get("safety_verifier") or {})
-            safety_risk = str(safety_output.get("payload", {}).get("risk_level") or "").strip().upper()
-            if safety_risk in {"HIGH", "CRITICAL"}:
-                risk_flags.append(f"SAFETY_RISK:{safety_risk}")
-                confidence = min(confidence, 0.4)
-
-            artifact_ref = f"artifact://{request_id}/{AGENT_ID_INTENT}_{int(time.time() * 1000)}"
-            write_agent_artifact_to_state(
-                out,
-                agent_id=AGENT_ID_INTENT,
-                artifact_ref=artifact_ref,
-                summary=draft_summary,
-                confidence=confidence,
-                risk_flags=risk_flags,
-            )
-
-            out["intent_agent_trace"] = {
-                "agent_id": AGENT_ID_INTENT,
-                "mode": "legacy_chain",
-                "artifact_ref": artifact_ref,
-                "gateway_status": gateway_status,
-                "safety_risk": safety_risk or "NONE",
-                "intent_subgraph_enabled": False,
-                "ts_ms": int(time.time() * 1000),
-            }
-    except Exception as exc:
-        artifacts = out.setdefault("agent_artifacts", {})
-        artifacts[AGENT_ID_INTENT] = {
-            "artifact_ref": f"artifact://{request_id}/{AGENT_ID_INTENT}_error",
-            "summary": _resolve_intent_agent_error_summary(),
-            "confidence": 0.0,
-            "risk_flags": ["EXEC_INTENT_SCENE", f"HANDLER_ERROR:{type(exc).__name__}"],
-            "error": str(exc),
-            "ts_ms": int(time.time() * 1000),
-        }
-
-    return out
+__all__ = [
+    "INTENT_GOVERNED_EXECUTION_REQUIRED",
+    "INTENT_HANDOFF_SCHEMA",
+    "intent_agent_handler",
+]

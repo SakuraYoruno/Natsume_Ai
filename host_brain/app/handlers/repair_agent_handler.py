@@ -187,16 +187,23 @@ def _build_repair_planner_user_prompt(task_text: str, previous_error: str) -> st
     )
 
 
-def _call_repair_planner_llm(task_text: str, previous_error: str) -> dict[str, Any] | None:
+def _call_repair_planner_llm(
+    task_text: str,
+    previous_error: str,
+    *,
+    model_attempt_service: Any = None,
+) -> dict[str, Any] | None:
     try:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
-        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import REPAIR_AGENT_PLAN_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
+        if model_attempt_service is None:
+            return None
+
         user_prompt = _build_repair_planner_user_prompt(task_text=task_text, previous_error=previous_error)
         result = complete_compiled_prompt_sync(
-            attempt_service=get_model_attempt_service(),
+            attempt_service=model_attempt_service,
             prompt_id=REPAIR_AGENT_PLAN_PROMPT_ID,
             request_id=f"repair-planner::{int(time.time() * 1000)}",
             scene_type="REPAIR_PLANNER",
@@ -320,7 +327,12 @@ def _execute_repair_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _build_repair_result(*, task_text: str, previous_error: str) -> dict[str, Any]:
+def _build_repair_result(
+    *,
+    task_text: str,
+    previous_error: str,
+    model_attempt_service: Any = None,
+) -> dict[str, Any]:
     templates = _repair_runtime_templates()
     fallback_templates = _mapping_section(templates, "rule_fallback")
     normalized_error = str(previous_error or "").strip().upper()
@@ -335,7 +347,13 @@ def _build_repair_result(*, task_text: str, previous_error: str) -> dict[str, An
     llm_enabled = str(os.environ.get(_REPAIR_PLANNER_ENABLED_ENV) or "true").strip().lower()
     if llm_enabled not in ("false", "0", "no", "off"):
         _logger.info("[RepairAgent] 尝试 canonical LLM 规划器，error_prefix=%s", normalized_error[:60])
-        plan = _call_repair_planner_llm(task_text=task_text, previous_error=previous_error)
+        planner_args = {
+            "task_text": task_text,
+            "previous_error": previous_error,
+        }
+        if model_attempt_service is not None:
+            planner_args["model_attempt_service"] = model_attempt_service
+        plan = _call_repair_planner_llm(**planner_args)
         if plan is not None:
             return _execute_repair_plan(plan)
 
@@ -362,7 +380,11 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
 
     out = dict(payload)
     try:
-        repair_result = _build_repair_result(task_text=task_text, previous_error=previous_error)
+        repair_result = _build_repair_result(
+            task_text=task_text,
+            previous_error=previous_error,
+            model_attempt_service=ctx.get("model_attempt_service"),
+        )
         final_answer = str(repair_result.get("summary") or "").strip()
         out["react_scratchpad"] = redact_legacy_trace_payload({
             "agent_id": AGENT_REPAIR,

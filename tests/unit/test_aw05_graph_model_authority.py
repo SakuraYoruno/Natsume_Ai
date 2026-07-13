@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.composition import process_services as dependencies
 from host_brain.integrations.graph_executor import GraphExecutor
 from host_brain.model_runtime import (
     CallableProviderAdapter,
@@ -91,35 +90,32 @@ def test_graph_executor_invokes_only_canonical_composition_with_node_semantics()
         gateway_bindings.append(kwargs)
         return _InvokingGateway(kwargs["provider"])
 
-    dependencies.reset_model_runtime_composition(composition)
-    try:
-        executor = GraphExecutor(
-            handlers={},
-            gateway_factory=_gateway_factory,
-            model_nodes={
-                "renderer_ja_c_style": {
-                    "provider": "mock",
-                    "model_id": "configured-model",
-                    "timeout_ms": 3000,
-                    "available": True,
-                }
-            },
-        )
-        result = executor._invoke_model_node(
-            node_id="respond",
-            binding={"model_node_id": "renderer_ja_c_style", "task": "CHAT"},
-            state={
-                "request_id": "req-graph-authority",
-                "graph_id": "graph-authority",
-                "timeout_ms": 5000,
-                "payload": {"input": "hello"},
-                "edge_map": {},
-                "model_profile_id": "test",
-                "model_calls": [],
-            },
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
+    executor = GraphExecutor(
+        handlers={},
+        gateway_factory=_gateway_factory,
+        model_attempt_service=composition.attempt_service,
+        model_nodes={
+            "renderer_ja_c_style": {
+                "provider": "mock",
+                "model_id": "configured-model",
+                "timeout_ms": 3000,
+                "available": True,
+            }
+        },
+    )
+    result = executor._invoke_model_node(
+        node_id="respond",
+        binding={"model_node_id": "renderer_ja_c_style", "task": "CHAT"},
+        state={
+            "request_id": "req-graph-authority",
+            "graph_id": "graph-authority",
+            "timeout_ms": 5000,
+            "payload": {"input": "hello"},
+            "edge_map": {},
+            "model_profile_id": "test",
+            "model_calls": [],
+        },
+    )
 
     assert result["__orchestration_status__"] == "OK"
     assert len(route.requests) == len(route.prompts) == len(provider_attempts) == 1

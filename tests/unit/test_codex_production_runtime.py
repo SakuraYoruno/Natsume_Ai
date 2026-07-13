@@ -45,16 +45,42 @@ from host_brain.skills.executor_registry import (
 from host_brain.skills import executor_registry as executor_registry_module
 
 
-@pytest.fixture(autouse=True)
-def _durable_governed_authority_fixture(monkeypatch):  # noqa: ANN001, ANN201
-    """The production verifier is covered separately against repository fixtures."""
-
+@pytest.fixture(scope="module")
+def _canonical_test_ledger(tmp_path_factory):  # noqa: ANN001, ANN201
+    from host_brain.audit.migration_runner import SQLiteMigrationRunner
     from host_brain.audit.sqlite_ledger import SQLiteLedger
 
+    db_path = tmp_path_factory.mktemp("codex-production-runtime") / "canonical.sqlite3"
+    migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="codex-production-runtime-fixture",
+    )
+    assert migration.success, migration.as_dict()
+    ledger = SQLiteLedger(
+        db_path=db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
+    try:
+        yield ledger
+    finally:
+        ledger.close()
+
+
+@pytest.fixture(autouse=True)
+def _durable_governed_authority_fixture(  # noqa: ANN201
+    monkeypatch,
+    _canonical_test_ledger,  # noqa: ANN001
+):
+    """The production verifier is covered separately against repository fixtures."""
+
+    from host_brain.composition.process_service_container import (
+        get_process_service_container,
+    )
+
     monkeypatch.setattr(
-        dependencies,
-        "_ledger",
-        SQLiteLedger(db_path=":memory:", check_same_thread=False),
+        get_process_service_container(),
+        "ledger",
+        _canonical_test_ledger,
     )
     dependencies.reset_capability_runtime_composition()
 
@@ -68,7 +94,10 @@ def _durable_governed_authority_fixture(monkeypatch):  # noqa: ANN001, ANN201
         "_PRODUCTION_AUTHORITY_VERIFIER_OVERRIDE",
         lambda _authority, _order: None,
     )
-    yield
+    try:
+        yield
+    finally:
+        dependencies.reset_capability_runtime_composition()
 
 
 def _governed_context() -> dict[str, object]:
@@ -139,6 +168,8 @@ def _execute_canonical(payload: dict[str, object]) -> dict[str, object]:
 
 
 def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
+    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+
     context = dict(payload.get("_context") or {})
     governed = dict(context.get("_governed_execution_context") or {})
     work_order = dict(payload.get("work_order") or {})
@@ -151,6 +182,15 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
         "target_id": skill_id,
         "work_order_id": str(work_order.get("work_order_id") or ""),
     })
+    capability_broker = dependencies.get_capability_broker()
+    context.update(
+        {
+            "capability_broker": capability_broker,
+            "model_attempt_service": ApplicationModelAttemptServicePort(),
+            "production_authority_verifier": lambda _authority, _order: None,
+        }
+    )
+    payload["_context"] = context
     authority = bind_validated_skill_authority(
         payload=payload,
         request_id=request_id,
@@ -158,12 +198,13 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
         principal_id="test-principal",
         target_id=skill_id,
         governed_execution_context=governed,
+        durable_ledger=dependencies.get_ledger(),
         validated_by="test.governed_task_fixture",
     )
     return dispatch_executor_payload(
         payload,
         authority=authority,
-        capability_broker=dependencies.get_capability_broker(),
+        capability_broker=capability_broker,
     )
 
 

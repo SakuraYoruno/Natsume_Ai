@@ -212,7 +212,7 @@ class TestPanelReadonlySafety:
         from pathlib import Path
 
         project_root = Path(__file__).resolve().parents[2]
-        body = (project_root / "host_brain" / "app" / "static" / "monitor" / "index.html").read_text(
+        body = (project_root / "host_brain" / "app" / "monitor_ui" / "index.html").read_text(
             encoding="utf-8-sig"
         ).lower()
         assert "<form" not in body or 'action="' not in body

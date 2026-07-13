@@ -1,11 +1,4 @@
-"""P14 单元测试：judge_agent_handler ReAct 化。
-
-验收标准覆盖：
-  - 3.1：judge_agent_handler 走 ReAct 路径，react_scratchpad 非 None，
-         mode="react_loop"，judge_agent_trace 字段契约正确
-  - 3.2：evaluate_artifact / compare_artifacts 工具有真实实现
-  - 3.3：P13 基线（85 用例）不退化，judge_agent 工具 allowlist 更新
-"""
+"""Deterministic judge boundary and artifact-tool unit tests."""
 
 from __future__ import annotations
 
@@ -119,150 +112,39 @@ def _make_payload(
 
 
 # ---------------------------------------------------------------------------
-# 3.1 judge_agent_handler ReAct 模式
+# Deterministic application boundary
 # ---------------------------------------------------------------------------
 
-class TestReActMode:
-    """验收 3.1：ReAct 模式可运行，字段结构正确。"""
-
-    def test_returns_judge_agent_trace(self):
-        """judge_agent_trace 存在且 mode == 'react_loop'。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"request_id": "test-req-p14-001", "gateway": gateway},
-        )
-        assert "judge_agent_trace" in result
-        trace = result["judge_agent_trace"]
-        assert trace["mode"] == "react_loop"
-
-    def test_scratchpad_exists(self):
-        """react_scratchpad 存在。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        assert "react_scratchpad" in result
-        scratchpad = result["react_scratchpad"]
-        assert isinstance(scratchpad, dict)
-
-    def test_judge_result_exists(self):
-        """judge_result 存在且含必填字段。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        assert "judge_result" in result
-        jr = result["judge_result"]
-        assert "status" in jr
-        assert "mode" in jr
-        assert jr["mode"] == "react_loop"
-
-    def test_judge_result_status_ok(self):
-        """正常工件时 judge_result.status == 'OK'。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        jr = result["judge_result"]
-        assert jr["status"] in {"OK", "DEGRADED"}
-
-    def test_trace_artifact_ref_nonempty(self):
-        """judge_agent_trace.artifact_ref 非空。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"request_id": "test-req-p14-001", "gateway": gateway},
-        )
-        trace = result["judge_agent_trace"]
-        assert trace["artifact_ref"]
-        assert "test-req-p14-001" in trace["artifact_ref"]
-
-    def test_trace_stopped_reason_valid(self):
-        """judge_agent_trace.stopped_reason 为有效值。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        trace = result["judge_agent_trace"]
-        assert trace["stopped_reason"] in {"FINAL_ANSWER", "MAX_STEPS", "ERROR"}
-
-    def test_trace_total_steps_gte_1(self):
-        """judge_agent_trace.total_steps >= 1（有工件时）。"""
-        gateway = _make_gateway()
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        trace = result["judge_agent_trace"]
-        assert trace["total_steps"] >= 1
-
-    def test_tool_call_then_final_answer(self):
-        """先调用工具再给出 final_answer 时，react_scratchpad.steps 有 2 步。"""
-        gateway = _make_gateway_tool_then_answer("compare_artifacts")
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        scratchpad = result["react_scratchpad"]
-        steps = scratchpad.get("steps", [])
-        assert len(steps) >= 1
-
-    def test_selected_agent_in_artifacts(self):
-        """judge_result.selected_agent 在 agent_artifacts 中（或为 None）。"""
-        gateway = _make_gateway()
+class TestArtifactPolicyBoundary:
+    def test_selects_highest_confidence_artifact_without_gateway(self):
         payload = _make_payload()
-        result = judge_agent_handler(payload, context={"gateway": gateway})
-        jr = result["judge_result"]
-        if jr["selected_agent"] is not None:
-            assert jr["selected_agent"] in payload["agent_artifacts"]
+        result = judge_agent_handler(payload, context={"request_id": "test-req-p14-001"})
 
-    def test_all_agents_evaluated_field(self):
-        """judge_result.all_agents_evaluated 包含所有工件 agent_id。"""
-        gateway = _make_gateway()
-        payload = _make_payload()
-        result = judge_agent_handler(payload, context={"gateway": gateway})
-        jr = result["judge_result"]
-        assert "all_agents_evaluated" in jr
-        for aid in payload["agent_artifacts"]:
-            assert aid in jr["all_agents_evaluated"]
-
-
-# ---------------------------------------------------------------------------
-# 3.1 降级路径
-# ---------------------------------------------------------------------------
-
-class TestDegradedPaths:
-    """降级路径：无工件、全部错误、高风险。"""
-
-    def test_no_artifacts_degraded(self):
-        """无工件时直接降级，不进入 ReAct 循环。"""
-        result = judge_agent_handler(
-            _make_payload(artifacts={}),
-            context={"request_id": "test-req-p14-002"},
-        )
-        jr = result["judge_result"]
-        assert jr["status"] == "DEGRADED"
-        assert jr["reason"] == "NO_ARTIFACTS"
-        assert jr["mode"] == "react_loop"
-
-    def test_no_artifacts_trace_total_steps_zero(self):
-        """无工件时 judge_agent_trace.total_steps == 0。"""
-        result = judge_agent_handler(
-            _make_payload(artifacts={}),
-            context={},
-        )
+        judge = result["judge_result"]
         trace = result["judge_agent_trace"]
-        assert trace["total_steps"] == 0
-        assert trace["stopped_reason"] == "NO_ARTIFACTS"
+        assert judge["status"] == "OK"
+        assert judge["mode"] == "artifact_policy"
+        assert judge["selected_agent"] == "agent_worker"
+        assert judge["all_agents_evaluated"] == ["agent_worker", "translate_agent"]
+        assert trace["mode"] == "artifact_policy"
+        assert trace["side_effects_executed"] is False
+        assert "react_scratchpad" not in result
 
-    def test_high_risk_artifact_degraded(self):
-        """含高风险标记的工件导致 judge_result.status == 'DEGRADED'。"""
-        gateway = _make_gateway("selected_agent=agent_worker, confidence=0.85, reason=高风险")
+    def test_gateway_is_ignored_at_policy_boundary(self):
+        gateway = MagicMock()
+        result = judge_agent_handler(_make_payload(), context={"gateway": gateway})
+
+        gateway.complete.assert_not_called()
+        assert result["judge_result"]["selected_agent"] == "agent_worker"
+
+    def test_no_artifacts_degrades_with_stable_reason(self):
+        result = judge_agent_handler(_make_payload(artifacts={}))
+
+        assert result["judge_result"]["status"] == "DEGRADED"
+        assert result["judge_result"]["reason"] == "NO_ARTIFACTS"
+        assert result["judge_agent_trace"]["artifacts_evaluated"] == 0
+
+    def test_high_risk_artifact_is_never_approved(self):
         artifacts = {
             "agent_worker": {
                 "artifact_ref": "artifact://req/code_1",
@@ -271,36 +153,20 @@ class TestDegradedPaths:
                 "risk_flags": ["SAFETY_RISK:HIGH"],
             }
         }
-        result = judge_agent_handler(
-            _make_payload(artifacts=artifacts),
-            context={"gateway": gateway},
-        )
-        jr = result["judge_result"]
-        assert jr["status"] == "DEGRADED"
+        result = judge_agent_handler(_make_payload(artifacts=artifacts))
 
-    def test_exception_safety(self):
-        """gateway 抛异常时，handler 不抛异常，返回 DEGRADED judge_result。"""
-        gateway = MagicMock()
-        gateway.complete.side_effect = RuntimeError("LLM 不可用")
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": gateway},
-        )
-        jr = result["judge_result"]
-        assert jr["status"] == "DEGRADED"
-        # reason 可能是 REACT_LOOP_ERROR 或 JUDGE_ERROR:xxx
-        assert "ERROR" in jr["reason"]
+        assert result["judge_result"]["status"] == "DEGRADED"
+        assert result["judge_result"]["reason"] == "ARTIFACT_POLICY_RISK"
 
-    def test_none_gateway_no_crash(self):
-        """gateway 为 None 时，handler 不崩溃，返回有效结果。"""
-        result = judge_agent_handler(
-            _make_payload(),
-            context={"gateway": None},
-        )
-        # gateway 为 None 时 react_loop 内部降级处理，不崩溃即可
-        assert "judge_result" in result
-        jr = result["judge_result"]
-        assert jr["status"] in {"OK", "DEGRADED"}
+    def test_all_error_artifacts_are_rejected(self):
+        artifacts = {
+            "agent_a": {"confidence": 0.9, "error": "FAILED"},
+            "agent_b": {"confidence": 0.8, "error": "TIMEOUT"},
+        }
+        result = judge_agent_handler(_make_payload(artifacts=artifacts))
+
+        assert result["judge_result"]["selected_agent"] is None
+        assert result["judge_result"]["reason"] == "ALL_ARTIFACTS_REJECTED"
 
 
 # ---------------------------------------------------------------------------
@@ -595,5 +461,4 @@ class TestParseJudgeFinalAnswer:
         )
         # 回退到 agent_worker
         assert agent == "agent_worker"
-
 

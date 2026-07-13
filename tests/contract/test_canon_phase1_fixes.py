@@ -9,13 +9,12 @@ T-Canon-P1-05：rollback_proposal 非 APPLIED 状态 — pending/rejected 提案
 
 from __future__ import annotations
 
-import importlib
-import sqlite3
-
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import WorldCanonStore
+from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -24,8 +23,16 @@ from host_brain.memory.canon_world_store import WorldCanonStore
 
 @pytest.fixture()
 def ledger(tmp_path):
-    db = SQLiteLedger(db_path=str(tmp_path / "test.sqlite3"))
-    return db
+    db_path = tmp_path / "test.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="canon-phase1-contract",
+    )
+    assert migrated.success, migrated.as_dict()
+    db = SQLiteLedger(db_path=db_path, initialize_schema=False)
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @pytest.fixture()
@@ -75,7 +82,8 @@ def test_canon_routes_no_circular_import():
     try:
         import host_brain.app.canon_routes as cr
         assert hasattr(cr, "router"), "canon_routes 应暴露 router 对象"
-        assert hasattr(cr, "set_ledger_provider"), "canon_routes 应暴露 set_ledger_provider"
+        assert hasattr(cr, "set_canon_service_provider")
+        assert not hasattr(cr, "set_ledger_provider")
     except ImportError as exc:
         pytest.fail(f"canon_routes 导入失败（循环导入）: {exc}")
 
@@ -84,20 +92,19 @@ def test_canon_routes_no_circular_import():
 # T-Canon-P1-03：set_ledger_provider 注入生效
 # ---------------------------------------------------------------------------
 
-def test_set_ledger_provider_injection(ledger):
-    """注入 ledger provider 后，_get_ledger_from_app 应返回注入的 ledger 实例。"""
+def test_set_canon_service_provider_injection(tmp_path):
+    """Route injection owns one explicit Canon application boundary."""
     import host_brain.app.canon_routes as cr
 
-    # 保存原始 provider
-    original_provider = cr._ledger_provider
-
-    try:
-        cr.set_ledger_provider(lambda: ledger)
-        result = cr._get_ledger_from_app()
-        assert result is ledger, "注入后应返回注入的 ledger 实例"
-    finally:
-        # 恢复原始 provider，避免污染其他测试
-        cr._ledger_provider = original_provider
+    with compose_canon_test_runtime(
+        tmp_path,
+        request_id="canon-phase1-provider",
+    ) as runtime:
+        cr.set_canon_service_provider(lambda: runtime.container.application)
+        try:
+            assert cr._get_canon_service() is runtime.container.application
+        finally:
+            cr.set_canon_service_provider(None)
 
 
 # ---------------------------------------------------------------------------

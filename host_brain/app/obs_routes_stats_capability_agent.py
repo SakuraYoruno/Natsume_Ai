@@ -203,11 +203,15 @@ def _extract_immune_gate_event_fields(row: Dict[str, Any]) -> Optional[Dict[str,
     payload_dict = dict(payload) if isinstance(payload, dict) else {}
     source_payload: Optional[Dict[str, Any]] = None
     if event_type == "IMMUNE_CHAT_GATE":
-        source_payload = payload_dict
+        source_payload = payload_dict or dict(row)
     elif event_type.startswith("INPUT_"):
         gate_payload = payload_dict.get("immune_gate")
         if isinstance(gate_payload, dict):
             source_payload = dict(gate_payload)
+        elif str(row.get("decision") or "").strip():
+            # The public query projection flattens only non-sensitive immune
+            # decision metadata; raw input payloads never cross this boundary.
+            source_payload = dict(row)
     if source_payload is None:
         return None
     decision = str(source_payload.get("decision") or "").strip().upper()

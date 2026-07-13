@@ -141,6 +141,9 @@ _PRIVATE_OR_SECRET_FIELDS = frozenset(
 _PUBLIC_VOICE_PAYLOAD_FIELDS = frozenset(
     {"platform", "source", "phase", "latency_ms"}
 )
+_PUBLIC_IMMUNE_GATE_FIELDS = frozenset(
+    {"decision", "risk_level", "score", "reason_codes", "matched_rules"}
+)
 
 
 def _row_ts(row: Mapping[str, Any]) -> int:
@@ -193,6 +196,17 @@ def sanitize_stats_row(table: str, row: Mapping[str, Any]) -> dict[str, Any]:
                 value = raw_payload.get(field)
                 if isinstance(value, (type(None), bool, int, float, str)):
                     projected[field] = _public_scalar(value)
+            event_type = str(row.get("event_type") or "").strip().upper()
+            gate_payload: Any = None
+            if event_type == "IMMUNE_CHAT_GATE":
+                gate_payload = raw_payload
+            elif event_type.startswith("INPUT_"):
+                gate_payload = raw_payload.get("immune_gate")
+            if isinstance(gate_payload, Mapping):
+                for field in _PUBLIC_IMMUNE_GATE_FIELDS:
+                    value = gate_payload.get(field)
+                    if isinstance(value, (type(None), bool, int, float, str, list, tuple)):
+                        projected[field] = _public_scalar(value)
     return projected
 
 

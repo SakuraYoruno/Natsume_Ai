@@ -29,9 +29,9 @@ def test_repository_boundary_baseline_is_exact_content_addressed_and_current() -
 
     assert report["passed"] is True
     assert report["violations"] == []
-    assert report["finding_count"] == 7
-    assert counts == {"HOST_TO_EDGE": 7}
-    assert kinds[("HOST_TO_EDGE", "dynamic_risk")] == 7
+    assert report["finding_count"] == 0
+    assert counts == {}
+    assert kinds == {}
     assert not [
         row for row in report["findings"] if row["direction"] == "EDGE_TO_HOST"
     ]
@@ -39,7 +39,7 @@ def test_repository_boundary_baseline_is_exact_content_addressed_and_current() -
         row for row in report["findings"] if row["direction"].startswith("CONTRACTS_")
     ]
     assert report["baseline_fingerprints_sha256"] == (
-        "sha256:c7911197b99c1ede561751675a20ee299fe8c9e179afa7306de02c469525963b"
+        "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
     )
     assert report["current_fingerprints_sha256"] == report[
         "baseline_fingerprints_sha256"
@@ -51,13 +51,13 @@ def test_every_debt_edge_has_one_owner_target_deadline_and_content_digest() -> N
     migration = json.loads(MIGRATION.read_text(encoding="utf-8"))
     report = _repository_report()
 
-    assert len(baseline["expected_fingerprints"]) == 7
+    assert baseline["expected_fingerprints"] == []
     assert baseline["fingerprints_sha256"] == guard.fingerprint_digest(
         baseline["expected_fingerprints"]
     )
     assert baseline["migration_sha256"] == guard.content_digest(migration)
-    assert len(migration["edges"]) == 7
-    assert len(report["mapped_migration_edges"]) == 7
+    assert migration["edges"] == []
+    assert report["mapped_migration_edges"] == []
     assert {edge["edge_id"] for edge in migration["edges"]} == set(
         report["mapped_migration_edges"]
     )

@@ -5,9 +5,9 @@ import inspect
 import json
 from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.composition.life import ProcessLifeContainer, build_process_life_container
 from host_brain.conversation.memory_spine import record_conversation_turn_memory_spine
 import host_brain.digital_life.experience_ingress as experience_ingress
 from host_brain.digital_life.experience_ingress import record_life_experience
@@ -26,14 +26,20 @@ class DurableLedgerReference:
         raise AttributeError(name)
 
 
-def _ledger(tmp_path: Path) -> tuple[Path, DurableLedgerReference]:
+def _ledger(
+    tmp_path: Path,
+) -> tuple[Path, DurableLedgerReference, ProcessLifeContainer]:
     db_path = tmp_path / "aw04-life-experience.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="aw04-life-experience-cutover",
         ts_ms=NOW,
     )
     assert result.success is True, result.as_dict()
-    return db_path, DurableLedgerReference(db_path)
+    ledger = DurableLedgerReference(db_path)
+    return db_path, ledger, build_process_life_container(
+        ledger=ledger,
+        adopted_at_ms=NOW,
+    )
 
 
 def _count(connection: sqlite3.Connection, table: str) -> int:
@@ -43,9 +49,10 @@ def _count(connection: sqlite3.Connection, table: str) -> int:
 def test_record_life_experience_is_one_idempotent_command_without_legacy_writers(
     tmp_path: Path,
 ) -> None:
-    db_path, ledger = _ledger(tmp_path)
+    db_path, _ledger_ref, life = _ledger(tmp_path)
     arguments = {
-        "ledger": ledger,
+        "service": life.command_service,
+        "reader": life.snapshot_reader,
         "person_id": "person-aw04",
         "session_id": "session-aw04",
         "source_kind": "inner_stream",
@@ -116,11 +123,12 @@ def test_record_life_experience_is_one_idempotent_command_without_legacy_writers
 def test_concurrent_duplicate_life_experience_converges_on_one_receipt(
     tmp_path: Path,
 ) -> None:
-    db_path, ledger = _ledger(tmp_path)
+    db_path, _ledger_ref, life = _ledger(tmp_path)
 
     def submit(_index: int) -> dict:
         return record_life_experience(
-            ledger=ledger,
+            service=life.command_service,
+            reader=life.snapshot_reader,
             person_id="person-concurrent",
             source_kind="conversation_turn",
             event_kind="assistant_reply",
@@ -142,11 +150,12 @@ def test_concurrent_duplicate_life_experience_converges_on_one_receipt(
 def test_signature_identity_replays_one_occurrence_but_not_a_later_occurrence(
     tmp_path: Path,
 ) -> None:
-    db_path, ledger = _ledger(tmp_path)
+    db_path, _ledger_ref, life = _ledger(tmp_path)
 
     def submit(ts_ms: int) -> dict:
         return record_life_experience(
-            ledger=ledger,
+            service=life.command_service,
+            reader=life.snapshot_reader,
             person_id="person-inner-world",
             session_id="inner_world",
             source_kind="inner_world",
@@ -172,9 +181,10 @@ def test_signature_identity_replays_one_occurrence_but_not_a_later_occurrence(
 def test_replay_returns_receipt_exact_state_after_later_commands(
     tmp_path: Path,
 ) -> None:
-    _db_path, ledger = _ledger(tmp_path)
+    _db_path, _ledger_ref, life = _ledger(tmp_path)
     first_arguments = {
-        "ledger": ledger,
+        "service": life.command_service,
+        "reader": life.snapshot_reader,
         "person_id": "person-exact-state",
         "source_kind": "conversation_turn",
         "event_kind": "user_message",
@@ -184,7 +194,8 @@ def test_replay_returns_receipt_exact_state_after_later_commands(
 
     first = record_life_experience(**first_arguments)
     second = record_life_experience(
-        ledger=ledger,
+        service=life.command_service,
+        reader=life.snapshot_reader,
         person_id="person-exact-state",
         source_kind="conversation_turn",
         event_kind="assistant_reply",
@@ -204,10 +215,11 @@ def test_historical_occurrence_cannot_move_snapshot_apply_time_backward(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    _db_path, ledger = _ledger(tmp_path)
+    _db_path, _ledger_ref, life = _ledger(tmp_path)
     monkeypatch.setattr(experience_ingress, "_now_ms", lambda: 5_000)
     current = record_life_experience(
-        ledger=ledger,
+        service=life.command_service,
+        reader=life.snapshot_reader,
         person_id="person-monotonic-time",
         source_kind="conversation_turn",
         event_kind="user_message",
@@ -216,7 +228,8 @@ def test_historical_occurrence_cannot_move_snapshot_apply_time_backward(
     )
     monkeypatch.setattr(experience_ingress, "_now_ms", lambda: 4_000)
     historical = record_life_experience(
-        ledger=ledger,
+        service=life.command_service,
+        reader=life.snapshot_reader,
         person_id="person-monotonic-time",
         source_kind="memory_backfill",
         event_kind="user_message",
@@ -235,11 +248,12 @@ def test_memory_spine_command_id_and_type_are_the_canonical_receipt_identity(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    db_path, ledger = _ledger(tmp_path)
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
+    db_path, ledger, life = _ledger(tmp_path)
 
     first = record_conversation_turn_memory_spine(
         ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="request-memory-spine",
         session_id="session-memory-spine",
         person_id="person-memory-spine",
@@ -252,6 +266,8 @@ def test_memory_spine_command_id_and_type_are_the_canonical_receipt_identity(
     )
     replay = record_conversation_turn_memory_spine(
         ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="request-memory-spine",
         session_id="session-memory-spine",
         person_id="person-memory-spine",
@@ -291,52 +307,14 @@ def test_memory_spine_command_id_and_type_are_the_canonical_receipt_identity(
         )
 
 
-def test_life_command_authority_cache_is_bounded_lru(monkeypatch) -> None:
-    class FakeRepository:
-        def __init__(self, db_path: str) -> None:
-            self.db_path = Path(db_path)
+def test_life_command_ingress_requires_explicit_service_and_reader_ports() -> None:
+    parameters = inspect.signature(record_life_experience).parameters
 
-    monkeypatch.setattr(
-        experience_ingress.LifeCommandRepository,
-        "from_ledger",
-        classmethod(
-            lambda _cls, ledger: FakeRepository(ledger.canonical_db_path)
-        ),
-    )
-    monkeypatch.setattr(
-        experience_ingress,
-        "LifeCommandService",
-        lambda repository: ("service", str(repository.db_path)),
-    )
-    monkeypatch.setattr(
-        experience_ingress,
-        "LifeSnapshotReader",
-        lambda repository: ("reader", str(repository.db_path)),
-    )
-    with experience_ingress._LIFE_COMMAND_AUTHORITY_LOCK:
-        saved = experience_ingress._LIFE_COMMAND_AUTHORITIES.copy()
-        experience_ingress._LIFE_COMMAND_AUTHORITIES.clear()
-    try:
-        authorities = [
-            experience_ingress._life_command_authority(
-                SimpleNamespace(canonical_db_path=f"tenant-{index}.sqlite3")
-            )
-            for index in range(65)
-        ]
-        last_replay = experience_ingress._life_command_authority(
-            SimpleNamespace(canonical_db_path="tenant-64.sqlite3")
-        )
-
-        assert len(experience_ingress._LIFE_COMMAND_AUTHORITIES) == 64
-        assert "tenant-0.sqlite3" not in experience_ingress._LIFE_COMMAND_AUTHORITIES
-        assert last_replay is authorities[-1]
-        assert next(reversed(experience_ingress._LIFE_COMMAND_AUTHORITIES)) == (
-            "tenant-64.sqlite3"
-        )
-    finally:
-        with experience_ingress._LIFE_COMMAND_AUTHORITY_LOCK:
-            experience_ingress._LIFE_COMMAND_AUTHORITIES.clear()
-            experience_ingress._LIFE_COMMAND_AUTHORITIES.update(saved)
+    assert "service" in parameters
+    assert "reader" in parameters
+    assert parameters["service"].default is inspect.Parameter.empty
+    assert parameters["reader"].default is inspect.Parameter.empty
+    assert "ledger" not in parameters
 
 
 def test_record_life_experience_source_has_no_retired_state_or_experience_writer() -> None:
@@ -351,10 +329,7 @@ def test_record_life_experience_source_has_no_retired_state_or_experience_writer
 
 def test_production_experience_callsites_do_not_import_legacy_life_continuity() -> None:
     root = Path(__file__).resolve().parents[2]
-    for relative in (
-        "host_brain/conversation/memory_spine.py",
-        "host_brain/agent_runtime/production_executor.py",
-    ):
+    for relative in ("host_brain/conversation/memory_spine.py",):
         source = (root / relative).read_text(encoding="utf-8")
         assert "runtime.life_continuity import record_life_experience" not in source
         assert "digital_life.experience_ingress import" in source

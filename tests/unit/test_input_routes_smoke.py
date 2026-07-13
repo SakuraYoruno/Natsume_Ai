@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,6 +12,11 @@ from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.input_runtime.contracts_and_normalization import InputPayload
 from host_brain.input_runtime.ingress import receive_input
 from host_brain.app.settings.input import input_settings_from_mapping
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+
+
+def _ports(**overrides):  # noqa: ANN003
+    return replace(build_input_runtime_application_ports(), **overrides)
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +70,7 @@ def test_receive_input_smoke_gateway_dispatches_to_graph():
                     msg_type="text",
                 ),
                 request=MagicMock(),
+                ports=_ports(),
             )
         )
 
@@ -92,6 +99,7 @@ def test_receive_input_smoke_asr_dispatches_to_graph():
                     seq=7,
                 ),
                 request=MagicMock(),
+                ports=_ports(),
             )
         )
 
@@ -120,6 +128,7 @@ def test_receive_input_smoke_asr_non_final_is_ignored():
                     seq=8,
                 ),
                 request=MagicMock(),
+                ports=_ports(),
             )
         )
 
@@ -151,6 +160,7 @@ def test_receive_input_smoke_asr_low_confidence_is_ignored():
                     seq=9,
                 ),
                 request=MagicMock(),
+                ports=_ports(),
             )
         )
 

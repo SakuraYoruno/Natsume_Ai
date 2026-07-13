@@ -3282,7 +3282,7 @@ def test_compaction_keeps_summary_episode_and_marks_sources_cold_or_gone() -> No
         ledger.close()
 
 
-def test_ledger_skill_exec_creates_action_anchor_without_legacy_memory() -> None:
+def test_ledger_skill_exec_is_audit_only_without_hidden_life_memory_write() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
         ledger.log_skill_exec(
@@ -3300,12 +3300,8 @@ def test_ledger_skill_exec_creates_action_anchor_without_legacy_memory() -> None
         )
 
         assert len(ledger.skill_exec_log) == 1
-        assert len(ledger.life_episode) == 1
-        episode = ledger.life_episode[0]
-        assert episode["episode_kind"] == EPISODE_ACTION
-        assert episode["action"] == "daily_recommendation"
-        assert episode["retention_state"] in {"HOT", "WARM", "COLD"}
-        assert any(row["source_ref"] == "skill://exec/exec-anchor-1" for row in ledger.life_evidence)
+        assert ledger.life_episode == []
+        assert ledger.life_evidence == []
     finally:
         ledger.close()
 

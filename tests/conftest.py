@@ -81,6 +81,10 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         if bond_queue is not None:
             with contextlib.suppress(Exception):
                 bond_queue.shutdown()
+        ledger = container.ledger
+        if ledger is not None:
+            with contextlib.suppress(Exception):
+                ledger.close()
         container.clear_service_references()
     except Exception:
         pass
@@ -169,6 +173,13 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
             os.environ.update(env_snapshot)
         except Exception:
             pass
+
+    try:
+        from host_brain.app.settings.persistence import get_persistence_settings
+
+        get_persistence_settings.cache_clear()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)

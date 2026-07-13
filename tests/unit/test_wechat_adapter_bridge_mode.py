@@ -301,7 +301,8 @@ def test_wechat_adapter_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, c
     caplog.set_level("WARNING")
 
     assert WeChatAdapter._bridge_backend() == "wxautox4"
-    assert "no longer supported" in caplog.text
+    # The adapter resolver is pure; bootstrap owns the single warning.
+    assert caplog.text == ""
 
 
 def test_wechat_adapter_falls_back_to_plain_send_when_humanized_send_fails(monkeypatch) -> None:

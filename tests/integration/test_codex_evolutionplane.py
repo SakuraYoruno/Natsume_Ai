@@ -7,8 +7,7 @@ from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 
 
-def test_codex_evolutionplane_blocks_outside_experiment_branch(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
+def test_codex_evolutionplane_blocks_outside_experiment_branch(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     registry = build_agent_runtime_skill_registry()

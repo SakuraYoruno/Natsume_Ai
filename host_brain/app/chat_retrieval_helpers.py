@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from functools import partial
 from typing import Any, Dict, Mapping, Optional
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
@@ -225,6 +226,7 @@ def _surface_memory_distortion_bias(
 async def _run_retrieval(
     *,
     life_snapshot_reader: Any,
+    life_memory_store: Any,
     request_id: str,
     message: str,
     person_id: str,
@@ -308,6 +310,7 @@ async def _run_retrieval(
                 session_id=session_id,
                 ts_ms=ts_ms,
                 build_packet_fn=build_surface_memory_recall_packet,
+                life_memory_store=life_memory_store,
             )
             if packet is None:
                 query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
@@ -379,6 +382,7 @@ async def _run_retrieval(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=life_memory_store,
         )
         packet = await _maybe_apply_generic_evidence_review(
             packet=packet,
@@ -387,6 +391,7 @@ async def _run_retrieval(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            life_memory_store=life_memory_store,
         )
         return _surface_memory_retrieval_summary(
             request_id=request_id,
@@ -422,6 +427,7 @@ def _maybe_recall_collection_fastpath(
     session_id: str,
     ts_ms: int,
     build_packet_fn: Any,
+    life_memory_store: Any,
 ) -> Any | None:
     if not _parse_bool_env("HOST_SURFACE_COLLECTION_FAST_RECALL_ENABLED", default=True):
         return None
@@ -432,10 +438,7 @@ def _maybe_recall_collection_fastpath(
     started_ms = int(time.time() * 1000)
     try:
         from dataclasses import replace  # noqa: PLC0415
-        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-        raw_packet = store.recall_collection_packet(
+        raw_packet = life_memory_store.recall_collection_packet(
             query=str(getattr(plan, "query", "") or ""),
             top_k=max(5, int(getattr(plan, "max_facts", 0) or 0)),
             person_id=person_id,
@@ -761,6 +764,7 @@ async def _maybe_apply_lightnovel_deep_review(
     person_id: str,
     session_id: str,
     ts_ms: int,
+    life_memory_store: Any,
 ) -> Any:
     try:
         from dataclasses import replace  # noqa: PLC0415
@@ -769,7 +773,6 @@ async def _maybe_apply_lightnovel_deep_review(
             review_lightnovel_selection_from_memory_packet,
             should_deep_review_lightnovel_selection,
         )
-        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
         from host_brain.app.observability_persist import (  # noqa: PLC0415
             persist_life_action_event_memory,
         )
@@ -797,8 +800,11 @@ async def _maybe_apply_lightnovel_deep_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
-            life_memory_store=get_life_memory_store(),
-            persist_life_action_event_memory=persist_life_action_event_memory,
+            life_memory_store=life_memory_store,
+            persist_life_action_event_memory=partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
         )
     except Exception as exc:
         review = {
@@ -1081,6 +1087,7 @@ async def _maybe_apply_generic_evidence_review(
     person_id: str,
     session_id: str,
     ts_ms: int,
+    life_memory_store: Any,
 ) -> Any:
     try:
         from dataclasses import replace  # noqa: PLC0415
@@ -1109,7 +1116,10 @@ async def _maybe_apply_generic_evidence_review(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
-            persist_life_action_event_memory=persist_life_action_event_memory,
+            persist_life_action_event_memory=partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
         )
     except Exception as exc:
         review = {

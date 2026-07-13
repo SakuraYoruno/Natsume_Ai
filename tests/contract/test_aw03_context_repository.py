@@ -179,9 +179,9 @@ def test_aw03_tactic_store_uses_semantic_repository_uow(tmp_path: Path) -> None:
 
 def test_aw03_context_compatibility_files_have_no_private_sqlite_access() -> None:
     files = (
-        ROOT / "host_brain" / "app" / "context" / "topic_ledger.py",
+        ROOT / "host_brain" / "persona" / "context" / "topic_ledger.py",
         ROOT / "host_brain" / "app" / "context" / "topic_state.py",
-        ROOT / "host_brain" / "app" / "context" / "tactic_ledger.py",
+        ROOT / "host_brain" / "persona" / "context" / "tactic_ledger.py",
     )
     forbidden = ("._conn", "._write_lock", "._ensure_schema", "CREATE TABLE", "ALTER TABLE")
     for path in files:

@@ -183,7 +183,7 @@ class CanonApplySqliteAuthority:
         return conn
 
     def assert_ready(self) -> None:
-        with self.connect() as conn:
+        with self.read() as conn:
             assert_canon_apply_schema_ready(conn)
 
     @contextmanager

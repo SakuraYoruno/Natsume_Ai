@@ -37,9 +37,9 @@
       "target": "previous-core-release"
     }
   ],
-  "generated_at": "2026-07-13T09:19:41.181132+00:00",
+  "generated_at": "2026-07-13T09:20:18.603997+00:00",
   "release_id": "natsume-ai-v1-core",
-  "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+  "run_id": "aw08-core-final-20260713",
   "schema_version": "natsume.core-rollback-matrix.v1",
   "source_ref": "configs/release/core_rollback_map.json",
   "source_sha256": "sha256:5cf61ce920866b7bea974baf3922f0732ef53dd5bbc778ff0eca42fc54607a5e"

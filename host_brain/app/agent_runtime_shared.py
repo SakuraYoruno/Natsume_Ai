@@ -31,6 +31,7 @@ from host_brain.composition.process_services import (
     get_conversation_history,
     get_ledger,
     get_life_memory_service,
+    get_life_memory_store,
     get_model_attempt_service,
     get_prompt_registry,
     get_runtime_task_registry,
@@ -42,13 +43,34 @@ async def _run_retrieval_with_life_ports(**kwargs):  # noqa: ANN003
     life = PROCESS_LIFE_PROVIDER.require()
     return await _run_retrieval(
         life_snapshot_reader=life.snapshot_reader,
+        life_memory_store=get_life_memory_store(),
+        **kwargs,
+    )
+
+
+def _record_user_turn_with_life_ports(**kwargs):  # noqa: ANN003
+    life = PROCESS_LIFE_PROVIDER.require()
+    return record_user_turn(
+        ledger=get_ledger(),
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
+        **kwargs,
+    )
+
+
+def _record_assistant_turn_with_life_ports(**kwargs):  # noqa: ANN003
+    life = PROCESS_LIFE_PROVIDER.require()
+    return record_assistant_turn(
+        ledger=get_ledger(),
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         **kwargs,
     )
 
 
 AGENT_RUNTIME_PORTS = AgentRuntimeApplicationPorts(
-        record_user_turn=record_user_turn,
-        record_assistant_turn=record_assistant_turn,
+        record_user_turn=_record_user_turn_with_life_ports,
+        record_assistant_turn=_record_assistant_turn_with_life_ports,
         run_retrieval=_run_retrieval_with_life_ports,
         filter_retrieval_evidence_items_for_prompt=filter_retrieval_evidence_items_for_prompt,
         build_user_preference_pack=build_user_preference_pack,

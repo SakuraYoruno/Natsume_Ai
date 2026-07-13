@@ -26,6 +26,7 @@ from host_brain.composition.process_services import (
     notify_user_interaction,
 )
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 
 
 def build_input_runtime_application_ports() -> InputRuntimeApplicationPorts:
@@ -50,6 +51,7 @@ def build_input_runtime_application_ports() -> InputRuntimeApplicationPorts:
         reply_form_decision_type=ReplyFormDecision,
         get_reply_form_decider=get_reply_form_decider,
         message_type=MsgType,
+        trigger_reply_performance=trigger_reply_performance,
         render_quick_gateway_progress_text=render_quick_gateway_progress_text,
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
     )

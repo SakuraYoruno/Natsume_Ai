@@ -9,11 +9,12 @@ be deleted and rebuilt deterministically from the journal.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Iterator
 
 from host_brain.core.ids import now_ms
 
@@ -174,7 +175,8 @@ class CanonRepository:
         if verify_schema:
             self.assert_schema_ready()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(
             str(self.db_path),
             timeout=self._timeout_ms / 1000.0,
@@ -183,7 +185,11 @@ class CanonRepository:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _now(self) -> int:
         try:

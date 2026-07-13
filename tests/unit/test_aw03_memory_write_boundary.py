@@ -37,8 +37,13 @@ def test_chat_production_has_no_legacy_memory_writer_or_helper() -> None:
         }
         assert not forbidden_symbols.intersection(names | attributes), path
         assert "get_episodic_store" not in names, path
-        if path.name in {"agent_runtime_shared.py", "chat_handler_vision.py"}:
+        if path.name == "chat_handler_vision.py":
             assert source.count(".admit_chat") == 1, path
+
+    writer = (ROOT / "host_brain/app/conversation_writer.py").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "append_visible_conversation_turn" in writer
 
 
 def test_observability_module_no_longer_defines_chat_memory_writer() -> None:

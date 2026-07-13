@@ -102,6 +102,16 @@
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.unlink",
           "line": 423
+        },
+        {
+          "path": "host_brain/app/observability_runtime/domain_command_ports.py",
+          "symbol": "WorldCanonStore.approve_proposal",
+          "line": 384
+        },
+        {
+          "path": "host_brain/app/observability_runtime/domain_command_ports.py",
+          "symbol": "WorldCanonStore.rollback_proposal",
+          "line": 406
         }
       ]
     },

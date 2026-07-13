@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations import llm_helpers as helpers
 
 
@@ -17,8 +16,12 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     helpers._POOL_COMPLETION_CACHE.clear()
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
-    ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
+    traces: list[dict] = []
+    monkeypatch.setattr(
+        helpers,
+        "_log_llm_pool_call",
+        lambda **kwargs: traces.append(dict(kwargs)),
+    )
 
     calls: list[tuple[str, str]] = []
 
@@ -54,9 +57,9 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     )
         > 0
     )
-    assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
-    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-pool-1")
-    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
+    assert traces[-1]["final_provider"] == "minimax"
+    assert traces[-1]["request_id"] == "req-pool-1"
+    assert traces[-1]["cached"] is False
 
     monkeypatch.setattr(
         helpers,
@@ -76,6 +79,7 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
     assert cached.cached is True
     assert cached.final_provider == "minimax"
     assert calls == [("gemini", "gemini-pro"), ("minimax", "minimax-her")]
+    assert traces[-1]["cached"] is True
 
 
 @pytest.mark.asyncio
@@ -86,8 +90,12 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
 
     helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
-    ledger = SQLiteLedger(":memory:")
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: ledger)
+    traces: list[dict] = []
+    monkeypatch.setattr(
+        helpers,
+        "_log_llm_pool_call",
+        lambda **kwargs: traces.append(dict(kwargs)),
+    )
 
     async def _fake_astream(**kwargs):
         provider_name = str(kwargs.get("provider_name") or "")
@@ -109,9 +117,9 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
         chunks.append(chunk)
 
     assert "".join(chunks) == "hello"
-    assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
-    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-stream-1")
-    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
+    assert traces[-1]["final_provider"] == "minimax"
+    assert traces[-1]["request_id"] == "req-stream-1"
+    assert traces[-1]["pool_exhausted"] is False
 
 
 def test_pool_cooldown_is_scoped_per_scene_type() -> None:

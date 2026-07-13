@@ -141,7 +141,7 @@ def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch
     ledger = _LedgerStub()
     dispatch_mock = AsyncMock(return_value=None)
     monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
-    monkeypatch.setattr("host_brain.input_runtime.worker_dispatch._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("tests.fakes.host_app._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
     try:

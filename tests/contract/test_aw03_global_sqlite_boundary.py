@@ -15,6 +15,13 @@ EXTERNAL_DDL_ADAPTERS = {
     Path("host_brain/bond/neo4j_client.py"),
 }
 
+# This is the durable observability repository.  It owns its SQLite
+# connection just like the repositories under ``host_brain.persistence``;
+# application and domain layers remain forbidden from doing so.
+EMBEDDED_SQLITE_REPOSITORIES = {
+    Path("host_brain/observability/projection_store.py"),
+}
+
 DDL = re.compile(
     r"(?im)^\s*(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER)\b"
 )
@@ -41,6 +48,8 @@ def test_aw03_production_layers_have_no_embedded_sqlite_authority() -> None:
     violations: list[str] = []
     for path in _production_python_files():
         relative = path.relative_to(ROOT)
+        if relative in EMBEDDED_SQLITE_REPOSITORIES:
+            continue
         source = path.read_text(encoding="utf-8-sig")
         tree = ast.parse(source, filename=str(relative))
         for node in ast.walk(tree):

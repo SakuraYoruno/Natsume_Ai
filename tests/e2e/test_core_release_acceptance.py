@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from tools.run_core_release import (
     AcceptanceStage,
+    RECEIPT_SCHEMA_VERSION,
     StageOutcome,
     STATUS_FAIL,
     STATUS_PASS,
@@ -12,7 +16,9 @@ from tools.run_core_release import (
     _run_isolated_migration_backup_restore,
     _run_rollback_drill,
     build_acceptance_plan,
+    main,
     read_aw08_state,
+    resume_acceptance_plan,
     run_acceptance_plan,
 )
 
@@ -32,6 +38,21 @@ def _outcome(stage: AcceptanceStage, status: str) -> StageOutcome:
         log_ref=f"docs/50_release/core/runs/test/{stage.stage_id}.log",
         detail="fake acceptance outcome",
     )
+
+
+def _skipped_row(stage: AcceptanceStage) -> dict[str, object]:
+    now = "2026-07-13T00:00:02+00:00"
+    return StageOutcome(
+        stage_id=stage.stage_id,
+        status=STATUS_SKIPPED,
+        started_at=now,
+        finished_at=now,
+        duration_ms=0,
+        exit_code=None,
+        command=stage.command,
+        log_ref=None,
+        detail="fake skipped outcome",
+    ).as_dict()
 
 
 def test_core_release_plan_is_complete_and_has_one_repository_wide_pytest() -> None:
@@ -134,6 +155,250 @@ def test_acceptance_receipt_binds_one_run_id_across_every_stage(tmp_path: Path) 
     assert observed_run_ids == ["acceptance-contract-pass", "acceptance-contract-pass"]
     assert receipt["passed_stage_count"] == 2
     assert persisted[-1]["status"] == STATUS_PASS
+
+
+def test_explicit_resume_keeps_pass_prefix_and_continues_from_fail(tmp_path: Path) -> None:
+    plan = (
+        AcceptanceStage("already_passed", "command", ("fake", "first")),
+        AcceptanceStage("failed_before", "command", ("fake", "second")),
+        AcceptanceStage("skipped_before", "command", ("fake", "third")),
+    )
+    initial_calls: list[str] = []
+
+    def initial_runner_without_log(
+        stage: AcceptanceStage, _root: Path, _run_dir: Path, _run_id: str
+    ) -> StageOutcome:
+        initial_calls.append(stage.stage_id)
+        status = STATUS_FAIL if stage.stage_id == "failed_before" else STATUS_PASS
+        return StageOutcome(
+            stage_id=stage.stage_id,
+            status=status,
+            started_at="2026-07-13T00:00:00+00:00",
+            finished_at="2026-07-13T00:00:01+00:00",
+            duration_ms=1_000,
+            exit_code=0 if status == STATUS_PASS else 1,
+            command=stage.command,
+            log_ref=None,
+            detail="fake initial outcome",
+        )
+
+    prior = run_acceptance_plan(
+        root=ROOT,
+        run_id="resume-contract-pass",
+        run_dir=tmp_path,
+        stages=plan,
+        stage_runner=initial_runner_without_log,
+    )
+    retained_pass = json.loads(json.dumps(prior["stages"][0]))
+    resumed_calls: list[str] = []
+
+    def resumed_runner(
+        stage: AcceptanceStage, _root: Path, _run_dir: Path, _run_id: str
+    ) -> StageOutcome:
+        resumed_calls.append(stage.stage_id)
+        return _outcome(stage, STATUS_PASS)
+
+    receipt = resume_acceptance_plan(
+        root=tmp_path,
+        run_id="resume-contract-pass",
+        run_dir=tmp_path,
+        prior_receipt=prior,
+        stages=plan,
+        stage_runner=resumed_runner,
+        source_commit="b" * 40,
+    )
+
+    assert initial_calls == ["already_passed", "failed_before"]
+    assert resumed_calls == ["failed_before", "skipped_before"]
+    assert receipt["status"] == STATUS_PASS
+    assert receipt["stages"][0] == retained_pass
+    assert [row["status"] for row in receipt["stages"]] == [STATUS_PASS] * 3
+    assert receipt["automatic_retry_count"] == 0
+    assert receipt["resume_count"] == 1
+    assert receipt["source_commit"] == "b" * 40
+    assert receipt["resumed_from_source_commit"] == prior["source_commit"]
+    assert receipt["initial_source_commit"] == prior["source_commit"]
+    assert receipt["stage_source_commits"] == {
+        "already_passed": prior["source_commit"],
+        "failed_before": "b" * 40,
+        "skipped_before": "b" * 40,
+    }
+    history = receipt["resume_history"][0]
+    assert history["failed_stage_id"] == "failed_before"
+    assert history["stages"][1]["status"] == STATUS_FAIL
+    assert history["stages"][2]["status"] == STATUS_SKIPPED
+    assert history["stage_source_commits"]["failed_before"] == prior["source_commit"]
+    assert (tmp_path / "acceptance_receipt.attempt-1.json").is_file()
+
+
+def test_explicit_resume_archives_failed_log_and_fails_fast_again(tmp_path: Path) -> None:
+    plan = (
+        AcceptanceStage("passed", "command", ("fake", "first")),
+        AcceptanceStage("retry_me", "command", ("fake", "second")),
+        AcceptanceStage("still_skipped", "command", ("fake", "third")),
+    )
+    run_dir = tmp_path / "runs" / "resume-log-contract"
+    run_dir.mkdir(parents=True)
+    failed_log = run_dir / "retry_me.log"
+    failed_log.write_text("original failure evidence\n", encoding="utf-8")
+    prior = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "run_id": "resume-log-contract",
+        "status": STATUS_FAIL,
+        "started_at": "2026-07-13T00:00:00+00:00",
+        "finished_at": "2026-07-13T00:00:03+00:00",
+        "source_commit": "a" * 40,
+        "stage_count": 3,
+        "completed_stage_count": 3,
+        "automatic_retry_count": 0,
+        "passed_stage_count": 1,
+        "failed_stage_count": 1,
+        "skipped_stage_count": 1,
+        "stages": [
+            {**_outcome(plan[0], STATUS_PASS).as_dict(), "log_ref": None},
+            {
+                **_outcome(plan[1], STATUS_FAIL).as_dict(),
+                "log_ref": "runs/resume-log-contract/retry_me.log",
+            },
+            _skipped_row(plan[2]),
+        ],
+    }
+    calls: list[str] = []
+
+    def runner(stage: AcceptanceStage, _root: Path, _run_dir: Path, _run_id: str) -> StageOutcome:
+        calls.append(stage.stage_id)
+        return _outcome(stage, STATUS_FAIL)
+
+    receipt = resume_acceptance_plan(
+        root=tmp_path,
+        run_id="resume-log-contract",
+        run_dir=run_dir,
+        prior_receipt=prior,
+        stages=plan,
+        stage_runner=runner,
+        source_commit="b" * 40,
+    )
+
+    archive = run_dir / "retry_me.attempt-1.log"
+    assert archive.read_text(encoding="utf-8") == "original failure evidence\n"
+    assert failed_log.read_text(encoding="utf-8") == "original failure evidence\n"
+    assert calls == ["retry_me"]
+    assert [row["status"] for row in receipt["stages"]] == [
+        STATUS_PASS,
+        STATUS_FAIL,
+        STATUS_SKIPPED,
+    ]
+    assert receipt["resume_history"][0]["failed_stage_log_ref"].endswith(
+        "retry_me.attempt-1.log"
+    )
+    assert receipt["resume_history"][0]["failed_stage_log_sha256"].startswith("sha256:")
+    archived_receipt = json.loads(
+        (run_dir / "acceptance_receipt.attempt-1.json").read_text(encoding="utf-8")
+    )
+    assert archived_receipt["stages"][1]["log_ref"].endswith("retry_me.attempt-1.log")
+    assert archived_receipt["archived_failed_log_sha256"] == receipt["resume_history"][0][
+        "failed_stage_log_sha256"
+    ]
+
+
+def test_resume_revalidates_pass_prefix_when_source_commit_changed(tmp_path: Path) -> None:
+    plan = (
+        AcceptanceStage("static_pass", "command", ("fake", "static")),
+        AcceptanceStage("offline_fail", "command", ("fake", "offline")),
+        AcceptanceStage("later", "command", ("fake", "later")),
+    )
+    run_dir = tmp_path / "runs" / "resume-new-commit"
+    run_dir.mkdir(parents=True)
+    for stage in plan[:2]:
+        (run_dir / f"{stage.stage_id}.log").write_text(
+            f"{stage.stage_id} attempt one\n",
+            encoding="utf-8",
+        )
+    prior = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "run_id": "resume-new-commit",
+        "status": STATUS_FAIL,
+        "started_at": "2026-07-13T00:00:00+00:00",
+        "finished_at": "2026-07-13T00:00:03+00:00",
+        "source_commit": "a" * 40,
+        "stage_count": 3,
+        "completed_stage_count": 3,
+        "automatic_retry_count": 0,
+        "passed_stage_count": 1,
+        "failed_stage_count": 1,
+        "skipped_stage_count": 1,
+        "stages": [
+            {**_outcome(plan[0], STATUS_PASS).as_dict(), "log_ref": "runs/resume-new-commit/static_pass.log"},
+            {**_outcome(plan[1], STATUS_FAIL).as_dict(), "log_ref": "runs/resume-new-commit/offline_fail.log"},
+            _skipped_row(plan[2]),
+        ],
+    }
+    calls: list[str] = []
+
+    def runner(stage: AcceptanceStage, _root: Path, _run_dir: Path, _run_id: str) -> StageOutcome:
+        calls.append(stage.stage_id)
+        return _outcome(stage, STATUS_PASS)
+
+    receipt = resume_acceptance_plan(
+        root=tmp_path,
+        run_id="resume-new-commit",
+        run_dir=run_dir,
+        prior_receipt=prior,
+        stages=plan,
+        stage_runner=runner,
+        source_commit="b" * 40,
+        revalidate_pass_prefix_on_source_change=True,
+    )
+
+    assert calls == ["static_pass", "offline_fail", "later"]
+    assert receipt["status"] == STATUS_PASS
+    assert set(receipt["stage_source_commits"].values()) == {"b" * 40}
+    history = receipt["resume_history"][0]
+    assert history["restart_stage_id"] == "static_pass"
+    assert history["revalidated_pass_prefix"] is True
+    assert set(history["archived_stage_logs"]) == {"static_pass", "offline_fail"}
+    assert (run_dir / "static_pass.attempt-1.log").is_file()
+    assert (run_dir / "offline_fail.attempt-1.log").is_file()
+
+
+def test_resume_rejects_invalid_fail_fast_topology_before_running(tmp_path: Path) -> None:
+    plan = (
+        AcceptanceStage("first", "command", ("fake", "first")),
+        AcceptanceStage("second", "command", ("fake", "second")),
+    )
+    prior = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "run_id": "invalid-resume",
+        "status": STATUS_FAIL,
+        "started_at": "2026-07-13T00:00:00+00:00",
+        "finished_at": "2026-07-13T00:00:02+00:00",
+        "source_commit": "a" * 40,
+        "stage_count": 2,
+        "completed_stage_count": 2,
+        "automatic_retry_count": 0,
+        "passed_stage_count": 1,
+        "failed_stage_count": 1,
+        "skipped_stage_count": 0,
+        "stages": [_outcome(plan[0], STATUS_FAIL).as_dict(), _outcome(plan[1], STATUS_PASS).as_dict()],
+    }
+
+    with pytest.raises(ValueError, match="only SKIPPED stages after FAIL"):
+        resume_acceptance_plan(
+            root=tmp_path,
+            run_id="invalid-resume",
+            run_dir=tmp_path,
+            prior_receipt=prior,
+            stages=plan,
+            stage_runner=lambda *_args: pytest.fail("invalid receipt must not execute a stage"),
+            source_commit="b" * 40,
+        )
+
+
+def test_resume_cli_requires_accept_and_explicit_run_id(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--resume", "--run-id", "existing"]) == 2
+    assert "--resume requires --accept" in capsys.readouterr().err
+    assert main(["--accept", "--resume"]) == 2
+    assert "--resume requires an explicit --run-id" in capsys.readouterr().err
 
 
 def test_green_stages_cannot_pass_gates_when_per_gate_evidence_is_missing() -> None:

@@ -73,6 +73,6 @@ def build_host_test_app(
         chat_endpoint=chat_endpoint,
         edge_events_endpoint=edge_events_endpoint,
         root_endpoint=root_endpoint,
-        canon_service_provider=canon_service_provider,
+        canon_service_provider=canon_service_provider or (lambda: None),
         input_runtime_ports=input_runtime_ports,
     )

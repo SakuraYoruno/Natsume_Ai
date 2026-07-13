@@ -29,6 +29,7 @@ from host_brain.tribe.hippocampus_agent import HippocampusAgent
 from host_brain.tribe.initiative_governor_agent import InitiativeGovernorAgent
 from host_brain.tribe.mirror_neuron_agent import MirrorNeuronAgent
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
+from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +51,7 @@ class _ScriptedAdapter:
         yield response.content
 
 
-def _install(monkeypatch, responses: list[str]) -> _ScriptedAdapter:  # noqa: ANN001
+def _install(responses: list[str]) -> _ScriptedAdapter:
     registry = build_live_production_prompt_registry()
     adapter = _ScriptedAdapter(responses)
     route = RouteDecision(
@@ -72,13 +73,17 @@ def _install(monkeypatch, responses: list[str]) -> _ScriptedAdapter:  # noqa: AN
         provider_adapters=ProviderAdapterRegistry((adapter,)),
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
+    adapter.service = service
+    adapter.prompt_registry = registry
+    adapter.application_ports = TribeApplicationPorts(
+        model_attempt_service=lambda: service,
+        prompt_registry=lambda: registry,
+    )
     return adapter
 
 
 def test_prefrontal_self_reflection_uses_registered_text_prompt(monkeypatch) -> None:
-    adapter = _install(monkeypatch, ["我正在重新理解最近的平静。"])
+    adapter = _install(["我正在重新理解最近的平静。"])
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
 
     class _Snapshot:
@@ -95,7 +100,9 @@ def test_prefrontal_self_reflection_uses_registered_text_prompt(monkeypatch) -> 
 
     monkeypatch.setattr("host_brain.persona.self_reflection.build_self_reflection_pulse", _pulse)
 
-    result = PrefrontalAgent().resolve_self_reflection_context(
+    result = PrefrontalAgent(
+        application_ports=adapter.application_ports,
+    ).resolve_self_reflection_context(
         persona_user_id="user-aw05",
         timeline_summary={},
         timeline_diary={},
@@ -113,7 +120,6 @@ def test_prefrontal_self_reflection_uses_registered_text_prompt(monkeypatch) -> 
 @pytest.mark.asyncio
 async def test_prefrontal_plan_uses_registered_json_prompt(monkeypatch) -> None:
     adapter = _install(
-        monkeypatch,
         [json.dumps({"action": "speak", "task": "回应", "tone_hint": "warm", "urgency": 0.4})],
     )
     monkeypatch.setattr(
@@ -128,7 +134,9 @@ async def test_prefrontal_plan_uses_registered_json_prompt(monkeypatch) -> None:
         },
     )
 
-    result = await PrefrontalAgent().plan_response(
+    result = await PrefrontalAgent(
+        application_ports=adapter.application_ports,
+    ).plan_response(
         user_message="你好",
         motive_state={"care": 0.5, "continuity": 0.5, "withdraw": 0.2},
         request_id="req-prefrontal-aw05",
@@ -142,7 +150,6 @@ async def test_prefrontal_plan_uses_registered_json_prompt(monkeypatch) -> None:
 
 def test_mirror_and_initiative_use_independent_registered_prompts(monkeypatch) -> None:
     adapter = _install(
-        monkeypatch,
         [json.dumps({"empathy_hint": "先接住她的难过"}), json.dumps({"topic_seed": "聊聊今天的小发现"})],
     )
 
@@ -160,8 +167,8 @@ def test_mirror_and_initiative_use_independent_registered_prompts(monkeypatch) -
         }
 
     monkeypatch.setattr("host_brain.model_runtime.prompt_contract.resolve_prompt_contract_json", _templates)
-    mirror = MirrorNeuronAgent()
-    initiative = InitiativeGovernorAgent()
+    mirror = MirrorNeuronAgent(application_ports=adapter.application_ports)
+    initiative = InitiativeGovernorAgent(application_ports=adapter.application_ports)
 
     assert mirror.generate_empathy_response_hint(resonance_intensity=0.8) == "先接住她的难过"
     assert initiative.generate_proactive_topic(loneliness_level=0.7) == "聊聊今天的小发现"
@@ -178,7 +185,6 @@ def test_mirror_and_initiative_use_independent_registered_prompts(monkeypatch) -
 @pytest.mark.asyncio
 async def test_hippocampus_uses_async_registered_json_prompt(monkeypatch) -> None:
     adapter = _install(
-        monkeypatch,
         [json.dumps({"association_summary": "这和上次的登录问题有关", "recall_focus": "登录"})],
     )
     monkeypatch.setattr(
@@ -189,7 +195,9 @@ async def test_hippocampus_uses_async_registered_json_prompt(monkeypatch) -> Non
         },
     )
 
-    result = await HippocampusAgent()._maybe_generate_association_summary(
+    result = await HippocampusAgent(
+        application_ports=adapter.application_ports,
+    )._maybe_generate_association_summary(
         request_id="req-hippo-aw05",
         message="登录失败",
         person_id="person-aw05",
@@ -204,7 +212,7 @@ async def test_hippocampus_uses_async_registered_json_prompt(monkeypatch) -> Non
 
 
 def test_emotion_reactivity_exposes_canonical_trace(monkeypatch) -> None:
-    adapter = _install(monkeypatch, [json.dumps({"reactivity_hint": "先放慢语气"})])
+    adapter = _install([json.dumps({"reactivity_hint": "先放慢语气"})])
     monkeypatch.setattr(
         "host_brain.persona.emotion_reactivity._load_reactivity_llm_templates",
         lambda: {"system_prompt": "json", "user_prompt": {}},
@@ -216,6 +224,7 @@ def test_emotion_reactivity_exposes_canonical_trace(monkeypatch) -> None:
         bond_stage="FRIEND",
         modifiers=ReactivityModifiers(),
         model_attempt_sink=trace,
+        model_attempt_service=adapter.service,
     )
 
     assert hint == "先放慢语气"
@@ -225,14 +234,13 @@ def test_emotion_reactivity_exposes_canonical_trace(monkeypatch) -> None:
 
 def test_emotional_silence_formats_templates_and_retains_attempt_trace(monkeypatch) -> None:
     adapter = _install(
-        monkeypatch,
         [json.dumps({"silence_hint": "只说必要的话", "topic_resistance_hint": "暂时不碰这个话题"})],
     )
     monkeypatch.setattr(
         "host_brain.persona.emotional_silence._load_llm_hint_templates",
         lambda: {"system_prompt": "json", "user_prompt": "{current_topic} {willingness:.2f}"},
     )
-    engine = EmotionalSilenceEngine()
+    engine = EmotionalSilenceEngine(model_attempt_service=adapter.service)
 
     result = engine._maybe_render_llm_hints(
         current_topic="工作",

@@ -10,11 +10,10 @@ from host_brain.app.surface_context_packet import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _stable_empty_life_snapshot(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        "host_brain.app.surface_context_packet.read_life_snapshot",
-        lambda person_id: {
+@pytest.fixture
+def life_snapshot_reader() -> SimpleNamespace:
+    return SimpleNamespace(
+        get_snapshot=lambda person_id: {
             "person_id": str(person_id or "default"),
             "version": 0,
             "state": {"person_id": str(person_id or "default"), "version": 0},
@@ -76,7 +75,10 @@ def _plane(
     )
 
 
-def test_build_surface_context_packet_extracts_compressed_context_only(monkeypatch) -> None:
+def test_build_surface_context_packet_extracts_compressed_context_only(
+    monkeypatch,
+    life_snapshot_reader,
+) -> None:
     calls: list[dict] = []
 
     def _fake_detect_relational_chat_topic(_message):  # noqa: ANN001
@@ -98,6 +100,7 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     )
 
     packet = build_surface_context_packet(
+        life_snapshot_reader=life_snapshot_reader,
         user_message="continue",
         render_target_lang="zh",
         emotion_context={"emotion_tag": "ANXIOUS", "emotion_intensity": 0.6},
@@ -145,7 +148,7 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     assert "raw older summary" not in rendered
 
 
-def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> None:
+def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch, life_snapshot_reader) -> None:
     calls: list[dict] = []
 
     def _fake_detect_relational_chat_topic(_message):  # noqa: ANN001
@@ -166,7 +169,12 @@ def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> N
         _fake_assemble_prompt_context_plane,
     )
 
-    packet = build_surface_context_packet(user_message="在吗", request_id="req-compact", session_id="sess")
+    packet = build_surface_context_packet(
+        life_snapshot_reader=life_snapshot_reader,
+        user_message="在吗",
+        request_id="req-compact",
+        session_id="sess",
+    )
 
     assert len(calls) == 1
     assert calls[0]["history_max_turns"] is None
@@ -174,7 +182,7 @@ def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> N
     assert packet["reply_plan"]["primary_topic"] == "presence_ping"
 
 
-def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch) -> None:
+def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch, life_snapshot_reader) -> None:
     def _fake_detect_relational_chat_topic(_message):  # noqa: ANN001
         return ""
 
@@ -197,6 +205,7 @@ def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch) -> 
     )
 
     packet = build_surface_context_packet(
+        life_snapshot_reader=life_snapshot_reader,
         user_message="今天晚点陪我聊会儿？",
         request_id="req-close-stage",
         session_id="sess-close-stage",
@@ -235,9 +244,8 @@ def test_build_surface_context_packet_collects_stable_life_snapshot(monkeypatch)
 
     monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
     monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
-    monkeypatch.setattr("host_brain.app.surface_context_packet.read_life_snapshot", _snapshot)
-
     packet = build_surface_context_packet(
+        life_snapshot_reader=SimpleNamespace(get_snapshot=_snapshot),
         user_message="我有点烦",
         request_id="req-live-organ",
         session_id="sess-live-organ",
@@ -257,12 +265,10 @@ def test_build_surface_context_packet_collects_stable_life_snapshot(monkeypatch)
 def test_build_surface_context_packet_degrades_when_snapshot_reader_fails(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
     monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
-    monkeypatch.setattr(
-        "host_brain.app.surface_context_packet.read_life_snapshot",
-        lambda _person_id: (_ for _ in ()).throw(RuntimeError("snapshot unavailable")),
-    )
-
     packet = build_surface_context_packet(
+        life_snapshot_reader=SimpleNamespace(
+            get_snapshot=lambda _person_id: (_ for _ in ()).throw(RuntimeError("snapshot unavailable"))
+        ),
         user_message="继续",
         request_id="req-live-organ-fail",
         session_id="sess-live-organ-fail",
@@ -273,11 +279,15 @@ def test_build_surface_context_packet_degrades_when_snapshot_reader_fails(monkey
     assert packet["surface_influence_packet"]["organ_trace"]["mapped_organs"] == []
 
 
-def test_build_surface_context_packet_uses_surface_task_control_for_influence(monkeypatch) -> None:
+def test_build_surface_context_packet_uses_surface_task_control_for_influence(
+    monkeypatch,
+    life_snapshot_reader,
+) -> None:
     monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
     monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane(topic="default_text", thread="phatic"))
 
     packet = build_surface_context_packet(
+        life_snapshot_reader=life_snapshot_reader,
         user_message="端口18080被占用了",
         request_id="req-task-control",
         session_id="sess-task-control",

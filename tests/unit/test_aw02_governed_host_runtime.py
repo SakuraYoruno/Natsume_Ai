@@ -65,7 +65,7 @@ async def test_close_admission_rejects_new_work_and_drain_waits_for_in_flight() 
     application = _BlockingApplication()
     runtime = GovernedHostRuntime(
         application=application,
-        runtime_router=CanonicalRuntimeRouter(mode="legacy"),
+        runtime_router=CanonicalRuntimeRouter(),
         command_repository=_EmptyCommandRepository(),
         drain_timeout_s=1.0,
     )

@@ -60,6 +60,20 @@ class ProjectionRefresh:
     trace: Callable[[], object]
 
 
+class EmptyLifeSnapshotReader:
+    """Explicit query-side Life reader used by the live projection fixture."""
+
+    @staticmethod
+    def get_snapshot(person_id: str) -> dict[str, object]:
+        return {
+            "person_id": str(person_id or "default"),
+            "version": 0,
+            "state": {},
+            "state_digest": "",
+            "updated_at_ms": 0,
+        }
+
+
 @pytest.fixture
 def ledger(tmp_path: Path, monkeypatch):
     """Migrated durable ledger shared by source writers and projection store."""
@@ -395,7 +409,9 @@ def projection_refresh(ledger) -> ProjectionRefresh:
         sessions=refresh_session_query_projection,
         health=refresh_health_query_projections,
         runtime=refresh_runtime_snapshot_projection,
-        gateway=refresh_operator_live_state_projections,
+        gateway=lambda: refresh_operator_live_state_projections(
+            life_snapshot_reader=EmptyLifeSnapshotReader(),
+        ),
         trace=refresh_trace_query_projections,
     )
 

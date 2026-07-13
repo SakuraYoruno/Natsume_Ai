@@ -4,25 +4,25 @@ import time
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from tests.fakes.obs_projection_runtime import LedgerStatsRefreshingTestClient, compose_durable_obs_projection_runtime
 
 
 @pytest.fixture
-def ledger():
-    db = SQLiteLedger(":memory:", check_same_thread=False)
-    yield db
-    db.close()
+def ledger(tmp_path, request):
+    composition = compose_durable_obs_projection_runtime(tmp_path, request_id="obs-input-loop-stats")
+    runtime = composition.__enter__()
+    request.addfinalizer(lambda: composition.__exit__(None, None, None))
+    yield runtime.ledger
 
 
 @pytest.fixture
 def client(ledger):
     app = FastAPI()
     app.include_router(router)
-    set_ledger_provider(lambda: ledger)
-    return TestClient(app)
+    return LedgerStatsRefreshingTestClient(app)
 
 
 def _log_input_event(

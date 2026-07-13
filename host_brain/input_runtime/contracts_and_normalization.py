@@ -29,7 +29,6 @@ from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     read_life_snapshot,
 )
-from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
 from host_brain.input_runtime.reply_performance import coerce_reply_performance

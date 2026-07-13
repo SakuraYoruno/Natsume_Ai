@@ -193,5 +193,4 @@ def test_catalog_defaults_conflict_gate_and_one_shot_candidate_activation() -> N
     assert len(enforce_bind.consumed) == 1
     assert set(enforce_health.inspected) == {
         "host.mateengine.bridge.http",
-        "host.mateengine.bridge.udp",
     }

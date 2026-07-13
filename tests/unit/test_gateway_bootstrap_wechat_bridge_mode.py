@@ -220,7 +220,8 @@ def test_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, caplog) -> None:
     caplog.set_level("WARNING")
 
     assert _wechat_bridge_backend() == "wxautox4"
-    assert "no longer supported" in caplog.text
+    assert "invalid EDGE_WECHAT_BRIDGE_BACKEND=uia" in caplog.text
+    assert "falling back to wxautox4" in caplog.text
 
 
 def test_start_gateway_emits_platform_connected_and_disconnected(monkeypatch) -> None:

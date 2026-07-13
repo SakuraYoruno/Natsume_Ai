@@ -555,8 +555,10 @@ def get_tribe_events(
     for raw in raw_items:
         if not isinstance(raw, dict):
             continue
+        event_payload = raw.get("payload")
+        event_payload = dict(event_payload) if isinstance(event_payload, dict) else {}
         if any(
-            str(raw.get(field) or "") != str(expected)
+            str(raw.get(field) or event_payload.get(field) or "") != str(expected)
             for field, expected in filters.items()
             if expected is not None
         ):

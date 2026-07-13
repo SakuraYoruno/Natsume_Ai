@@ -27,6 +27,7 @@ _SURFACE_RUNTIME_FACADE_FILES = {
 }
 _SURFACE_CONTEXT_PACKET_CALLER_FILES = {
     Path("host_brain/app/surface_main_chain_adapter.py"),
+    Path("host_brain/surface_runtime/reply_context.py"),
 }
 _BUILD_INPUT_CALL_RE = re.compile(r"\bbuild_isolated_surface_input\s*\(")
 _PACKET_CONSTRUCTOR_RE = re.compile(r"\bReplyControlPacket\s*\(")

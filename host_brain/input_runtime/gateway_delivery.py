@@ -91,30 +91,6 @@ async def _deliver_gateway_reply(
     emotion_tag = performance.emotion_tag or str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     emotion_intensity = performance.emotion_intensity
 
-    def _schedule_reply_performance() -> None:
-        task = asyncio.create_task(
-            trigger_reply_performance(
-                request_id=request_id,
-                reply_envelope=reply_envelope,
-                enable_vts=True,
-            )
-        )
-
-        def _on_performance_done(done_task: Any) -> None:
-            try:
-                perf_result = done_task.result()
-                _logger.info(
-                    "gateway reply performance completed request_id=%s invoked=%s success=%s emotion=%s",
-                    request_id,
-                    perf_result.get("invoked"),
-                    perf_result.get("success"),
-                    perf_result.get("emotion_tag"),
-                )
-            except Exception as exc:  # pragma: no cover - defensive callback
-                _logger.debug("gateway reply performance task failed request_id=%s err=%s", request_id, exc)
-
-        task.add_done_callback(_on_performance_done)
-
     reply_text = reply_envelope.text or _build_gateway_reply_text(
         decision=decision,
         narrative=narrative,
@@ -205,7 +181,18 @@ async def _deliver_gateway_reply(
             "voice_sent": False,
         }
 
-    _schedule_reply_performance()
+    performance_result = await ports.trigger_reply_performance(
+        request_id=request_id,
+        reply_envelope=reply_envelope,
+        enable_vts=True,
+    )
+    _logger.info(
+        "gateway reply performance completed request_id=%s invoked=%s success=%s emotion=%s",
+        request_id,
+        performance_result.get("invoked"),
+        performance_result.get("success"),
+        performance_result.get("emotion_tag"),
+    )
 
     from host_brain.channels.edge_transport import submit_gateway_reply as post_gateway_reply  # noqa: PLC0415
     ReplyFormDecision = ports.reply_form_decision_type

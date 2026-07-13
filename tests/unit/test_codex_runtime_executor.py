@@ -51,6 +51,10 @@ def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypa
     calls: list[tuple[str, Path]] = []
 
     class FakeAgentExecutor:
+        def __init__(self, **dependencies: object) -> None:
+            assert dependencies["model_attempt_service"] is model_attempt_service
+            assert dependencies["prompt_registry"] is prompt_registry
+
         def execute(self, order, *, workspace: Path) -> AgentResult:
             calls.append((order.work_order_id, workspace))
             return AgentResult(
@@ -77,7 +81,13 @@ def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypa
     monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
     monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: next(git_states))
 
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
+    model_attempt_service = object()
+    prompt_registry = object()
+    result = AgentRuntimeExecutor(
+        artifact_store=AgentArtifactStore(tmp_path / "runs"),
+        model_attempt_service=model_attempt_service,
+        prompt_registry=prompt_registry,
+    ).execute(
         _inspect_order(tmp_path, work_order_id="wo-canonical")
     )
 
@@ -96,6 +106,9 @@ def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypa
 
 def test_runtime_converts_canonical_agent_crash_to_failed_result(monkeypatch, tmp_path: Path) -> None:
     class CrashingAgentExecutor:
+        def __init__(self, **_dependencies: object) -> None:
+            pass
+
         def execute(self, _order, *, workspace: Path) -> AgentResult:
             raise RuntimeError(f"boom in {workspace.name}")
 
@@ -105,7 +118,11 @@ def test_runtime_converts_canonical_agent_crash_to_failed_result(monkeypatch, tm
         lambda _workspace: {"changed_files": [], "git_diff_stat": None, "git_status": None, "status_map": {}},
     )
 
-    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path / "runs")).execute(
+    result = AgentRuntimeExecutor(
+        artifact_store=AgentArtifactStore(tmp_path / "runs"),
+        model_attempt_service=object(),
+        prompt_registry=object(),
+    ).execute(
         _inspect_order(tmp_path, work_order_id="wo-crash")
     )
 
@@ -133,5 +150,7 @@ def test_runtime_source_has_no_independent_codex_cli_authority() -> None:
         "CODEX_EXEC",
     )
 
-    assert "AgentExecutor().execute" in source
+    assert "AgentExecutor(" in source
+    assert "model_attempt_service=self.model_attempt_service" in source
+    assert "prompt_registry=self.prompt_registry" in source
     assert all(symbol not in source for symbol in forbidden)

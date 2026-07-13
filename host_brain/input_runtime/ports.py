@@ -29,6 +29,7 @@ class InputRuntimeApplicationPorts:
     reply_form_decision_type: type[Any]
     get_reply_form_decider: Callable[[], Any]
     message_type: type[Any]
+    trigger_reply_performance: Callable[..., Any]
     render_quick_gateway_progress_text: Callable[..., str]
     render_quick_gateway_realign_text: Callable[..., str]
 

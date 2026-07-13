@@ -42,8 +42,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 ) -> None:
     captured: dict[str, object] = {}
     events: list[str] = []
-    ledger = SimpleNamespace(canonical_db_path="D:/runtime/canonical.sqlite3")
+    ledger = SimpleNamespace(
+        canonical_db_path="D:/runtime/canonical.sqlite3",
+        log_voice_event=lambda *_args, **_kwargs: None,
+    )
     token_service = object()
+    capability_broker = object()
+    model_attempt_service = object()
+    prompt_registry = object()
+    canonical_executor = object()
     obs_ingress = object()
     pentest_composition = object()
     signed_ingress = object()
@@ -174,6 +181,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["ledger"] is ledger
         assert kwargs["skill_registry"] is skill_registry
         assert kwargs["token_service"] is token_service
+        assert kwargs["capability_broker"] is capability_broker
+        assert kwargs["model_attempt_service"] is model_attempt_service
+        assert kwargs["production_authority_verifier"] is asgi.verify_durable_production_authority
+        assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
+        assert kwargs["owner_id"] == "test-canonical-owner"
         events.append("governed-runtime-built")
         return governed_runtime
 
@@ -181,6 +193,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["task_runtime_container"] is task_runtime_container
         assert kwargs["ledger"] is ledger
         assert kwargs["result_repository"] is task_runtime_container.agent_result_repository
+        assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
+        assert kwargs["owner_id"] == "test-canonical-owner"
+        assert kwargs["canonical_executor"] is canonical_executor
         events.append("internal-runtime-built")
         return internal_runtime
 
@@ -233,7 +248,32 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         else pytest.fail("wrong Life dispatcher ledger"),
     )
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
+    monkeypatch.setattr(asgi, "get_capability_broker", lambda: capability_broker)
+    monkeypatch.setattr(
+        asgi,
+        "ApplicationModelAttemptServicePort",
+        lambda: model_attempt_service,
+    )
+    monkeypatch.setattr(asgi, "get_model_attempt_service", lambda: model_attempt_service)
+    monkeypatch.setattr(asgi, "get_prompt_registry", lambda: prompt_registry)
+    monkeypatch.setattr(
+        asgi,
+        "AgentRuntimeExecutor",
+        lambda **kwargs: canonical_executor
+        if kwargs == {
+            "model_attempt_service": model_attempt_service,
+            "prompt_registry": prompt_registry,
+        }
+        else pytest.fail("wrong canonical agent executor ports"),
+    )
     monkeypatch.setattr(asgi, "get_skill_registry", lambda: skill_registry)
+    monkeypatch.setattr(
+        asgi,
+        "get_core_settings",
+        lambda: SimpleNamespace(
+            task_runtime_canonical_owner="test-canonical-owner",
+        ),
+    )
     monkeypatch.setattr(asgi, "get_intent_engine", object)
     monkeypatch.setattr(asgi, "get_episodic_store", object)
     monkeypatch.setattr(asgi, "get_memory_guard", object)

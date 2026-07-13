@@ -301,15 +301,6 @@ def _run_orchestration_case(
     graph_config = dict(scenario.get("graph") or {})
     payload = dict(scenario.get("payload") or {})
 
-    for model_node in (graph_config.get("model_nodes") or {}).values():
-        if not isinstance(model_node, dict):
-            continue
-        provider_fn = model_node.get("provider_fn")
-        if isinstance(provider_fn, str):
-            model_node["provider_fn"] = lambda _payload: json.dumps(
-                {"narrative": {"text": "drill"}, "intent_draft": {}, "meta": {"draft_only": True}},
-                ensure_ascii=False,
-            )
     dependency_statuses = dict(scenario.get("dependency_statuses") or {})
     model_profile_id = str(graph_config.get("model_profile_id") or "").strip() or None
 

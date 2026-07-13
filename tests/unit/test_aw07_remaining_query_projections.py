@@ -80,6 +80,13 @@ def test_background_job_materializes_metadata_without_private_bodies(
     from host_brain.app.observability_runtime import remaining_query_projection as projection
 
     store = _store(tmp_path)
+    source_db = tmp_path / "source.sqlite3"
+    source_migration = SQLiteMigrationRunner(db_path=source_db).apply_migrations(
+        request_id="aw07-remaining-source",
+    )
+    assert source_migration.success, source_migration.as_dict()
+    source_ledger = _SourceLedger()
+    source_ledger.canonical_db_path = str(source_db)
     profile = tmp_path / "character_profile.json"
     profile.write_text(
         json.dumps(
@@ -123,10 +130,21 @@ def test_background_job_materializes_metadata_without_private_bodies(
             return [WorldDocument(), RelativeWorldDocument()]
 
     monkeypatch.setattr(canon_world_store, "WorldCanonStore", WorldStore)
-    monkeypatch.setattr(dependencies, "get_ledger", lambda: _SourceLedger())
+    monkeypatch.setattr(dependencies, "get_ledger", lambda: source_ledger)
     monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
 
-    result = projection.refresh_remaining_query_projections()
+    class CanonService:
+        @staticmethod
+        def preview_sync():
+            return type(
+                "Preview",
+                (),
+                {"issues": (), "records": (), "removed_doc_ids": ()},
+            )()
+
+    result = projection.refresh_remaining_query_projections(
+        canon_service=CanonService(),
+    )
 
     assert result["agent_loop_count"] == 1
     assert result["checkpoint_count"] == 1

@@ -3,6 +3,11 @@ from __future__ import annotations
 import time
 
 from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
 from host_brain.governor.action_arbiter import (
     ACTION_ARBITER_SCHEMA_VERSION,
     ARBITER_ALLOW,
@@ -363,7 +368,10 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
     assert lowered_risk["effective_risk_level"] == 5
 
 
-def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(monkeypatch) -> None:
+def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(
+    monkeypatch,
+    tmp_path,
+) -> None:
     registry = build_builtin_skill_registry()
     meta = registry.require("session_summary")
     token_service = TokenService(approval_ttl_ms=120_000)
@@ -379,6 +387,8 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(m
         "target": meta.scope,
         "args": {"user_message": "summarize the approved session"},
         "nonce": "nonce_exec_bound_1",
+        "person_id": "person_exec_bound_1",
+        "principal_id": "person_exec_bound_1",
     }
     token_ref = token_service.issue_approval_token(
         intent_id=envelope["id"],
@@ -403,6 +413,18 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(m
     monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
     monkeypatch.setattr("host_brain.composition.process_services.get_skill_registry", lambda: registry)
     monkeypatch.setattr("host_brain.composition.process_services.get_token_service", lambda: token_service)
+    ledger = SQLiteLedger(tmp_path / "nle-scene-skill.sqlite3")
+    capability_broker = build_production_capability_runtime(
+        execution_journal=SQLiteCapabilityExecutionJournal(ledger),
+    ).broker
+    governor.update(
+        {
+            "request_id": "req_exec_bound_1",
+            "stage": "S_INTENT_OK",
+            "ts_ms": now,
+        }
+    )
+    ledger.log_governor(governor)
 
     kwargs = {
         "ports": build_executive_runtime_application_ports(),
@@ -418,14 +440,18 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(m
         "intent_draft": envelope,
         "emotion_context": {"mood_state": "CALM", "emotion_tag": "FOCUSED"},
         "render_target_lang": "zh-CN",
+        "ledger": ledger,
+        "durable_authority_ledger": ledger,
+        "capability_broker_override": capability_broker,
     }
     first = _execute_skill(**kwargs)
     replay = _execute_skill(**kwargs)
 
-    assert first.success is True
+    assert first.success is True, (first.error_text, first.payload)
     assert first.payload["approval_token_ref"] == token_ref
     assert replay.success is False
     assert replay.error_text == "TOKEN_INVALID"
+    ledger.close()
 
 
 class _EventStore:

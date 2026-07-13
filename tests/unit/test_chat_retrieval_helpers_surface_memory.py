@@ -8,6 +8,16 @@ from host_brain.app import chat_retrieval_helpers as helpers
 from host_brain.conversation.schema import Turn
 
 
+_LIFE_SNAPSHOT_READER = SimpleNamespace(
+    get_snapshot=lambda person_id: {
+        "person_id": str(person_id or "default"),
+        "version": 0,
+        "state": {"person_id": str(person_id or "default"), "version": 0},
+    }
+)
+_LIFE_MEMORY_STORE = SimpleNamespace()
+
+
 @pytest.mark.asyncio
 async def test_run_retrieval_returns_compressed_surface_memory_packet(monkeypatch) -> None:
     captured: dict[str, object] = {}
@@ -47,6 +57,8 @@ async def test_run_retrieval_returns_compressed_surface_memory_packet(monkeypatc
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
 
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-surface-memory",
         message="下一步怎么处理这个文本质量问题",
         person_id="person-1",
@@ -115,9 +127,9 @@ async def test_run_retrieval_uses_collection_fastpath_without_embedding(monkeypa
 
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
-    monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: _LifeMemoryStore())
-
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LifeMemoryStore(),
         request_id="req-collection-fastpath",
         message="昨天三本呢？",
         person_id="person-1",
@@ -199,9 +211,9 @@ async def test_run_retrieval_dated_quality_followup_bypasses_collection_fastpath
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_maybe_apply_lightnovel_deep_review", _identity_review)
     monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
-    monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: _UnexpectedLifeMemoryStore())
-
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_UnexpectedLifeMemoryStore(),
         request_id="req-dated-quality-selection",
         message="昨天那几本好看吗",
         person_id="person-1",
@@ -296,6 +308,8 @@ async def test_run_retrieval_retries_recent_collection_when_first_recall_is_unde
     monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
 
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-retry-recent-undercovered",
         message="最近十几本里哪本好看？",
         person_id="person-1",
@@ -357,6 +371,8 @@ async def test_run_retrieval_does_not_expand_explicit_yesterday_scope(monkeypatc
     monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-no-expand-yesterday",
         message="昨天那几本好看吗？",
         person_id="person-1",
@@ -386,6 +402,8 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
 
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-skip-memory",
         message="继续",
         person_id="person-1",
@@ -415,6 +433,8 @@ async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monk
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
 
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-skip-plain-answer",
         message="今天先随便聊两句吧。",
         person_id="person-1",
@@ -492,6 +512,8 @@ async def test_run_retrieval_prefers_recent_explicit_memory_write(monkeypatch) -
     monkeypatch.setattr("host_brain.composition.process_services.get_conversation_history", lambda: _History())
 
     summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-current",
         message="我刚才让你记了什么？",
         person_id="person-1",
@@ -578,6 +600,8 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-lightnovel-deep-review",
         message="这两本书哪本好看？",
         person_id="person-1",
@@ -679,6 +703,8 @@ async def test_run_retrieval_marks_partial_lightnovel_deep_review_scope(monkeypa
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-lightnovel-partial-deep-review",
         message="这几天十几本里哪本最好看？",
         person_id="person-1",
@@ -767,6 +793,8 @@ async def test_run_retrieval_uses_readiness_to_recover_missing_detail_with_deep_
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-lightnovel-readiness-recovery",
         message="这三本书哪本好看？",
         person_id="person-1",
@@ -853,6 +881,8 @@ async def test_run_retrieval_marks_failed_lightnovel_deep_review_not_ready(monke
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-lightnovel-fetch-failed-not-ready",
         message="昨天推荐 B：与神在河岸 这本好看吗？",
         person_id="person-1",
@@ -953,6 +983,8 @@ async def test_run_retrieval_applies_lightnovel_deep_review_from_entity_trace(mo
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-lightnovel-entity-deep-review",
         message="与神在河岸这本好看吗？",
         person_id="person-1",
@@ -1022,6 +1054,8 @@ async def test_run_retrieval_uses_generic_evidence_review_for_missing_web_body(m
     )
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-generic-evidence-review",
         message="昨天那个网页内容靠谱吗？依据是什么？",
         person_id="person-1",
@@ -1083,6 +1117,8 @@ async def test_run_retrieval_preserves_surface_memory_validation_contract(monkey
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
 
     summary, _evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
         request_id="req-validation-contract",
         message="昨天三本呢？",
         person_id="person-1",

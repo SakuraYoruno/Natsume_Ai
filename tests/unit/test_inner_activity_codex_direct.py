@@ -33,7 +33,7 @@ class _InnerAdapter:
         yield response.content
 
 
-def _install_service(monkeypatch, responses: list[str]):  # noqa: ANN001, ANN202
+def _install_service(responses: list[str]) -> _InnerAdapter:
     registry = build_live_production_prompt_registry()
     adapter = _InnerAdapter(responses)
     route = RouteDecision(
@@ -55,16 +55,18 @@ def _install_service(monkeypatch, responses: list[str]):  # noqa: ANN001, ANN202
         provider_adapters=ProviderAdapterRegistry((adapter,)),
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    monkeypatch.setattr("host_brain.composition.process_services.get_prompt_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.composition.process_services.get_model_attempt_service", lambda: service)
+    adapter.service = service
+    adapter.prompt_registry = registry
     return adapter
 
 
-def _call() -> str:
+def _call(adapter: _InnerAdapter) -> str:
     return agent._run_inner_activity_llm(
         timeout_ms=5_000,
         prompt_text='{"goal":"generate_inner_activity_note"}',
         system_prompt="return json",
+        model_attempt_service=adapter.service,
+        prompt_registry=adapter.prompt_registry,
     )
 
 
@@ -77,19 +79,20 @@ def test_inner_activity_port_exposes_no_provider_or_cache_authority() -> None:
         "system_prompt",
         "model_attempt_sink",
         "retry_evaluator",
+        "model_attempt_service",
+        "prompt_registry",
     }
 
 
 def test_inner_activity_uses_registered_prompt_and_service_owned_json_repair(monkeypatch) -> None:
     adapter = _install_service(
-        monkeypatch,
         [
             "not-json",
             json.dumps({"note": "封面错位的画面还卡在眼前。", "focus": "memory"}, ensure_ascii=False),
         ],
     )
 
-    raw = _call()
+    raw = _call(adapter)
 
     assert "封面错位" in raw
     assert len(adapter.requests) == 2
@@ -101,16 +104,16 @@ def test_inner_activity_uses_registered_prompt_and_service_owned_json_repair(mon
 
 def test_inner_activity_does_not_keep_cross_request_direct_cache(monkeypatch) -> None:
     payload = json.dumps({"note": "早安已经错过钟点了。", "focus": "self"}, ensure_ascii=False)
-    adapter = _install_service(monkeypatch, [payload, payload])
+    adapter = _install_service([payload, payload])
 
-    assert _call() == _call()
+    assert _call(adapter) == _call(adapter)
     assert len(adapter.requests) == 2
 
 
 def test_inner_activity_freshness_retry_is_owned_by_one_model_request(monkeypatch) -> None:
     duplicate = json.dumps({"note": "重复念头", "focus": "self"}, ensure_ascii=False)
     fresh = json.dumps({"note": "窗边那张错位封面还卡在眼前。", "focus": "memory"}, ensure_ascii=False)
-    adapter = _install_service(monkeypatch, [duplicate, fresh])
+    adapter = _install_service([duplicate, fresh])
     monkeypatch.setenv("HOST_INNER_ACTIVITY_LLM_ENABLED", "true")
     monkeypatch.setenv("NATSUME_INNER_WORLD_LLM_ENABLED", "true")
     monkeypatch.setattr(
@@ -135,6 +138,8 @@ def test_inner_activity_freshness_retry_is_owned_by_one_model_request(monkeypatc
         offline_hours=0.0,
         inner_state={},
         now_ms=123,
+        model_attempt_service=adapter.service,
+        prompt_registry=adapter.prompt_registry,
     )
 
     assert note == "窗边那张错位封面还卡在眼前。"

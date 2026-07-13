@@ -30,10 +30,9 @@ def test_nle_boundary_scan_rejects_each_unlisted_high_risk_edge() -> None:
     )
 
     assert report["existing_debt"] == []
-    assert len(report["violations"]) == 8
+    assert len(report["violations"]) == 7
     assert {row["rule_id"] for row in report["violations"]} == {
         "NLE-BND-EDGE-HOST-IMPL",
-        "NLE-BND-AGENTRUNTIME-APP",
         "NLE-BND-PENTEST-WORLDCANON-IMPORT",
         "NLE-BND-PENTEST-WORLDCANON-UPSERT",
         "NLE-BND-PENTEST-CANON-VECTOR-READER",

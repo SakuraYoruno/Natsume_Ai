@@ -1,24 +1,35 @@
 from __future__ import annotations
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
+from host_brain.composition.life import ProcessLifeContainer, build_process_life_container
 from host_brain.composition.process_service_container import get_process_service_container
 from host_brain.persistence.context_repository import ContextRepository
 
 
-def _install_ledger(monkeypatch) -> tuple[SQLiteLedger, ContextRepository]:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+def _install_ledger(monkeypatch, tmp_path) -> tuple[SQLiteLedger, ContextRepository, ProcessLifeContainer]:
+    db_path = tmp_path / "conversation.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="conversation-writer-test",
+        ts_ms=0,
+    )
+    assert result.success is True, result.as_dict()
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
     repository = ContextRepository.from_ledger(ledger)
     container = get_process_service_container()
     monkeypatch.setattr(container, "ledger", ledger)
     monkeypatch.setattr(container, "conversation_turn_store", repository)
-    return ledger, repository
+    return ledger, repository, build_process_life_container(ledger=ledger, adopted_at_ms=0)
 
 
-def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch) -> None:
-    _ledger, repository = _install_ledger(monkeypatch)
+def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch, tmp_path) -> None:
+    ledger, repository, life = _install_ledger(monkeypatch, tmp_path)
 
     record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-user",
         session_id="sess",
         person_id="p1",
@@ -27,6 +38,9 @@ def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch)
         lang="zh",
     )
     record_assistant_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-assistant",
         session_id="sess",
         person_id="p1",
@@ -42,10 +56,13 @@ def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch)
     ]
 
 
-def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> None:
-    _ledger, repository = _install_ledger(monkeypatch)
+def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch, tmp_path) -> None:
+    ledger, repository, life = _install_ledger(monkeypatch, tmp_path)
 
     first = record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-same",
         session_id="sess",
         person_id="p1",
@@ -54,6 +71,9 @@ def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch) -> No
         lang="zh",
     )
     replay = record_user_turn(
+        ledger=ledger,
+        life_service=life.command_service,
+        life_reader=life.snapshot_reader,
         request_id="req-same",
         session_id="sess",
         person_id="p1",

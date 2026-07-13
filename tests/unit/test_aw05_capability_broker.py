@@ -229,10 +229,7 @@ def test_hung_capability_pool_cannot_starve_unrelated_capability() -> None:
     broker.close()
 
 
-def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_path, monkeypatch) -> None:  # noqa: ANN001
-    from host_brain.composition import process_services as dependencies
-    from host_brain.audit.sqlite_ledger import SQLiteLedger
-    from host_brain.domain_packs import production_runtime as production_executor
+def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_path) -> None:  # noqa: ANN001
     from host_brain.agent_runtime.artifact_store import AgentArtifactStore
     from host_brain.domain_packs.production_runtime import _execute_worker
     from host_brain.agent_runtime.production_studio import build_production_work_order
@@ -242,18 +239,12 @@ def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_pat
         {"task": "research", "artifacts_root": str(tmp_path)},
         skill_id="browser_research",
     ))
-    monkeypatch.setattr(
-        dependencies,
-        "_ledger",
-        SQLiteLedger(db_path=":memory:", check_same_thread=False),
-    )
-    dependencies.reset_capability_runtime_composition()
-    from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
     from host_brain.domain_packs.production_runtime import _compose_production_capabilities
 
+    process_broker = CapabilityBroker(policy=DescriptorCapabilityPolicy())
     broker, runtime = _compose_production_capabilities(
-        capability_broker=dependencies.get_capability_broker(),
-        model_attempt_service=ApplicationModelAttemptServicePort(),
+        capability_broker=process_broker,
+        model_attempt_service=SimpleNamespace(),
         authority_verifier=lambda _authority, _order: None,
     )
     receipt = _execute_worker(
@@ -265,3 +256,4 @@ def test_production_capability_cannot_self_sign_without_governed_attempt(tmp_pat
     )
     assert receipt["status"] == "FAILED"
     assert receipt["reason_code"] == "AGENT_PRODUCTION_GOVERNOR_GRANT_MISSING"
+    broker.close()

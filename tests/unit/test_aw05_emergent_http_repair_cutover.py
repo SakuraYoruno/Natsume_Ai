@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition import process_services as dependencies
 from host_brain.app.handlers import repair_agent_handler
 from host_brain.model_runtime import (
     EMERGENT_GROWTH_PATTERN_PROMPT_ID,
@@ -40,17 +39,15 @@ class _CountingRoute:
         )
 
 
-def _install_model_runtime(complete):  # noqa: ANN001
+def _build_model_runtime(complete):  # noqa: ANN001
     route = _CountingRoute()
-    dependencies.reset_model_runtime_composition(
-        build_model_runtime_composition(
-            prompt_registry=build_live_production_prompt_registry(),
-            route_policy=route,
-            provider_adapters=[CallableProviderAdapter("test.aw05-b3", complete_fn=complete)],
-            audit_repository=InMemoryAttemptAuditRepository(),
-        )
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=route,
+        provider_adapters=[CallableProviderAdapter("test.aw05-b3", complete_fn=complete)],
+        audit_repository=InMemoryAttemptAuditRepository(),
     )
-    return route
+    return route, composition
 
 
 def test_evolution_desire_ignores_legacy_callable_and_uses_registered_attempt(
@@ -62,7 +59,7 @@ def test_evolution_desire_ignores_legacy_callable_and_uses_registered_attempt(
         attempts.append(attempt)
         return {"content": "我想更自然地说出那些真正放在心上的事。"}
 
-    route = _install_model_runtime(_complete)
+    route, composition = _build_model_runtime(_complete)
     engine = evolution_desire_engine.EvolutionDesireEngine(seed=0)
     monkeypatch.setattr(engine, "_try_fulfilled_text", lambda *_args: "")
     monkeypatch.setattr(engine, "_try_user_preference_desire", lambda *_args: "")
@@ -72,20 +69,17 @@ def test_evolution_desire_ignores_legacy_callable_and_uses_registered_attempt(
         lambda: {"desire_prompt": "根据关系与成长状态写一句第一人称愿望。"},
     )
 
-    def _legacy_callable(_prompt):  # noqa: ANN001
-        raise AssertionError("legacy callable used")
-
-    setattr(_legacy_callable, "canonical_model_attempt_port", True)
-    try:
-        text = engine.generate_desire(
-            emotion_trend="平稳",
-            bond_stage="FRIEND",
-            current_ts_ms=123,
-            llm_fn=_legacy_callable,
-            strict_llm=True,
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
+    model_port = evolution_desire_engine._EvolutionDesireModelPort(
+        request_id="req-aw05-desire",
+        attempt_service=composition.attempt_service,
+    )
+    text = engine.generate_desire(
+        emotion_trend="平稳",
+        bond_stage="FRIEND",
+        current_ts_ms=123,
+        llm_fn=model_port,
+        strict_llm=True,
+    )
 
     assert text == "我想更自然地说出那些真正放在心上的事。"
     assert attempts[0].prompt.prompt_id == EVOLUTION_DESIRE_PROMPT_ID
@@ -108,7 +102,7 @@ def test_self_reflection_uses_one_typed_port_with_four_registered_semantics(
         attempts.append(attempt)
         return {"content": responses[attempt.prompt.prompt_id]}
 
-    route = _install_model_runtime(_complete)
+    route, composition = _build_model_runtime(_complete)
     monkeypatch.setattr(
         self_reflection,
         "build_self_awareness_text",
@@ -135,15 +129,16 @@ def test_self_reflection_uses_one_typed_port_with_four_registered_semantics(
         "_load_prompt_templates",
         lambda **_kwargs: {"style_trend_prompt": "风格变化：{hint_str}"},
     )
-    try:
-        pulse = self_reflection.build_self_reflection_pulse(
-            {"bond_growth_perception": "稳定"},
-            llm_fn=lambda _prompt: (_ for _ in ()).throw(AssertionError("legacy callable used")),
-            strict_llm=True,
-            style_evolution={"history_count": 20, "trend": {"warmth": "rising"}},
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
+    model_port = self_reflection._SelfReflectionModelPort(
+        request_id="req-aw05-self-reflection",
+        attempt_service=composition.attempt_service,
+    )
+    pulse = self_reflection.build_self_reflection_pulse(
+        {"bond_growth_perception": "稳定"},
+        llm_fn=model_port,
+        strict_llm=True,
+        style_evolution={"history_count": 20, "trend": {"warmth": "rising"}},
+    )
 
     assert [attempt.prompt.prompt_id for attempt in attempts] == [
         SELF_REFLECTION_AWARENESS_PROMPT_ID,
@@ -176,27 +171,16 @@ def test_emergent_growth_replaces_legacy_callable_with_canonical_port(
                 "growth_result": {"applied": True},
             }
 
-    route = _install_model_runtime(_complete)
-    monkeypatch.setattr(
-        "host_brain.tribe.prefrontal_agent.get_prefrontal_agent",
-        lambda: _Prefrontal(),
+    route, composition = _build_model_runtime(_complete)
+    result = execute_emergent_growth_weekly(
+        args={"user_id": "u-aw05"},
+        context={
+            "request_id": "req-aw05-emergent",
+            "model_attempt_service": composition.attempt_service,
+            "prefrontal_agent": _Prefrontal(),
+            "episodic_store": object(),
+        },
     )
-    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: object())
-
-    def _legacy_callable(_prompt):  # noqa: ANN001
-        raise AssertionError("legacy callable used")
-
-    setattr(_legacy_callable, "canonical_model_attempt_port", True)
-    try:
-        result = execute_emergent_growth_weekly(
-            args={"user_id": "u-aw05"},
-            context={
-                "request_id": "req-aw05-emergent",
-                "emergent_growth_llm_fn": _legacy_callable,
-            },
-        )
-    finally:
-        dependencies.reset_model_runtime_composition()
 
     assert result["pattern_result"] == {"signal": "rich"}
     assert attempts[0].prompt.prompt_id == EMERGENT_GROWTH_PATTERN_PROMPT_ID
@@ -223,17 +207,18 @@ def test_repair_planner_uses_registered_json_attempt_and_exposes_trace(
             )
         }
 
-    route = _install_model_runtime(_complete)
+    route, composition = _build_model_runtime(_complete)
     monkeypatch.setattr(repair_agent_handler, "_resolve_repair_planner_system_prompt", lambda: "system")
     monkeypatch.setattr(
         repair_agent_handler,
         "_build_repair_planner_user_prompt",
         lambda *_args, **_kwargs: "user",
     )
-    try:
-        plan = repair_agent_handler._call_repair_planner_llm("task", "unknown error")
-    finally:
-        dependencies.reset_model_runtime_composition()
+    plan = repair_agent_handler._call_repair_planner_llm(
+        "task",
+        "unknown error",
+        model_attempt_service=composition.attempt_service,
+    )
 
     assert plan is not None
     assert attempts[0].prompt.prompt_id == REPAIR_AGENT_PLAN_PROMPT_ID
@@ -247,17 +232,18 @@ def test_repair_planner_schema_failure_degrades_with_attempt_trace(
     async def _complete(_attempt):  # noqa: ANN001
         return {"content": "not-json"}
 
-    _install_model_runtime(_complete)
+    _route, composition = _build_model_runtime(_complete)
     monkeypatch.setattr(repair_agent_handler, "_resolve_repair_planner_system_prompt", lambda: "system")
     monkeypatch.setattr(
         repair_agent_handler,
         "_build_repair_planner_user_prompt",
         lambda *_args, **_kwargs: "user",
     )
-    try:
-        plan = repair_agent_handler._call_repair_planner_llm("task", "unknown error")
-    finally:
-        dependencies.reset_model_runtime_composition()
+    plan = repair_agent_handler._call_repair_planner_llm(
+        "task",
+        "unknown error",
+        model_attempt_service=composition.attempt_service,
+    )
 
     assert plan is not None
     assert plan["repair_type"] == "unsupported"
@@ -268,7 +254,6 @@ def test_repair_planner_schema_failure_degrades_with_attempt_trace(
 def test_b3_domain_files_have_no_private_route_pool_retry_or_cache_authority() -> None:
     root = Path(__file__).resolve().parents[2]
     paths = (
-        "host_brain/app/http_hooks_runtime_helpers.py",
         "host_brain/persona/self_reflection.py",
         "host_brain/persona/evolution_desire_engine.py",
         "host_brain/skills/impl/emergent_growth_skill.py",

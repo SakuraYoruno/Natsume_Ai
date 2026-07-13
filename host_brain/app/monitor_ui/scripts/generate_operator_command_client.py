@@ -155,7 +155,9 @@ def main() -> int:
         if not _check_or_write(path, content, check=args.check)
     ]
     if stale:
-        print("Operator command generated artifacts drifted: " + ", ".join(stale))
+        sys.stdout.write(
+            "Operator command generated artifacts drifted: " + ", ".join(stale) + "\n"
+        )
         return 1
     return 0
 
