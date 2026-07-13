@@ -8,6 +8,7 @@ import pytest
 
 from tools.run_core_release import (
     AcceptanceStage,
+    InternalStageEvidenceError,
     RECEIPT_SCHEMA_VERSION,
     StageOutcome,
     STATUS_FAIL,
@@ -17,6 +18,7 @@ from tools.run_core_release import (
     _evaluate_architecture_gates,
     _resolve_subprocess_command,
     _run_isolated_migration_backup_restore,
+    _run_isolated_runtime_http_drill,
     _run_monitor_ui_interaction_smoke,
     _run_rollback_drill,
     build_acceptance_plan,
@@ -204,6 +206,84 @@ def test_monitor_interaction_smoke_resolves_npm_exec(
     ]
     assert launched[0][0] == str(npm_cmd.resolve())
     assert result["npm_executable_resolution"]["resolved_executable"] == str(npm_cmd.resolve())
+
+
+@pytest.mark.parametrize(
+    "internal_runner",
+    [_run_monitor_ui_interaction_smoke, _run_isolated_runtime_http_drill],
+)
+def test_internal_child_failure_preserves_bounded_redacted_log_evidence(
+    internal_runner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "host_brain/app/monitor_ui").mkdir(parents=True)
+
+    class FailedProcess:
+        pid = 4321
+        returncode: int | None = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 1
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            return self.returncode
+
+        def kill(self):
+            self.returncode = 1
+
+    def fake_popen(*_args, **kwargs):
+        log = kwargs["stdout"]
+        log.write("Authorization: Bearer child-secret-token\nchild boot failed\n")
+        log.flush()
+        return FailedProcess()
+
+    monkeypatch.setattr("tools.run_core_release.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(
+        "tools.run_core_release._wait_for_http_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("child unavailable")),
+    )
+
+    with pytest.raises(InternalStageEvidenceError) as captured:
+        internal_runner(root=tmp_path, run_id="child-log-failure")
+
+    evidence = captured.value.evidence
+    child_log = dict(evidence["child_log"])
+    assert child_log["available"] is True
+    assert child_log["content_sha256"].startswith("sha256:")
+    assert "child boot failed" in child_log["tail_redacted"]
+    assert "child-secret-token" not in child_log["tail_redacted"]
+    assert "<redacted>" in child_log["tail_redacted"]
+
+
+def test_internal_stage_failure_persists_child_evidence_in_stage_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    evidence = {
+        "child_process": "monitor_obs",
+        "child_log": {
+            "content_sha256": "sha256:" + "a" * 64,
+            "tail_redacted": "bounded child failure",
+        },
+    }
+
+    def fail_internal(*_args, **_kwargs):
+        raise InternalStageEvidenceError("monitor child failed", evidence=evidence)
+
+    monkeypatch.setattr("tools.run_core_release._run_monitor_ui_interaction_smoke", fail_internal)
+    stage = AcceptanceStage("monitor_interaction_smoke", "internal")
+    outcome = _default_stage_runner(stage, tmp_path, run_dir, "child-evidence-test")
+
+    assert outcome.status == STATUS_FAIL
+    assert outcome.evidence == evidence
+    persisted = json.loads((run_dir / "monitor_interaction_smoke.log").read_text(encoding="utf-8"))
+    assert persisted["evidence"] == evidence
 
 
 def test_acceptance_is_fail_fast_and_never_automatically_retries(tmp_path: Path) -> None:

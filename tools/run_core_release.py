@@ -156,6 +156,14 @@ class StageOutcome:
         return payload
 
 
+class InternalStageEvidenceError(RuntimeError):
+    """Internal-stage failure carrying bounded, redacted child evidence."""
+
+    def __init__(self, message: str, *, evidence: Mapping[str, Any]) -> None:
+        super().__init__(message)
+        self.evidence = dict(evidence)
+
+
 StageRunner = Callable[[AcceptanceStage, Path, Path, str], StageOutcome]
 ReceiptUpdate = Callable[[dict[str, Any]], None]
 
@@ -1078,6 +1086,55 @@ def _resolve_subprocess_command(
     return (str(Path(resolved).resolve()), *(str(argument) for argument in command[1:]))
 
 
+def _redact_child_log_tail(value: str) -> str:
+    text = re.sub(
+        r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+",
+        r"\1 <redacted>",
+        str(value),
+    )
+    text = re.sub(
+        r"(?i)\b(authorization|api[_-]?key|access[_-]?token|token|secret|password)"
+        r"(\s*[:=]\s*)([^\s,;]+)",
+        r"\1\2<redacted>",
+        text,
+    )
+    text = re.sub(r"(?i)(://)[^/@\s:]+:[^/@\s]+@", r"\1<redacted>@", text)
+    return "".join(character if character in "\n\r\t" or ord(character) >= 32 else "?" for character in text)
+
+
+def _bounded_text_evidence(value: str, *, max_tail_chars: int = 2_000) -> dict[str, Any]:
+    raw = str(value).encode("utf-8", errors="replace")
+    tail = str(value)[-max(1, int(max_tail_chars)) :]
+    return {
+        "content_sha256": f"sha256:{hashlib.sha256(raw).hexdigest()}",
+        "size_bytes": len(raw),
+        "tail_redacted": _redact_child_log_tail(tail),
+        "tail_truncated": len(str(value)) > max(1, int(max_tail_chars)),
+    }
+
+
+def _bounded_child_log_evidence(path: Path, *, max_tail_bytes: int = 4_000) -> dict[str, Any]:
+    if not path.is_file():
+        return {
+            "available": False,
+            "content_sha256": None,
+            "size_bytes": 0,
+            "tail_redacted": "",
+            "tail_truncated": False,
+        }
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        handle.seek(max(0, size - max(1, int(max_tail_bytes))))
+        tail = handle.read().decode("utf-8", errors="replace")
+    return {
+        "available": True,
+        "content_sha256": _sha256(path),
+        "size_bytes": size,
+        "tail_redacted": _redact_child_log_tail(tail),
+        "tail_truncated": size > max(1, int(max_tail_bytes)),
+    }
+
+
 def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run_id: str) -> StageOutcome:
     started_at = _utc_now()
     started = time.monotonic()
@@ -1122,7 +1179,25 @@ def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run
                 evidence=evidence,
             )
         except BaseException as exc:
-            _atomic_write_text(log_path, f"{type(exc).__name__}: {exc}\n")
+            failure_evidence = (
+                dict(exc.evidence)
+                if isinstance(exc, InternalStageEvidenceError)
+                else {}
+            )
+            _atomic_write_text(
+                log_path,
+                json.dumps(
+                    {
+                        "error_type": type(exc).__name__,
+                        "detail": str(exc),
+                        "evidence": failure_evidence,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                )
+                + "\n",
+            )
             return _outcome(
                 stage,
                 status=STATUS_FAIL,
@@ -1131,6 +1206,7 @@ def _default_stage_runner(stage: AcceptanceStage, root: Path, run_dir: Path, run
                 exit_code=1,
                 log_ref=_repo_ref(root, log_path),
                 detail=f"internal acceptance stage failed: {type(exc).__name__}: {exc}",
+                evidence=failure_evidence,
             )
 
     cwd = (root / stage.cwd).resolve()
@@ -1971,27 +2047,29 @@ def _run_isolated_runtime_http_drill(*, root: Path, run_id: str) -> dict[str, An
             port = _reserve_loopback_port()
             log_path = workspace / f"obs-boot-{boot_index}.log"
             boot_record: dict[str, Any] | None = None
+            boot_error: BaseException | None = None
             with log_path.open("w+", encoding="utf-8", newline="\n") as log:
-                process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "uvicorn",
-                        "host_brain.app.obs_fastapi_app:app",
-                        "--host",
-                        "127.0.0.1",
-                        "--port",
-                        str(port),
-                        "--log-level",
-                        "warning",
-                    ],
-                    cwd=root,
-                    env=environment,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
+                process: subprocess.Popen[Any] | None = None
                 try:
+                    process = subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-m",
+                            "uvicorn",
+                            "host_brain.app.obs_fastapi_app:app",
+                            "--host",
+                            "127.0.0.1",
+                            "--port",
+                            str(port),
+                            "--log-level",
+                            "warning",
+                        ],
+                        cwd=root,
+                        env=environment,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
                     health = _wait_for_http_json(
                         f"http://127.0.0.1:{port}/health",
                         process=process,
@@ -2016,8 +2094,10 @@ def _run_isolated_runtime_http_drill(*, root: Path, run_id: str) -> dict[str, An
                         "health_payload_status": str(dict(health.get("payload") or {}).get("status") or ""),
                         "malformed_trace_status_code": int(rejected["status_code"]),
                     }
+                except BaseException as exc:
+                    boot_error = exc
                 finally:
-                    if process.poll() is None:
+                    if process is not None and process.poll() is None:
                         # A forced termination models the process-fault boundary;
                         # the second boot proves cold recovery over the same DB.
                         process.terminate()
@@ -2029,13 +2109,23 @@ def _run_isolated_runtime_http_drill(*, root: Path, run_id: str) -> dict[str, An
                     log.flush()
                     log.seek(0)
                     log_tail = log.read()[-4_000:]
-                if process.returncode is None:
-                    raise RuntimeError("isolated Obs process did not terminate")
-                if boot_record is None:
-                    raise RuntimeError(f"isolated Obs boot {boot_index} produced no HTTP evidence")
-                boot_record["termination_exit_code"] = int(process.returncode)
-                boot_record["log_tail_sha256"] = f"sha256:{hashlib.sha256(log_tail.encode()).hexdigest()}"
-                boots.append(boot_record)
+            if boot_error is not None:
+                raise InternalStageEvidenceError(
+                    f"isolated Obs boot {boot_index} failed: {type(boot_error).__name__}: {boot_error}",
+                    evidence={
+                        "child_process": "isolated_obs",
+                        "boot_index": boot_index,
+                        "child_log": _bounded_child_log_evidence(log_path),
+                    },
+                ) from boot_error
+            assert process is not None
+            if process.returncode is None:
+                raise RuntimeError("isolated Obs process did not terminate")
+            if boot_record is None:
+                raise RuntimeError(f"isolated Obs boot {boot_index} produced no HTTP evidence")
+            boot_record["termination_exit_code"] = int(process.returncode)
+            boot_record["log_tail_sha256"] = f"sha256:{hashlib.sha256(log_tail.encode()).hexdigest()}"
+            boots.append(boot_record)
 
         if not database.is_file() or database.stat().st_size <= 0:
             raise RuntimeError("isolated runtime did not create the canonical database")
@@ -2093,16 +2183,19 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
             }
         )
         obs_log = workspace / "obs.log"
+        process: subprocess.Popen[Any] | None = None
+        monitor_error: BaseException | None = None
+        output = ""
         with obs_log.open("w", encoding="utf-8", newline="\n") as log:
-            process = subprocess.Popen(
-                [sys.executable, "-m", "uvicorn", "host_brain.app.obs_fastapi_app:app", "--host", "127.0.0.1", "--port", str(obs_port), "--log-level", "warning"],
-                cwd=root,
-                env=environment,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
             try:
+                process = subprocess.Popen(
+                    [sys.executable, "-m", "uvicorn", "host_brain.app.obs_fastapi_app:app", "--host", "127.0.0.1", "--port", str(obs_port), "--log-level", "warning"],
+                    cwd=root,
+                    env=environment,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
                 health = _wait_for_http_json(f"{obs_url}/health", process=process, timeout_s=75)
                 npm_requested_command = (
                     "npm",
@@ -2127,15 +2220,32 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                 )
                 output = str(completed.stdout or "") + str(completed.stderr or "")
                 if completed.returncode != 0:
-                    raise RuntimeError(f"unstubbed Monitor interaction failed: {output[-4000:]}")
+                    raise RuntimeError(
+                        f"unstubbed Monitor interaction failed with exit {completed.returncode}"
+                    )
+            except BaseException as exc:
+                monitor_error = exc
             finally:
-                if process.poll() is None:
+                if process is not None and process.poll() is None:
                     process.terminate()
                     try:
                         process.wait(timeout=20)
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait(timeout=10)
+                log.flush()
+        if monitor_error is not None:
+            evidence: dict[str, Any] = {
+                "child_process": "monitor_obs",
+                "child_log": _bounded_child_log_evidence(obs_log),
+            }
+            if output:
+                evidence["playwright_output"] = _bounded_text_evidence(output)
+            raise InternalStageEvidenceError(
+                f"Monitor interaction child failed: {type(monitor_error).__name__}: {monitor_error}",
+                evidence=evidence,
+            ) from monitor_error
+        assert process is not None
         return {
             "status": STATUS_PASS,
             "smoke_kind": "unstubbed_browser_via_preview_proxy_to_real_obs_process",
@@ -2146,6 +2256,7 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
             "monitor_preview_port": ui_port,
             "playwright_exit_code": int(completed.returncode),
             "playwright_output_sha256": f"sha256:{hashlib.sha256(output.encode()).hexdigest()}",
+            "obs_child_log_sha256": _bounded_child_log_evidence(obs_log)["content_sha256"],
             "npm_executable_resolution": {
                 "method": "shutil.which",
                 "requested_executable": npm_requested_command[0],

@@ -51,6 +51,7 @@ from host_brain.app.observability_runtime.live_source_projection import (
     run_operator_live_state_projection_job,
 )
 from host_brain.app.settings import get_persistence_settings
+from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.composition.canon import build_process_canon_container
 from host_brain.composition.life import build_process_life_container
 from host_brain.app.observability_runtime.health_device_projection import (
@@ -60,6 +61,11 @@ from host_brain.app.observability_runtime.health_device_projection import (
 )
 
 _logger = logging.getLogger("Natsume.obs_app")
+
+# The observability server is a standalone process composition root.  Uvicorn
+# imports this module directly, without importing the primary Host ASGI app
+# that normally binds these application ports.
+configure_process_service_ports()
 
 
 def _get_obs_ledger():
@@ -76,7 +82,7 @@ async def lifespan(_app: FastAPI):
     canon = build_process_canon_container(
         ledger=ledger,
         canonical_db_path=str(getattr(ledger, "canonical_db_path", "") or ""),
-        world_root=settings.world_canon_root,
+        world_root=settings.world_canon_root.resolve(),
     )
     life = build_process_life_container(
         ledger=ledger,
