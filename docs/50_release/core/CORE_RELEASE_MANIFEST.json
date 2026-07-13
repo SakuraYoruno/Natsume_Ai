@@ -1,0 +1,463 @@
+{
+  "acceptance": {
+    "result_ref": "",
+    "run_id": ""
+  },
+  "architecture_gates": [
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=1"
+      ],
+      "gate": 1,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "package dependency and Edge boundary"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=2"
+      ],
+      "gate": 2,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "single composition root and app truth boundary"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=3"
+      ],
+      "gate": 3,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "mixed-responsibility production file limits"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=4"
+      ],
+      "gate": 4,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "single grant, lineage and side-effect receipt"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=5"
+      ],
+      "gate": 5,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "verification commit guard"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=6"
+      ],
+      "gate": 6,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "single writer and rebuildable projections"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=7"
+      ],
+      "gate": 7,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "zero-write surface and durable outbox"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=8"
+      ],
+      "gate": 8,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "knowledge namespace and promotion boundary"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=9"
+      ],
+      "gate": 9,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "authenticated and audited write ingress"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=10"
+      ],
+      "gate": 10,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "migration-only DDL and canonical persistence"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=11"
+      ],
+      "gate": 11,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "single production services and signed bundle supply chain"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=12"
+      ],
+      "gate": 12,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "standalone Edge and unique physical-output authority"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=13"
+      ],
+      "gate": 13,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "pure Operator query and generated UI client"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#stage=architecture_static_gates&gate=14"
+      ],
+      "gate": 14,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "retired compatibility authorities"
+    },
+    {
+      "evidence_refs": [
+        "docs/50_release/core/PREPARE_RECEIPT.json#gate=15"
+      ],
+      "gate": 15,
+      "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+      "status": "PENDING",
+      "title": "complete program acceptance"
+    }
+  ],
+  "asset_groups": {
+    "configuration": {
+      "digest": "sha256:d41c6e1ccd31140f2fbca9bf9a7938b74ad189aae7310cd53c064cf2b0f6ce11",
+      "file_count": 7,
+      "files": {
+        "configs/deploy/node_inventory_personal_lan.json": "sha256:f67c693a52719ebe3ce32afb3eaae87660d0ddbe9c51e874df4d14d0c9e62e02",
+        "configs/model_plane/model_profiles.yaml": "sha256:741fe2c83a1c3fd7da054225109f1597ae44483c55bcc348cb9c12b443cd98c1",
+        "configs/model_plane/node_registry.yaml": "sha256:e831780fc0743c630b777893a04d9b8059d123dae7c616b7a57a7fc00a385982",
+        "configs/release/core_architecture_policy.json": "sha256:45892dcf2d139f300fc45a75ad45c20072beff41ebd7c59a99ba4aff7feb7e3c",
+        "configs/release/core_release.json": "sha256:65769568dd6a6199802e6a8267a192c9e9b37cd55eb19f8bb077900d97c607be",
+        "configs/release/core_rollback_map.json": "sha256:5cf61ce920866b7bea974baf3922f0732ef53dd5bbc778ff0eca42fc54607a5e",
+        "configs/vts/vts_hotkey_config.yaml": "sha256:d63d7b7a2a11d641ee3b7c268bea06595f95aeac68d918e1a4b82a55882db9bf"
+      }
+    },
+    "contracts": {
+      "digest": "sha256:00dc559a16d471db14f9f5154c11278a25caf6cfa543a0d3b24a1c9dc6e35c6e",
+      "file_count": 15,
+      "files": {
+        "natsume_contracts/__init__.py": "sha256:edc58e16daf264618970013508c6534dd477eaecf288738512b06db212e1adc7",
+        "natsume_contracts/bridge_auth.py": "sha256:0662f7f0e26d214c7f60a385f1d46a8a51e0bdb5d01bb185b53e5b6d4cc61714",
+        "natsume_contracts/edge/__init__.py": "sha256:3fe0bcc7f24aed222b229cd49681632019115866efe17b218aff84a7bd59f804",
+        "natsume_contracts/edge/embodiment_v1.py": "sha256:a291d2195c763ae370f0996300cf45fc2622870d4c41ee0e9987bdb9afe588ef",
+        "natsume_contracts/edge/service_catalog_v1.py": "sha256:ae28970f9a3d117a7d949bf0925845c8d5c60fd7aa25d0dedb8cb91239ec67c1",
+        "natsume_contracts/edge/transport_v1.py": "sha256:df9e9a36ef74e0ddc96ec5e5b36937af61cdd6762138868b116e4a01fe966379",
+        "natsume_contracts/edge/v1.py": "sha256:775feedccc012c8b00cb86a14d9cc9c6f5e1de5193f12d7068b72c959b6b19c5",
+        "natsume_contracts/identity/__init__.py": "sha256:0a08e1dd2b094740a8dfb6dcbd795b5e8fe337b947991053276c566ac67fb4e0",
+        "natsume_contracts/identity/v1.py": "sha256:58b275dd7d382098f618e10c19e899b773cf6b8cbb5714eac174579d89c9a7ec",
+        "natsume_contracts/life/__init__.py": "sha256:ffb4e5f4c9be6c7191232f46627cf83b77e5869d87bd6eda65839c53019e85be",
+        "natsume_contracts/life/v1.py": "sha256:7d593dfc09006b88f27af745c0bd5f77afa3bcb9347404e8d9983ce9fdf385a4",
+        "natsume_contracts/operator/__init__.py": "sha256:e9bcc30400c549ffaadfb0b4885a34f701727c8e833c9488799b6155ce065396",
+        "natsume_contracts/operator/v1.py": "sha256:879529d24f851f4f7eb6b285b826be925f028d983773678042b9e2f19ef7bc8e",
+        "natsume_contracts/task/__init__.py": "sha256:ba54af25cc33bd4d07e2d1b5aaec41cf82aad949c80ace5ba07112775c69ed96",
+        "natsume_contracts/task/v1.py": "sha256:8f4d1bab811579b851acbe69218c441e6fd6c861ee59fc5f868acf313ddfac66"
+      }
+    },
+    "edge_device": {
+      "digest": "sha256:f911174cd32b4a23b50564b6ec5281f43516bbf3b9102cf6b25498be4acd02c8",
+      "file_count": 93,
+      "files": {
+        "edge_client/__init__.py": "sha256:7a66135e7e73f766db32908e458fc71fe67cfcf82872a194b375cc81bdf12e16",
+        "edge_client/__main__.py": "sha256:46f70455d77678f2ffbcbaa86e881614f31e20841c8bc1e50019707644d00394",
+        "edge_client/actuators/__init__.py": "sha256:f0215671b37a06b4715239b2453a9a4c68f668eeb4919c4d5adf7ef1cd874475",
+        "edge_client/actuators/desktop_clipboard.py": "sha256:f098011134c9668860989004ddf42489892df841174d2a9f6eeb775f5c86602f",
+        "edge_client/actuators/desktop_controller.py": "sha256:bb5e3cc62814e1114018b4903b9a30f7caa87df0860a686a7cd916486ec891d5",
+        "edge_client/actuators/fanout_avatar_driver.py": "sha256:9ed2a3e0b2ae2f96f7d64cba800e1bf4a839ac79c41185b0b23934ef40f4c2f3",
+        "edge_client/actuators/mateengine_driver.py": "sha256:b8ae3a9682c1d2f5c4ec42e967e208fbbd6d7d7835713a8d436aad82bb57e5e2",
+        "edge_client/actuators/speech.py": "sha256:161d5820bfda3d59ebed5dc3f327f6466f7cc3752a60c67cb2cfddb7f4e205d8",
+        "edge_client/actuators/tts_engine.py": "sha256:c14a03fd901939247d537fd85a2ff0a22e98dc307028bfd84de449ba3bca7957",
+        "edge_client/actuators/tts_persistent_worker.py": "sha256:3f59e673ef00c3cfb1f117667e80145193b6ad3444b3f8bf1f8313afb2625472",
+        "edge_client/actuators/tts_subprocess_helper.py": "sha256:0158f93451cab8b0982a9587362653808a84328b4507bc56ae9e5dac4345cf1c",
+        "edge_client/actuators/vision_locator.py": "sha256:c35486c02dd12a43a49fac7e6887f10e98515609022493fc538bcc9588b171cb",
+        "edge_client/actuators/vrm_bridge_driver.py": "sha256:7816bee8f95c27b6f801c208d40e4151deea14bfec84cbc52190e6f5b69a8199",
+        "edge_client/actuators/vts_driver.py": "sha256:ae3e688b35c8d5b0c3b3ddb50cf7de82c42e0c9f0a0a0bad55f45f8e50d6fbb5",
+        "edge_client/actuators/vts_expression_map.py": "sha256:efe2ea17e9a74a0a6de28ebb0ad95ec3d3e16991a1cb6debec1acefb6d26a0b6",
+        "edge_client/app/__init__.py": "sha256:3ad5d657cc7dc639fdac9c8541193264ea8daa7268717d60bbf8b29da45f0228",
+        "edge_client/app/fastapi_app.py": "sha256:2be266a637ee1a22f993b6384dfdf2d490fc77b7095416b26c73e89b7cbcb3ec",
+        "edge_client/app/schemas.py": "sha256:4a4c2c78033f2af1f66bc8a30b0370dae2a5d4d873e7fa6869ca46952a7636b2",
+        "edge_client/channels/__init__.py": "sha256:fd5b3f6defa1d25ee9bbdba33ddc1b12bfdc2596a4f6304016f965a21eba391d",
+        "edge_client/channels/base.py": "sha256:7958d43d02fb8a46330481ff11ddf8d5350bac18e9571d851e844355101e3137",
+        "edge_client/channels/input_reporter.py": "sha256:a44b7311f250b45761404f6884947aa24498de9af9be90e18eeab09341896039",
+        "edge_client/channels/wechat_channel_capabilities.py": "sha256:4d5b9e928729e8cc7d8b06970c3b38e06cdc82bda0ea8448ddf4222a5411ea01",
+        "edge_client/channels/wechat_command_queue.py": "sha256:f2aec3bd8b11bc6d4de06472ffc477e52ece16db4513ea140fb89922dd8c0a50",
+        "edge_client/config.py": "sha256:1f4369e551204dc204f353b6cc7cd7638d42ede3343adff5ab3a75e7296fb93f",
+        "edge_client/gateway/__init__.py": "sha256:ef165bb18c630a001c2b37e14712c60fbb33fad3d96ab3e0b125770d8af9f79b",
+        "edge_client/gateway/adapters/__init__.py": "sha256:53a14d24711219bf59861e34baccfa86115e710e26046f35a023316ffa87d2d5",
+        "edge_client/gateway/adapters/base.py": "sha256:8e95c1a3a0ab73d4d12aa05906af78f08db19fb550fef572354b54ee305d19ab",
+        "edge_client/gateway/adapters/feishu_adapter.py": "sha256:6addf8b62b01be0eeb2719192ffa2f43da3cad36b55650e36d5cc5d9e7ca5bf0",
+        "edge_client/gateway/adapters/line_adapter.py": "sha256:ebfecf53cd6fec2ab28ce03b7108d82c3b15031090aebb968ea8128df350d1a6",
+        "edge_client/gateway/adapters/qq_adapter.py": "sha256:86751acbcc98d717c4d33209a427dc5473df62b4839ec2da9a1ad77e2138268e",
+        "edge_client/gateway/adapters/telegram_adapter.py": "sha256:6e6248bc83017243b6926a5f53ffeedc66a66faeefe6849243f4c93e59920dd5",
+        "edge_client/gateway/adapters/wechat_adapter.py": "sha256:3c230c5048cfcb0d924b7a273aa11b04d97282f470189db917a1d349960e9a8f",
+        "edge_client/gateway/adapters/wecom_adapter.py": "sha256:1cea695305b4b686bc1cadb00f1995e115f379871c700bcd099a0eb989d8d9ef",
+        "edge_client/gateway/bootstrap.py": "sha256:3ad7adac1fca25cbe99a4e2f7cea260a6bc99e794586c43d4fb52698e8f2829a",
+        "edge_client/gateway/delivery_runtime.py": "sha256:3c250cfcce36904594171b1a76108e74796227e9b01abfb1ed2af9fd106288bd",
+        "edge_client/gateway/embodiment_runtime.py": "sha256:d13af5e4b2406c5c67d9465817213f70f862a20210dd629d3cccbe27b0ea5df5",
+        "edge_client/gateway/humanize_sender.py": "sha256:fddf0f694fcded4a1c514868e0de7e806563c6b74319faddd2000b30bc663b6e",
+        "edge_client/gateway/media/__init__.py": "sha256:cc14b297eba59649589404e9a3d3f5c0a478f477ea7479340c856a22497d21d0",
+        "edge_client/gateway/media/file_handler.py": "sha256:10c7f148858adf7806c498f79d8652193bad32db6c0bcd6949b06c4fd7a19be4",
+        "edge_client/gateway/media/image_handler.py": "sha256:69fc5df8b2f6137f6aacb6b5bd5b30234a31aecf91f0bf81d98697d05caeb298",
+        "edge_client/gateway/media/video_handler.py": "sha256:de39b63406857951df19ed39f330911076332874dd7d7e342fc51de2b359b0e5",
+        "edge_client/gateway/media/voice_handler.py": "sha256:4fc99a0c4d5ab4b5773df514b1d31b745216aec712028b7793cbfe315185346f",
+        "edge_client/gateway/migration_runner.py": "sha256:f319f74ace68784ecc5e84b195f8e4cfc073f32c7886798a99d05a7ed03071fd",
+        "edge_client/gateway/models.py": "sha256:f283d36d9470dc86f729fa306c91d9a99409643f9ecb1c03cf215c9e98e3d682",
+        "edge_client/gateway/normalizer.py": "sha256:af97244d5d705de52987dea66f3ff5cb11c526ab2a2bd68eef7141c141f79d7b",
+        "edge_client/gateway/outbound.py": "sha256:b11ff772b0b7155d146a5a39d5a51504bd5f2edb45608470012861ef4c22462b",
+        "edge_client/gateway/server.py": "sha256:0bc18f59817ee1bf7589b8a9b03b9eee8236dcc0e24caf71863039fb6d7d54b8",
+        "edge_client/gateway/voice_asr.py": "sha256:bdbe3a0ca9210d7ea16c72d9234c75539f51d1a9ee2edd06cdb4ae7463e2644b",
+        "edge_client/gateway/webhook_security.py": "sha256:a2288ffc3d8e57992fd7c4b6df9c31b5f84a0988a450014276fdc3e65505c6bd",
+        "edge_client/gateway/wechat_query_routes.py": "sha256:708a6bf9f102c90fee528bce2db59784ae45aeed9fdfa6a5342f95174dd82261",
+        "edge_client/persistence/__init__.py": "sha256:763ec333df7af051b00008d1503bbf184bd76ad69ef6b542fab13f882437a14f",
+        "edge_client/persistence/sqlite.py": "sha256:692301a1283ce86c7ab0d562c361f2cabd37e65c50667d060cacdc4b5033c7fd",
+        "edge_client/proofs/__init__.py": "sha256:7a30dda812a0808cc6e799b520c9fcab58cf7fca25aad87a3efb78482dea5b31",
+        "edge_client/proofs/resource_gate.py": "sha256:fb75f02b6b9ab7e51d62ff462c06778afdb9e2ce6df1476740f88c5cbba2822f",
+        "edge_client/rpc/__init__.py": "sha256:59a46b6bb839323db597746bf2dd1956679d5fb72623710e7e5f33b978db3a62",
+        "edge_client/rpc/auth.py": "sha256:60b6a9a1bccd8d2731665c865dfcfb422b4ac8fb8d536a3bb36ad75c25409835",
+        "edge_client/rpc/event_reporter.py": "sha256:d161eda89e83ac7d539032399f87dac7a50ff0d544205d8412794e1e3af1750e",
+        "edge_client/rpc/fallback_llm.py": "sha256:f8f1712b51b8d8877666f9aa5df41496e131dcda9daa603a0426a5612b4a058d",
+        "edge_client/rpc/health.py": "sha256:e4a3e8e6b1c73c268c66d5e88fdc84609a5e75c2a85c97a09f1c3e5a76489706",
+        "edge_client/rpc/resource_gate.py": "sha256:b4bc6d75aad62f8dd4beff39509d180e46bbba3bf3bbca075535d51c06f216c7",
+        "edge_client/rpc/voice.py": "sha256:6b808b4236e88074ac2b26beb5b174259e8d80b16015539020a15765ba2a162d",
+        "edge_client/runtime/__init__.py": "sha256:bc442a1c0778e8c0c13b98ec69e88d8a8457d73d301e40277e7dae9a100cbbd6",
+        "edge_client/runtime/avatar_behavior.py": "sha256:33add6c315f5ed838c60a46fa81caa242ab743ff26a1c8e864f2421b1a57b23e",
+        "edge_client/runtime/bootstrap.py": "sha256:ca8eea507ca2328658e1f17b5d63d90dce87124b55cd3c1fba377a55b3b703e8",
+        "edge_client/runtime/emotion_inference.py": "sha256:3731dadf019e98b433438b70e15ebad0caee45f94ffb13a56cbdf871f7c8c2d9",
+        "edge_client/runtime/health.py": "sha256:44d120a44e72ed27be85e20c129bffd79f4bbcb5ad817e0217a63e6855116493",
+        "edge_client/runtime/tribe_composition.py": "sha256:a7ecf9ead1501fe2b690be914243d8ec4ab623d4d48e43b906ca1bbb89806dd6",
+        "edge_client/runtime/voice_pipeline.py": "sha256:d01a0811528c2c11cd19189504d6d028128ec9e1424f186b6e9f580a94454b07",
+        "edge_client/runtime_texts.py": "sha256:dbdfda8b80b23c6d915b5461c955f88af9bbe611aa598d3e57d143ef2ca43a59",
+        "edge_client/security_probe/__init__.py": "sha256:1a16ac18838b5a80c6910b777f0e251d6608bcba6b1c8f1eddc34ca60035ca9d",
+        "edge_client/security_probe/__main__.py": "sha256:60ecb027cd7ff17ce3dfbd3837a18fda065f800e02b4e1e4c2fe83a37da5e2ee",
+        "edge_client/security_probe/collector.py": "sha256:280e9a2b9b075d135cc242ca68a4e82ef74f31fccf0dd207765d63378f2b0fa4",
+        "edge_client/security_probe/reporter.py": "sha256:653d909760bc6d12982792d7c53cb4ea2e5aee7f2e01dd546beadaa1ce3d3a9e",
+        "edge_client/senses/__init__.py": "sha256:8b99e3eda360faf5107520f9db94aa2cd4a777b5071076ca89fbc6c64685dfb4",
+        "edge_client/senses/asr.py": "sha256:678116167b88c986d44aeecafa742db25a5daef336908cdacde85e292dcd83af",
+        "edge_client/senses/fallback_llm.py": "sha256:ef4cce4a3e6d82569f191545beac4c43c8a2c41c5609d60bf0007495fbb3a527",
+        "edge_client/services/__init__.py": "sha256:4afdb97273e1b42b02f636a5d6152505215560308370e350a9068615bed2327b",
+        "edge_client/services/wx_db_service.py": "sha256:5ed67f8765829dabaa9012a4bbba67c45141e2ce17434a4728d0a072aad24335",
+        "edge_client/services/wx_decrypt_refresher.py": "sha256:5e7531e4b2220d3a14ea5701370a1d01eabfa5d4f55df3ba0c27f1725bfedfb5",
+        "edge_client/services/wx_watcher.py": "sha256:d9e0bfaa799486675c9c656949b8963f6114eda2e06da9b6a00acd1621f8212e",
+        "edge_client/tribe/__init__.py": "sha256:5caef119c1d7bb09571c82176f518df24c0737c35bad62d4445251be66cedd80",
+        "edge_client/tribe/base_agent.py": "sha256:538108efc69b4bb9cbb56ebb9ee5d329167e2451a54849f38368d40679da777c",
+        "edge_client/tribe/channel_agent.py": "sha256:65ad00a6c012ccb0806042083c0f77a3fd2204b2621e1568b9a222db3cd11e2a",
+        "edge_client/tribe/edge_tribe_bridge.py": "sha256:68b492072ce1118d8ea8672b79d23861ec82fec7256d946c6f9c44222c658b66",
+        "edge_client/tribe/peripheral_agent.py": "sha256:44b86ff11741dd67ee03825ba1bda4a7665273be77e78876d036a8b34fe45a1a",
+        "edge_client/tribe/registry.py": "sha256:b6696aaec5c08fecb9d99d1a12b3557ff8b2d9a751b945484453f175fae7a074",
+        "edge_client/tribe/somatic_agent.py": "sha256:675fbcef180942d4075f7ddca45b1101ab995decbd6c1bf5704700ba1fa10174",
+        "edge_client/tribe/voice_agent.py": "sha256:55c09f29e1cc4bf65594b216b0bd86400ad63b3e0e97bc749af9fd93f5398a75",
+        "natsume_contracts/edge/__init__.py": "sha256:3fe0bcc7f24aed222b229cd49681632019115866efe17b218aff84a7bd59f804",
+        "natsume_contracts/edge/embodiment_v1.py": "sha256:a291d2195c763ae370f0996300cf45fc2622870d4c41ee0e9987bdb9afe588ef",
+        "natsume_contracts/edge/service_catalog_v1.py": "sha256:ae28970f9a3d117a7d949bf0925845c8d5c60fd7aa25d0dedb8cb91239ec67c1",
+        "natsume_contracts/edge/transport_v1.py": "sha256:df9e9a36ef74e0ddc96ec5e5b36937af61cdd6762138868b116e4a01fe966379",
+        "natsume_contracts/edge/v1.py": "sha256:775feedccc012c8b00cb86a14d9cc9c6f5e1de5193f12d7068b72c959b6b19c5"
+      }
+    },
+    "generated_operator_client": {
+      "digest": "sha256:fbff41f13024225faaf4921a037a014bed1b5167959fd364b7b4a627d6e41576",
+      "file_count": 4,
+      "files": {
+        "host_brain/app/monitor_ui/e2e/core-release-real-interaction.spec.js": "sha256:530fbd7026c9a2ed24e02a5a2a5110586eee283a79178e11e0b0c3a0e87dcded",
+        "host_brain/app/monitor_ui/src/shared/api/generated/operator-command.openapi.json": "sha256:3e222f5a64f4fdd696c5382af168c116bd5d24f0fcefe07c1b2a048bfd639270",
+        "host_brain/app/monitor_ui/src/shared/api/generated/operatorCommandClient.ts": "sha256:d44ced492d955abc1fab544ab745e5784e8d4c337ec1d1e76dfc0d0d627ab0a6",
+        "host_brain/app/monitor_ui/src/shared/api/operatorCommandGateway.js": "sha256:0f634aee41fae25bcfb77fc7161512db20a64d15f6b793172e6b4189f88d7750"
+      }
+    },
+    "migrations": {
+      "digest": "sha256:eb785298a0d57125513eb9001d01984f6c2a90c7ff72a483ce38ddd58b9fc2e4",
+      "file_count": 70,
+      "files": {
+        "edge_client/gateway/migrations/0001_embodiment_transport.sql": "sha256:baa1ae53ca1386b00e3839516cad02ec96e669d54a346fe17668d529d45d445d",
+        "host_brain/audit/migrations/0001_triptych.sql": "sha256:b981d4d83038c747883ccc546c5fcb3b55f3a7d39ee65b82ab8d46ba700d003b",
+        "host_brain/audit/migrations/0002_canon_schema.sql": "sha256:bc82a6aafa378e6171b22478a924c90f6ff4935568c2e0aa42e33bb88676f226",
+        "host_brain/audit/migrations/0003_memory_ops.sql": "sha256:8545307877a1ee793107edd8ad46defab8d4f6f26467e23f2b1e00bc86262bf8",
+        "host_brain/audit/migrations/0004_vault_schema.sql": "sha256:356951a5f35dced99ef8ab9465fde7ab0469c63f4fa213649fc2943b8467fb20",
+        "host_brain/audit/migrations/0005_airlock_schema.sql": "sha256:8e2cc3c3f19a9fc822b58f022f8c2918c24b0bdf112ed85700778c9b6ddb8ea6",
+        "host_brain/audit/migrations/0006_channel_io_schema.sql": "sha256:83d5bed070469724f647e60e3121d8a1cda06ff7d11f031f030fb427b7534330",
+        "host_brain/audit/migrations/0007_avatar_schema.sql": "sha256:fc48814682503608863d8afad8f70c0ddb717d2b872a1db4ba000a182102a8da",
+        "host_brain/audit/migrations/0008_clawd_ui_schema.sql": "sha256:5a3b22b6aa88f55000233172982ef0d1da55abef3470fbed0079523729a95c75",
+        "host_brain/audit/migrations/0009_agent_loop_log.sql": "sha256:244dc97e2ca1e4060dd65dcdf3244a4ae03b000527534ca28cdffd1f0d02924e",
+        "host_brain/audit/migrations/0009_service_health_schema.sql": "sha256:6d2409ed28016cf260e56d137dd7912cc12b0395f7eae8b7d838837678706bdf",
+        "host_brain/audit/migrations/0010_voice_event_schema.sql": "sha256:95ac838df778e47c7ccc6d8eebba3de18aed742a599897a89c431c62a2a22ef0",
+        "host_brain/audit/migrations/0011_retrieval_event_schema.sql": "sha256:d2cc37a2e5e3106b01202008e6227c3bc9628025b29e376b6f60e4ada97b84f5",
+        "host_brain/audit/migrations/0012_vision_event_schema.sql": "sha256:b30a68c2f7446969dbb422ea296056929e2ab3f3e16969fdb482c20bce708fd3",
+        "host_brain/audit/migrations/0013_bond_update_schema.sql": "sha256:cf02c7533f9ac82ff58297b5fcabcbd927e6e3d93d3043cdb84087886e58de45",
+        "host_brain/audit/migrations/0014_scheduler_event_schema.sql": "sha256:5b32dc052d72ec95a1e2f7a2582e75ef8ad684cfe27f9be2136132fa26aa94b8",
+        "host_brain/audit/migrations/0015_world_canon_doc.sql": "sha256:aa4bb90ca28f08458d6c06edc1b4ad0537f61caa6e1716a695b202e3f4be43df",
+        "host_brain/audit/migrations/0016_canon_proposal_log.sql": "sha256:ea8510beab2d3a7c7491bde8e8b5f564a19bf4263b312cce42e103c7da62e177",
+        "host_brain/audit/migrations/0017_canon_proposal_id_unique.sql": "sha256:b80daa6ef6763970f6190f401dd4918843e629923a2430ee6177d449b2054525",
+        "host_brain/audit/migrations/0018_scheduler_tasks.sql": "sha256:3e3bcf5ef5633f498dc1922c54de99c550b0e20530aa1418231a98a1dfbb2197",
+        "host_brain/audit/migrations/0019_subgraph_trace.sql": "sha256:1e70f67514e085acce1028e93062e7cc4e31da15b8b66dd4533f200ef9824220",
+        "host_brain/audit/migrations/0020_llm_call_log.sql": "sha256:fa33ceb6575cce7fa865ea2dfb560a1c732042df841425e666d235d4d1c68bb4",
+        "host_brain/audit/migrations/0021_episodic_fts5.sql": "sha256:25c938ba7eef54c52642ecb39e17be0bd4caf04b39925212cfcb59c620f778fa",
+        "host_brain/audit/migrations/0022_llm_route_log.sql": "sha256:f1f0a653f584ec889ab54d7a3af381b51c50a7050a6ecdd382c94323497c0128",
+        "host_brain/audit/migrations/0039_llm_route_log.sql": "sha256:839d7077ca3ea3532d1b17bd857c8e42b63fbb9c10a48162e2e2912e29aed3c9",
+        "host_brain/audit/migrations/0040_llm_route_config_log.sql": "sha256:15d75e73743d942aa8775e2bfb620258bb6c002f798d7e84228df0d751f5179f",
+        "host_brain/audit/migrations/0041_canon_change_log_body.sql": "sha256:663fc6a8c069e8d7749cc580f347edc18ec89fb685f602f6e614e5c32524b06f",
+        "host_brain/audit/migrations/0042_llm_pool_call_log.sql": "sha256:365b821d397b2ec984b391f0d0111f107e1bf9940fbc82bce34de5970e4fb3eb",
+        "host_brain/audit/migrations/0043_canon_proposal_content.sql": "sha256:cefd91006687803d58817a1965eee369a9334c1f0558d8fd8eb804b105c8487f",
+        "host_brain/audit/migrations/0044_llm_token_usage_log.sql": "sha256:d4b8ec7d1b4d76afb1d879f55bc4258ce19cf897acfce33cdb669aa87a01c85b",
+        "host_brain/audit/migrations/0045_life_memory_tables.sql": "sha256:1a646b85903cb3d4a116886dc36036feb083cb7900a984b9c85bf92cefb91e31",
+        "host_brain/audit/migrations/0046_life_memory_collections.sql": "sha256:c372529ecffcb566c0866d29e14194c3f423f110982721118217677b5d3d3cea",
+        "host_brain/audit/migrations/0047_life_memory_entities.sql": "sha256:70e6d3b6603eb637ecddf24c7c7beda88970b0729b59e404f02a63f6fd1a7fb2",
+        "host_brain/audit/migrations/0048_user_preference_schema.sql": "sha256:144d2516987d4a28379123354281c0132a8a4b31342c4d6abd02e0b9502996fb",
+        "host_brain/audit/migrations/0049_digital_life_causality.sql": "sha256:448aecc9f3c20829746313f59174e9af1233da9e2fb2ec6a6795843b9acc7750",
+        "host_brain/audit/migrations/0050_pentest_knowledge.sql": "sha256:3139a960f5406393ea6a6bca2526187b9d8de09a52969a9af18db86c2e48a23e",
+        "host_brain/audit/migrations/0051_pentest_knowledge_promotion_candidate.sql": "sha256:4eacbafbb6be890e6481464ea8abdb89f460db8b456207d41d07bb06c59971d0",
+        "host_brain/audit/migrations/0052_task_runtime.sql": "sha256:2beb2cde77a2a7bc140c1fa870d57b0f79aac18d3d041f766521e915262aed75",
+        "host_brain/audit/migrations/0053_canon_apply.sql": "sha256:5c712b40f7184f5f47bcc50be3e3516f59d4a5ec6342e9a4f07c64f13f54e54b",
+        "host_brain/audit/migrations/0054_task_runtime_recovery.sql": "sha256:5a0450d4770ff1a33c85170e52483a78508bf43c2946ef6ed058278f35bca489",
+        "host_brain/audit/migrations/0055_agent_runtime_review_store.sql": "sha256:c4e9596a513910bd4d4fabdecb4eb71e24de4047269d56018ca2b9b447a7940d",
+        "host_brain/audit/migrations/0056_runtime_events.sql": "sha256:e806e145521e39bfc82895ca78710d138367863b46973a6785d793b2728fafd5",
+        "host_brain/audit/migrations/0057_life_occ.sql": "sha256:9151f5c3c6a8370bb4de07c8f8dfa5b844f09b03c6ab1d625917db6b2d47791a",
+        "host_brain/audit/migrations/0058_secure_ingress.sql": "sha256:e5b8790b6ac9058fb48ef0a2af9aa162985985eb4ee2eeab61788b233047b95b",
+        "host_brain/audit/migrations/0059_gateway_transport.sql": "sha256:bad91de55866c6e9ffffed8a8d249abf077b146bce6b3705a5f95d11b91a8944",
+        "host_brain/audit/migrations/0060_skill_supply_chain.sql": "sha256:ea7471978f063b6152f3f1699f6896fe5782bede412214b2162b3592b9a1618e",
+        "host_brain/audit/migrations/0061_pentest_run_store.sql": "sha256:4aeda398f2f758b5c1e8cb2894aef93b17177137112d5145e720bfd607c37fa0",
+        "host_brain/audit/migrations/0062_host_command_admission.sql": "sha256:e003783038278ca82c7b8ee18fb87916ee7e6c109592a59a4f3579da378f5d59",
+        "host_brain/audit/migrations/0063_life_memory_admission.sql": "sha256:1b44c80975c275fae713344e1189efe57d43cec223c3931de122231dda82cb66",
+        "host_brain/audit/migrations/0064_agent_execution_result.sql": "sha256:3a34845837c82e7637fe9331945d56a11e58b212e51a75bd34dada446eb0d040",
+        "host_brain/audit/migrations/0065_scheduler_runtime.sql": "sha256:447387f6a5b0e085d3e3155baaa25e2164070c6a5875d894903dfd9acdb11c8c",
+        "host_brain/audit/migrations/0066_scheduler_durable_uow.sql": "sha256:c91a8941b5a9abe182399e9408789218cd2fc4614e279ff4a35a578087007c1b",
+        "host_brain/audit/migrations/0067_canon_command_spine.sql": "sha256:efa1fb7bca9735cbe5fd81c027bbd38a1b63f874b9afaba9487e95ca3b244116",
+        "host_brain/audit/migrations/0068_runtime_event_delivery.sql": "sha256:91f114e2d0f199a9d9fa772f207e9154aba577f8469a0be0ff59dcbe854d63e2",
+        "host_brain/audit/migrations/0069_life_episode_retention.sql": "sha256:277869c81031da2d7a1b3b5e1be084674fddb64ab478017fb4e524bd3a9e158c",
+        "host_brain/audit/migrations/0070_context_persistence.sql": "sha256:faf991332cffab3f9f7307b2101e9c88d6443b5b32972b08a3be946d97a43e67",
+        "host_brain/audit/migrations/0071_life_runtime_uow.sql": "sha256:55abc3eb3372ca973f3fef2cec41b1660102c0f4da44c68eba7db54c15dc8b16",
+        "host_brain/audit/migrations/0072_platform_registry_persistence.sql": "sha256:21dfa7958d43c9f7543ceefe1d4d4601fef1a366d360509a3fb5502e26b782b5",
+        "host_brain/audit/migrations/0073_rate_limit_persistence.sql": "sha256:767194c1f5328984f14100f7b8ce707b0bbfae7d6a84b5b12a60eb92a250d7f2",
+        "host_brain/audit/migrations/0074_graph_evidence_persistence.sql": "sha256:9c64bfce0c495a33350935eb31283b1b21af57692f949cc50208000dde0d9f4e",
+        "host_brain/audit/migrations/0075_platform_registry_catalog_repair.sql": "sha256:a2685586a1ff884acf5e035fa05cba42766973f2b4877a48c01aa6441d72987a",
+        "host_brain/audit/migrations/0076_bond_fallback_persistence.sql": "sha256:a089c310961174aa925a5ecbd340094cef6392dc58ed3282ac63a19c06b43839",
+        "host_brain/audit/migrations/0077_nvd_cache_persistence.sql": "sha256:1ed411277f60a1e3db3320b2463204915aa078cf0ac8e125452dd1c4f44600e0",
+        "host_brain/audit/migrations/0078_response_feedback_persistence.sql": "sha256:bcbce69394c2e9e6a199526f35c6d577653154ec960a938e993233b4dc0f8105",
+        "host_brain/audit/migrations/0079_life_command_foundation.sql": "sha256:f2cc0b206b0d23c68e9bac97bde164039ecad16f61441f1f32b3c16115b573ca",
+        "host_brain/audit/migrations/0080_model_attempt_audit.sql": "sha256:ba68caa7fa5446ede540e094c4f18140663718f4efc1a861db2b2df4ce531686",
+        "host_brain/audit/migrations/0081_capability_execution_journal.sql": "sha256:30930ef415f2cadf1feca3855a503b415ad1cc1314ff57856251dda93bde128f",
+        "host_brain/audit/migrations/0082_operator_query_projection.sql": "sha256:815728f7d03ae67f955d807aae0a11f63dee6b80e2bd0560a903ee1816b81875",
+        "host_brain/audit/migrations/0083_host_embodiment_outbox.sql": "sha256:7d797a2ea74a693ccd421f18bc13b1cf486ad9a20d5a89ef5a07e2a87f67fd3c",
+        "host_brain/bond/migrations/0001_bond_constraints.cypher": "sha256:7d675021f9fd1eab2bf3ecb9c2cf68d6c851a6cd576ca44aba4c32f5408a81d2"
+      }
+    },
+    "model_prompt_domain": {
+      "digest": "sha256:ada27b2fd7a0100f93327206ae797bcbc52e504d00b49e324c002382a2672131",
+      "file_count": 34,
+      "files": {
+        "host_brain/domain_packs/__init__.py": "sha256:99a1aae988722a5c2a8af1848b75c2aaa43fd40cc165365a2d071b165ef75fd9",
+        "host_brain/domain_packs/contracts.py": "sha256:1a85d98b8c3cbcc9da801bb2307f3a53c958d9eb5d627244716f4d588ea092d7",
+        "host_brain/domain_packs/lightnovel/__init__.py": "sha256:50a669b56981ef4c8f9f8a97d32e050c22546012f8a4fef38dda14c9402c2b4a",
+        "host_brain/domain_packs/lightnovel/delivery.py": "sha256:fe884cf05c4b3c0e3ec14a31262e0e16a4baf0a2ff0c7c74ad50a5435cd74a20",
+        "host_brain/domain_packs/lightnovel/ranking.py": "sha256:7573687ea346edd2dd9c1d918925ef8796e9585c4159a9450672d97999f96a99",
+        "host_brain/domain_packs/lightnovel/research.py": "sha256:9f5d6e21de82d610748aca29809b15cceecb85fb674554bd2b23b551507591ff",
+        "host_brain/domain_packs/media_translation.py": "sha256:03bbab4ffd14c311f2dfebd5dbe2aa2768412464167bf4e14d8c95852fd2d4fb",
+        "host_brain/domain_packs/pentest.py": "sha256:7b5f08493d4425555a56527cc5da32354d9a9cabbc07164a33120811961d874b",
+        "host_brain/domain_packs/ports.py": "sha256:be886f08ec658f5db0eceab004e0fc2d583ccbe0bff86f51b6bb69b24c5b036a",
+        "host_brain/domain_packs/production_composition.py": "sha256:e303e970b2da07ac3eeb877af159a8330873962e6d372a3ba76e327066960af1",
+        "host_brain/domain_packs/production_jobs.py": "sha256:633172bc54940279173d161b5b6bddb63a25158d80b049e532a2deafce0f3800",
+        "host_brain/domain_packs/production_runtime.py": "sha256:46517c500c0195af133ea96e680293beb8d55bd3ac737941404cd6279edb3c87",
+        "host_brain/domain_packs/registry.py": "sha256:65066b8684b95fc1c7117372476f478d3db68432bf6442e8607c44f74aede63e",
+        "host_brain/domain_packs/research_browser.py": "sha256:c40af1cdd0fc4438be9bc85e204b24e1b52ffaadec2a6beac954d2d78af89c54",
+        "host_brain/model_runtime/__init__.py": "sha256:995ffcb2354881db501b93bb054aaf840e7d9797ab56dba8e777cae2400bf0e1",
+        "host_brain/model_runtime/composition.py": "sha256:e1a41f0ea160864ccc4f14cc40c56c6ec3724e978b9186f74432062d83a5f4dc",
+        "host_brain/model_runtime/contracts.py": "sha256:b184b8653df73f7ba29ea8cc2b6ff56b71fe6ff57b2297d6239891e25e9b1597",
+        "host_brain/model_runtime/graph_semantics.py": "sha256:39eba8dd8567dd2906f810e4c639cd560904cbd35aa9637b62d466a2f68006d3",
+        "host_brain/model_runtime/invocation.py": "sha256:613979091fc35e22bdfdbb4d45f86d4e3426badd506c3db462f854bd3cf71bff",
+        "host_brain/model_runtime/json_parser.py": "sha256:33c477aef0b504c421a16ac262d17d50b14411e30b9b7d116320a7c12b3fa629",
+        "host_brain/model_runtime/live_prompts.py": "sha256:0fcf071b49de8cf08680f92e7ac2f1d53b4a52314f8bc86918aa6f4403eb40ff",
+        "host_brain/model_runtime/model_attempt_service.py": "sha256:aa4f18dfafa588d352c67b381eaf56cbe01c977700324766fb2a5aaa5bbe5015",
+        "host_brain/model_runtime/production_composition.py": "sha256:41b96875c554a10a375adea11cecedb3765eeddcf0903c015d17567a8b824e8f",
+        "host_brain/model_runtime/production_provider_adapters.py": "sha256:ea0bc2d597d43a467a38f1ab68e85c3d551771b79f030f7a3ee4acd034070c46",
+        "host_brain/model_runtime/production_route_policy.py": "sha256:34173455b3b8b37023f9b266a63dbb14186a1cf4aec6c4dcad6b0cb212aae559",
+        "host_brain/model_runtime/prompt_builder_utils.py": "sha256:10c57f06bd316a580dc75f74395946bc2819279975b93c12c2ad5d3270044515",
+        "host_brain/model_runtime/prompt_catalog.py": "sha256:de159df4af3b157cc287f5224d04f54a3c4310c3b10acd494f76637a46899b73",
+        "host_brain/model_runtime/prompt_contract.py": "sha256:089678f58b30f11e139e429ce2de7b11a9d6aebd53b5b19031f5908e9cfcf348",
+        "host_brain/model_runtime/prompt_registry.py": "sha256:69cdcd8796163e3f159e5f0bd880cecb4df5bbdf8c08a3d53507bf09f65161bc",
+        "host_brain/model_runtime/prompt_specs.py": "sha256:af2e210b135e034d4e1fcc71539f620ae6d0b5e2c03db1a4d9be33a9b3c413ce",
+        "host_brain/model_runtime/provider_adapters.py": "sha256:c7e2525c351dc99e28f744c9a10ecfb41a311f31cf926b7b3419fd1e62fa34cd",
+        "host_brain/model_runtime/route_catalog.py": "sha256:2e78566b942fac050b7946ab0934b3a9dc15df7046956d9778062845b2afbc58",
+        "host_brain/model_runtime/route_policy.py": "sha256:2a7d195954833a1364b445c5270de1cd9af7f6430513b898874fbdbbcb6fa847",
+        "host_brain/model_runtime/trace.py": "sha256:7f6ce2a55087692b2adf991105b635176bd08df09ccc7e819fdd0e5d846a3068"
+      }
+    },
+    "packages": {
+      "digest": "sha256:da2852e9982f6390a32f1885bb6038016e16442372568b6f2ef7013e83a55b38",
+      "file_count": 10,
+      "files": {
+        "desktop_pet/package-lock.json": "sha256:f7b2c13adc228a9ab2ad1bd0ff2ab64f1a93d9b887ed3b0457c91eee47fafe14",
+        "desktop_pet/package.json": "sha256:a82359d7aec1ece9532260287238125a69adf5e9e84e6b0437ccd4670b46b52b",
+        "edge_client/pyproject.toml": "sha256:d7e930abb6c105367bac2d370b909a6db65b890ba7a68f63a6edb27d38475235",
+        "host_brain/app/monitor_ui/package-lock.json": "sha256:88380709a957810fb6db8cbfdb2a20175fdaa68b8668f80dd21d74b2d20241f1",
+        "host_brain/app/monitor_ui/package.json": "sha256:55c8c71ef28d0a077f35ec77fb8d54fd11c60f69583dc49714692a3b3dd82dc0",
+        "host_brain/pyproject.toml": "sha256:0108686b02d5b966b9f1629ee5aae55cb6fbeb7e4858e444aa27392252201de3",
+        "natsume_contracts/pyproject.toml": "sha256:81d6e97283949d5af6435b71c41d7b9cfd7bb4a765798b9043a37f54b1550184",
+        "package-lock.json": "sha256:40fe453f30f3612aa3b3f39bc51259147f2f64db08ac5e4e81060c84f371306b",
+        "package.json": "sha256:addbb573f3a5c448b26da1cad4428e198d21e4885cf32bceace7fe8035078ad1",
+        "requirements.txt": "sha256:88a9c3fedc6805d5a158614bfc15378d4492b6a1a7e433f7546c9712f9d0ceaf"
+      }
+    },
+    "release_acceptance": {
+      "digest": "sha256:b481aa1392ef30c28ceca3c7c8f3c4f6e201d8d7cdff6cefc2e27c8efa2bde72",
+      "file_count": 7,
+      "files": {
+        "configs/release/core_architecture_policy.json": "sha256:45892dcf2d139f300fc45a75ad45c20072beff41ebd7c59a99ba4aff7feb7e3c",
+        "host_brain/app/monitor_ui/e2e/core-release-real-interaction.spec.js": "sha256:530fbd7026c9a2ed24e02a5a2a5110586eee283a79178e11e0b0c3a0e87dcded",
+        "host_brain/app/monitor_ui/playwright.config.js": "sha256:b3bb0fa026e611245b79098c675b1fe92ac2f6ba4ef81410826fb574d8ee05a4",
+        "host_brain/app/monitor_ui/vite.config.js": "sha256:15c6af49ba810f655890a0bf7261dca602d275ef1929ffeb262560246fb1159c",
+        "tests/contract/test_core_release_manifest_contract.py": "sha256:6b6ffd6689207c5410f579dddd57fd5e6a4ab1e8c95d4daac9c7dd5d942a3f62",
+        "tests/e2e/test_core_release_acceptance.py": "sha256:a4fd831cd1057e821e0d0c0758048abed3d18a3522e733019d1e839615d33a4a",
+        "tools/run_core_release.py": "sha256:9e560216aea993f7451e9bb0669a44c702097d9242c99ca991ff06c9b1dfb4a3"
+      }
+    }
+  },
+  "compatibility_registry": {
+    "active_count": 0,
+    "issues": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS",
+    "usage_count": 0
+  },
+  "contracts": {
+    "edge_embodiment": "natsume.edge.embodiment.v1",
+    "operator_command": "natsume.operator.command.v1",
+    "operator_query": "natsume.operator-query.v1",
+    "query_projection": "Natsume.operator.query_projection.v1"
+  },
+  "generated_at": "2026-07-13T09:19:42.346000+00:00",
+  "git": {
+    "commit": "296593755a094add05d6e4f9219c08bae61744a6",
+    "dirty_paths": []
+  },
+  "migration_head": "host_brain/audit/migrations/0083_host_embodiment_outbox.sql",
+  "release_id": "natsume-ai-v1-core",
+  "release_status": "DRAFT",
+  "retired_paths": {
+    "remaining_paths": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS"
+  },
+  "rollback_matrix_ref": "docs/50_release/core/CORE_ROLLBACK_MATRIX.json",
+  "sbom_ref": "docs/50_release/core/SBOM.cdx.json",
+  "schema_version": "natsume.core-release-manifest.v1",
+  "ts_ms": 1783934382346
+}

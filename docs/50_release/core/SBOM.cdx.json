@@ -1,0 +1,389 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "group": "npm",
+      "name": "@dagrejs/dagre",
+      "purl": "pkg:npm/@dagrejs/dagre@2.0.4",
+      "scope": "required",
+      "type": "library",
+      "version": "^2.0.4"
+    },
+    {
+      "group": "npm",
+      "name": "@eslint/js",
+      "purl": "pkg:npm/@eslint/js@9.39.2",
+      "scope": "optional",
+      "type": "library",
+      "version": "^9.39.2"
+    },
+    {
+      "group": "npm",
+      "name": "@pixiv/three-vrm",
+      "purl": "pkg:npm/@pixiv/three-vrm@3.4.2",
+      "scope": "required",
+      "type": "library",
+      "version": "^3.4.2"
+    },
+    {
+      "group": "npm",
+      "name": "@playwright/test",
+      "purl": "pkg:npm/@playwright/test@1.61.0",
+      "scope": "optional",
+      "type": "library",
+      "version": "^1.61.0"
+    },
+    {
+      "group": "npm",
+      "name": "@types/react",
+      "purl": "pkg:npm/@types/react@18.3.12",
+      "scope": "optional",
+      "type": "library",
+      "version": "^18.3.12"
+    },
+    {
+      "group": "npm",
+      "name": "@types/react-dom",
+      "purl": "pkg:npm/@types/react-dom@18.3.1",
+      "scope": "optional",
+      "type": "library",
+      "version": "^18.3.1"
+    },
+    {
+      "group": "npm",
+      "name": "@vitejs/plugin-react",
+      "purl": "pkg:npm/@vitejs/plugin-react@5.2.0",
+      "scope": "optional",
+      "type": "library",
+      "version": "^5.2.0"
+    },
+    {
+      "group": "npm",
+      "name": "@xyflow/react",
+      "purl": "pkg:npm/@xyflow/react@12.3.6",
+      "scope": "required",
+      "type": "library",
+      "version": "^12.3.6"
+    },
+    {
+      "group": "npm",
+      "name": "autoprefixer",
+      "purl": "pkg:npm/autoprefixer@10.4.20",
+      "scope": "optional",
+      "type": "library",
+      "version": "^10.4.20"
+    },
+    {
+      "group": "npm",
+      "name": "echarts",
+      "purl": "pkg:npm/echarts@5.5.1",
+      "scope": "required",
+      "type": "library",
+      "version": "^5.5.1"
+    },
+    {
+      "group": "npm",
+      "name": "echarts-for-react",
+      "purl": "pkg:npm/echarts-for-react@3.0.2",
+      "scope": "required",
+      "type": "library",
+      "version": "^3.0.2"
+    },
+    {
+      "group": "npm",
+      "name": "electron",
+      "purl": "pkg:npm/electron@31.7.7",
+      "scope": "required",
+      "type": "library",
+      "version": "^31.7.7"
+    },
+    {
+      "group": "npm",
+      "name": "eslint",
+      "purl": "pkg:npm/eslint@9.39.2",
+      "scope": "optional",
+      "type": "library",
+      "version": "^9.39.2"
+    },
+    {
+      "group": "npm",
+      "name": "eslint-plugin-react",
+      "purl": "pkg:npm/eslint-plugin-react@7.37.5",
+      "scope": "optional",
+      "type": "library",
+      "version": "^7.37.5"
+    },
+    {
+      "group": "npm",
+      "name": "eslint-plugin-react-hooks",
+      "purl": "pkg:npm/eslint-plugin-react-hooks@7.0.1",
+      "scope": "optional",
+      "type": "library",
+      "version": "^7.0.1"
+    },
+    {
+      "group": "npm",
+      "name": "globals",
+      "purl": "pkg:npm/globals@16.5.0",
+      "scope": "optional",
+      "type": "library",
+      "version": "^16.5.0"
+    },
+    {
+      "group": "npm",
+      "name": "lucide-react",
+      "purl": "pkg:npm/lucide-react@0.468.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^0.468.0"
+    },
+    {
+      "group": "npm",
+      "name": "pixi-live2d-display",
+      "purl": "pkg:npm/pixi-live2d-display@0.4.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^0.4.0"
+    },
+    {
+      "group": "npm",
+      "name": "pixi.js",
+      "purl": "pkg:npm/pixi.js@6.5.10",
+      "scope": "required",
+      "type": "library",
+      "version": "^6.5.10"
+    },
+    {
+      "group": "npm",
+      "name": "postcss",
+      "purl": "pkg:npm/postcss@8.4.49",
+      "scope": "optional",
+      "type": "library",
+      "version": "^8.4.49"
+    },
+    {
+      "group": "npm",
+      "name": "react",
+      "purl": "pkg:npm/react@18.3.1",
+      "scope": "required",
+      "type": "library",
+      "version": "^18.3.1"
+    },
+    {
+      "group": "npm",
+      "name": "react-dom",
+      "purl": "pkg:npm/react-dom@18.3.1",
+      "scope": "required",
+      "type": "library",
+      "version": "^18.3.1"
+    },
+    {
+      "group": "npm",
+      "name": "react-hot-toast",
+      "purl": "pkg:npm/react-hot-toast@2.6.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^2.6.0"
+    },
+    {
+      "group": "npm",
+      "name": "react-router-dom",
+      "purl": "pkg:npm/react-router-dom@6.28.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^6.28.0"
+    },
+    {
+      "group": "npm",
+      "name": "sql.js",
+      "purl": "pkg:npm/sql.js@1.14.1",
+      "scope": "required",
+      "type": "library",
+      "version": "^1.14.1"
+    },
+    {
+      "group": "npm",
+      "name": "tailwindcss",
+      "purl": "pkg:npm/tailwindcss@3.4.16",
+      "scope": "optional",
+      "type": "library",
+      "version": "^3.4.16"
+    },
+    {
+      "group": "npm",
+      "name": "three",
+      "purl": "pkg:npm/three@0.170.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^0.170.0"
+    },
+    {
+      "group": "npm",
+      "name": "typescript",
+      "purl": "pkg:npm/typescript@5.9.3",
+      "scope": "optional",
+      "type": "library",
+      "version": "^5.9.3"
+    },
+    {
+      "group": "npm",
+      "name": "vite",
+      "purl": "pkg:npm/vite@5.4.11",
+      "scope": "required",
+      "type": "library",
+      "version": "^5.4.11"
+    },
+    {
+      "group": "npm",
+      "name": "vite",
+      "purl": "pkg:npm/vite@8.0.3",
+      "scope": "optional",
+      "type": "library",
+      "version": "^8.0.3"
+    },
+    {
+      "group": "npm",
+      "name": "ws",
+      "purl": "pkg:npm/ws@8.18.0",
+      "scope": "required",
+      "type": "library",
+      "version": "^8.18.0"
+    },
+    {
+      "group": "npm",
+      "name": "zustand",
+      "purl": "pkg:npm/zustand@5.0.2",
+      "scope": "required",
+      "type": "library",
+      "version": "^5.0.2"
+    },
+    {
+      "group": "pypi",
+      "name": "beautifulsoup4",
+      "purl": "pkg:pypi/beautifulsoup4@4.12.0,<5",
+      "type": "library",
+      "version": "4.12.0,<5"
+    },
+    {
+      "group": "pypi",
+      "name": "chromadb",
+      "purl": "pkg:pypi/chromadb@1.4.0,<2",
+      "type": "library",
+      "version": "1.4.0,<2"
+    },
+    {
+      "group": "pypi",
+      "name": "cryptography",
+      "purl": "pkg:pypi/cryptography@46.0.0,<47",
+      "type": "library",
+      "version": "46.0.0,<47"
+    },
+    {
+      "group": "pypi",
+      "name": "fastapi",
+      "purl": "pkg:pypi/fastapi@0.104.0,<1",
+      "type": "library",
+      "version": "0.104.0,<1"
+    },
+    {
+      "group": "pypi",
+      "name": "langchain",
+      "purl": "pkg:pypi/langchain@1.2.0,<2",
+      "type": "library",
+      "version": "1.2.0,<2"
+    },
+    {
+      "group": "pypi",
+      "name": "langchain-core",
+      "purl": "pkg:pypi/langchain-core@1.0.0,<2",
+      "type": "library",
+      "version": "1.0.0,<2"
+    },
+    {
+      "group": "pypi",
+      "name": "langchain-google-genai",
+      "purl": "pkg:pypi/langchain-google-genai@4.2.0,<5",
+      "type": "library",
+      "version": "4.2.0,<5"
+    },
+    {
+      "group": "pypi",
+      "name": "langchain-openai",
+      "purl": "pkg:pypi/langchain-openai@1.1.0,<2",
+      "type": "library",
+      "version": "1.1.0,<2"
+    },
+    {
+      "group": "pypi",
+      "name": "langgraph",
+      "purl": "pkg:pypi/langgraph@1.0.0,<2",
+      "type": "library",
+      "version": "1.0.0,<2"
+    },
+    {
+      "group": "pypi",
+      "name": "neo4j",
+      "purl": "pkg:pypi/neo4j@6.1.0,<7",
+      "type": "library",
+      "version": "6.1.0,<7"
+    },
+    {
+      "group": "pypi",
+      "name": "psutil",
+      "purl": "pkg:pypi/psutil@5.9.0,<7",
+      "type": "library",
+      "version": "5.9.0,<7"
+    },
+    {
+      "group": "pypi",
+      "name": "pydantic",
+      "purl": "pkg:pypi/pydantic@2.0.0,<3",
+      "type": "library",
+      "version": "2.0.0,<3"
+    },
+    {
+      "group": "pypi",
+      "name": "pydantic-settings",
+      "purl": "pkg:pypi/pydantic-settings@2.0.0,<3",
+      "type": "library",
+      "version": "2.0.0,<3"
+    },
+    {
+      "group": "pypi",
+      "name": "pyvts",
+      "purl": "pkg:pypi/pyvts@0.3.0,<1",
+      "type": "library",
+      "version": "0.3.0,<1"
+    },
+    {
+      "group": "pypi",
+      "name": "requests",
+      "purl": "pkg:pypi/requests@2.31.0,<3",
+      "type": "library",
+      "version": "2.31.0,<3"
+    },
+    {
+      "group": "pypi",
+      "name": "transformers",
+      "purl": "pkg:pypi/transformers@4.51.0,<5",
+      "type": "library",
+      "version": "4.51.0,<5"
+    },
+    {
+      "group": "pypi",
+      "name": "uvicorn",
+      "purl": "pkg:pypi/uvicorn@[standard]>=0.24.0,<1",
+      "type": "library",
+      "version": "[standard]>=0.24.0,<1"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "name": "natsume-ai-v1-core",
+      "type": "application"
+    }
+  },
+  "serialNumber": "urn:uuid:745c7cad70af65467c6f8a156e96a7f1",
+  "specVersion": "1.5",
+  "version": 1
+}
