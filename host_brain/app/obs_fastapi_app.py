@@ -53,7 +53,7 @@ from host_brain.app.observability_runtime.live_source_projection import (
 from host_brain.app.settings import get_persistence_settings
 from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.composition.canon import build_process_canon_container
-from host_brain.composition.life import build_process_life_container
+from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
 from host_brain.app.observability_runtime.health_device_projection import (
     HEALTH_MAX_AGE_MS,
     SERVICE_HEALTH_KEY,
@@ -88,6 +88,7 @@ async def lifespan(_app: FastAPI):
         ledger=ledger,
         adopted_at_ms=int(time.time() * 1000),
     )
+    PROCESS_LIFE_PROVIDER.install(life)
     _app.state.canon_container = canon
     _app.state.life_container = life
     register_projection_job(
@@ -108,6 +109,7 @@ async def lifespan(_app: FastAPI):
         yield
     finally:
         stop_status = stop_projection_jobs()
+        PROCESS_LIFE_PROVIDER.clear(life)
         _app.state.canon_container = None
         _app.state.life_container = None
         _logger.info("operator projection daemon shutdown: %s", stop_status)

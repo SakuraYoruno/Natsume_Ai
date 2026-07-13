@@ -4,7 +4,7 @@ import hashlib
 import importlib
 import json
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
@@ -37,8 +37,12 @@ def _test_app(monkeypatch) -> FastAPI:
     app.add_middleware(OperatorQueryMiddleware, gateway_provider=lambda: gateway)
 
     @app.get("/obs/trace/{request_id}")
-    async def trace(request_id: str, request: Request):
+    async def trace(request_id: str, request: Request, response: Response):
         context = get_operator_query_context(request)
+        # The operator gateway must replace unsafe downstream cache policy and
+        # retain unrelated Vary dimensions.
+        response.headers["Cache-Control"] = "public, max-age=600"
+        response.headers["Vary"] = "Origin"
         return {
             "request_id": request_id,
             "auth_status_seen_by_route": context.authority.auth_status.value,
@@ -58,7 +62,9 @@ def _test_app(monkeypatch) -> FastAPI:
         }
 
     @app.get("/obs/public-summary")
-    async def public_summary():
+    async def public_summary(response: Response):
+        # Anonymous public routes retain their application-owned cache policy.
+        response.headers["Cache-Control"] = "public, max-age=60"
         return {
             "status": "OK",
             "summary": {
@@ -84,6 +90,11 @@ def test_anonymous_trace_query_is_rejected_before_route_execution(monkeypatch) -
     assert response.status_code == 401
     assert response.headers["x-natsume-query-auth"] == OperatorQueryAuthStatus.ANONYMOUS.value
     assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {item.strip().lower() for item in response.headers["vary"].split(",")} == {
+        "cookie",
+        "authorization",
+    }
     assert response.json()["detail"] == "OPERATOR_QUERY_AUTH_REQUIRED"
     assert "private user sentence" not in response.text
 
@@ -94,6 +105,8 @@ def test_anonymous_public_summary_remains_available_but_private_fields_are_refer
     assert response.status_code == 200
     assert response.headers["x-natsume-query-auth"] == OperatorQueryAuthStatus.ANONYMOUS.value
     assert response.headers["x-natsume-query-redactions"] == "2"
+    assert response.headers["cache-control"] == "public, max-age=60"
+    assert "vary" not in response.headers
     assert response.json()["summary"]["decision_summary"] == "request completed"
     assert "private body hidden from public summary" not in response.text
     assert "private session preview" not in response.text
@@ -114,6 +127,14 @@ def test_authenticated_trace_still_cannot_bypass_default_private_serializer(monk
 
     assert response.status_code == 200
     assert response.headers["x-natsume-query-auth"] == OperatorQueryAuthStatus.AUTHENTICATED.value
+    assert response.headers["x-natsume-query-privacy"] == "natsume.operator-query.v1"
+    assert response.headers["x-natsume-query-redactions"] == "5"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {item.strip().lower() for item in response.headers["vary"].split(",")} == {
+        "origin",
+        "cookie",
+        "authorization",
+    }
     assert response.json()["auth_status_seen_by_route"] == "AUTHENTICATED"
     assert "private user sentence" not in response.text
     assert "private assistant sentence" not in response.text
@@ -128,6 +149,11 @@ def test_invalid_bearer_is_rejected_before_sensitive_trace_route(monkeypatch) ->
 
     assert response.status_code == 403
     assert response.headers["x-natsume-query-auth"] == OperatorQueryAuthStatus.INVALID.value
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {item.strip().lower() for item in response.headers["vary"].split(",")} == {
+        "cookie",
+        "authorization",
+    }
     assert response.json()["detail"] == "OPERATOR_QUERY_SCOPE_DENIED"
     assert "private user sentence" not in response.text
     assert "hidden reasoning" not in response.text
@@ -139,6 +165,40 @@ def test_anonymous_non_json_trace_feed_is_gated_before_streaming(monkeypatch) ->
     assert response.status_code == 401
     assert response.json()["detail"] == "OPERATOR_QUERY_AUTH_REQUIRED"
     assert "private trace event" not in response.text
+
+
+def test_authenticated_non_json_operator_stream_is_private_no_store(monkeypatch) -> None:
+    response = TestClient(_test_app(monkeypatch)).get(
+        "/obs/trace-feed/live",
+        headers={"Authorization": "Bearer contract-operator-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {item.strip().lower() for item in response.headers["vary"].split(",")} == {
+        "cookie",
+        "authorization",
+    }
+    assert response.headers["x-natsume-query-auth"] == "AUTHENTICATED"
+    assert response.headers["x-natsume-query-privacy"] == "natsume.operator-query.v1"
+    assert "x-natsume-query-redactions" not in response.headers
+
+
+def test_authenticated_public_route_is_private_no_store(monkeypatch) -> None:
+    response = TestClient(_test_app(monkeypatch)).get(
+        "/obs/public-summary",
+        headers={"Authorization": "Bearer contract-operator-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {item.strip().lower() for item in response.headers["vary"].split(",")} == {
+        "cookie",
+        "authorization",
+    }
+    assert response.headers["x-natsume-query-auth"] == "AUTHENTICATED"
+    assert response.headers["x-natsume-query-redactions"] == "2"
 
 
 def test_real_obs_fastapi_trace_route_crosses_operator_query_gateway(monkeypatch) -> None:

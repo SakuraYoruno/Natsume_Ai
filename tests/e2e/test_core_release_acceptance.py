@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import time
 from types import SimpleNamespace
+from typing import Mapping
 
 import pytest
 
@@ -17,6 +23,7 @@ from tools.run_core_release import (
     _default_stage_runner,
     _evaluate_architecture_gates,
     _resolve_subprocess_command,
+    _run_subprocess_with_tree_cleanup,
     _run_isolated_migration_backup_restore,
     _run_isolated_runtime_http_drill,
     _run_monitor_ui_interaction_smoke,
@@ -126,6 +133,79 @@ def test_subprocess_command_resolves_windows_npm_shim_and_fails_closed(
         _resolve_subprocess_command(("missing-tool",), environment={"PATH": "test-path"})
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object containment contract")
+@pytest.mark.parametrize("parent_mode", ("exit", "timeout"))
+def test_contained_windows_subprocess_cleans_grandchild_on_every_exit_path(
+    tmp_path: Path,
+    parent_mode: str,
+) -> None:
+    pid_path = tmp_path / f"grandchild-{parent_mode}.pid"
+    launcher = tmp_path / f"launch-{parent_mode}.py"
+    launcher.write_text(
+        """
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+child = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    close_fds=True,
+)
+Path(sys.argv[1]).write_text(str(child.pid), encoding="ascii")
+if sys.argv[2] == "timeout":
+    time.sleep(60)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    command = (sys.executable, str(launcher), str(pid_path), parent_mode)
+    if parent_mode == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired):
+            _run_subprocess_with_tree_cleanup(
+                command,
+                cwd=tmp_path,
+                environment=os.environ,
+                timeout_s=1,
+            )
+    else:
+        completed = _run_subprocess_with_tree_cleanup(
+            command,
+            cwd=tmp_path,
+            environment=os.environ,
+            timeout_s=10,
+        )
+        assert completed.returncode == 0
+
+    grandchild_pid = int(pid_path.read_text(encoding="ascii"))
+    deadline = time.monotonic() + 5
+    alive = True
+    while time.monotonic() < deadline:
+        probe = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"if (Get-Process -Id {grandchild_pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 3 }}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        alive = probe.returncode == 0
+        if not alive:
+            break
+        time.sleep(0.1)
+    assert alive is False, (
+        f"contained grandchild still alive: pid={grandchild_pid} mode={parent_mode}"
+    )
+
+
 def test_command_stage_launches_resolved_executable_and_records_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -162,9 +242,13 @@ def test_monitor_interaction_smoke_resolves_npm_exec(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "host_brain/app/monitor_ui").mkdir(parents=True)
+    monkeypatch.setenv("HOST_MCP_REGISTRY_DB", str(tmp_path / "legacy-mcp.sqlite3"))
     npm_cmd = tmp_path / "npm.CMD"
     resolved_requests: list[tuple[str, ...]] = []
     launched: list[list[str]] = []
+    service_environments: list[dict[str, str]] = []
+    monitor_environments: list[dict[str, str]] = []
+    monitor_environment_refs: list[Mapping[str, str]] = []
 
     class FakeProcess:
         pid = 1234
@@ -184,7 +268,11 @@ def test_monitor_interaction_smoke_resolves_npm_exec(
         return (str(npm_cmd.resolve()), *(str(value) for value in command[1:]))
 
     monkeypatch.setattr("tools.run_core_release._reserve_loopback_port", lambda: 19001)
-    monkeypatch.setattr("tools.run_core_release.subprocess.Popen", lambda *_args, **_kwargs: FakeProcess())
+    def fake_popen(*_args, **kwargs):
+        service_environments.append(dict(kwargs["env"]))
+        return FakeProcess()
+
+    monkeypatch.setattr("tools.run_core_release.subprocess.Popen", fake_popen)
     monkeypatch.setattr(
         "tools.run_core_release._wait_for_http_json",
         lambda *_args, **_kwargs: {
@@ -194,18 +282,102 @@ def test_monitor_interaction_smoke_resolves_npm_exec(
     )
     monkeypatch.setattr("tools.run_core_release._resolve_subprocess_command", fake_resolve)
 
-    def fake_run(command: list[str], **_kwargs):
-        launched.append(command)
+    def fake_contained_run(command, *, cwd, environment, timeout_s):  # noqa: ANN001, ARG001
+        launched.append(list(command))
+        monitor_environments.append(dict(environment))
+        monitor_environment_refs.append(environment)
         return SimpleNamespace(returncode=0, stdout="passed", stderr="")
 
-    monkeypatch.setattr("tools.run_core_release.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "tools.run_core_release._run_subprocess_with_tree_cleanup",
+        fake_contained_run,
+    )
     result = _run_monitor_ui_interaction_smoke(root=tmp_path, run_id="npm-interaction-test")
 
     assert resolved_requests == [
-        ("npm", "exec", "playwright", "--", "test", "e2e/core-release-real-interaction.spec.js")
+        (
+            "npm",
+            "exec",
+            "playwright",
+            "--",
+            "test",
+            "e2e/core-release-real-interaction.spec.js",
+            "--trace=off",
+        )
     ]
     assert launched[0][0] == str(npm_cmd.resolve())
+    assert "MONITOR_UI_OPERATOR_SESSION_TOKEN" not in service_environments[0]
+    assert "HOST_MCP_REGISTRY_DB" not in service_environments[0]
+    assert service_environments[0]["HOST_NLE_OPERATOR_VIEWS_ENABLED"] == "true"
+    token = monitor_environments[0]["MONITOR_UI_OPERATOR_SESSION_TOKEN"]
+    artifact_dir = Path(monitor_environments[0]["MONITOR_UI_PLAYWRIGHT_OUTPUT_DIR"])
+    assert artifact_dir.name == "playwright-results"
+    assert artifact_dir.parent.name.startswith("natsume-core-release-ui-")
+    bindings = json.loads(service_environments[0]["NATSUME_OPERATOR_QUERY_AUTH_BINDINGS"])
+    assert bindings == json.loads(monitor_environments[0]["NATSUME_OPERATOR_QUERY_AUTH_BINDINGS"])
+    assert bindings[0]["token_sha256"] == hashlib.sha256(token.encode()).hexdigest()
+    assert "obs:task-runtime:read" in bindings[0]["scopes"]
+    assert "MONITOR_UI_OPERATOR_SESSION_TOKEN" not in monitor_environment_refs[0]
     assert result["npm_executable_resolution"]["resolved_executable"] == str(npm_cmd.resolve())
+
+
+def test_monitor_interaction_timeout_clears_raw_token_and_stops_obs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "host_brain/app/monitor_ui").mkdir(parents=True)
+    environment_refs: list[Mapping[str, str]] = []
+    observed_token = ""
+
+    class FakeObsProcess:
+        pid = 2468
+        returncode: int | None = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            return self.returncode
+
+    obs_process = FakeObsProcess()
+    monkeypatch.setattr("tools.run_core_release._reserve_loopback_port", lambda: 19002)
+    monkeypatch.setattr(
+        "tools.run_core_release.subprocess.Popen",
+        lambda *_args, **_kwargs: obs_process,
+    )
+    monkeypatch.setattr(
+        "tools.run_core_release._wait_for_http_json",
+        lambda *_args, **_kwargs: {
+            "status_code": 200,
+            "payload": {"projection": {"schema_version": "test.v1"}},
+        },
+    )
+    monkeypatch.setattr(
+        "tools.run_core_release._resolve_subprocess_command",
+        lambda command, *, environment=None: tuple(command),  # noqa: ARG005
+    )
+
+    def fake_timeout(command, *, cwd, environment, timeout_s):  # noqa: ANN001, ARG001
+        nonlocal observed_token
+        environment_refs.append(environment)
+        observed_token = str(environment["MONITOR_UI_OPERATOR_SESSION_TOKEN"])
+        raise subprocess.TimeoutExpired(command, timeout_s, output="browser timed out", stderr="")
+
+    monkeypatch.setattr(
+        "tools.run_core_release._run_subprocess_with_tree_cleanup",
+        fake_timeout,
+    )
+
+    with pytest.raises(InternalStageEvidenceError) as captured:
+        _run_monitor_ui_interaction_smoke(root=tmp_path, run_id="monitor-timeout-cleanup")
+
+    assert observed_token
+    assert "MONITOR_UI_OPERATOR_SESSION_TOKEN" not in environment_refs[0]
+    assert obs_process.returncode == 0
+    assert observed_token not in json.dumps(captured.value.evidence, sort_keys=True)
 
 
 @pytest.mark.parametrize(

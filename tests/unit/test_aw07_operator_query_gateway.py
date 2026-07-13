@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 
@@ -10,8 +11,10 @@ from host_brain.observability.operator_query_gateway import (
     DEFAULT_FORBIDDEN_PRIVATE_FIELDS,
     DigestOperatorQueryAuthenticator,
     OPERATOR_QUERY_AUTH_BINDINGS_ENV,
+    OperatorQueryAuthority,
     OperatorQueryAuthStatus,
     OperatorQueryGateway,
+    OperatorQueryMiddleware,
     required_operator_query_scope,
 )
 
@@ -43,6 +46,19 @@ def test_operator_auth_binds_server_principal_and_scope_by_token_digest(monkeypa
     assert context.authority.allows("obs:public:read")
     assert "operator-test-token" not in str(context.authority)
     assert context.authority.auth_ref.startswith("operator-auth://sha256/")
+
+
+def test_authority_never_treats_wildcard_text_as_a_scope_grant() -> None:
+    authority = OperatorQueryAuthority(
+        principal_id="ops.test",
+        scopes=frozenset({"obs:*"}),
+        auth_status=OperatorQueryAuthStatus.AUTHENTICATED,
+    )
+
+    assert not authority.allows("obs:write")
+    assert not authority.allows("canon:write")
+    assert not authority.allows("device:edge:write")
+    assert not authority.allows("tool:execute")
 
 
 def test_missing_duplicate_and_invalid_credentials_never_gain_private_scope(monkeypatch) -> None:
@@ -290,3 +306,51 @@ def test_same_origin_operator_session_cookie_authenticates_without_js_header(mon
 )
 def test_query_only_post_routes_are_never_anonymous(path, scope) -> None:
     assert required_operator_query_scope(method="POST", path=path) == scope
+
+
+def test_operator_query_middleware_leaves_websocket_transport_untouched() -> None:
+    sent: list[dict] = []
+    seen_scope: dict = {}
+
+    async def websocket_app(scope, receive, send) -> None:
+        seen_scope.update(scope)
+        await send(
+            {
+                "type": "websocket.accept",
+                "headers": [(b"cache-control", b"public, max-age=60")],
+            }
+        )
+        await send({"type": "websocket.close", "code": 1000})
+
+    middleware = OperatorQueryMiddleware(
+        websocket_app,
+        gateway_provider=lambda: OperatorQueryGateway(DigestOperatorQueryAuthenticator()),
+    )
+
+    async def receive() -> dict:
+        return {"type": "websocket.connect"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    asyncio.run(
+        middleware(
+            {
+                "type": "websocket",
+                "method": "GET",
+                "path": "/obs/ws/health",
+                "headers": [(b"authorization", b"Bearer ignored-by-http-middleware")],
+            },
+            receive,
+            send,
+        )
+    )
+
+    assert "state" not in seen_scope
+    assert sent == [
+        {
+            "type": "websocket.accept",
+            "headers": [(b"cache-control", b"public, max-age=60")],
+        },
+        {"type": "websocket.close", "code": 1000},
+    ]

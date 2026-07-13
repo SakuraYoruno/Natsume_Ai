@@ -106,10 +106,12 @@ def get_tool_broker() -> ToolBroker:
 
 
 def _resolve_mcp_registry_db_path() -> str:
-    return (
-        str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
-        or "host_brain/data/mcp_registry.sqlite3"
-    )
+    db_path = str(
+        require_process_application_ports().persistence_db_path() or ""
+    ).strip()
+    if not db_path:
+        raise RuntimeError("MCP_REGISTRY_CANONICAL_DB_PATH_REQUIRED")
+    return db_path
 
 
 def get_mcp_tool_registry() -> MCPToolRegistry:

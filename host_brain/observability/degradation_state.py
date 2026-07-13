@@ -1195,7 +1195,12 @@ _GLOBAL_MACHINE_LOCK = threading.RLock()
 
 
 def _default_runtime_event_db_path() -> Path:
-    raw_path = str(os.environ.get("HOST_RUNTIME_EVENT_DB_PATH") or "").strip()
+    raw_path = str(
+        os.environ.get("NATSUME_AUDIT_DB")
+        or os.environ.get("Natsume_AUDIT_DB")
+        or os.environ.get("HOST_RUNTIME_EVENT_DB_PATH")
+        or ""
+    ).strip()
     if raw_path:
         return Path(raw_path).expanduser()
     return Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"

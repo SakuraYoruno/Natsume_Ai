@@ -590,6 +590,53 @@ def test_runtime_snapshot_returns_unified_state(
     assert "homeostasis_report" in data
 
 
+def test_runtime_snapshot_accepts_nested_slot_privacy_metadata(
+    client,
+    monkeypatch,
+    projection_refresh: ProjectionRefresh,
+):
+    """Projected slot statuses retain serializer privacy metadata without a 500."""
+
+    monkeypatch.setattr(
+        "host_brain.lifecycle_runtime.runtime_snapshot.build_digital_life_runtime_snapshot",
+        lambda *, ports=None, current_topic="": {
+            "persona_user_id": "persona-user-private-slot",
+            "current_topic": current_topic,
+            "sys_mode": "normal",
+            # ``bond_narrative`` is intentionally content-shaped.  The public
+            # projection serializer must withhold its value and emit nested
+            # metadata rather than weakening the privacy policy.
+            "slot_status": {"bond_narrative": "live"},
+            "degraded": False,
+            "degraded_reasons": [],
+            "timestamp": 1700000000000,
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
+        lambda: type(
+            "_FakeModeService",
+            (),
+            {"get_current_status": lambda self: {"sys_mode": "normal"}},
+        )(),
+    )
+    projection_refresh.runtime()
+
+    response = client.get("/obs/runtime-snapshot")
+
+    assert response.status_code == 200
+    slot_status = response.json()["slot_status"]
+    assert slot_status["sys_mode_status"] == "live"
+    assert "bond_narrative" not in slot_status
+    privacy = slot_status["_operator_privacy"]
+    assert privacy["redacted"] is True
+    assert privacy["schema_version"] == "natsume.operator-query.v1"
+    assert [item["field"] for item in privacy["withheld"]] == ["bond_narrative"]
+    assert privacy["withheld"][0]["citation_ref"].startswith(
+        "operator-private-bond-narrative://sha256/"
+    )
+
+
 def test_runtime_snapshot_repeated_reads_do_not_rebuild(
     client,
     monkeypatch,

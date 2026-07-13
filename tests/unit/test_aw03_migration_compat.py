@@ -96,6 +96,75 @@ def test_legacy_inline_ledger_replays_complete_catalog_without_duplicate_ddl(
     }
 
 
+def test_capability_forge_proposal_log_is_migration_owned(tmp_path) -> None:
+    db_path = tmp_path / "capability-forge-migrated.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw03-capability-forge-schema",
+        ts_ms=1_800_000_000_000,
+    )
+    assert result.success is True, result.as_dict()
+    assert result.summary["current_version"] >= 84
+
+    ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
+    try:
+        ledger.log_capability_forge_proposal(
+            {
+                "proposal_id": "forge-proposal-1",
+                "event_type": "CREATED",
+                "status": "PENDING_APPROVAL",
+                "stage": "SHADOW",
+                "payload": {"proposal_id": "forge-proposal-1"},
+                "ts_ms": 1,
+            }
+        )
+        rows = ledger.list_capability_forge_proposals(
+            proposal_id="forge-proposal-1",
+        )
+    finally:
+        ledger.close()
+
+    assert len(rows) == 1
+    assert rows[0]["payload"]["proposal_id"] == "forge-proposal-1"
+
+
+def test_capability_forge_migration_upgrades_an_existing_head_83_database(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "head-83.sqlite3"
+    runner = SQLiteMigrationRunner(db_path=db_path)
+    seeded = runner.apply_migrations(
+        request_id="aw03-capability-forge-seed",
+        ts_ms=1_800_000_000_000,
+    )
+    assert seeded.success is True, seeded.as_dict()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE capability_forge_proposal_log")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 84")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 84")
+        conn.commit()
+        assert conn.execute(
+            "SELECT MAX(migration_id) FROM schema_migrations"
+        ).fetchone() == (83,)
+
+    upgraded = runner.apply_migrations(
+        request_id="aw03-capability-forge-upgrade",
+        ts_ms=1_800_000_000_001,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 84
+    assert upgraded.summary["applied_count"] == 1
+    assert upgraded.records[-1].migration_id == "0084_capability_forge_proposal_log"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'capability_forge_proposal_log'
+            """
+        ).fetchone() == ("capability_forge_proposal_log",)
+
+
 def test_aw03_migrations_require_an_explicit_immediate_transaction(tmp_path) -> None:
     catalog = tmp_path / "migrations"
     catalog.mkdir()

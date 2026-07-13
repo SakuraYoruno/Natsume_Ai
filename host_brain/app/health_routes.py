@@ -31,6 +31,7 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
+from host_brain.app.settings import get_persistence_settings
 from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KEY,
     CANON_SYNC_KIND,
@@ -42,6 +43,42 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()
+
+
+def _apply_host_health_status(health_report: dict[str, Any]) -> None:
+    """Derive the public Host status from service and durability state."""
+
+    summary = dict(health_report.get("summary") or {})
+    required_unavailable = int(summary.get("required_unavailable") or 0)
+    optional_unavailable = int(summary.get("optional_unavailable") or 0)
+    public_status = "FAILED" if required_unavailable else (
+        "DEGRADED" if optional_unavailable else "OK"
+    )
+    if required_unavailable:
+        summary["overall_status"] = "DOWN"
+    elif optional_unavailable:
+        summary["overall_status"] = "DEGRADED"
+    else:
+        summary["overall_status"] = "UP"
+
+    degradation = dict(health_report.get("degradation_state") or {})
+    durability_required = bool(degradation.get("durability_required"))
+    durability_status = str(degradation.get("durability_status") or "").upper()
+    if durability_required and durability_status != "READY":
+        if durability_status == "FAILED":
+            public_status = "FAILED"
+            summary["overall_status"] = "DOWN"
+        elif public_status == "OK":
+            public_status = "DEGRADED"
+            summary["overall_status"] = "DEGRADED"
+        if not health_report.get("reason_code"):
+            health_report["reason_code"] = (
+                str(degradation.get("last_durable_error") or "").strip()
+                or "DURABILITY_NOT_READY"
+            )
+
+    health_report["summary"] = summary
+    health_report["status"] = public_status
 
 
 def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None, str | None]:
@@ -154,6 +191,7 @@ async def build_live_health_report(
         health_report["degradation_state"] = get_degradation_state()
     except Exception as degradation_exc:
         _logger.warning("Health degradation projection skipped: %s", degradation_exc)
+    _apply_host_health_status(health_report)
     return health_report
 
 
@@ -270,7 +308,7 @@ async def environment_readiness(
 async def mcp_health_check() -> HealthResponse:
     """MCP registry health endpoint."""
     ts_ms = int(time.time() * 1000)
-    db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+    db_path = str(get_persistence_settings().canonical_db_path).strip()
     status_text = "OK"
     reason_code = None
     detail = "mcp registry reachable"

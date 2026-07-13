@@ -304,7 +304,7 @@ class OperatorQueryAuthority:
 
     def allows(self, required_scope: str) -> bool:
         scope = _validated_scope(required_scope)
-        return scope in self.scopes or "obs:*" in self.scopes
+        return scope in self.scopes
 
 
 class OperatorQueryAuthenticator(Protocol):
@@ -523,14 +523,23 @@ class OperatorQueryMiddleware:
         gateway = self._gateway_provider()
         context = gateway.open_asgi_context(scope)
         scope.setdefault("state", {})["operator_query_context"] = context
+        method = str(scope.get("method") or "GET")
+        path = str(scope.get("path") or "/")
+        route_is_protected = required_operator_query_scope(method=method, path=path) is not None
+        private_no_store = route_is_protected or context.authority.authenticated
         try:
             gateway.authorize_route(
                 context,
-                method=str(scope.get("method") or "GET"),
-                path=str(scope.get("path") or "/"),
+                method=method,
+                path=path,
             )
         except HTTPException as exc:
-            await _send_authorization_denial(send, context=context, exc=exc)
+            await _send_authorization_denial(
+                send,
+                context=context,
+                exc=exc,
+                private_no_store=private_no_store,
+            )
             return
 
         response_start: dict[str, Any] | None = None
@@ -547,7 +556,12 @@ class OperatorQueryMiddleware:
                 content_type = _response_header(headers, b"content-type").lower()
                 buffering_json = b"application/json" in content_type or b"+json" in content_type
                 if not buffering_json:
-                    response_start["headers"] = _with_query_headers(headers, context, None)
+                    response_start["headers"] = _with_query_headers(
+                        headers,
+                        context,
+                        None,
+                        private_no_store=private_no_store,
+                    )
                     await send(response_start)
                 return
             if message_type != "http.response.body" or not buffering_json:
@@ -603,6 +617,7 @@ class OperatorQueryMiddleware:
                 headers,
                 context,
                 redacted_fields,
+                private_no_store=private_no_store,
             )
             await send(response_start)
             await send({"type": "http.response.body", "body": sanitized_body})
@@ -810,6 +825,8 @@ def _with_query_headers(
     headers: Sequence[tuple[bytes, bytes]],
     context: OperatorQueryContext,
     redacted_fields: int | None,
+    *,
+    private_no_store: bool = False,
 ) -> list[tuple[bytes, bytes]]:
     excluded = {
         b"x-natsume-query-auth",
@@ -825,6 +842,40 @@ def _with_query_headers(
     )
     if redacted_fields is not None:
         output.append((b"x-natsume-query-redactions", str(redacted_fields).encode("ascii")))
+    if private_no_store:
+        output = _with_private_no_store_headers(output)
+    return output
+
+
+def _with_private_no_store_headers(
+    headers: Sequence[tuple[bytes, bytes]],
+) -> list[tuple[bytes, bytes]]:
+    """Prevent shared or browser caches from retaining operator-owned responses."""
+
+    output: list[tuple[bytes, bytes]] = []
+    vary_values: list[str] = []
+    vary_names: set[str] = set()
+    for name, value in headers:
+        normalized_name = name.lower()
+        if normalized_name == b"cache-control":
+            continue
+        if normalized_name == b"vary":
+            for raw_token in value.decode("latin-1").split(","):
+                token = raw_token.strip()
+                normalized_token = token.lower()
+                if token and normalized_token not in vary_names:
+                    vary_values.append(token)
+                    vary_names.add(normalized_token)
+            continue
+        output.append((name, value))
+
+    for token in ("Cookie", "Authorization"):
+        if token.lower() not in vary_names:
+            vary_values.append(token)
+            vary_names.add(token.lower())
+
+    output.append((b"cache-control", b"private, no-store"))
+    output.append((b"vary", ", ".join(vary_values).encode("latin-1")))
     return output
 
 
@@ -833,6 +884,7 @@ async def _send_authorization_denial(
     *,
     context: OperatorQueryContext,
     exc: HTTPException,
+    private_no_store: bool,
 ) -> None:
     body = json.dumps(
         {
@@ -847,7 +899,12 @@ async def _send_authorization_denial(
     ]
     for name, value in (exc.headers or {}).items():
         headers.append((str(name).lower().encode("latin-1"), str(value).encode("latin-1")))
-    headers = _with_query_headers(headers, context, 0)
+    headers = _with_query_headers(
+        headers,
+        context,
+        0,
+        private_no_store=private_no_store,
+    )
     await send(
         {
             "type": "http.response.start",

@@ -31,8 +31,9 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
 
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
-    assert manifest["migration_head"].endswith("0083_host_embodiment_outbox.sql")
+    assert manifest["migration_head"].endswith("0084_capability_forge_proposal_log.sql")
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0084_capability_forge_proposal_log.sql" in migration_files
     assert "host_brain/audit/migrations/0083_host_embodiment_outbox.sql" in migration_files
     assert "edge_client/gateway/migrations/0001_embodiment_transport.sql" in migration_files
     for name in (

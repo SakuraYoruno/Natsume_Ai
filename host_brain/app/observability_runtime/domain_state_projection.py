@@ -160,8 +160,13 @@ def load_life_evolution_projection_source(
 
     if snapshot_reader is None:
         from host_brain.digital_life.application_boundary import read_life_snapshot
+        from host_brain.composition.process_services import get_life_snapshot_reader
 
-        snapshot_reader = read_life_snapshot
+        reader = get_life_snapshot_reader()
+        snapshot_reader = lambda resolved_person_id: read_life_snapshot(
+            resolved_person_id,
+            reader=reader,
+        )
     snapshot = dict(snapshot_reader(str(person_id or LIFE_DEFAULT_KEY)) or {})
     cursor = max(int(snapshot.get("updated_at_ms") or 0), int(snapshot.get("version") or 0))
     return _canonical_life_view(snapshot), max(0, cursor)

@@ -18,6 +18,7 @@ from host_brain.app.observability_runtime.domain_state_projection import (
     load_life_evolution_projection_source,
     load_skill_pack_catalog_projection_source,
 )
+from host_brain.app.observability_runtime import process_state_projection
 from host_brain.observability.projection_store import QueryProjectionStore
 
 
@@ -259,6 +260,71 @@ def test_background_loaders_project_canonical_life_and_skill_pack_catalog(monkey
     assert cursor > 0
     assert catalog["skills"][0]["name"] == "skill.one"
     assert catalog["domain_packs"][0]["pack_id"] == "pack.one"
+
+
+def test_life_background_loader_binds_the_composed_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
+    from host_brain.composition import process_services
+
+    calls: list[str] = []
+
+    class Reader:
+        def get_snapshot(self, person_id: str) -> dict[str, object]:
+            calls.append(person_id)
+            return {
+                "person_id": person_id,
+                "version": 3,
+                "updated_at_ms": 900,
+                "state_digest": "sha256:life",
+                "state": {},
+            }
+
+    reader = Reader()
+    monkeypatch.setattr(process_services, "get_life_snapshot_reader", lambda: reader)
+
+    payload, cursor = load_life_evolution_projection_source("natsume")
+
+    assert calls == ["natsume"]
+    assert payload["person_id"] == "natsume"
+    assert cursor == 900
+
+
+def test_bio_ops_refresh_floors_source_cursors_at_durable_documents(
+    tmp_path,
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    store = _store(tmp_path)
+    store.upsert(
+        process_state_projection.BIO_OPS_KIND,
+        "run-1",
+        {"run_id": "run-1", "status": "old"},
+        source_cursor=20,
+    )
+    store.upsert(
+        process_state_projection.BIO_OPS_KIND,
+        process_state_projection.BIO_OPS_LATEST_KEY,
+        {"run_id": "run-1", "latest_run_id": "run-1", "status": "old"},
+        source_cursor=30,
+    )
+    monkeypatch.setattr(process_state_projection, "_store", lambda: store)
+    monkeypatch.setattr(
+        process_state_projection,
+        "load_bio_ops_projection_sources",
+        lambda _root: [("run-1", {"run_id": "run-1", "status": "new"}, 10)],
+    )
+
+    result = process_state_projection.refresh_bio_ops_projection()
+    replayed = process_state_projection.refresh_bio_ops_projection()
+
+    assert result == {"document_count": 2}
+    assert replayed == {"document_count": 2}
+    assert store.get(process_state_projection.BIO_OPS_KIND, "run-1").source_cursor == 21
+    assert (
+        store.get(
+            process_state_projection.BIO_OPS_KIND,
+            process_state_projection.BIO_OPS_LATEST_KEY,
+        ).source_cursor
+        == 31
+    )
 
 
 def test_life_body_has_no_legacy_trace_feed_warm_read_model() -> None:

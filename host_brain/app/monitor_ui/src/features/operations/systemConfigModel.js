@@ -19,7 +19,9 @@ export function getSystemConfigCollections({ routeData, callData, rateData } = {
 }
 
 export function countNotLiveRuntimeSlots(runtimeSnapshot) {
-  return Object.values(runtimeSnapshot?.slot_status || {}).filter((status) => status !== 'live').length
+  return Object.entries(runtimeSnapshot?.slot_status || {}).filter(
+    ([key, status]) => key !== '_operator_privacy' && status !== 'live',
+  ).length
 }
 
 export function getSystemConfigRuntimeLabels(runtimeSnapshot) {

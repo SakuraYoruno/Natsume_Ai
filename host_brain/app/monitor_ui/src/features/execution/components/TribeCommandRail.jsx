@@ -264,10 +264,10 @@ function buildFocusActions({
 
   return [{
     icon: Bot,
-    title: '从 Agent Loop 复核协作动作',
-    detail: '状态和订阅者可用，但当前事件样本较少，适合从执行回路反查。',
-    to: '/execution/agent-loop',
-    label: '进入 Agent Loop',
+    title: '从执行审查复核协作动作',
+    detail: '状态和订阅者可用，但当前事件样本较少，适合从受控任务运行时反查。',
+    to: '/execution/task-runtime',
+    label: '进入执行审查',
   }]
 }
 

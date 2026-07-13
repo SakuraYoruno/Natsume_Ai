@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -31,13 +30,10 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _default_db_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
+def _canonical_db_path() -> Path:
+    from host_brain.app.settings.persistence import get_persistence_settings
 
-
-def _db_path(env_name: str) -> Path:
-    raw = _text(os.environ.get(env_name))
-    return Path(raw).expanduser() if raw else _default_db_path()
+    return Path(get_persistence_settings().canonical_db_path).expanduser()
 
 
 def set_operator_read_model_service_provider(
@@ -67,10 +63,11 @@ def _get_operator_read_model_service() -> OperatorReadModelService:
 def refresh_task_runtime_query_projections() -> dict[str, int]:
     """Background-only Task/Review projection entry."""
 
+    canonical_db_path = _canonical_db_path()
     source = OperatorReadModelService(
-        task_store=DurableTaskStore(_db_path("HOST_TASK_RUNTIME_DB_PATH")),
-        review_store=ReviewStore(_db_path("HOST_AGENT_REVIEW_DB_PATH")),
-        event_store=RuntimeEventStore(_db_path("HOST_RUNTIME_EVENT_DB_PATH")),
+        task_store=DurableTaskStore(canonical_db_path),
+        review_store=ReviewStore(canonical_db_path),
+        event_store=RuntimeEventStore(canonical_db_path),
     )
     return refresh_task_projections(source, get_query_projection_worker())
 

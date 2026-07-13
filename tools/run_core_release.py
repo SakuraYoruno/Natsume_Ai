@@ -26,6 +26,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -1086,6 +1087,209 @@ def _resolve_subprocess_command(
     return (str(Path(resolved).resolve()), *(str(argument) for argument in command[1:]))
 
 
+def _create_windows_kill_on_close_job(process: subprocess.Popen[Any]) -> Any | None:
+    """Contain a credential-bearing Windows process and all of its children.
+
+    Closing the returned Job Object kills every process still attached to the
+    job.  This is stronger than terminating an ``npm.cmd`` wrapper: Playwright,
+    Vite and Chromium are grandchildren and otherwise survive a wrapper
+    timeout on Windows.
+    """
+
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class _JobObjectBasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _JobObjectExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _JobObjectBasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    )
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    information = _JobObjectExtendedLimitInformation()
+    # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    information.BasicLimitInformation.LimitFlags = 0x00002000
+    configured = kernel32.SetInformationJobObject(
+        job,
+        9,  # JobObjectExtendedLimitInformation
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    )
+    process_handle_value = int(getattr(process, "_handle", 0) or 0)
+    assigned = bool(
+        configured
+        and process_handle_value
+        and kernel32.AssignProcessToJobObject(job, wintypes.HANDLE(process_handle_value))
+    )
+    if not assigned:
+        kernel32.CloseHandle(job)
+        return None
+    return job
+
+
+def _terminate_contained_process_tree(
+    process: subprocess.Popen[Any],
+    *,
+    windows_job: Any | None,
+) -> None:
+    """Best-effort, bounded process-tree cleanup for release subprocesses."""
+
+    if os.name == "nt":
+        if windows_job is not None:
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+                kernel32.CloseHandle.restype = wintypes.BOOL
+                kernel32.CloseHandle(windows_job)
+            except BaseException:
+                pass
+        if process.poll() is None:
+            taskkill = (
+                Path(os.environ.get("SystemRoot") or r"C:\Windows")
+                / "System32"
+                / "taskkill.exe"
+            )
+            try:
+                subprocess.run(
+                    [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=15,
+                )
+            except BaseException:
+                pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+    if process.poll() is None:
+        try:
+            process.wait(timeout=10)
+        except BaseException:
+            try:
+                if os.name != "nt":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except BaseException:
+                pass
+            try:
+                process.wait(timeout=5)
+            except BaseException:
+                pass
+
+
+def _run_subprocess_with_tree_cleanup(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout_s: float,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess whose descendants cannot outlive the acceptance stage."""
+
+    popen_options: dict[str, Any] = {}
+    if os.name == "nt":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_options["start_new_session"] = True
+    process = subprocess.Popen(
+        list(command),
+        cwd=cwd,
+        env=dict(environment),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **popen_options,
+    )
+    windows_job = _create_windows_kill_on_close_job(process)
+    if os.name == "nt" and windows_job is None:
+        _terminate_contained_process_tree(process, windows_job=None)
+        raise RuntimeError(
+            "could not contain Windows acceptance subprocess in a kill-on-close Job Object"
+        )
+
+    cleaned = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_contained_process_tree(process, windows_job=windows_job)
+        cleaned = True
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except BaseException:
+            stdout = str(exc.output or "")
+            stderr = str(exc.stderr or "")
+        raise subprocess.TimeoutExpired(
+            list(command),
+            timeout_s,
+            output=stdout,
+            stderr=stderr,
+        ) from exc
+    finally:
+        if not cleaned:
+            _terminate_contained_process_tree(process, windows_job=windows_job)
+
+    return subprocess.CompletedProcess(
+        args=list(command),
+        returncode=int(process.returncode or 0),
+        stdout=str(stdout or ""),
+        stderr=str(stderr or ""),
+    )
+
+
 def _redact_child_log_tail(value: str) -> str:
     text = re.sub(
         r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+",
@@ -2037,7 +2241,7 @@ def _run_isolated_runtime_http_drill(*, root: Path, run_id: str) -> dict[str, An
                 "HOST_TASK_RUNTIME_DB_PATH": str(database),
                 "HOST_AGENT_REVIEW_DB_PATH": str(database),
                 "HOST_RUNTIME_EVENT_DB_PATH": str(database),
-                "HOST_MCP_REGISTRY_DB": str(workspace / "mcp.sqlite3"),
+                "HOST_NLE_OPERATOR_VIEWS_ENABLED": "true",
                 "NATSUME_CORE_RELEASE_RUN_ID": run_id,
                 "PYTHONDONTWRITEBYTECODE": "1",
             }
@@ -2164,7 +2368,37 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
         obs_port = _reserve_loopback_port()
         ui_port = _reserve_loopback_port()
         obs_url = f"http://127.0.0.1:{obs_port}"
+        operator_token = f"{uuid4().hex}{uuid4().hex}"
+        operator_binding = json.dumps(
+            [
+                {
+                    "token_sha256": hashlib.sha256(operator_token.encode()).hexdigest(),
+                    "principal_id": "core-release.monitor",
+                    "tenant_id": "core-release",
+                    "key_id": "core-release-monitor",
+                    "principal_kind": "service",
+                    "scopes": [
+                        "obs:operator:read",
+                        "obs:health:stream",
+                        "obs:task-runtime:read",
+                        "obs:session:read",
+                        "obs:session:export",
+                        "obs:trace:read",
+                        "obs:checkpoint:read",
+                        "obs:memory:read",
+                        "obs:immune:read",
+                        "obs:bio-ops:read",
+                        "obs:ui:read",
+                        "obs:capability-forge:read",
+                        "obs:life-evolution:read",
+                        "obs:agent-history:read",
+                    ],
+                }
+            ],
+            separators=(",", ":"),
+        )
         environment = dict(os.environ)
+        environment.pop("HOST_MCP_REGISTRY_DB", None)
         environment.update(
             {
                 "NATSUME_AUDIT_DB": str(database),
@@ -2172,7 +2406,7 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                 "HOST_TASK_RUNTIME_DB_PATH": str(database),
                 "HOST_AGENT_REVIEW_DB_PATH": str(database),
                 "HOST_RUNTIME_EVENT_DB_PATH": str(database),
-                "HOST_MCP_REGISTRY_DB": str(workspace / "mcp.sqlite3"),
+                "HOST_NLE_OPERATOR_VIEWS_ENABLED": "true",
                 "NATSUME_CORE_RELEASE_RUN_ID": run_id,
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "VITE_DEV_OBS_API_TARGET": obs_url,
@@ -2180,7 +2414,16 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                 "VITE_DEV_HOST_API_TARGET": obs_url,
                 "MONITOR_UI_PREVIEW_PORT": str(ui_port),
                 "MONITOR_UI_BASE_URL": f"http://127.0.0.1:{ui_port}/monitor/",
+                "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS": operator_binding,
             }
+        )
+        # The real Obs child receives only the digest binding. The raw session
+        # credential is scoped to the contained Playwright process tree that
+        # injects the host-only HttpOnly cookie and disappears with that tree.
+        monitor_environment = dict(environment)
+        monitor_environment["MONITOR_UI_OPERATOR_SESSION_TOKEN"] = operator_token
+        monitor_environment["MONITOR_UI_PLAYWRIGHT_OUTPUT_DIR"] = str(
+            workspace / "playwright-results"
         )
         obs_log = workspace / "obs.log"
         process: subprocess.Popen[Any] | None = None
@@ -2204,19 +2447,17 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                     "--",
                     "test",
                     "e2e/core-release-real-interaction.spec.js",
+                    "--trace=off",
                 )
                 npm_resolved_command = _resolve_subprocess_command(
                     npm_requested_command,
-                    environment=environment,
+                    environment=monitor_environment,
                 )
-                completed = subprocess.run(
-                    list(npm_resolved_command),
+                completed = _run_subprocess_with_tree_cleanup(
+                    npm_resolved_command,
                     cwd=monitor,
-                    env=environment,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=180,
+                    environment=monitor_environment,
+                    timeout_s=180,
                 )
                 output = str(completed.stdout or "") + str(completed.stderr or "")
                 if completed.returncode != 0:
@@ -2224,8 +2465,15 @@ def _run_monitor_ui_interaction_smoke(*, root: Path, run_id: str) -> dict[str, A
                         f"unstubbed Monitor interaction failed with exit {completed.returncode}"
                     )
             except BaseException as exc:
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    output = str(exc.output or "") + str(exc.stderr or "")
                 monitor_error = exc
             finally:
+                # Remove the raw credential from the parent-side environment as
+                # soon as the contained browser tree is gone.  The Obs child
+                # never receives this value, only its SHA-256 binding.
+                monitor_environment.pop("MONITOR_UI_OPERATOR_SESSION_TOKEN", None)
+                operator_token = ""
                 if process is not None and process.poll() is None:
                     process.terminate()
                     try:

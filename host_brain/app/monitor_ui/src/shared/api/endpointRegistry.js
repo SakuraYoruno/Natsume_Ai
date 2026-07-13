@@ -23,11 +23,6 @@ export const ENDPOINT_REGISTRY = Object.freeze({
   },
   pentest: {
     capabilities: { service: 'host', path: '/v1/pentest/capabilities', queryOnly: true, risk: 'low' },
-    environment: { service: 'host', path: '/v1/pentest/environment', queryOnly: true, risk: 'low' },
-    runs: { service: 'host', path: '/v1/pentest/runs', queryOnly: true, risk: 'medium' },
-    run: { service: 'host', path: '/v1/pentest/runs/:runId', queryOnly: true, risk: 'medium' },
-    events: { service: 'host', path: '/v1/pentest/runs/:runId/events', queryOnly: true, risk: 'medium' },
-    report: { service: 'host', path: '/v1/pentest/runs/:runId/report', queryOnly: true, risk: 'medium' },
   },
   securityImmune: {
     runtime: { service: 'obs', path: '/obs/security/runtime', risk: 'low' },

@@ -360,13 +360,18 @@ def _first_schedule_at(definition: Mapping[str, Any], *, now_ms: int) -> int | N
     hour = int(config.get("hour", 0))
     minute = int(config.get("minute", 0))
     timezone_name = str(config.get("timezone") or "UTC").strip() or "UTC"
-    try:
-        timezone = ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise SchedulerCompositionError(
-            SCHEDULER_COMPOSITION_INVALID,
-            f"scheduler timezone is unavailable: {timezone_name}",
-        ) from exc
+    if timezone_name.upper() in {"UTC", "ETC/UTC", "Z"}:
+        # UTC is part of Python itself and must not depend on an optional IANA
+        # tzdata installation (notably absent in a clean Windows venv).
+        timezone = dt.timezone.utc
+    else:
+        try:
+            timezone = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError as exc:
+            raise SchedulerCompositionError(
+                SCHEDULER_COMPOSITION_INVALID,
+                f"scheduler timezone is unavailable: {timezone_name}",
+            ) from exc
     now = dt.datetime.fromtimestamp(now_ms / 1_000, tz=timezone)
     weekdays_raw = config.get("day_of_week")
     weekdays = (

@@ -1,9 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
+import { resolvePlaywrightArtifactPolicy } from './playwrightArtifactPolicy.js'
 
 const baseURL = process.env.MONITOR_UI_BASE_URL || 'http://127.0.0.1:4173/monitor/'
 const browserChannel = process.env.MONITOR_UI_PLAYWRIGHT_CHANNEL ?? 'chrome'
 const shouldStartPreview = process.env.MONITOR_UI_SKIP_WEB_SERVER !== '1'
 const previewPort = Number(process.env.MONITOR_UI_PREVIEW_PORT || 4173)
+const artifactPolicy = resolvePlaywrightArtifactPolicy()
 
 export default defineConfig({
   testDir: './e2e',
@@ -14,12 +16,12 @@ export default defineConfig({
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
-  outputDir: 'test-results',
+  outputDir: artifactPolicy.outputDir,
   use: {
     baseURL,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: artifactPolicy.trace,
+    screenshot: artifactPolicy.screenshot,
+    video: artifactPolicy.video,
   },
   webServer: shouldStartPreview
     ? {

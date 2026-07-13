@@ -33,19 +33,19 @@ export default function ToolExecutePanel({ tool, onClose }) {
     return (
       <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50/80 p-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-orange-800">Pentest 工具由 Security Lab 接管</h3>
+          <h3 className="text-sm font-semibold text-orange-800">Pentest 工具需要受控执行</h3>
           <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded text-orange-500 hover:bg-orange-100">
             <X size={15} />
           </button>
         </div>
         <p className="text-sm text-orange-700">
-          {tool.id} 属于 Pentest Agent 能力清单。执行入口已迁移到带 scope、Lab Mode 和 approval rail 的 Pentest Lab。
+          {tool.id} 属于 Pentest 能力清单。旧 Pentest Lab 已退役；本页只展示元信息，安全态和证据请在 Security Immune 复核。
         </p>
         <Link
-          to="/security/pentest"
+          to="/security/immune"
           className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-orange-300 bg-white/85 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50"
         >
-          打开 Pentest Lab
+          打开 Security Immune
         </Link>
       </div>
     )

@@ -15,6 +15,7 @@ import {
   formatSlotLabel,
   formatSlotStatus,
 } from '../../../utils/digitalLife.js'
+import { getRuntimeSlotCount } from '../../../utils/runtimeHealth.js'
 
 export default function DigitalLifeSecondarySections({ model }) {
   const {
@@ -74,7 +75,7 @@ export default function DigitalLifeSecondarySections({ model }) {
           <SampleMeta
             loadState={runtimeVitalsLoadState}
             windowMinutes={windowMinutes}
-            sampleSize={Object.keys(runtimeSnapshot?.slot_status || {}).length || null}
+            sampleSize={getRuntimeSlotCount(runtimeSnapshot) || null}
             sampleLabel="关键槽位"
             updatedAt={runtimeUpdatedAt}
             source="runtime snapshot"

@@ -90,6 +90,150 @@ function Join-CmdArguments {
   return ($parts -join ' ')
 }
 
+function Invoke-ChildPowerShellScript {
+  param(
+    [string]$ScriptPath,
+    [hashtable]$NamedArguments,
+    [ValidateRange(1, 86400)]
+    [int]$TimeoutSeconds = 120
+  )
+
+  # Do not capture a native child through PowerShell's pipeline here.  The
+  # startup scripts intentionally launch long-lived descendants (for example
+  # nginx).  A descendant can inherit the pipeline's stdout handle, keeping the
+  # pipeline open after the child PowerShell process has exited and making this
+  # orchestrator wait for the service itself to stop.
+  #
+  # WMI creates the direct child outside this process' stdio handle tree.  The
+  # child writes its success/error streams to files from inside its own
+  # runspace, so a service descendant never receives an orchestrator pipe or a
+  # redirected output-file handle.  We then wait only for the WMI-created PID.
+  $stdoutPath = [System.IO.Path]::GetTempFileName()
+  $stderrPath = [System.IO.Path]::GetTempFileName()
+  $exitCodePath = [System.IO.Path]::GetTempFileName()
+  try {
+    $invocationParts = @(
+      "&",
+      ("'{0}'" -f ([string]$ScriptPath).Replace("'", "''"))
+    )
+    foreach ($entry in @($NamedArguments.GetEnumerator() | Sort-Object Key)) {
+      $name = "-$([string]$entry.Key)"
+      $value = $entry.Value
+      if ($value -is [bool] -or $value -is [System.Management.Automation.SwitchParameter]) {
+        if ([bool]$value) {
+          $invocationParts += $name
+        }
+        continue
+      }
+      if ($null -eq $value) {
+        continue
+      }
+      $invocationParts += $name
+      $invocationParts += ("'{0}'" -f ([string]$value).Replace("'", "''"))
+    }
+
+    $stdoutLiteral = "'{0}'" -f $stdoutPath.Replace("'", "''")
+    $stderrLiteral = "'{0}'" -f $stderrPath.Replace("'", "''")
+    $exitCodeLiteral = "'{0}'" -f $exitCodePath.Replace("'", "''")
+    $invocationLine = $invocationParts -join " "
+    $childSource = @"
+`$ErrorActionPreference = "Stop"
+`$childExitCode = 0
+try {
+  $invocationLine | Set-Content -LiteralPath $stdoutLiteral -Encoding UTF8
+} catch {
+  `$childExitCode = 1
+  (`$_ | Out-String) | Set-Content -LiteralPath $stderrLiteral -Encoding UTF8
+}
+[System.IO.File]::WriteAllText($exitCodeLiteral, [string]`$childExitCode)
+exit `$childExitCode
+"@
+
+    $encodedCommand = [Convert]::ToBase64String(
+      [System.Text.Encoding]::Unicode.GetBytes($childSource)
+    )
+    $powershellExe = Join-Path $PSHOME "powershell.exe"
+    $childCommandLine = @(
+      (ConvertTo-CmdArgument -Value $powershellExe),
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      $encodedCommand
+    ) -join " "
+    $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+    $startup.ShowWindow = 0
+    $createResult = ([wmiclass]"Win32_Process").Create(
+      $childCommandLine,
+      (Get-Location).Path,
+      $startup
+    )
+    if ([int]$createResult.ReturnValue -ne 0) {
+      throw "failed to launch child startup script: return=$($createResult.ReturnValue); script=$ScriptPath"
+    }
+    $childProcess = Get-Process -Id ([int]$createResult.ProcessId) -ErrorAction SilentlyContinue
+    if ($null -ne $childProcess) {
+      # The bounded wait observes only this WMI-created PowerShell, not its
+      # background service descendants.  A hung startup script must not stall
+      # the whole Host orchestrator indefinitely.
+      $completed = $childProcess.WaitForExit([int]($TimeoutSeconds * 1000))
+      if (-not $completed) {
+        $childPid = [int]$childProcess.Id
+        $terminationStatus = "process_tree_termination_requested"
+        try {
+          # Kill the tree while the direct wrapper still exists.  Killing the
+          # wrapper first would orphan a Python/nginx service it already
+          # launched and make the next startup collide with the occupied port.
+          $taskkillExe = Join-Path $env:SystemRoot "System32\taskkill.exe"
+          if (-not (Test-Path -LiteralPath $taskkillExe)) {
+            throw "taskkill.exe not found: $taskkillExe"
+          }
+          & $taskkillExe /PID $childPid /T /F 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "taskkill.exe failed with exit code $LASTEXITCODE for pid $childPid"
+          }
+          if ($childProcess.WaitForExit(5000)) {
+            $terminationStatus = "process_tree_terminated"
+          } else {
+            $childProcess.Kill()
+            if ($childProcess.WaitForExit(5000)) {
+              $terminationStatus = "direct_child_terminated_tree_unconfirmed"
+            } else {
+              $terminationStatus = "process_tree_termination_incomplete"
+            }
+          }
+        } catch {
+          try {
+            $childProcess.Kill()
+            $null = $childProcess.WaitForExit(5000)
+          } catch {
+          }
+          $terminationStatus = "process_tree_termination_failed: $($_.Exception.Message)"
+        }
+        throw "child startup script timed out after $TimeoutSeconds seconds; pid=$childPid; cleanup=$terminationStatus; script=$ScriptPath"
+      }
+    }
+
+    $exitCodeText = [System.IO.File]::ReadAllText($exitCodePath).Trim()
+    $exitCode = if ($exitCodeText) { [int]$exitCodeText } else { 1 }
+    $stdoutText = [System.IO.File]::ReadAllText($stdoutPath)
+    $stderrText = [System.IO.File]::ReadAllText($stderrPath)
+    if ($exitCode -ne 0) {
+      $detail = $stderrText.Trim()
+      if ($detail) {
+        throw "child startup script failed with exit code $exitCode`: $ScriptPath`n$detail"
+      }
+      throw "child startup script failed with exit code $exitCode`: $ScriptPath"
+    }
+    return $stdoutText
+  } finally {
+    Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $exitCodePath -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-RuntimeEnvFile {
   param(
     [string]$Path,
@@ -1104,6 +1248,7 @@ if ($null -ne $listeningPid) {
 }
 Set-Content -Path $pidFile -Value ([string]$hostPid) -Encoding ascii
 
+$startupWarnings = @()
 $obsProcessResult = [ordered]@{
   side = "obs"
   status = if ($obsEnabled) { "disabled" } else { "disabled_by_config" }
@@ -1122,11 +1267,18 @@ if ($obsEnabled) {
     try {
       $obsArgs = @{
         EnvFile = $EnvFile
+        WaitSeconds = $WaitSeconds
       }
       if ($ForceRestart.IsPresent) {
         $obsArgs["ForceRestart"] = $true
       }
-      $obsRaw = & $startObsScript @obsArgs
+      # start_obs_side has two bounded WaitSeconds phases (listener and
+      # health) plus an eight-second fallback probe.  Keep the wrapper alive
+      # long enough for the child to reach its own cleanup path.
+      $obsRaw = Invoke-ChildPowerShellScript `
+        -ScriptPath $startObsScript `
+        -NamedArguments $obsArgs `
+        -TimeoutSeconds ([Math]::Max(60, (2 * $WaitSeconds) + 30))
       $obsJson = ($obsRaw | Out-String).Trim()
       if ($obsJson) {
         try {
@@ -1165,7 +1317,6 @@ if ($obsEnabled) {
 # ── M8 TASK-0107: OBS / MCP 子系统健康探测 ──────────────────────────────
 $obsStatus = "ok"
 $mcpRegistryStatus = "ok"
-$startupWarnings = @()
 if ([string]$externalServicesReady.status -ne "ready") {
   if ($ExternalServicesBackend -eq "none") {
     $startupWarnings += "STARTUP_EXTERNAL_SERVICES_SKIPPED_UNREADY"
@@ -1264,6 +1415,7 @@ if ($monitorProxyEnabled) {
     try {
       $monitorArgs = @{
         EnvFile = $EnvFile
+        WaitSeconds = $WaitSeconds
         UpstreamHost = $probeHost
         UpstreamPort = $Port
         ObsUpstreamHost = [string]$(if ($obsProcessResult.PSObject.Properties.Name -contains "host") { $obsProcessResult.host } else { $probeHost })
@@ -1282,7 +1434,12 @@ if ($monitorProxyEnabled) {
         $monitorArgs["ForceRestart"] = $true
       }
 
-      $monitorRaw = & $startMonitorScript @monitorArgs
+      # The proxy performs one WaitSeconds monitor probe and an eight-second
+      # metrics fallback, so one phase plus 30 seconds covers its own bound.
+      $monitorRaw = Invoke-ChildPowerShellScript `
+        -ScriptPath $startMonitorScript `
+        -NamedArguments $monitorArgs `
+        -TimeoutSeconds ([Math]::Max(30, $WaitSeconds + 30))
       $monitorJson = ($monitorRaw | Out-String).Trim()
       if ($monitorJson) {
         try {

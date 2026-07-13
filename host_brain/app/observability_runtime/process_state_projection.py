@@ -439,6 +439,21 @@ def _safe_call(callback: Callable[[], Mapping[str, Any]]) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _monotonic_source_cursor(
+    current: Any | None,
+    payload: Mapping[str, Any],
+    observed: int,
+) -> int:
+    """Bind changed sources to a new cursor and reuse unchanged durable cursors."""
+
+    if current is None:
+        return max(0, int(observed))
+    current_cursor = int(current.source_cursor)
+    if current.source_digest == digest_json(payload):
+        return max(0, int(observed), current_cursor)
+    return max(0, int(observed), current_cursor + 1)
+
+
 def load_bio_ops_projection_sources(root: Path) -> list[tuple[str, dict[str, Any], int]]:
     """Scan owner artifacts and emit metadata-only documents per run."""
 
@@ -542,7 +557,8 @@ def refresh_bio_ops_projection() -> dict[str, int]:
         return {"document_count": 0}
     store = _store()
     for run_id, payload, observed in documents:
-        cursor = _next_cursor(f"{BIO_OPS_KIND}:{run_id}", observed)
+        current = store.get(BIO_OPS_KIND, run_id)
+        cursor = _monotonic_source_cursor(current, payload, observed)
         store.upsert(
             BIO_OPS_KIND,
             run_id,
@@ -553,11 +569,17 @@ def refresh_bio_ops_projection() -> dict[str, int]:
         )
     latest_run_id, latest_payload, latest_observed = documents[-1]
     latest = {**latest_payload, "latest_run_id": latest_run_id}
+    current_latest = store.get(BIO_OPS_KIND, BIO_OPS_LATEST_KEY)
+    latest_cursor = _monotonic_source_cursor(
+        current_latest,
+        latest,
+        latest_observed,
+    )
     store.upsert(
         BIO_OPS_KIND,
         BIO_OPS_LATEST_KEY,
         latest,
-        source_cursor=_next_cursor(f"{BIO_OPS_KIND}:latest", latest_observed),
+        source_cursor=latest_cursor,
         source_digest=digest_json(latest),
         source_ref="bio-ops-metadata-background-worker:latest",
     )

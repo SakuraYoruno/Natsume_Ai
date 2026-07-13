@@ -284,9 +284,10 @@ def test_security_feature_api_uses_endpoint_aware_client_for_json_requests() -> 
     assert "endpointPost(" in source
     assert "httpGet" not in source
     assert "httpPost" not in source
-    assert "httpText" in source
-    assert "pentestRunEventsPath" in source
-    assert "endpointPath(pentest.events" in source
+    assert "httpText" not in source
+    assert "endpointPath(" not in source
+    assert "securityImmune" in source
+    assert "pentest" not in source.lower()
 
 
 def test_life_feature_api_uses_endpoint_aware_client() -> None:
@@ -3705,9 +3706,8 @@ def test_log_stream_view_model_lives_in_observability_feature() -> None:
         assert forbidden not in log_stream_page
 
 
-def test_pentest_display_metadata_lives_in_shared_module() -> None:
+def test_tools_pentest_display_metadata_lives_in_shared_module() -> None:
     shared = SHARED_PENTEST_META.read_text(encoding="utf-8")
-    pentest_page = (MONITOR_SRC / "pages" / "SecurityPentest.jsx").read_text(encoding="utf-8")
     tools_page = (MONITOR_SRC / "pages" / "Tools.jsx").read_text(encoding="utf-8")
     tools_pentest_section = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsPentestMetadataSection.jsx"
@@ -3718,8 +3718,6 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
-    pentest_lab_model = (MONITOR_SRC / "features" / "security" / "pentestLabModel.js").read_text(encoding="utf-8")
-
     for export_name in [
         "PENTEST_PHASE_OPTIONS",
         "PENTEST_PHASE_LABELS",
@@ -3731,11 +3729,6 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
         "resolvePentestRiskStyle",
     ]:
         assert export_name in shared
-
-    assert "shared/pentestMeta.js" in pentest_lab_model
-    assert "const PHASE_OPTIONS" not in pentest_page
-    assert "function phaseCounts(" not in pentest_page
-    assert "label: 'Phase 1 Passive'" not in pentest_page
 
     assert "shared/pentestMeta.js" in tools_pentest_section
     assert "shared/pentestMeta.js" in tool_detail_panel
@@ -3749,103 +3742,62 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
         assert "label: 'critical', className: 'bg-red-100 text-red-700'" not in source
 
 
-def test_pentest_run_detail_model_lives_in_security_feature() -> None:
-    run_detail_page = (MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx").read_text(encoding="utf-8")
-    run_detail_controller = (MONITOR_SRC / "features" / "security" / "pentestRunDetailController.js").read_text(encoding="utf-8")
-    run_detail_surface = (MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx").read_text(encoding="utf-8")
-    run_detail_model = (MONITOR_SRC / "features" / "security" / "pentestRunDetailModel.js").read_text(encoding="utf-8")
-    run_detail_components = MONITOR_SRC / "features" / "security" / "components" / "pentestRunDetail"
-    attack_graph_panel = (run_detail_components / "AttackGraphPanel.jsx").read_text(encoding="utf-8")
-    live_timeline_section = (run_detail_components / "LiveTimelineSection.jsx").read_text(encoding="utf-8")
-    approval_rail_section = (run_detail_components / "ApprovalRailSection.jsx").read_text(encoding="utf-8")
+def test_legacy_pentest_run_ui_and_security_api_are_hard_cut() -> None:
+    retired_files = [
+        MONITOR_SRC / "pages" / "SecurityPentest.jsx",
+        MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx",
+        MONITOR_SRC / "features" / "security" / "pentestAttackGraphModel.js",
+        MONITOR_SRC / "features" / "security" / "pentestIsolationModel.js",
+        MONITOR_SRC / "features" / "security" / "pentestIsolationModel.test.js",
+        MONITOR_SRC / "features" / "security" / "pentestLabController.js",
+        MONITOR_SRC / "features" / "security" / "pentestLabModel.js",
+        MONITOR_SRC / "features" / "security" / "pentestRunDetailController.js",
+        MONITOR_SRC / "features" / "security" / "pentestRunDetailModel.js",
+        MONITOR_SRC / "features" / "security" / "components" / "PentestIsolationStatus.jsx",
+        MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestSurface.jsx",
+        MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx",
+    ]
+    retired_component_roots = [
+        MONITOR_SRC / "features" / "security" / "components" / "attackGraph",
+        MONITOR_SRC / "features" / "security" / "components" / "pentestLab",
+        MONITOR_SRC / "features" / "security" / "components" / "pentestRunDetail",
+    ]
 
-    for export_name in [
-        "normalizePentestEvent",
-        "pentestEventKey",
-        "mergePentestEvents",
-        "mergeRunWithExistingEvents",
-        "buildPentestAttackGraph",
-        "buildPentestApprovalRailView",
-        "buildPentestRunHeroMetaItems",
-    ]:
-        assert f"export function {export_name}(" in run_detail_model
+    assert all(not path.exists() for path in retired_files)
+    assert all(not any(path.rglob("*")) for path in retired_component_roots)
 
-    assert "./pentestRunDetailModel.js" in run_detail_controller
-    assert "buildPentestAttackGraph(run)" in attack_graph_panel
-    assert "buildPentestApprovalRailView(run, environment)" in run_detail_controller
-    assert "buildPentestRunHeroMetaItems(run, loading)" in run_detail_controller
-    assert "mergeRunWithExistingEvents(runData, previousRun)" in run_detail_controller
-    assert "mergePentestEvents(previousRun?.events || [], [normalized])" in run_detail_controller
-    assert "normalizePentestEvent(event)" in run_detail_controller
-    assert "pentestEventKey(event)" in live_timeline_section
-    assert "ApprovalRailSection" in run_detail_surface
-    assert "AttackGraphPanel" in run_detail_surface
-    assert "LiveTimelineSection" in run_detail_surface
-
-    assert "function normalizePentestEvent(" not in run_detail_page
-    assert "function pentestEventKey(" not in run_detail_page
-    assert "function mergePentestEvents(" not in run_detail_page
-    assert "function mergeRunWithExistingEvents(" not in run_detail_page
-    assert "fetchPentestRun(" not in run_detail_page
-    assert "subscribePentestRunEvents(" not in run_detail_page
-    assert "setLiveStatus(" not in run_detail_page
-    assert "ScopeGuard" not in run_detail_page
-    assert "const openSideEffectSteps" not in run_detail_page
-    assert "const openSideEffectSteps" not in run_detail_surface
-    assert "const approvalRecorded" not in run_detail_page
-    assert "const approvalRecorded" not in run_detail_surface
-    assert "const continuationLabel = !approvalRequired" not in run_detail_page
-    assert "const continuationLabel = !approvalRequired" not in approval_rail_section
-    assert "canApprove: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
-    assert "canContinue: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
-
-
-def test_pentest_run_detail_surface_is_feature_owned() -> None:
-    page = MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx"
-    surface = MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx"
-    controller = MONITOR_SRC / "features" / "security" / "pentestRunDetailController.js"
-    page_source = page.read_text(encoding="utf-8")
-    surface_source = surface.read_text(encoding="utf-8")
-    controller_source = controller.read_text(encoding="utf-8")
-
-    assert surface.exists()
-    assert controller.exists()
-    assert "SecurityPentestRunDetailSurface from '../features/security/components/SecurityPentestRunDetailSurface.jsx'" in page_source
-    assert "usePentestRunDetailController" in page_source
-    assert "export function usePentestRunDetailController(runId, { governancePentest } = {})" in controller_source
-    assert "export default function SecurityPentestRunDetailSurface(" in surface_source
-    assert "subscribePentestRunEvents(runId" in controller_source
-    assert "approvePentestSideEffect(runId)" in controller_source
-    assert "continuePentestSideEffect(runId" in controller_source
-    assert "cancelPentestRun(runId)" in controller_source
-
-    for stale_component in [
-        "AttackGraph",
-        "CheckCircle2",
-        "FileText",
-        "JsonBlock",
-        "Link",
-        "NoticeBanner",
-        "PageHero",
-        "RefreshCw",
-        "ShieldAlert",
-        "StatusBadge",
-        "XCircle",
-    ]:
-        assert stale_component not in page_source
-
-    for stale_controller_detail in [
-        "useEffect",
-        "useMemo",
-        "useRef",
-        "useState",
+    security_api = (MONITOR_SRC / "features" / "security" / "api.js").read_text(encoding="utf-8")
+    for legacy_symbol in [
+        "PENTEST_RUN_EVENT_TYPES",
+        "fetchPentestCapabilities",
+        "fetchPentestEnvironment",
+        "createPentestRun",
+        "fetchPentestRuns",
+        "fetchPentestRun",
+        "pentestRunEventsPath",
+        "subscribePentestRunEvents",
         "fetchPentestReport",
+        "cancelPentestRun",
         "approvePentestSideEffect",
         "continuePentestSideEffect",
-        "cancelPentestRun",
-        "subscribePentestRunEvents",
     ]:
-        assert stale_controller_detail not in page_source
+        assert legacy_symbol not in security_api
+    assert "pentest" not in security_api.lower()
+
+    terminology = (MONITOR_SRC / "shared" / "content" / "terminology.js").read_text(
+        encoding="utf-8"
+    )
+    assert "PENTEST_COPY" not in terminology
+    assert "pentestRun:" not in terminology
+    assert "pentest: '渗透实验室'" not in terminology
+
+    endpoint_registry = ENDPOINT_REGISTRY.read_text(encoding="utf-8")
+    assert "path: '/v1/pentest/capabilities'" in endpoint_registry
+    for retired_endpoint in [
+        "/v1/pentest/environment",
+        "/v1/pentest/runs",
+    ]:
+        assert retired_endpoint not in endpoint_registry
 
 
 def test_security_immune_query_and_view_model_live_in_security_feature() -> None:

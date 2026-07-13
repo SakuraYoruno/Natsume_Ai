@@ -236,7 +236,7 @@ if (Test-Path -Path $pidFile) {
         runtime_env_file = $runtimeEnvFile
       }
       $result | ConvertTo-Json -Depth 8
-      exit 0
+      return
     }
     if ($null -ne $existingProc -and $existingObsProc -and $ForceRestart.IsPresent) {
       Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
@@ -264,7 +264,7 @@ if ($staleObsPids.Count -gt 0) {
       runtime_env_file = $runtimeEnvFile
     }
     $result | ConvertTo-Json -Depth 8
-    exit 0
+    return
   }
   foreach ($stalePid in $staleObsPids) {
     Stop-ProcessTree -ProcessId ([int]$stalePid) | Out-Null
@@ -288,7 +288,7 @@ if ($null -ne $listeningPid) {
         runtime_env_file = $runtimeEnvFile
       }
       $result | ConvertTo-Json -Depth 8
-      exit 0
+      return
     }
     throw "port $Port is already in use by pid $listeningPid (non-obs process)"
   }
@@ -402,4 +402,4 @@ $result = [ordered]@{
 }
 $json = $result | ConvertTo-Json -Depth 8
 Write-Output $json
-exit 0
+return

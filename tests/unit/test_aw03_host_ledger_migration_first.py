@@ -46,12 +46,26 @@ def test_startup_check_runs_catalog_before_opening_durable_ledger(
     monkeypatch,
 ) -> None:
     db_path = tmp_path / "startup-check.sqlite3"
+    startup_calls: list[str] = []
 
     def reject_inline_schema(_self) -> None:
         raise AssertionError("startup check must not execute inline DDL")
 
+    def configure_ports(*, persistence_db_path=None) -> None:
+        assert persistence_db_path == str(db_path)
+        startup_calls.append("configure_ports")
+
     monkeypatch.setattr(SQLiteLedger, "_ensure_schema", reject_inline_schema)
-    monkeypatch.setattr(host_main, "collect_dependency_probes_sync", lambda: {})
+    monkeypatch.setattr(
+        host_main,
+        "configure_process_service_ports",
+        configure_ports,
+    )
+    monkeypatch.setattr(
+        host_main,
+        "collect_dependency_probes_sync",
+        lambda: startup_calls.append("collect_probes") or {},
+    )
     monkeypatch.setattr(
         host_main,
         "build_startup_report",
@@ -60,6 +74,7 @@ def test_startup_check_runs_catalog_before_opening_durable_ledger(
     monkeypatch.setattr(host_main, "emit_runtime_bootstrap_logs", lambda **_kwargs: None)
 
     assert host_main.run_startup_check(str(db_path)) is True
+    assert startup_calls == ["configure_ports", "collect_probes"]
     with sqlite3.connect(db_path) as conn:
         latest = conn.execute(
             "SELECT MAX(migration_id) FROM schema_migrations"

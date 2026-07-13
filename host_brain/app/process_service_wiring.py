@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from host_brain.composition.process_application_ports import (
     ProcessApplicationPorts,
     configure_process_application_ports,
 )
 
 
-def configure_process_service_ports() -> None:
+def configure_process_service_ports(
+    *,
+    persistence_db_path: str | Path | None = None,
+) -> None:
+    persistence_db_path_override = (
+        None if persistence_db_path is None else str(persistence_db_path)
+    )
+
     from host_brain.app.capability_forge import CapabilityForgeService
     from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
     from host_brain.app.graph_config_builder import (
@@ -72,7 +81,11 @@ def configure_process_service_ports() -> None:
 
     configure_process_application_ports(
         ProcessApplicationPorts(
-            persistence_db_path=lambda: str(get_persistence_settings().canonical_db_path),
+            persistence_db_path=lambda: (
+                persistence_db_path_override
+                if persistence_db_path_override is not None
+                else str(get_persistence_settings().canonical_db_path)
+            ),
             mode_transition_service=_get_mode_transition_service,
             model_credential_resolver=resolve_model_provider_credential,
             model_base_url_resolver=resolve_model_provider_base_url,

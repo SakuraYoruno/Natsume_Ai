@@ -40,6 +40,7 @@ from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
 from host_brain.observability.routes import build_obs_metrics_response
+from host_brain.app.settings import get_persistence_settings
 
 ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
     {
@@ -551,7 +552,7 @@ def obs_metrics_payload(
 
 def mcp_health_check_response() -> HealthResponse:
     ts_ms = int(time.time() * 1000)
-    db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+    db_path = str(get_persistence_settings().canonical_db_path).strip()
     status_text = "OK"
     reason_code = None
     detail = "mcp registry reachable"

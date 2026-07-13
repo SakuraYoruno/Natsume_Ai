@@ -31,8 +31,6 @@ export const NAV_LABELS = Object.freeze({
   agentLoop: '智能体循环',
   tribe: '群体协作',
   edgeCommand: '边缘命令',
-  pentest: '渗透实验室',
-  pentestRun: '渗透任务详情',
   immune: '安全免疫',
   body: '身体集成',
 })
@@ -168,7 +166,7 @@ export const EDGE_COMMAND_COPY = Object.freeze({
   quickLinksTitle: '相关入口',
   quickLinks: [
     { key: 'gateway', to: '/execution/gateway', label: 'Gateway', detail: '检查 Edge / WeChat 网关事件和通道健康。' },
-    { key: 'agentLoop', to: '/execution/agent-loop', label: 'Agent Loop', detail: '从自动执行回路验证端侧动作效果。' },
+    { key: 'taskRuntime', to: '/execution/task-runtime', label: '执行审查', detail: '从受控任务运行时复核端侧动作和执行回执。' },
     { key: 'tools', to: '/execution/tools', label: 'Tools', detail: '查看工具能力、side-effect 和执行入口。' },
     { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '追踪命令相关 request 和 edge 节点。' },
   ],
@@ -184,7 +182,7 @@ export const TRIBE_COPY = Object.freeze({
   focusTitle: '建议路径',
   quickLinksTitle: '相关入口',
   quickLinks: [
-    { key: 'agentLoop', to: '/execution/agent-loop', label: 'Agent Loop', detail: '查看智能体循环和最近执行历史。' },
+    { key: 'taskRuntime', to: '/execution/task-runtime', label: '执行审查', detail: '查看受控任务和最近执行历史。' },
     { key: 'tools', to: '/execution/tools', label: 'Tools', detail: '核对工具能力和 side-effect 元数据。' },
     { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '追踪协作事件关联的 request 链路。' },
     { key: 'logs', to: '/observability/logs', label: 'Logs', detail: '查看总线异常、订阅失败和后端日志。' },
@@ -214,7 +212,7 @@ export const GATEWAY_COPY = Object.freeze({
 export const EXECUTION_TOOLS_COPY = Object.freeze({
   heroEyebrow: 'Execution / Tools',
   heroTitle: '工具管理',
-  heroDescription: '把工具目录、只读/写入权限、Pentest 分流和人工执行门禁放在同一个工作台。先判断能不能执行，再决定进入普通执行、审批令牌或 Security Lab。',
+  heroDescription: '把工具目录、只读/写入权限、Pentest 元信息和人工执行门禁放在同一个工作台。先判断能不能执行，再决定进入普通执行、审批令牌或安全证据复核。',
   commandRailTitle: 'Tools Execution Gate',
   commandRailDescription: '首屏先回答：工具目录是否可信、当前筛选是否影响样本、选中工具能否直接执行、写入或 Pentest 能力由哪条审批路径接管。',
   gateTitle: '执行 Gate',
@@ -226,7 +224,7 @@ export const EXECUTION_TOOLS_COPY = Object.freeze({
   quickLinks: [
     { key: 'catalog', label: 'Catalog', targetId: 'tools-catalog-workspace', detail: '搜索、筛选并选择工具。' },
     { key: 'detail', label: 'Detail', targetId: 'tools-detail-panel', detail: '查看权限、schema 与执行入口。' },
-    { key: 'pentest', label: 'Pentest', targetId: 'tools-pentest-metadata', detail: '只展示元信息，运行跳转 Security Lab。' },
+    { key: 'pentest', label: 'Pentest', targetId: 'tools-pentest-metadata', detail: '只展示元信息，安全态与证据在 Security Immune 复核。' },
     { key: 'runtime', label: 'Runtime', targetId: 'tools-runtime-context', detail: '展开工具器官和运行态上下文。' },
   ],
 })
@@ -264,41 +262,8 @@ export const INTEGRATIONS_COPY = Object.freeze({
   quickLinks: [
     { key: 'edgeCommand', to: '/execution/edge-command', label: 'Edge Command', detail: '检查边缘命令状态和 gated push。' },
     { key: 'gateway', to: '/execution/gateway', label: 'Gateway', detail: '核对 Edge / WeChat 网关通道健康。' },
-    { key: 'chatDebug', to: '/observability/chat-debug', label: 'Chat Debug', detail: '用一次可追踪请求验证身体动作链路。' },
+    { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '用可追踪的 request 和 edge 节点验证身体动作链路。' },
     { key: 'cockpit', to: '/cockpit', label: 'Cockpit', detail: '回到数字生命体总览确认运行态影响。' },
-  ],
-})
-
-export const PENTEST_COPY = Object.freeze({
-  labTitle: '渗透实验室',
-  labEyebrow: 'Security Lab / Pentest Agent',
-  labDescription: '面向授权测试环境的渗透任务控制台。先约束目标与 scope，再生成攻击路径，最后在审计链和审批轨道内执行。',
-  runTitle: '渗透任务详情',
-  runEyebrow: 'Pentest Run Detail',
-  runDescription: '实时查看任务事件、攻击路径、发现、报告和 side-effect 审批状态。',
-  runCommandRailTitle: 'Run Decision Rail',
-  runCommandRailDescription: '把 run 状态、Lab gate、approval、finding、timeline 和 report 压缩成下一步操作。',
-  runCommandRailFocusTitle: '下一步动作',
-  runCommandRailGateTitle: '执行 Gate',
-  runCommandRailEvidenceTitle: '证据摘要',
-  creationResultTitle: 'Run 已创建',
-  creationResultDescription: 'Host Main 已接收创建请求。后续状态、timeline、finding、approval 与 report 以详情页为准。',
-  workflow: [
-    { key: 'scope', title: '1. 授权范围', detail: 'target 必须命中 scope，越界会被 ScopeGuard 拦截。' },
-    { key: 'plan', title: '2. 计划路径', detail: '根据 mode 与 phases 生成可解释攻击图。' },
-    { key: 'run', title: '3. 只读采证', detail: '默认走 readonly fixture 和安全验证。' },
-    { key: 'approval', title: '4. 高风险审批', detail: 'Phase4/5 必须 Lab Mode + approval rail。' },
-    { key: 'report', title: '5. 报告归档', detail: '报告、证据、审计事件写入 artifacts。' },
-  ],
-  modeLabels: {
-    readonly: '只读采证',
-    lab_full: '靶场全流程',
-  },
-  graphLegend: [
-    { key: 'target', label: '目标', detail: '被授权测试的 host、服务或入口。', className: 'border-cyan-200 bg-cyan-50 text-cyan-800' },
-    { key: 'guard', label: '守卫', detail: 'ScopeGuard、Governor 或 approval gate。', className: 'border-blue-200 bg-blue-50 text-blue-800' },
-    { key: 'finding', label: '发现', detail: '验证出的风险、弱点或证据节点。', className: 'border-rose-200 bg-rose-50 text-rose-800' },
-    { key: 'blocked', label: '阻断', detail: '越界、未审批或策略拒绝。', className: 'border-red-200 bg-red-50 text-red-800' },
   ],
 })
 

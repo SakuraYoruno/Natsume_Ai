@@ -127,7 +127,13 @@ def test_clock_identity_is_read_only_validated_against_registered_service() -> N
     assert rejected.value.reason_code == composition.SCHEDULER_CLOCK_IDENTITY_INVALID
 
 
-def test_seed_cron_defaults_to_utc_and_composition_has_no_app_or_sqlite_write() -> None:
+def test_seed_cron_defaults_to_builtin_utc_without_tzdata(
+    monkeypatch,
+) -> None:
+    def reject_zoneinfo(_name: str):
+        raise composition.ZoneInfoNotFoundError("tzdata unavailable")
+
+    monkeypatch.setattr(composition, "ZoneInfo", reject_zoneinfo)
     now = int(datetime(2026, 7, 12, 22, 0, tzinfo=timezone.utc).timestamp() * 1_000)
     task_id, definition, next_at = composition.scheduler_seed_payload(
         {
@@ -152,8 +158,10 @@ def test_seed_cron_defaults_to_utc_and_composition_has_no_app_or_sqlite_write() 
         datetime(2026, 7, 12, 23, 0, tzinfo=timezone.utc).timestamp() * 1_000
     )
 
+
+def test_scheduler_composition_has_no_app_or_sqlite_write() -> None:
+
     source = inspect.getsource(composition)
     assert "host_brain.app" not in source
     assert "sqlite3" not in source
     assert "INSERT INTO secure_ingress" not in source
-
