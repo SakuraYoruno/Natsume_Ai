@@ -16,24 +16,36 @@ namespace Natsume.MateEngineBridge;
 [BepInPlugin("ai.natsume.mateengine.bridge", "Natsume MateEngine Bridge", "0.1.0")]
 public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
 {
-    private const int DefaultPort = 32146;
-    private readonly ConcurrentQueue<BridgeCommand> _queue = new();
+    private const int MaxCommandsPerFrame = 4;
+    private readonly ConcurrentQueue<QueuedBridgeCommand> _queue = new();
     private UdpClient? _udp;
     private Thread? _thread;
     private volatile bool _running;
+    private int _queuedCount;
     private ManualLogSource? _log;
+    private BridgeSecurityGate? _security;
     private GameObject? _fallbackCanvas;
     private Text? _fallbackText;
     private float _fallbackUntil;
     private readonly Dictionary<string, float> _managedBlendshapes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Transform, Vector3> _originalScales = new();
+    private readonly HashSet<string> _allowedAccessoryPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _lastRejectionLogUtc = new(StringComparer.Ordinal);
     private float _formUntil;
     private bool _chibiActive;
 
     private void Awake()
     {
         _log = Logger;
-        StartUdp();
+        if (!BridgeSecurityGate.TryCreate(out var security, out var reason) || security == null)
+        {
+            _log?.LogWarning($"Natsume bridge UDP remains disabled: {reason}");
+            return;
+        }
+
+        _security = security;
+        LoadAccessoryAllowlist();
+        StartUdp(security.Port);
     }
 
     private void OnDestroy()
@@ -43,9 +55,21 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
-        while (_queue.TryDequeue(out var command))
+        var processedThisFrame = 0;
+        while (processedThisFrame < MaxCommandsPerFrame && _queue.TryDequeue(out var queued))
         {
-            HandleCommand(command);
+            processedThisFrame++;
+            Interlocked.Decrement(ref _queuedCount);
+            try
+            {
+                HandleCommand(queued.Command);
+                _security?.AuditCompleted(queued.Authorization, queued.CommandType, true);
+            }
+            catch (Exception ex)
+            {
+                _security?.AuditCompleted(queued.Authorization, queued.CommandType, false);
+                _log?.LogWarning($"Authorized Natsume bridge command failed: {ex.Message}");
+            }
         }
 
         if (_fallbackCanvas != null && Time.unscaledTime > _fallbackUntil)
@@ -61,11 +85,11 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
         ApplyManagedBlendshapes();
     }
 
-    private void StartUdp()
+    private void StartUdp(int port)
     {
         try
         {
-            _udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, DefaultPort));
+            _udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
             _running = true;
             _thread = new Thread(ListenLoop)
             {
@@ -73,7 +97,7 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
                 Name = "NatsumeMateEngineBridgeUdp",
             };
             _thread.Start();
-            _log?.LogInfo($"Natsume bridge UDP ready on 127.0.0.1:{DefaultPort}");
+            _log?.LogInfo($"Natsume bridge signed UDP ready on 127.0.0.1:{port}");
         }
         catch (Exception ex)
         {
@@ -101,12 +125,58 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
                 var udp = _udp;
                 if (udp == null) break;
                 var bytes = udp.Receive(ref endpoint);
-                var json = Encoding.UTF8.GetString(bytes);
-                var command = JsonUtility.FromJson<BridgeCommand>(json);
-                if (command != null)
+                var security = _security;
+                if (security == null)
                 {
-                    _queue.Enqueue(command);
+                    continue;
                 }
+
+                if (!security.TryAuthenticate(
+                        bytes,
+                        endpoint,
+                        out var payloadJson,
+                        out var authorization,
+                        out var rejectionReason))
+                {
+                    if (ShouldLogRejection(rejectionReason))
+                    {
+                        _log?.LogWarning($"Natsume bridge datagram rejected: {rejectionReason}");
+                    }
+                    continue;
+                }
+
+                BridgeCommand? command;
+                try
+                {
+                    command = JsonUtility.FromJson<BridgeCommand>(payloadJson);
+                }
+                catch (Exception)
+                {
+                    command = null;
+                }
+
+                if (command == null)
+                {
+                    security.AuditRejected(authorization, "invalid_command_json", "");
+                    continue;
+                }
+
+                var commandType = (command.type ?? "say").Trim().ToLowerInvariant();
+                if (Interlocked.Increment(ref _queuedCount) > security.QueueCapacity)
+                {
+                    Interlocked.Decrement(ref _queuedCount);
+                    security.AuditRejected(authorization, "queue_capacity_exceeded", commandType);
+                    continue;
+                }
+
+                if (!security.CommitAccepted(authorization, commandType))
+                {
+                    Interlocked.Decrement(ref _queuedCount);
+                    _log?.LogWarning("Natsume bridge command rejected: durable audit unavailable");
+                    continue;
+                }
+
+                _queue.Enqueue(new QueuedBridgeCommand(command, authorization, commandType));
             }
             catch (ObjectDisposedException)
             {
@@ -300,7 +370,12 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
             return;
         }
 
-        var renderers = FindObjectsOfType<SkinnedMeshRenderer>();
+        if (!TryResolveSingleAvatar(out var animator) || animator == null)
+        {
+            return;
+        }
+
+        var renderers = animator.GetComponentsInChildren<SkinnedMeshRenderer>(true);
         foreach (var renderer in renderers)
         {
             var mesh = renderer.sharedMesh;
@@ -336,29 +411,36 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
     private void ToggleAccessory(string? name, bool enabled)
     {
         var cleanName = (name ?? "").Trim();
-        if (string.IsNullOrEmpty(cleanName))
+        if (string.IsNullOrEmpty(cleanName) || !_allowedAccessoryPaths.Contains(cleanName))
         {
-            return;
+            throw new InvalidOperationException("Accessory path is not explicitly allowlisted.");
         }
 
-        var changed = 0;
-        foreach (var transform in Resources.FindObjectsOfTypeAll<Transform>())
+        if (!TryResolveSingleAvatar(out var animator) || animator == null)
         {
-            if (transform == null || transform.gameObject == null)
+            throw new InvalidOperationException("A unique humanoid avatar is required.");
+        }
+
+        Transform? selected = null;
+        foreach (var transform in animator.GetComponentsInChildren<Transform>(true))
+        {
+            if (!string.Equals(RelativePath(animator.transform, transform), cleanName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-
-            if (transform.name.IndexOf(cleanName, StringComparison.OrdinalIgnoreCase) < 0)
+            if (selected != null)
             {
-                continue;
+                throw new InvalidOperationException("Accessory path is ambiguous.");
             }
-
-            transform.gameObject.SetActive(enabled);
-            changed++;
+            selected = transform;
         }
 
-        _log?.LogInfo($"Accessory toggle '{cleanName}' enabled={enabled} changed={changed}");
+        if (selected == null || selected.gameObject == null)
+        {
+            throw new InvalidOperationException("Accessory path was not found under the active avatar.");
+        }
+        selected.gameObject.SetActive(enabled);
+        _log?.LogInfo($"Accessory toggle '{cleanName}' enabled={enabled}");
     }
 
     private void ApplyChibiMode(bool enabled, float scale)
@@ -369,11 +451,9 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
             return;
         }
 
-        var animator = FindObjectOfType<Animator>();
-        if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
+        if (!TryResolveSingleAvatar(out var animator) || animator == null)
         {
-            _log?.LogWarning("Chibi form skipped: no humanoid animator found.");
-            return;
+            throw new InvalidOperationException("Chibi form requires one unique humanoid avatar.");
         }
 
         var headScale = scale > 0.1f ? scale : 2.4f;
@@ -440,11 +520,12 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
     {
         try
         {
-            var handler = FindObjectOfType<AvatarRandomMessages>();
-            if (handler == null)
+            var handlers = FindObjectsOfType<AvatarRandomMessages>();
+            if (handlers.Length != 1)
             {
                 return false;
             }
+            var handler = handlers[0];
 
             if (ttl > 0.1f)
             {
@@ -540,6 +621,76 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
         _fallbackCanvas.SetActive(false);
     }
 
+    private void LoadAccessoryAllowlist()
+    {
+        _allowedAccessoryPaths.Clear();
+        var raw = Environment.GetEnvironmentVariable("NATSUME_MATEENGINE_PLUGIN_ACCESSORY_ALLOWLIST") ?? "";
+        foreach (var item in raw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var value = item.Trim().Trim('/');
+            if (!string.IsNullOrEmpty(value)
+                && value.Length <= 256
+                && value.IndexOf("..", StringComparison.Ordinal) < 0)
+            {
+                _allowedAccessoryPaths.Add(value);
+            }
+        }
+    }
+
+    private bool ShouldLogRejection(string reason)
+    {
+        var key = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+        var now = DateTime.UtcNow;
+        if (_lastRejectionLogUtc.TryGetValue(key, out var previous)
+            && (now - previous).TotalSeconds < 1.0)
+        {
+            return false;
+        }
+        _lastRejectionLogUtc[key] = now;
+        return true;
+    }
+
+    private bool TryResolveSingleAvatar(out Animator? selected)
+    {
+        selected = null;
+        foreach (var animator in FindObjectsOfType<Animator>())
+        {
+            if (animator == null || animator.avatar == null || !animator.avatar.isHuman)
+            {
+                continue;
+            }
+            if (selected != null)
+            {
+                _log?.LogWarning("MateEngine bridge effect rejected: multiple humanoid avatars detected.");
+                selected = null;
+                return false;
+            }
+            selected = animator;
+        }
+        if (selected == null)
+        {
+            _log?.LogWarning("MateEngine bridge effect rejected: no humanoid avatar detected.");
+            return false;
+        }
+        return true;
+    }
+
+    private static string RelativePath(Transform root, Transform target)
+    {
+        if (target == root)
+        {
+            return "";
+        }
+        var segments = new Stack<string>();
+        var current = target;
+        while (current != null && current != root)
+        {
+            segments.Push(current.name);
+            current = current.parent;
+        }
+        return current == root ? string.Join("/", segments) : "";
+    }
+
     [Serializable]
     private sealed class BridgeCommand
     {
@@ -557,6 +708,23 @@ public sealed class NatsumeMateEngineBridgePlugin : BaseUnityPlugin
         public float duration;
         public float scale;
         public float ttl = 8f;
+    }
+
+    private readonly struct QueuedBridgeCommand
+    {
+        internal QueuedBridgeCommand(
+            BridgeCommand command,
+            BridgeAuthorization authorization,
+            string commandType)
+        {
+            Command = command;
+            Authorization = authorization;
+            CommandType = commandType;
+        }
+
+        internal BridgeCommand Command { get; }
+        internal BridgeAuthorization Authorization { get; }
+        internal string CommandType { get; }
     }
 
     private static string FirstNonEmpty(params string?[] values)

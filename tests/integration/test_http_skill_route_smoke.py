@@ -1,28 +1,20 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import time
 from contextlib import ExitStack
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-import host_brain.app.dependencies as deps
+import host_brain.composition.process_services as deps
 import host_brain.app.asgi as host_api
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.agent_runtime_registry import AgentRuntimeSkillProvider
-
-
-class _FakeIntentEngine:
-    def evaluate_intent(self, *args, **kwargs) -> dict[str, Any]:  # noqa: ANN002, ANN003
-        return {
-            "decision": "APPROVE",
-            "reason_code": None,
-            "intent_id": "intent_http_skill_smoke_001",
-            "tokens": {"approval_token_ref": "approval::http_skill_smoke_001"},
-        }
 
 
 async def _fake_run_retrieval(*args, **kwargs) -> tuple[dict[str, Any], list[dict[str, Any]]]:  # noqa: ANN002, ANN003
@@ -76,13 +68,25 @@ def _parse_sse_events(response) -> list[dict[str, Any]]:
     return events
 
 
-def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[TestClient, SQLiteLedger]:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQLiteLedger]:
+    db_path = canonical_root / "host-canonical.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="http-skill-route-fixture",
+    )
+    assert migrated.success, migrated.as_dict()
+    ledger = SQLiteLedger(
+        db_path=db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
     registry = build_builtin_skill_registry()
 
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_skill_registry", registry, raising=False)
-    monkeypatch.setattr(deps, "_intent_engine", None, raising=False)
+    monkeypatch.setattr(deps.get_process_service_container(), "ledger", ledger, raising=False)
+    monkeypatch.setattr(deps.get_process_service_container(), "skill_registry", registry, raising=False)
+    monkeypatch.setattr(deps.get_process_service_container(), "intent_engine", None, raising=False)
+    monkeypatch.setattr(deps.get_process_service_container(), "token_service", None, raising=False)
+    previous_composition = deps.get_process_service_container().capability_runtime_composition  # noqa: SLF001
+    monkeypatch.setattr(deps.get_process_service_container(), "capability_runtime_composition", None)
 
     stack = ExitStack()
     stack.enter_context(
@@ -90,13 +94,6 @@ def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[Test
             "host_brain.app.asgi.evaluate_immune_gate_for_chat",
             lambda request_body: {"decision": "ALLOW", "reason_codes": []},
         )
-    )
-    if not use_real_governor:
-        stack.enter_context(
-            patch("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
-        )
-    stack.enter_context(
-        patch("host_brain.app.agent_runtime_shared.chat_lite_governor", lambda **kwargs: {"decision": "APPROVE"})
     )
     stack.enter_context(
         patch("host_brain.app.chat_retrieval_helpers._run_retrieval", _fake_run_retrieval)
@@ -111,12 +108,13 @@ def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[Test
         patch("host_brain.app.surface_reply_runtime.surface_reply_sse_generator", _fake_surface_reply_sse_generator)
     )
     stack.enter_context(
-        patch("host_brain.app.agent_runtime_shared._async_post_process", _fake_async_post_process)
+        patch("host_brain.agent_runtime.postprocess._async_post_process", _fake_async_post_process)
     )
 
     client = TestClient(host_api.app, raise_server_exceptions=False)
     client.__dict__["_skill_smoke_stack"] = stack
     client.__dict__["_skill_smoke_ledger"] = ledger
+    client.__dict__["_previous_capability_composition"] = previous_composition
     return client, ledger
 
 
@@ -124,11 +122,14 @@ def _close_client(client: TestClient, ledger: SQLiteLedger) -> None:
     stack = client.__dict__.pop("_skill_smoke_stack", None)
     if stack is not None:
         stack.close()
+    deps.reset_capability_runtime_composition(
+        client.__dict__.pop("_previous_capability_composition", None)
+    )
     ledger.close()
 
 
-def test_http_chat_route_executes_direct_skill(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
+def test_http_chat_route_executes_direct_skill(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/chat",
@@ -168,8 +169,8 @@ def test_http_chat_route_executes_direct_skill(monkeypatch) -> None:
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
+def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/chat",
@@ -200,12 +201,12 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
+def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
+    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
-    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+    def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         captured["payload"] = dict(payload)
         return {
             "status": "EXECUTED",
@@ -214,7 +215,7 @@ def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch) -> N
         }
 
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -251,12 +252,12 @@ def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch) -> N
         _close_client(client, ledger)
 
 
-def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
+def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
+    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
-    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+    def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         captured["payload"] = dict(payload)
         return {
             "status": "EXECUTED",
@@ -265,7 +266,7 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         }
 
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -294,12 +295,12 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_agent_self_heal_task(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
+def test_http_chat_route_infers_agent_self_heal_task(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
+    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
-    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+    def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         captured["payload"] = dict(payload)
         return {
             "status": "EXECUTED",
@@ -308,7 +309,7 @@ def test_http_chat_route_infers_agent_self_heal_task(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -336,8 +337,8 @@ def test_http_chat_route_infers_agent_self_heal_task(monkeypatch) -> None:
         _close_client(client, ledger)
 
 
-def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch, use_real_governor=True)
+def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         now_ms = int(time.time() * 1000)
         response = client.post(
@@ -387,8 +388,8 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch) -> 
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
+def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/chat",
@@ -422,8 +423,8 @@ def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch
         _close_client(client, ledger)
 
 
-def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
+def test_http_chat_route_executes_skill_plan(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/chat",
@@ -483,12 +484,12 @@ def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
         _close_client(client, ledger)
 
 
-def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
+def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
+    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: list[dict[str, Any]] = []
 
-    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+    def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         captured.append(dict(payload))
         return {
             "status": "EXECUTED",
@@ -497,7 +498,7 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         }
 
     monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -548,8 +549,9 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         assert route_event["route_type"] == "plan"
         assert route_event["target_id"] == "skill_dag"
         assert commit_event["decision"] == "APPROVE"
-        assert captured[0]["work_order"]["workspace"] == {"strategy": "runtime_repo"}
-        assert captured[0]["work_order"]["objective"] == "fix the failing test"
+        worker_payload = next(payload for payload in captured if "work_order" in payload)
+        assert worker_payload["work_order"]["workspace"] == {"strategy": "runtime_repo"}
+        assert worker_payload["work_order"]["objective"] == "fix the failing test"
 
         request_id = str(commit_event["request_id"])
         trace = ledger.trace_request(request_id)
@@ -561,8 +563,8 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         _close_client(client, ledger)
 
 
-def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> None:
-    client, ledger = _build_client(monkeypatch, use_real_governor=True)
+def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch, tmp_path: Path) -> None:
+    client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         now_ms = int(time.time() * 1000)
         response = client.post(
@@ -630,7 +632,19 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> N
         trace = ledger.trace_request(request_id)
         assert trace["status"] == "COMPLETE"
         assert len(trace["intent_log"]) == 1
-        assert len(trace["governor_log"]) == 1
+        assert len(trace["governor_log"]) == 3
+        child_grants = [
+            row
+            for row in trace["governor_log"]
+            if row.get("reason_code") == "PLAN_NODE_DERIVED_APPROVE"
+        ]
+        assert len(child_grants) == 2
+        child_actions = {
+            row["tokens"]["approved_action_binding"]["action_kind"]
+            for row in child_grants
+        }
+        assert child_actions == {"session_summary", "emotion_query"}
+        assert len({row["tokens"]["approval_token_ref"] for row in child_grants}) == 2
         assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
             "emotion_query",
             "session_summary",
@@ -638,4 +652,3 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> N
         assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
     finally:
         _close_client(client, ledger)
-

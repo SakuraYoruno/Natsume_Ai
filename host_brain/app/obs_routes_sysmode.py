@@ -1,4 +1,4 @@
-﻿"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
+"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
 
 包含：GET/POST /obs/sys-mode / history / auto-rules / event
 """
@@ -15,6 +15,21 @@ from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_host_proxy import fetch_host_json
+from host_brain.app.observability_runtime.live_source_projection import (
+    SYS_MODE_HISTORY_KEY,
+    SYS_MODE_HISTORY_KIND,
+    SYS_MODE_MAX_AGE_MS,
+    SYS_MODE_STATUS_KEY,
+    SYS_MODE_STATUS_KIND,
+    read_operator_live_projection,
+)
+from host_brain.app.observability_runtime.process_state_projection import (
+    RUNTIME_MAX_AGE_MS,
+    RUNTIME_SNAPSHOT_KEY,
+    RUNTIME_SNAPSHOT_KIND,
+    read_process_projection,
+)
+from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -23,7 +38,7 @@ from typing import Literal
 import threading
 
 from .obs_routes_core import router, _get_ledger, _now_ms
-from .obs_routes_core import _env_int, _get_obs_route_cached_response
+from .obs_routes_core import _env_int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,31 +51,6 @@ import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
 _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
 _RUNTIME_SNAPSHOT_CACHE_TTL_MS = _env_int("OBS_RUNTIME_SNAPSHOT_CACHE_TTL_MS", 2500, minimum=0)
-_RUNTIME_SNAPSHOT_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_runtime_snapshot_warm_enabled
-)
-_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS = _env_int(
-    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS",
-    15000,
-    minimum=1000,
-)
-_RUNTIME_SNAPSHOT_WARM_STALE_MS = _env_int(
-    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_STALE_MS",
-    max(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS * 3, 45000),
-    minimum=2000,
-)
-_runtime_snapshot_warm_thread: threading.Thread | None = None
-_runtime_snapshot_warm_stop = threading.Event()
-_runtime_snapshot_warm_lock = threading.Lock()
-_runtime_snapshot_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
 
 
 def _sync_obs_routes_compat_handles() -> None:
@@ -89,7 +79,7 @@ def _get_mode_transition_service():
 
         try:
             from host_brain.core.mode_transition import ModeTransitionService
-            from host_brain.app.dependencies import (
+            from host_brain.composition.process_services import (
                 get_hard_state as _dep_get_hard_state,
                 set_sys_mode as _dep_set_sys_mode,
             )
@@ -141,7 +131,7 @@ class _FallbackModeService:
             return {"success": False, "error": f"invalid mode: {target}"}
         # 优先通过 set_sys_mode 切换（保持 _hard_state 一致性）
         try:
-            from host_brain.app.dependencies import set_sys_mode as _dep_set  # noqa: PLC0415
+            from host_brain.composition.process_services import set_sys_mode as _dep_set  # noqa: PLC0415
             result = _dep_set(target)
             return {
                 "success": True,
@@ -187,6 +177,7 @@ class SysModeStatusResponse(BaseModel):
     ts_ms: int
     degraded: bool = False
     degraded_reason: Optional[str] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SysModeSwitchRequest(BaseModel):
@@ -223,6 +214,7 @@ class SysModeHistoryResponse(BaseModel):
     items: List[SysModeHistoryItem]
     total: int
     timestamp: int
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AutoRulesUpdateRequest(BaseModel):
@@ -268,28 +260,30 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     vestibular_state: Dict[str, Any] = Field(default_factory=dict)
     runtime_summary: Dict[str, Any] = Field(default_factory=dict)
     background_runtime: Dict[str, Any] = Field(default_factory=dict)
-    slot_status: Dict[str, str] = Field(default_factory=dict)
+    # Projection serialization can add a nested ``_operator_privacy`` envelope
+    # when a slot name is content-shaped (for example ``bond_narrative``).
+    # The read model must preserve that fail-closed metadata alongside the
+    # ordinary string statuses.
+    slot_status: Dict[str, Any] = Field(default_factory=dict)
     degraded: bool = False
     degraded_reasons: List[str] = Field(default_factory=list)
     timestamp: int
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-def _clone_runtime_snapshot_response(
-    value: "DigitalLifeRuntimeSnapshotResponse",
-) -> "DigitalLifeRuntimeSnapshotResponse":
-    if hasattr(value, "model_copy"):
-        return value.model_copy(deep=True)
-    return value.copy(deep=True)
-
-
-def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse:
-    from host_brain.app.http_hooks_runtime_helpers import (  # noqa: PLC0415
-        _build_background_runtime_snapshot,
-        build_digital_life_runtime_snapshot,
-    )
+def _build_runtime_snapshot_response(
+    current_topic: str,
+    *,
+    lifecycle_ports: LifecycleRuntimeApplicationPorts,
+) -> DigitalLifeRuntimeSnapshotResponse:
+    from host_brain.lifecycle_runtime.background_projection import _build_background_runtime_snapshot  # noqa: PLC0415
+    from host_brain.lifecycle_runtime.runtime_snapshot import build_digital_life_runtime_snapshot  # noqa: PLC0415
 
     service = _get_mode_transition_service()
-    payload = build_digital_life_runtime_snapshot(current_topic=current_topic)
+    payload = build_digital_life_runtime_snapshot(
+        ports=lifecycle_ports,
+        current_topic=current_topic,
+    )
     host_scheduler_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
     if host_scheduler_snapshot is not None:
         try:
@@ -320,129 +314,28 @@ def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSn
     return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
-def _refresh_runtime_snapshot_warm_once() -> None:
-    started_at = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="runtime_snapshot")
-        if deferred:
-            with _runtime_snapshot_warm_lock:
-                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
-                _runtime_snapshot_warm_state["last_duration_ms"] = 0
-            return
-        acquired, reason = try_acquire_obs_warm_slot(task_name="runtime_snapshot")
-        if not acquired:
-            with _runtime_snapshot_warm_lock:
-                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
-                _runtime_snapshot_warm_state["last_duration_ms"] = 0
-            return
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = _build_runtime_snapshot_response("")
-    except Exception as exc:
-        with _runtime_snapshot_warm_lock:
-            _runtime_snapshot_warm_state["last_error"] = str(exc)[:200]
-            _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        logger.warning("runtime snapshot warm refresh degraded: %s", exc)
-        return
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-    with _runtime_snapshot_warm_lock:
-        _runtime_snapshot_warm_state["value"] = _clone_runtime_snapshot_response(payload)
-        _runtime_snapshot_warm_state["updated_ts_ms"] = _now_ms()
-        _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        _runtime_snapshot_warm_state["last_error"] = None
-
-
-def _runtime_snapshot_warm_loop() -> None:
-    while not _runtime_snapshot_warm_stop.is_set():
-        _refresh_runtime_snapshot_warm_once()
-        wait_seconds = max(float(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS) / 1000.0, 0.25)
-        _runtime_snapshot_warm_stop.wait(wait_seconds)
-
-
-def start_runtime_snapshot_warm_cache() -> dict[str, Any]:
-    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
-        return {"enabled": False, "status": "disabled"}
-
-    global _runtime_snapshot_warm_thread
-    with _runtime_snapshot_warm_lock:
-        if _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive():
-            return get_runtime_snapshot_warm_status()
-        _runtime_snapshot_warm_stop.clear()
-        _runtime_snapshot_warm_thread = threading.Thread(
-            target=_runtime_snapshot_warm_loop,
-            name="obs-runtime-snapshot-warm",
-            daemon=True,
-        )
-        _runtime_snapshot_warm_thread.start()
-    return get_runtime_snapshot_warm_status()
-
-
-def stop_runtime_snapshot_warm_cache() -> dict[str, Any]:
-    global _runtime_snapshot_warm_thread
-    _runtime_snapshot_warm_stop.set()
-    thread = _runtime_snapshot_warm_thread
-    if thread is not None:
-        thread.join(timeout=2.0)
-    _runtime_snapshot_warm_thread = None
-    return get_runtime_snapshot_warm_status()
-
-
-def get_runtime_snapshot_warm_status() -> dict[str, Any]:
-    with _runtime_snapshot_warm_lock:
-        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
-        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
-        has_value = _runtime_snapshot_warm_state.get("value") is not None
-        last_duration_ms = int(_runtime_snapshot_warm_state.get("last_duration_ms") or 0)
-        last_error = str(_runtime_snapshot_warm_state.get("last_error") or "").strip() or None
-    running = _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive()
-    return {
-        "enabled": bool(_RUNTIME_SNAPSHOT_WARM_ENABLED),
-        "running": bool(running),
-        "has_value": bool(has_value),
-        "updated_ts_ms": updated_ts_ms or None,
-        "age_ms": age_ms,
-        "interval_ms": int(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS),
-        "stale_after_ms": int(_RUNTIME_SNAPSHOT_WARM_STALE_MS),
-        "last_duration_ms": last_duration_ms,
-        "last_error": last_error,
-    }
-
-
-def _get_warmed_runtime_snapshot(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse | None:
-    if str(current_topic or "").strip():
-        return None
-    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
-        return None
-
-    with _runtime_snapshot_warm_lock:
-        value = _runtime_snapshot_warm_state.get("value")
-        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
-
-    if value is None or updated_ts_ms <= 0:
-        return None
-    if max(0, _now_ms() - updated_ts_ms) > int(_RUNTIME_SNAPSHOT_WARM_STALE_MS):
-        return None
-    return _clone_runtime_snapshot_response(value)
-
-
 @router.get("/sys-mode", response_model=SysModeStatusResponse)
 def get_sys_mode():
-    """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
-    service = _get_mode_transition_service()
-    status = service.get_current_status()
-    return SysModeStatusResponse(**status)
+    """Read mode state without constructing the writer-capable service."""
+    status, projection = read_operator_live_projection(
+        SYS_MODE_STATUS_KIND,
+        SYS_MODE_STATUS_KEY,
+        max_age_ms=SYS_MODE_MAX_AGE_MS,
+    )
+    if status is None:
+        status = {
+            "sys_mode": "unknown",
+            "auto_rules": {},
+            "idle_ms": 0,
+            "idle_minutes": 0.0,
+            "last_interaction_ts_ms": 0,
+            "is_night_time": False,
+            "valid_transitions": [],
+            "ts_ms": _now_ms(),
+            "degraded": True,
+            "degraded_reason": projection["reason_code"],
+        }
+    return SysModeStatusResponse(**status, projection=projection)
 
 
 @router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
@@ -450,19 +343,24 @@ def get_digital_life_runtime_snapshot(
     current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
 ):
     """获取统一数字生命 runtime snapshot（只读观测面）。"""
-    warmed = _get_warmed_runtime_snapshot(current_topic)
-    if warmed is not None:
-        return warmed
-
-    return _get_obs_route_cached_response(
-        cache_name="runtime_snapshot",
-        cache_key={"current_topic": str(current_topic or "").strip()},
-        ttl_ms=_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
-        builder=lambda: _build_runtime_snapshot_response(current_topic),
+    payload, projection = read_process_projection(
+        RUNTIME_SNAPSHOT_KIND,
+        RUNTIME_SNAPSHOT_KEY,
+        max_age_ms=RUNTIME_MAX_AGE_MS,
     )
+    if payload is None:
+        payload = {
+            "persona_user_id": "user_1",
+            "current_topic": "",
+            "sys_mode": "unknown",
+            "degraded": True,
+            "degraded_reasons": [projection["reason_code"]],
+            "timestamp": _now_ms(),
+        }
+    payload = {**payload, "projection": projection}
+    return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
-@router.post("/sys-mode", response_model=SysModeSwitchResponse)
 def switch_sys_mode(body: SysModeSwitchRequest):
     """切换系统运行模式（手动 / API 触发）。"""
     service = _get_mode_transition_service()
@@ -502,18 +400,22 @@ def switch_sys_mode(body: SysModeSwitchRequest):
 def get_sys_mode_history(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
 ):
-    """获取模式切换历史记录。"""
-    service = _get_mode_transition_service()
-    history = service.get_history(limit=limit)
+    """Read projected mode transitions; slicing is request-local and pure."""
+    payload, projection = read_operator_live_projection(
+        SYS_MODE_HISTORY_KIND,
+        SYS_MODE_HISTORY_KEY,
+        max_age_ms=SYS_MODE_MAX_AGE_MS,
+    )
+    history = list((payload or {}).get("items") or [])[:limit]
     items = [SysModeHistoryItem(**h) for h in history]
     return SysModeHistoryResponse(
         items=items,
         total=len(items),
-        timestamp=_now_ms(),
+        timestamp=int((payload or {}).get("timestamp") or _now_ms()),
+        projection=projection,
     )
 
 
-@router.put("/sys-mode/auto-rules")
 def update_auto_rules(body: AutoRulesUpdateRequest):
     """更新自动切换规则开关。"""
     service = _get_mode_transition_service()
@@ -524,7 +426,6 @@ def update_auto_rules(body: AutoRulesUpdateRequest):
     }
 
 
-@router.post("/sys-mode/event")
 def post_sys_mode_event(
     event_type: str = Query(..., description="事件类型"),
 ):

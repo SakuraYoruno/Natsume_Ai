@@ -11,7 +11,7 @@ import time
 from typing import Any, Mapping
 from urllib.parse import urljoin, urlparse
 
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 try:  # pragma: no cover - exercised through import guard tests elsewhere
     import requests

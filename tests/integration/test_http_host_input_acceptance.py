@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from host_brain.app.asgi import app as host_app
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 
 
 def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
@@ -18,15 +19,33 @@ def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
 
 def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         _allow_input_immune_gate,
+    )
+    monkeypatch.setattr(
+        "host_brain.input_runtime.ingress._evaluate_host_gateway_ingress",
+        lambda **_kwargs: HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://host-input-test",
+            audit_ref="secure-ingress-audit://host-input-test",
+            principal_id="service.edge.gateway.test",
+            idempotency_key="host-input-test",
+            body_sha256="0" * 64,
+            request_id="request-host-input-test",
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.input_runtime.contracts_and_normalization._complete_host_gateway_ingress",
+        lambda **_kwargs: True,
     )
     return TestClient(host_app, raise_server_exceptions=False)
 
 
 def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -46,7 +65,7 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -56,8 +75,8 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
 
 
 def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -76,7 +95,7 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -87,14 +106,9 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     assert kwargs["payload"]["platform"] == "qq"
 
 
-def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    fastpath_mock = AsyncMock(return_value=True)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
-    monkeypatch.setattr(
-        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
-        fastpath_mock,
-    )
+def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatch) -> None:
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -115,14 +129,12 @@ def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatc
     payload = response.json()
     assert payload["success"] is True
     assert payload["status"] == "COMPLETED"
-    assert "progress fastpath" in payload["detail"]
-    assert fastpath_mock.await_count == 1
-    assert dispatch_mock.await_count == 0
+    assert dispatch_mock.await_count == 1
 
 
 def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
-    dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
     client = _build_client(monkeypatch)
     try:
@@ -143,7 +155,7 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["status"] == "ACCEPTED"
+    assert payload["status"] == "COMPLETED"
     assert payload["source"] == "ASR"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
@@ -154,13 +166,12 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
 
 def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
+    client = _build_client(monkeypatch)
     monkeypatch.setattr(
-        "host_brain.app.input_routes._evaluate_immune_gate_for_input",
+        "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
-
-    client = TestClient(host_app, raise_server_exceptions=False)
     try:
         response = client.post(
             "/v1/host/input",

@@ -7,6 +7,7 @@ and trace construction.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 from langchain_core.runnables import RunnableLambda
@@ -22,7 +23,7 @@ from host_brain.integrations.graph_contract import (
     GraphState, NodeHandler, GatewayFactory,
     CLOCK_EVENT_POLICY_TIMEOUT,
     STATUS_AIRLOCK_PENDING, STATUS_DEGRADED, STATUS_FAILED, STATUS_OK, STATUS_POLICY_TIMEOUT,
-    build_model_param_hash, extract_governance_refs, normalize_dependency_status, pick_api_key,
+    build_model_param_hash, extract_governance_refs, normalize_dependency_status,
 )
 from host_brain.integrations.graph_branch import (
     BranchSpec,
@@ -41,11 +42,13 @@ from host_brain.integrations.graph_streaming import (
 from host_brain.integrations.graph_checkpoint import (
     build_interrupt_signal,
 )
+from host_brain.integrations.graph_model_resolve import sanitize_model_node_spec
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
     handle_timeout, pick_fallback_node, pick_next_node, set_finish,
 )
 from host_brain.integrations.llm_gateway import LlmGatewayContract
+from host_brain.model_runtime.graph_semantics import graph_model_semantic
 
 
 # ---------------------------------------------------------------------------
@@ -94,12 +97,17 @@ class GraphExecutor:
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
                  evidence_plane: Any = None,
-                 model_nodes: dict[str, dict[str, Any]] | None = None) -> None:
+                 model_nodes: dict[str, dict[str, Any]] | None = None,
+                 model_attempt_service: Any = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
         self._ledger = ledger
-        self._model_nodes = dict(model_nodes or {})
+        self._model_attempt_service = model_attempt_service
+        self._model_nodes = {
+            str(model_node_id): sanitize_model_node_spec(str(model_node_id), spec)
+            for model_node_id, spec in dict(model_nodes or {}).items()
+        }
         # M36-K：Evidence Plane 实时写入（可选，默认 None）
         self._evidence_plane = evidence_plane
         # M38-E/F/G：Phase-Locked Streaming 发射器
@@ -167,7 +175,9 @@ class GraphExecutor:
             if need_judge:
                 next_node = (state.get("edge_map") or {}).get(node_id)
             else:
-                from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
+                from host_brain.model_runtime.prompt_builder_utils import (  # noqa: PLC0415
+                    CHAT_RENDER_NODE_ID,
+                )
                 next_node = CHAT_RENDER_NODE_ID
 
             agent_artifacts = dict(state.get("agent_artifacts") or {})
@@ -563,13 +573,15 @@ class GraphExecutor:
 
     def _invoke_model_node(self, *, node_id: str, binding: Mapping[str, Any], state: GraphState) -> dict[str, Any]:
         model_node_id = str(binding.get("model_node_id") or node_id).strip()
-        model_node = dict(
+        semantic = graph_model_semantic(model_node_id)
+        raw_model_node = (
             self._model_nodes.get(model_node_id)
             or (state.get("model_nodes") or {}).get(model_node_id)
             or {}
         )
-        if not model_node:
+        if not raw_model_node:
             raise KeyError(f"model node missing for node={node_id}, model_node_id={model_node_id}")
+        model_node = sanitize_model_node_spec(model_node_id, raw_model_node)
         provider_name = str(model_node.get("provider") or "").strip().lower()
         if not provider_name:
             raise KeyError(f"provider missing for model_node_id={model_node_id}")
@@ -579,11 +591,53 @@ class GraphExecutor:
             return self._build_token_missing_result(node_id, model_node_id, provider_name, model_node, gov_refs, state)
 
         timeout_value = int(model_node.get("timeout_ms") or state.get("timeout_ms") or self._default_timeout_ms)
-        provider_fn = model_node.get("provider_fn")
+        model_attempt_trace: dict[str, Any] = {}
+
+        def provider_fn(prompt_payload: dict[str, Any]) -> str:
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
+
+            if self._model_attempt_service is None:
+                raise RuntimeError("GRAPH_MODEL_ATTEMPT_SERVICE_NOT_COMPOSED")
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
+                prompt_id=semantic.prompt_id,
+                request_id=f"{str(state.get('request_id') or '')}:graph:{model_node_id}",
+                scene_type=semantic.scene_type,
+                cognitive_tier=semantic.cognitive_tier,
+                deadline_ms=max(1, timeout_value),
+                foreground=True,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Execute governed graph model node {semantic.model_node_id}. "
+                            "Return exactly one JSON object; never emit graph control fields."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True),
+                    },
+                ],
+                metadata={
+                    "caller": "graph_executor",
+                    "graph_node_id": node_id,
+                    "model_node_id": semantic.model_node_id,
+                    "graph_semantic_prompt_id": semantic.prompt_id,
+                },
+            )
+            model_attempt_trace.clear()
+            model_attempt_trace.update(model_attempt_result_trace(result))
+            if not result.success:
+                raise RuntimeError(result.error_code or "GRAPH_MODEL_ATTEMPT_FAILED")
+            return result.content
+
+        setattr(provider_fn, "natsume_provider_kind", "canonical_model_attempt")
         gateway = self._gateway_factory(
-            ledger=self._ledger, provider=provider_fn if callable(provider_fn) else None,
+            ledger=self._ledger, provider=provider_fn,
             provider_name=provider_name,
-            api_key=pick_api_key(state=state, provider_name=provider_name, model_node_id=model_node_id),
+            api_key=None,
             available=bool(model_node.get("available", True)), timeout_ms=timeout_value)
         emotion_context_raw = state.get("emotion_context")
         emotion_context = (
@@ -612,12 +666,28 @@ class GraphExecutor:
                                       "timeout_ms": timeout_value}},
             emotion_context=(emotion_context or None))
 
-        actual_hash = build_model_param_hash(provider=provider_name, model_id=str(model_node.get("model_id") or ""),
+        actual_provider = str(model_attempt_trace.get("final_provider") or provider_name)
+        actual_model = str(model_attempt_trace.get("final_model") or model_node.get("model_id") or "")
+        effective_model_node = {**model_node, "model_id": actual_model}
+        actual_hash = build_model_param_hash(provider=actual_provider, model_id=actual_model,
                                              temperature=model_node.get("temperature"), max_output_tokens=model_node.get("max_output_tokens"), timeout_ms=timeout_value)
         expected_hash = str(model_node.get("expected_param_hash") or "").strip() or None
         drift = bool(expected_hash and expected_hash != actual_hash)
 
-        base = _model_call_base(node_id, model_node_id, provider_name, model_node, timeout_value, expected_hash, actual_hash, drift, gov_refs)
+        base = {
+            **_model_call_base(
+                node_id,
+                model_node_id,
+                actual_provider,
+                effective_model_node,
+                timeout_value,
+                expected_hash,
+                actual_hash,
+                drift,
+                gov_refs,
+            ),
+            "model_attempt": dict(model_attempt_trace),
+        }
         payload = dict(state.get("payload") or {})
         payload[node_id] = {**base, "gateway_status": result.status, "reason_code": result.reason_code, "payload": result.output.get("payload")}
         mc = list(state.get("model_calls") or [])

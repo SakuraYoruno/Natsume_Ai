@@ -1,22 +1,32 @@
-"""Scheduler 定时调度器包——系统发起 Intent 的统一触发框架。"""
+"""Governed durable scheduler contracts and adapters."""
 
-from host_brain.scheduler.task_registry import (
-    SchedulerTaskConfig,
-    SchedulerTaskRegistry,
-    TriggerMode,
-    TaskPriority,
+from host_brain.scheduler.contracts import (
+    SCHEDULER_WORKER_ROUTE,
+    SchedulerDefinitionSnapshot,
+    SchedulerOccurrence,
+    SchedulerOccurrenceSource,
 )
-from host_brain.scheduler.scheduler import NatsumeScheduler
-from host_brain.scheduler.health import SchedulerHealthReporter
-from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers
+from host_brain.scheduler.clock import SchedulerClock
+from host_brain.scheduler.governed_runtime import (
+    GovernedSchedulerRuntime,
+    SchedulerCommandService,
+    SchedulerDefinitionPolicyEvaluator,
+    build_governed_scheduler_runtime,
+)
+from host_brain.scheduler.scheduler_routes import router as scheduler_router
+from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
+
 
 __all__ = [
-    "SchedulerTaskConfig",
-    "SchedulerTaskRegistry",
-    "TriggerMode",
-    "TaskPriority",
-    "NatsumeScheduler",
-    "SchedulerHealthReporter",
+    "SCHEDULER_WORKER_ROUTE",
+    "GovernedSchedulerRuntime",
+    "SchedulerClock",
+    "SchedulerCommandService",
+    "SchedulerDefinitionPolicyEvaluator",
+    "SchedulerDefinitionSnapshot",
+    "SchedulerOccurrence",
+    "SchedulerOccurrenceSource",
+    "SchedulerWorkerRegistry",
+    "build_governed_scheduler_runtime",
     "scheduler_router",
-    "set_scheduler_providers",
 ]

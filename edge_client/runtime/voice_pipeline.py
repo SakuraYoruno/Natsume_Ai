@@ -19,14 +19,14 @@ from edge_client.actuators.speech import (
     BeforePlaybackHook,
 )
 from edge_client.actuators.vts_driver import VTubeStudioDriver, VtsDriverResult, VtsState
+from edge_client.actuators.vts_expression_map import sub_emotion_to_hotkey
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
 from edge_client.runtime.emotion_inference import infer_asr_emotion
 from edge_client.tribe.somatic_agent import SomaticAgent
 from edge_client.tribe.voice_agent import VoiceAgent
-from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED, now_ms
 
 LOGGER = logging.getLogger("Natsume.edge.voice_pipeline")
 
@@ -1592,8 +1592,6 @@ class EdgeVoicePipeline:
         )
         sub_emotion = payload.get("sub_emotion")
         if sub_emotion and voice_expression_enabled:
-            from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
-
             hotkey_id = sub_emotion_to_hotkey(sub_emotion)
             if hotkey_id:
                 if vrm_fast_preplayback:
@@ -3114,4 +3112,3 @@ class EdgeVoicePipeline:
             confidence=event.get("confidence") if isinstance(event.get("confidence"), (int, float)) else None,
             final=bool(event.get("final", False)),
         )
-

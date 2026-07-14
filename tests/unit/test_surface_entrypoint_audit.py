@@ -13,6 +13,8 @@ TOOLS = ROOT / "tools"
 _LOW_LEVEL_SURFACE_FILES = {
     Path("host_brain/persona/isolated_surface_harness.py"),
     Path("host_brain/persona/isolated_surface_continuity.py"),
+    Path("host_brain/persona/surface/data_models.py"),
+    Path("host_brain/persona/surface/input_validation.py"),
     Path("host_brain/persona/surface_packet_compiler.py"),
     Path("host_brain/persona/surface_runtime.py"),
 }
@@ -25,6 +27,7 @@ _SURFACE_RUNTIME_FACADE_FILES = {
 }
 _SURFACE_CONTEXT_PACKET_CALLER_FILES = {
     Path("host_brain/app/surface_main_chain_adapter.py"),
+    Path("host_brain/surface_runtime/reply_context.py"),
 }
 _BUILD_INPUT_CALL_RE = re.compile(r"\bbuild_isolated_surface_input\s*\(")
 _PACKET_CONSTRUCTOR_RE = re.compile(r"\bReplyControlPacket\s*\(")

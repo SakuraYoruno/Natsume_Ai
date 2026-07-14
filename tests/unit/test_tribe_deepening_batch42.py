@@ -387,14 +387,13 @@ def test_default_mode_high_continuity_calls_reduce_recovery_urgency(monkeypatch)
 def test_hippocampus_episodic_write_triggers_default_mode():
     """T-311: write_episodic_memory_trace 完成后应调用 DefaultModeAgent.tick_idle_cycle()。"""
     from host_brain.tribe.hippocampus_agent import HippocampusAgent
+    from host_brain.tribe.application_ports import TribeApplicationPorts
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
     registry = MagicMock(spec=TribeStateRegistry)
     registry.get_state.return_value = {"state": {}}
     registry.set_state = MagicMock()
     registry.write = MagicMock()
-
-    agent = HippocampusAgent(state_registry=registry)
 
     mock_dma = MagicMock()
     mock_dma.tick_idle_cycle = MagicMock()
@@ -404,9 +403,14 @@ def test_hippocampus_episodic_write_triggers_default_mode():
         status="OK", written=True, state_version=1,
         reason_code=None, detail=None, payload={},
     ))
+    agent = HippocampusAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            state_write_arbiter=lambda: mock_arbiter,
+        ),
+    )
 
-    with patch("host_brain.tribe.hippocampus_agent.get_default_mode_agent", return_value=mock_dma), \
-         patch("host_brain.tribe.hippocampus_agent.get_state_write_arbiter", return_value=mock_arbiter):
+    with patch("host_brain.tribe.hippocampus_agent.get_default_mode_agent", return_value=mock_dma):
         result = agent.write_episodic_memory_trace(
             person_id="u1",
             session_id="s1",

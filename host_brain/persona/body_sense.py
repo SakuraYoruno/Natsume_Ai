@@ -30,8 +30,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-
 _logger = logging.getLogger("Natsume.body_sense")
 
 # ---------------------------------------------------------------------------
@@ -87,8 +85,11 @@ _LONELINESS_STYLE_HINTS: dict[str, str] = {
 
 
 def _load_style_hint_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("body_sense.style_hints")
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    return {
+        "drowsiness": dict(_DROWSY_STYLE_HINTS),
+        "fatigue": dict(_FATIGUE_STYLE_HINTS),
+        "loneliness": dict(_LONELINESS_STYLE_HINTS),
+    }
 
 
 def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
@@ -166,7 +167,7 @@ class BodySenseModel:
         # 每分钟 tick（由 NatsumeScheduler 驱动）
         model.tick()
 
-        # 注入孤独感（来自 OfflineInnerWorld.LonelinessAccumulator）
+        # 注入孤独感（来自 canonical Life affect snapshot）
         model.update_loneliness(loneliness_value=0.65)
 
         # 获取状态快照
@@ -241,7 +242,7 @@ class BodySenseModel:
     # ── 孤独感注入 ────────────────────────────────────────────────────────
 
     def update_loneliness(self, loneliness_value: float) -> None:
-        """注入孤独感值（来自 OfflineInnerWorld.LonelinessAccumulator）。
+        """注入孤独感值（来自 canonical Life affect snapshot）。
 
         Args:
             loneliness_value: 孤独感 [0.0, 1.0]

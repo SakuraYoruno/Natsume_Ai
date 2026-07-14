@@ -1,10 +1,25 @@
 受众：CODEX
-标题：DevTasks（任务清单：唯一可执行任务来源）
+标题：DevTasks（历史任务与需求追踪登记册）
 
-版本：v2.0
-日期：2026-06-04
+版本：v2.12
+日期：2026-07-12
+状态：`HISTORICAL_TRACE_REGISTRY`
 
-本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+本文件保留既有 TASK 编号、需求映射和历史交付记录，不再是完整架构重构的调度或提交 SSOT。自 Architecture Waves v2 起，唯一执行入口为：
+
+`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
+
+## 当前活动程序：Architecture Waves v2
+
+- 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
+- `TASK-0461～TASK-0622` 共 162 个编号在 2026-07-12 冻结，仅作需求、测试和实现线索，不再维护独立执行状态。
+- 旧 `DONE` 只表示对应历史交付曾通过其局部验收，不代表最终 production authority 已切换。
+- 旧 `PROGRAMMED`、`BLOCKED`、`IMPLEMENTED_AWAITING_PROTECTED_HANDOFF` 均由 Master §10 映射到 AW-00～AW-08；不再等待 WIP owner、handoff、逐任务 Seal 或 MASTER 批准。
+- 当前唯一进行中的执行单元是 `AW-00 平台安全能力生产接线`；完成后按 Master DAG 自主进入 AW-01。
+- 每个 Architecture Wave 以 production cutover、单一 authority、旧路径删除和架构指标为完成条件；TASK 数量、文档、fixture 和测试数量不计为完成度。
+- 关联需求仍为 `FR-NLE-001～005`、`FR-ARCH-001～010`；关联测试仍可复用 `T-NLE-01～24`、`T-ARCH-01～30`，但验证频率服从 Master §5。
+
+本文件后续的所有任务条目均为历史记录。与当前代码事实或 Architecture Waves v2 冲突时，直接以代码事实修订 Master，不得恢复逐任务执行机制。
 
 ### 当前任务与主链入口（2026-06-04）
 

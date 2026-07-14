@@ -30,19 +30,27 @@ from host_brain.airlock.image_filter import (
     IMAGE_EGRESS_WARN,
     filter_image_egress,
 )
-from host_brain.app.dependencies import (
-    get_episodic_store,
+from host_brain.composition.process_services import (
+    get_life_memory_service,
     get_ledger,
+    get_model_attempt_service,
+    get_prompt_registry,
 )
-from host_brain.app.emotion_context import build_chat_emotion_snapshot
+from host_brain.app.emotion_context import build_chat_emotion_snapshot, map_emotion_tag_to_vad
 from host_brain.app.graph_config_builder import (
     SCENE_VISION_UI,
     resolve_host_llm_runtime_async,
 )
-from host_brain.app.observability_persist import persist_chat_episodic_memory
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.schemas import ChatRequest
-from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
+from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
+from host_brain.model_runtime import (
+    ModelAttemptRequest,
+    OutputContract,
+    PromptRef,
+    VISION_UI_ANALYSIS_PROMPT_ID,
+    model_attempt_result_trace,
+)
 
 _logger = logging.getLogger("Natsume.chat_handler_vision")
 
@@ -69,7 +77,7 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -311,27 +319,11 @@ async def _call_vision_llm(
     Returns:
         dict with keys: narrative, model_used, provider, status, reason_code
     """
-    import asyncio as _asyncio
-
-    provider_name = str(llm_runtime.get("cloud_provider_name") or llm_runtime.get("provider_name") or PROVIDER_GEMINI)
+    provider_name = str(llm_runtime.get("cloud_provider_name") or llm_runtime.get("provider_name") or "gemini")
     model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash-lite")
-    api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 15000)
-    available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))
     analysis_templates = _load_template_mapping("chat_handler_vision.analysis_prompt.templates")
     fallback_templates = _load_template_mapping("chat_handler_vision.fallback_texts")
-
-    if not available or not api_key:
-        return {
-            "narrative": _mapping_text(
-                fallback_templates,
-                "llm_unavailable",
-            ),
-            "model_used": model_id,
-            "provider": provider_name,
-            "status": "DEGRADED",
-            "reason_code": "VISION_LLM_UNAVAILABLE",
-        }
 
     vision_context_section = _build_vision_context_section(vision_context)
     user_prompt = _mapping_text(
@@ -381,10 +373,6 @@ async def _call_vision_llm(
             )
 
     try:
-        provider_fn = llm_runtime.get("cloud_provider_fn") or llm_runtime.get("provider_fn")
-        if provider_fn is None:
-            raise ValueError("provider_fn 未配置")
-
         # 构建消息列表（支持多模态）
         messages: list[dict] = [
             {"role": "system", "content": ""},
@@ -419,27 +407,58 @@ async def _call_vision_llm(
             # 纯文本模式（无图片）
             messages.append({"role": "user", "content": user_prompt})
 
-        payload = {
-            "messages": messages,
-            "model": model_id,
-            "max_tokens": 800,
-            "temperature": 0.7,
-        }
-
-        timeout_sec = max(5.0, float(timeout_ms) / 1000.0)
-        result = await _asyncio.wait_for(
-            _asyncio.to_thread(provider_fn, payload),
-            timeout=timeout_sec,
+        # Prompt identity, routing, credential access, timeout and audit all
+        # cross the canonical model-attempt boundary exactly once.
+        prompt_ref = PromptRef(
+            prompt_id=VISION_UI_ANALYSIS_PROMPT_ID,
+            version="v1.0.0",
+            variables={"messages": tuple(messages)},
+            output_contract=OutputContract(kind="text"),
         )
+        # Render once before the call so an incorrectly composed registry fails
+        # without reaching a provider.
+        get_prompt_registry().render(prompt_ref)
+        attempt_result = await get_model_attempt_service().complete(
+            ModelAttemptRequest(
+                request_id=request_id,
+                scene_type=SCENE_VISION_UI,
+                cognitive_tier="B",
+                prompt=prompt_ref,
+                deadline_ms=max(5_000, timeout_ms),
+                foreground=True,
+                metadata={
+                    "caller": "chat_handler_vision",
+                    "has_image": bool(has_image),
+                    "occurred_at_ms": int(ts_ms),
+                    "image_filter_decision": (
+                        image_egress_report.decision if image_egress_report else None
+                    ),
+                },
+            )
+        )
+        attempt_trace = model_attempt_result_trace(attempt_result)
+        provider_name = str(attempt_trace.get("final_provider") or provider_name)
+        model_id = str(attempt_trace.get("final_model") or model_id)
+        if not attempt_result.success:
+            reason = str(attempt_result.error_code or "MODEL_ATTEMPT_FAILED")
+            sla = _vision_sla_monitor.record_call(
+                status="DEGRADED",
+                request_id=request_id,
+                latency_ms=0,
+                model_id=model_id,
+                provider=provider_name,
+            )
+            return {
+                "narrative": _mapping_text(fallback_templates, "llm_error"),
+                "model_used": model_id,
+                "provider": provider_name,
+                "status": "DEGRADED",
+                "reason_code": f"VISION_LLM_ERROR:{reason}",
+                "model_attempt": attempt_trace,
+                "sla": sla,
+            }
 
-        narrative = ""
-        if isinstance(result, dict):
-            choices = result.get("choices") or []
-            if choices and isinstance(choices[0], dict):
-                msg = choices[0].get("message") or {}
-                narrative = str(msg.get("content") or "").strip()
-            if not narrative:
-                narrative = str(result.get("content") or result.get("text") or "").strip()
+        narrative = str(attempt_result.content or "").strip()
 
         if not narrative:
             narrative = _mapping_text(
@@ -453,6 +472,7 @@ async def _call_vision_llm(
             "provider": provider_name,
             "status": "OK",
             "reason_code": None,
+            "model_attempt": attempt_trace,
             "image_filter_decision": image_egress_report.decision if image_egress_report else None,
             "image_filter_risks": image_egress_report.risks if image_egress_report else [],
             "image_digest": image_egress_report.image_digest if image_egress_report else None,
@@ -666,10 +686,15 @@ async def _vision_ui_sse_generator(
         _user_consent = bool(getattr(request_body, "image_upload_consent", False))
         _img_allowed, _img_deny_reason = True, None
 
-        llm_runtime = await resolve_host_llm_runtime_async(
-            rollout_key=session_id,
-            scene_type=SCENE_VISION_UI,
-        )
+        # Compatibility shape for the two model-attempt call sites.  It carries
+        # only a deadline hint; neither call site can select providers, models,
+        # credentials, base URLs, or provider functions.
+        llm_runtime = {
+            "timeout_ms": int(
+                str(os.environ.get("HOST_VISION_MODEL_TIMEOUT_MS") or "20000").strip()
+                or "20000"
+            )
+        }
 
         analysis_start_ms = int(time.time() * 1000)
         llm_result = await _call_vision_llm(
@@ -786,7 +811,7 @@ async def _vision_ui_sse_generator(
             "request_id": request_id,
         })
 
-        # ── 后处理：情节记忆 ───────────────────────────────────────────────
+        # ── 后处理：唯一 LifeMemory admission ─────────────────────────────
         vision_llm_summary = {
             "status": llm_status,
             "reason_code": llm_result.get("reason_code"),
@@ -799,25 +824,78 @@ async def _vision_ui_sse_generator(
         }
 
         try:
-            episodic_summary = persist_chat_episodic_memory(
-                request_id=request_id,
-                intent_id=str(intent_id or request_id),
-                person_id=getattr(request_body, "person_id", None),
-                session_id=session_id,
-                user_message=request_body.message,
-                assistant_reply=narrative,
-                emotion_context=emotion_context,
-                ts_ms=ts_ms,
-                episodic_store=get_episodic_store(),
+            from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+            memory_user = request_body.message
+            memory_reply = narrative
+            if _check_channel("MEMORY"):
+                memory_user = pii_scrub_if_enabled(
+                    memory_user,
+                    context="vision_life_memory_write_user",
+                )
+                memory_reply = pii_scrub_if_enabled(
+                    memory_reply,
+                    context="vision_life_memory_write_ai",
+                )
+            memory_emotion_tag = str(
+                emotion_context.get("user_emotion_tag")
+                or emotion_context.get("emotion_tag")
+                or "NEUTRAL"
+            ).strip().upper() or "NEUTRAL"
+            memory_valence, memory_arousal, _ = map_emotion_tag_to_vad(memory_emotion_tag)
+            safe_observations = {
+                key: value
+                for key, value in dict(vision_context or {}).items()
+                if key not in {"image_base64"}
+            }
+            memory_attachments: tuple[dict[str, Any], ...] = ()
+            image_url = str((vision_context or {}).get("image_url") or "").strip()
+            if has_image:
+                memory_attachments = (
+                    {
+                        "type": str((vision_context or {}).get("image_mime") or "image"),
+                        "source_ref": image_url or f"vision://observation/{request_id}",
+                    },
+                )
+            memory_receipt = get_life_memory_service().admit_chat(
+                ChatMemoryCandidate(
+                    request_id=request_id,
+                    intent_id=str(intent_id or request_id),
+                    person_id=resolve_bond_user_id(
+                        getattr(request_body, "person_id", None),
+                        session_id=session_id,
+                    ),
+                    session_id=session_id,
+                    user_message=memory_user,
+                    assistant_reply=memory_reply,
+                    emotion_tag=memory_emotion_tag,
+                    emotion_valence=memory_valence,
+                    emotion_arousal=memory_arousal,
+                    turn_count=max(1, int(emotion_context.get("turn_count") or 1)),
+                    attachments=memory_attachments,
+                    multimodal_observations=safe_observations,
+                    attachment_summary=str(
+                        (vision_context or {}).get("screen_description") or ""
+                    ).strip(),
+                    metadata={
+                        "source": "vision_ui",
+                        "scene_type": SCENE_VISION_UI,
+                        "input_mode": input_mode,
+                        "has_image": has_image,
+                    },
+                    ts_ms=ts_ms,
+                )
             )
+            episodic_summary = memory_receipt.as_dict()
         except Exception as exc:
             episodic_summary = {
                 "status": "DEGRADED",
-                "reason_code": "EPISODIC_WRITE_FAILED",
+                "reason_code": "LIFE_MEMORY_ADMISSION_FAILED",
                 "memory_id": None,
                 "detail": str(exc),
             }
-            _logger.debug("vision episodic memory write skipped", extra={"request_id": request_id, "error": str(exc)})
+            _logger.debug("vision life memory admission skipped", extra={"request_id": request_id, "error": str(exc)})
 
         # ── COMMIT ──────────────────────────────────────────────────────────────────
         commit_payload: Dict[str, Any] = {

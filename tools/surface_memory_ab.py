@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: E402
+from host_brain.persona.context.soul_runtime import get_compiled_soul  # noqa: E402
 from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
 from host_brain.persona.surface_scene_quality_pack import surface_scene_quality_memory_ab_case_payloads  # noqa: E402
 from host_brain.persona.surface_packet_compiler import compile_surface_shadow_inputs  # noqa: E402

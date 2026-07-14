@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from host_brain.app.context.affect_state import build_affect_summary, resolve_affect_state
-from host_brain.app.context.drive_state import resolve_drive_state
-from host_brain.app.context.relationship_state import build_relationship_summary, resolve_relationship_state
-from host_brain.app.context.topic_ledger import SessionTopicLedgerStore
+from host_brain.persona.context.affect_state import build_affect_summary, resolve_affect_state
+from host_brain.persona.context.drive_state import resolve_drive_state
+from host_brain.persona.context.relationship_state import build_relationship_summary, resolve_relationship_state
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 

@@ -3,8 +3,8 @@
 
 # 发布与回滚目录
 
-版本：v1.0
-维护日期：2026-05-30
+版本：v1.1
+维护日期：2026-07-11
 标签：历史归档 + 持续记录
 
 本目录记录发布方案、changelog 与回退/回放脚本。用于版本发布前后核对。
@@ -15,6 +15,7 @@
 3. 运行前核对 `reports/` 对应发布批次归档。
 
 ## 关键目录
+- `m48/`：TASK-0486 的 evidence、manifest、rollback matrix、known limitations、identity status 与机器可读 Seal Result；当前状态为 `BLOCKED`，不是 `SEALED`。
 - `changelog/`
 - `reports/`
 - `rollback/`

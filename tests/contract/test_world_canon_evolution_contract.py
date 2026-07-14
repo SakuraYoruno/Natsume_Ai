@@ -95,7 +95,7 @@ class TestWorldCanonEvolution(unittest.TestCase):
         self.assertEqual(proposal["proposal_id"], self.proposal_id)
 
     def test_t_wcanon_07c_approve_proposal_status_applied(self) -> None:
-        """approve_proposal_with_content() 审核通过后 status=APPLIED。"""
+        """旧 approve_proposal_with_content 入口无条件 fail-closed。"""
         self.store.submit_proposal(
             proposal_id=self.proposal_id,
             target_doc_id=self.target_doc_id,
@@ -103,15 +103,16 @@ class TestWorldCanonEvolution(unittest.TestCase):
             proposed_tags=self.proposed_tags,
             proposed_body=self.proposed_body,
         )
-        self.store.approve_proposal_with_content(
-            self.proposal_id,
-            proposed_title=self.proposed_title,
-            proposed_tags=self.proposed_tags,
-            proposed_body=self.proposed_body,
-        )
+        with self.assertRaisesRegex(PermissionError, "CANON_DIRECT_WRITE_FORBIDDEN"):
+            self.store.approve_proposal_with_content(
+                self.proposal_id,
+                proposed_title=self.proposed_title,
+                proposed_tags=self.proposed_tags,
+                proposed_body=self.proposed_body,
+            )
         proposal = self.ledger.get_proposal(self.proposal_id)
         self.assertIsNotNone(proposal)
-        self.assertEqual(proposal["status"], "APPLIED", msg="审核通过后 status 应为 APPLIED")
+        self.assertEqual(proposal["status"], "pending")
 
     def test_t_wcanon_07d_approve_writes_change_log(self) -> None:
         """审核通过后 canon_change_log 含变更前后 hash。"""
@@ -122,22 +123,19 @@ class TestWorldCanonEvolution(unittest.TestCase):
             proposed_tags=self.proposed_tags,
             proposed_body=self.proposed_body,
         )
-        self.store.approve_proposal_with_content(
-            self.proposal_id,
-            proposed_title=self.proposed_title,
-            proposed_tags=self.proposed_tags,
-            proposed_body=self.proposed_body,
-        )
+        with self.assertRaises(PermissionError):
+            self.store.approve_proposal_with_content(
+                self.proposal_id,
+                proposed_title=self.proposed_title,
+                proposed_tags=self.proposed_tags,
+                proposed_body=self.proposed_body,
+            )
         # 查询 canon_change_log
         changes = [
             row for row in self.ledger.canon_change_log
             if row.get("proposal_id") == self.proposal_id
         ]
-        self.assertGreater(len(changes), 0, msg="应有 canon_change_log 记录")
-        change = changes[-1]
-        self.assertIn("before_hash", change)
-        self.assertIn("after_hash", change)
-        self.assertIsNotNone(change.get("after_hash"), msg="after_hash 不应为 None")
+        self.assertEqual(changes, [])
 
     def test_t_wcanon_07e_before_after_hash_differ(self) -> None:
         """变更前后 hash 不同（hash 可回放）。"""
@@ -152,25 +150,20 @@ class TestWorldCanonEvolution(unittest.TestCase):
             proposed_tags=self.proposed_tags,
             proposed_body=self.proposed_body,
         )
-        self.store.approve_proposal_with_content(
-            self.proposal_id,
-            proposed_title=self.proposed_title,
-            proposed_tags=self.proposed_tags,
-            proposed_body=self.proposed_body,
-        )
+        with self.assertRaises(PermissionError):
+            self.store.approve_proposal_with_content(
+                self.proposal_id,
+                proposed_title=self.proposed_title,
+                proposed_tags=self.proposed_tags,
+                proposed_body=self.proposed_body,
+            )
 
         changes = [
             row for row in self.ledger.canon_change_log
             if row.get("proposal_id") == self.proposal_id
         ]
-        self.assertGreater(len(changes), 0)
-        change = changes[-1]
-        after_hash = change.get("after_hash")
-        self.assertNotEqual(
-            before_hash,
-            after_hash,
-            msg=f"before_hash={before_hash!r} 与 after_hash={after_hash!r} 应不同",
-        )
+        self.assertEqual(changes, [])
+        self.assertEqual(self.store.get(self.target_doc_id).hash if self.store.get(self.target_doc_id) else None, before_hash)
 
     def test_t_wcanon_07f_non_pending_proposal_cannot_be_approved(self) -> None:
         """非 pending 提案不得再次审核（PermissionError）。"""
@@ -181,14 +174,7 @@ class TestWorldCanonEvolution(unittest.TestCase):
             proposed_tags=self.proposed_tags,
             proposed_body=self.proposed_body,
         )
-        # 第一次审核
-        self.store.approve_proposal_with_content(
-            self.proposal_id,
-            proposed_title=self.proposed_title,
-            proposed_tags=self.proposed_tags,
-            proposed_body=self.proposed_body,
-        )
-        # 第二次审核应抛 PermissionError
+        # 任意 raw approve 都应抛 PermissionError。
         with self.assertRaises(PermissionError):
             self.store.approve_proposal_with_content(
                 self.proposal_id,
@@ -198,8 +184,8 @@ class TestWorldCanonEvolution(unittest.TestCase):
             )
 
     def test_t_wcanon_07g_nonexistent_proposal_raises_key_error(self) -> None:
-        """不存在的提案审核抛 KeyError。"""
-        with self.assertRaises(KeyError):
+        """raw API 在查询提案前即 fail-closed，避免状态枚举。"""
+        with self.assertRaises(PermissionError):
             self.store.approve_proposal_with_content(
                 "nonexistent-proposal-id",
                 proposed_title="test",
@@ -230,17 +216,15 @@ class TestWorldCanonEvolution(unittest.TestCase):
             proposed_tags=self.proposed_tags,
             proposed_body=self.proposed_body,
         )
-        updated_doc = self.store.approve_proposal_with_content(
-            self.proposal_id,
-            proposed_title=self.proposed_title,
-            proposed_tags=self.proposed_tags,
-            proposed_body=self.proposed_body,
-        )
-        self.assertEqual(
-            updated_doc.version,
-            base_version + 1,
-            msg=f"版本号应从 {base_version} 递增到 {base_version + 1}",
-        )
+        with self.assertRaises(PermissionError):
+            self.store.approve_proposal_with_content(
+                self.proposal_id,
+                proposed_title=self.proposed_title,
+                proposed_tags=self.proposed_tags,
+                proposed_body=self.proposed_body,
+            )
+        current = self.store.get(self.target_doc_id)
+        self.assertEqual(current.version if current else 0, base_version)
 
     def test_t_wcanon_07j_change_log_expected_fixture_fields(self) -> None:
         """change_log_expected.json fixture 字段完整性验证。"""

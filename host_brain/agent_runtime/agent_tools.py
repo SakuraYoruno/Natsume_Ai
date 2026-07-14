@@ -16,7 +16,7 @@ from host_brain.core.subprocess_utils import run as _subprocess_run
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
 
-from host_brain.app.agents.tool_registry import ToolSpec
+from host_brain.tools.contracts import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -603,4 +603,3 @@ __all__ = [
     "execute_agent_tool",
     "is_tool_allowed_for_run_mode",
 ]
-

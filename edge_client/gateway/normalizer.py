@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -145,7 +146,12 @@ class MessageNormalizer:
         }
         self._last_message: dict[str, Any] | None = None
 
-    def normalize(self, msg: UnifiedMessage) -> UnifiedMessage | None:
+    def normalize(
+        self,
+        msg: UnifiedMessage,
+        *,
+        deduplicate: bool = True,
+    ) -> UnifiedMessage | None:
         """标准化消息。
 
         Returns:
@@ -181,7 +187,7 @@ class MessageNormalizer:
         self._backfill_attachments(msg)
 
         # ── 去重 ──
-        if self._dedup.is_duplicate(msg.dedup_key()):
+        if deduplicate and self._dedup.is_duplicate(msg.dedup_key()):
             self._stats["deduplicated"] += 1
             self._last_message = self._summarize_message(msg, status="deduplicated")
             logger.debug(
@@ -221,7 +227,7 @@ class MessageNormalizer:
             "from_id": msg.from_id,
             "to_id": msg.to_id,
             "content_len": len(content),
-            "content_preview": content[:80],
+            "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             "is_group": bool(msg.is_group),
             "ts_ms": int(time.time() * 1000),
         }

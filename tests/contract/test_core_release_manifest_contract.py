@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from host_brain.release.compatibility_registry import (
+    RETIRED_CORE_PATHS,
+    validate_registry,
+    validate_retired_paths_absent,
+)
+from host_brain.release.release_manifest import (
+    CORE_RELEASE_GATE_COUNT,
+    CORE_RELEASE_MANIFEST_SCHEMA_VERSION,
+    generate_core_release_manifest,
+    generate_core_sbom,
+    validate_core_release_manifest,
+)
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _passing_gates() -> list[dict[str, object]]:
+    return [
+        {"gate": index, "status": "PASS", "evidence_refs": [f"architecture-gate://{index}"]}
+        for index in range(1, CORE_RELEASE_GATE_COUNT + 1)
+    ]
+
+
+def test_core_release_manifest_freezes_all_input_groups() -> None:
+    manifest = generate_core_release_manifest(root=ROOT, architecture_gates=_passing_gates())
+
+    assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
+    assert len(manifest["architecture_gates"]) == 15
+    assert manifest["migration_head"].endswith("0084_capability_forge_proposal_log.sql")
+    migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0084_capability_forge_proposal_log.sql" in migration_files
+    assert "host_brain/audit/migrations/0083_host_embodiment_outbox.sql" in migration_files
+    assert "edge_client/gateway/migrations/0001_embodiment_transport.sql" in migration_files
+    for name in (
+        "packages",
+        "migrations",
+        "contracts",
+        "configuration",
+        "model_prompt_domain",
+        "edge_device",
+        "generated_operator_client",
+        "release_acceptance",
+    ):
+        group = manifest["asset_groups"][name]
+        assert group["file_count"] > 0
+        assert group["digest"].startswith("sha256:")
+
+
+def test_core_release_manifest_validator_rechecks_checksums() -> None:
+    manifest = generate_core_release_manifest(root=ROOT, architecture_gates=_passing_gates())
+    manifest["git"]["dirty_paths"] = []
+
+    result = validate_core_release_manifest(root=ROOT, manifest=manifest)
+
+    assert result == {
+        "schema_version": CORE_RELEASE_MANIFEST_SCHEMA_VERSION,
+        "status": "PASS",
+        "issues": [],
+    }
+
+
+def test_core_release_requires_empty_compatibility_registry() -> None:
+    assert validate_registry(ROOT, require_empty=True) == {
+        "schema_version": "natsume.compatibility-registry.v1",
+        "status": "PASS",
+        "active_count": 0,
+        "usage_count": 0,
+        "issues": [],
+    }
+
+
+def test_core_release_retired_authorities_cannot_be_restored() -> None:
+    result = validate_retired_paths_absent(ROOT, RETIRED_CORE_PATHS)
+
+    assert result == {
+        "schema_version": "natsume.compatibility-registry.v1",
+        "status": "PASS",
+        "remaining_paths": [],
+    }
+
+
+def test_core_sbom_is_deterministic_cyclonedx_inventory() -> None:
+    first = generate_core_sbom(root=ROOT)
+    second = generate_core_sbom(root=ROOT)
+
+    assert first == second
+    assert first["bomFormat"] == "CycloneDX"
+    assert first["specVersion"] == "1.5"
+    assert first["components"]
+
+
+def test_hashed_monitor_build_output_is_not_tracked() -> None:
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "ls-files", "host_brain/app/static/monitor"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == ""

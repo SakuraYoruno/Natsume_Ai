@@ -186,9 +186,10 @@ class ReflectionResult:
     issues: list[str] = field(default_factory=list)
     revision_hints: list[str] = field(default_factory=list)
     should_revise: bool = False
+    model_attempt_trace: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "overall_score": round(self.overall_score, 3),
             "passed": self.passed,
             "should_revise": self.should_revise,
@@ -199,6 +200,9 @@ class ReflectionResult:
             "issues_count": len(self.issues),
             "revision_hints": list(self.revision_hints[:3]),
         }
+        if self.model_attempt_trace:
+            result["model_attempt"] = dict(self.model_attempt_trace)
+        return result
 
 
 @dataclass
@@ -251,6 +255,7 @@ class ReflectionChain:
         weights: dict[str, float] | None = None,
         use_llm: bool = False,
         llm_timeout_ms: int = 2800,
+        model_attempt_service: Any = None,
     ) -> None:
         self._threshold = float(pass_threshold)
         self._weights = dict(weights or {
@@ -262,6 +267,7 @@ class ReflectionChain:
         })
         self._use_llm = bool(use_llm)
         self._llm_timeout_ms = max(800, int(llm_timeout_ms))
+        self._model_attempt_service = model_attempt_service
 
     def should_reflect(
         self,
@@ -462,7 +468,11 @@ class ReflectionChain:
         if not self._use_llm:
             return None
         try:
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                REFLECTION_EVALUATE_PROMPT_ID,
+            )
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
             templates = _load_reflection_llm_templates()
             reflect_tpl = dict(templates.get("reflect") or {})
@@ -487,22 +497,28 @@ class ReflectionChain:
                     ensure_ascii=False,
                 ),
             )
-            result = complete_llm_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
+                prompt_id=REFLECTION_EVALUATE_PROMPT_ID,
                 request_id=f"reflection::{int(time.time() * 1000)}",
                 scene_type="REFLECTION",
                 cognitive_tier="B",
-                timeout_ms=self._llm_timeout_ms,
+                deadline_ms=self._llm_timeout_ms,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
-                response_format="json_object",
-                gen_params={"temperature": 0.1, "top_p": 0.9},
+                foreground=True,
+                metadata={"chain": "reflection_evaluate"},
             )
-            if result.pool_exhausted or not str(result.content or "").strip():
+            attempt_trace = model_attempt_result_trace(result)
+            if not result.success or not str(result.content or "").strip():
+                _logger.debug("Reflection model attempt unavailable: %s", attempt_trace)
                 return None
             parsed = json.loads(str(result.content or "{}"))
-            return dict(parsed) if isinstance(parsed, Mapping) else None
+            if not isinstance(parsed, Mapping):
+                return None
+            return {**dict(parsed), "_model_attempt": attempt_trace}
         except Exception as exc:
             _logger.debug("Reflection llm reflect skipped: %s", exc)
             return None
@@ -554,6 +570,7 @@ class ReflectionChain:
             issues=issues,
             revision_hints=hints,
             should_revise=should_revise,
+            model_attempt_trace=dict(llm_payload.get("_model_attempt") or {}),
         )
 
     # ── 各维度评估 ────────────────────────────────────────────────────────

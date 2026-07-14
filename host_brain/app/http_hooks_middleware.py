@@ -15,9 +15,6 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch
-
-
 def parse_bool_env(name: str, *, default: bool) -> bool:
     """解析布尔类型环境变量。"""
     raw = str(os.environ.get(name) or "").strip().lower()
@@ -37,7 +34,7 @@ def build_scheduler_emotion_state() -> dict[str, Any]:
     emotion_intensity = 0.0
     endocrine_state: dict[str, Any] = {}
     try:
-        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+        from host_brain.composition.process_services import get_hard_state  # noqa: PLC0415
         from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
 
         hard_state = get_hard_state()

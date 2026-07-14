@@ -2,22 +2,125 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+import time
 
+import pytest
+
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.executive_runtime_core import _execute_skill, _execute_skill_dag
-from host_brain.app.skill_dag_planner import build_skill_dag_plan
+from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
+from host_brain.capability_plane.production_composition import (
+    build_production_capability_runtime,
+)
+from host_brain.composition import process_services as dependencies
+from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
+from host_brain.executive_runtime.skill_execution import _execute_skill
+from host_brain.executive_runtime.conversation_execution import _execute_skill_dag
+from host_brain.executive_runtime.skill_dag import build_skill_dag_plan
+from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.memory_registry import build_memory_skill_registry
 
 
-def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
-    registry = build_builtin_skill_registry()
+@pytest.fixture
+def durable_skill_runtime(tmp_path, monkeypatch):  # noqa: ANN001
+    """Bind each smoke case to one migrated canonical authority database."""
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
+    resources: list[tuple[object, SQLiteLedger]] = []
+
+    def bind(*, case_id: str, registry):  # noqa: ANN001
+        db_path = tmp_path / f"{case_id}.sqlite3"
+        migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+            request_id=f"{case_id}-migration",
+        )
+        assert migrated.success is True, migrated.as_dict()
+        ledger = SQLiteLedger(
+            db_path=str(db_path),
+            check_same_thread=False,
+            initialize_schema=False,
+        )
+        composition = build_production_capability_runtime(
+            execution_journal=SQLiteCapabilityExecutionJournal(ledger),
+        )
+        monkeypatch.setattr(dependencies, "get_ledger", lambda: ledger)
+        monkeypatch.setattr(dependencies, "get_skill_registry", lambda: registry)
+        monkeypatch.setattr(
+            dependencies,
+            "get_capability_broker",
+            lambda: composition.broker,
+        )
+        resources.append((composition, ledger))
+        return ledger
+
+    yield bind
+
+    for composition, ledger in reversed(resources):
+        composition.broker.close()
+        ledger.close()
+
+
+def _durable_skill_grant(
+    ledger: SQLiteLedger,
+    *,
+    request_id: str,
+    intent_id: str,
+    session_id: str,
+    principal_id: str,
+    skill_id: str,
+    token_ref: str,
+    seq: int = 1,
+    target_id: str = "host",
+) -> dict[str, object]:
+    now_ms = int(time.time() * 1000)
+    binding = build_governed_action_binding(
+        intent_envelope={
+            "id": intent_id,
+            "session_id": session_id,
+            "seq": seq,
+            "action": skill_id,
+            "target": target_id,
+            "args": {},
+            "person_id": principal_id,
+            "principal_id": principal_id,
+        },
+        approval_token_ref=token_ref,
+        risk_level=1,
+        issued_at_ms=now_ms,
+        expires_at_ms=now_ms + 60_000,
+    )
+    decision: dict[str, object] = {
+        "request_id": request_id,
+        "intent_id": intent_id,
+        "decision": "APPROVE",
+        "tokens": {"approval_token_ref": token_ref},
+        "approved_action_binding": binding,
+        "ts_ms": now_ms,
+    }
+    ledger.log_governor(decision)
+    return decision
+
+
+def test_execute_skill_builtin_writes_skill_exec_audit(
+    durable_skill_runtime,
+) -> None:
+    registry = build_builtin_skill_registry()
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-builtin",
+        registry=registry,
+    )
+
+    governor = _durable_skill_grant(
+        ledger,
+        request_id="req_exec_skill_smoke_001",
+        intent_id="intent_exec_skill_smoke_001",
+        session_id="sess_exec_skill_smoke_001",
+        principal_id="person_exec_skill_smoke_001",
+        skill_id="session_summary",
+        token_ref="approval::exec_skill_smoke_001",
+    )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={},
         request_id="req_exec_skill_smoke_001",
         session_id="sess_exec_skill_smoke_001",
@@ -26,11 +129,11 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
         skill_id="session_summary",
         task_text="请总结当前会话",
         user_message="请总结当前会话",
-        governor_result={
-            "decision": "APPROVE",
-            "tokens": {"approval_token_ref": "approval::exec_skill_smoke_001"},
-        },
+        governor_result=governor,
         intent_draft={
+            "id": "intent_exec_skill_smoke_001",
+            "session_id": "sess_exec_skill_smoke_001",
+            "seq": 1,
             "args": {
                 "user_message": "今天先验证技能执行链路",
                 "session_id": "sess_exec_skill_smoke_001",
@@ -40,7 +143,7 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
         render_target_lang="zh-CN",
     )
 
-    assert outcome.success is True
+    assert outcome.success is True, outcome.error_text
     assert outcome.target_id == "session_summary"
     assert outcome.result_text == "session_summary"
     assert outcome.payload["approval_token_ref"] == "approval::exec_skill_smoke_001"
@@ -52,12 +155,14 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
     assert trace["skill_exec_log"][0]["approval_token_ref"] == "approval::exec_skill_smoke_001"
 
 
-def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_dag_parallel_builtin_skills_write_audit(
+    durable_skill_runtime,
+) -> None:
     registry = build_builtin_skill_registry()
-
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-dag",
+        registry=registry,
+    )
 
     planned_steps = [
         {
@@ -88,9 +193,22 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
         steps=planned_steps,
         parallel_window=4,
     )
+    node_grants = {
+        skill_id: _durable_skill_grant(
+            ledger,
+            request_id="req_exec_plan_smoke_001",
+            intent_id="intent_exec_plan_smoke_001",
+            session_id="sess_exec_plan_smoke_001",
+            principal_id="person_exec_plan_smoke_001",
+            skill_id=skill_id,
+            token_ref=f"approval::exec_plan_smoke_001::{skill_id}",
+        )
+        for skill_id in ("session_summary", "emotion_query")
+    }
 
     async def _run() -> tuple[object, dict[str, object]]:
         return await _execute_skill_dag(
+            ports=build_executive_runtime_application_ports(),
             plan=plan,
             request_body={},
             request_id="req_exec_plan_smoke_001",
@@ -99,9 +217,14 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
             intent_id="intent_exec_plan_smoke_001",
             governor_result={
                 "decision": "APPROVE",
-                "tokens": {"approval_token_ref": "approval::exec_plan_smoke_001"},
+                "node_grants": node_grants,
             },
-            intent_draft={"planned_steps": planned_steps},
+            intent_draft={
+                "id": "intent_exec_plan_smoke_001",
+                "session_id": "sess_exec_plan_smoke_001",
+                "seq": 1,
+                "planned_steps": planned_steps,
+            },
             emotion_context={
                 "mood_state": "CALM",
                 "emotion_tag": "FOCUSED",
@@ -112,23 +235,29 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
 
     outcome, meta = asyncio.run(_run())
 
-    assert outcome.success is True
+    assert outcome.success is True, outcome.error_text
     assert meta["parallel_enabled"] is True
     assert "session_summary" in outcome.result_text
     assert "emotion_query" in outcome.result_text
 
     trace = ledger.trace_request("req_exec_plan_smoke_001")
     assert len(trace["skill_exec_log"]) == 2
-    assert [row["skill_name"] for row in trace["skill_exec_log"]] == [
+    assert {row["skill_name"] for row in trace["skill_exec_log"]} == {
         "session_summary",
         "emotion_query",
-    ]
+    }
     assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
 
 
-def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypatch) -> None:
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+def test_execute_skill_memory_store_injects_runtime_memory_dependencies(
+    monkeypatch,
+    durable_skill_runtime,
+) -> None:
     registry = build_memory_skill_registry()
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-memory-store",
+        registry=registry,
+    )
     writes: list[dict[str, object]] = []
 
     class _StoreStub:
@@ -153,12 +282,22 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
             )
             return SimpleNamespace(success=True, reason_code=None, detail="ok", memory_id="mem-001")
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: _StoreStub())
-    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: object())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: _StoreStub())
+    monkeypatch.setattr("host_brain.composition.process_services.get_semantic_recaller", lambda: object())
+
+    governor = _durable_skill_grant(
+        ledger,
+        request_id="req_exec_skill_memory_001",
+        intent_id="intent_exec_skill_memory_001",
+        session_id="sess_exec_skill_memory_001",
+        principal_id="person_exec_skill_memory_001",
+        skill_id="memory_store",
+        token_ref="approval::exec_skill_memory_001",
+        target_id="memory",
+    )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={},
         request_id="req_exec_skill_memory_001",
         session_id="sess_exec_skill_memory_001",
@@ -167,11 +306,11 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
         skill_id="memory_store",
         task_text="记住今天我们确认了联调问题",
         user_message="帮我记住今天我们确认了联调问题",
-        governor_result={
-            "decision": "APPROVE",
-            "tokens": {"approval_token_ref": "approval::exec_skill_memory_001"},
-        },
+        governor_result=governor,
         intent_draft={
+            "id": "intent_exec_skill_memory_001",
+            "session_id": "sess_exec_skill_memory_001",
+            "seq": 1,
             "args": {
                 "content": "今天我们确认了联调问题",
                 "source": "user_request",
@@ -182,7 +321,7 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
         render_target_lang="zh-CN",
     )
 
-    assert outcome.success is True
+    assert outcome.success is True, outcome.error_text
     assert outcome.target_id == "memory_store"
     assert writes[0]["text"] == "今天我们确认了联调问题"
     assert writes[0]["request_id"] == "req_exec_skill_memory_001"
@@ -193,8 +332,15 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
     assert "source:user_request" in writes[0]["evidence_refs"]
 
 
-def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatch) -> None:
+def test_execute_skill_long_term_memory_search_filters_semantic_layer(
+    monkeypatch,
+    durable_skill_runtime,
+) -> None:
     registry = build_memory_skill_registry()
+    ledger = durable_skill_runtime(
+        case_id="exec-skill-memory-search",
+        registry=registry,
+    )
     captured: dict[str, object] = {}
 
     class _SemanticRecallStub:
@@ -222,11 +368,22 @@ def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatc
                 ]
             )
 
-    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: None)
-    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: _SemanticRecallStub())
+    monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: None)
+    monkeypatch.setattr("host_brain.composition.process_services.get_semantic_recaller", lambda: _SemanticRecallStub())
+
+    governor = _durable_skill_grant(
+        ledger,
+        request_id="req_exec_skill_long_term_memory_search",
+        intent_id="intent_exec_skill_long_term_memory_search",
+        session_id="sess_exec_skill_long_term_memory_search",
+        principal_id="person_exec_skill_long_term_memory_search",
+        skill_id="memory_search",
+        token_ref="approval::exec_skill_long_term_memory_search",
+        target_id="memory",
+    )
 
     outcome = _execute_skill(
+        ports=build_executive_runtime_application_ports(),
         request_body={
             "args": {
                 "query": "技术场景怎么帮我",
@@ -243,8 +400,11 @@ def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatc
         skill_id="memory_search",
         task_text="检索长期记忆",
         user_message="检索长期记忆",
-        governor_result={"decision": "APPROVE", "tokens": {}},
+        governor_result=governor,
         intent_draft={
+            "id": "intent_exec_skill_long_term_memory_search",
+            "session_id": "sess_exec_skill_long_term_memory_search",
+            "seq": 1,
             "args": {
                 "query": "技术场景怎么帮我",
                 "memory_type": "semantic",

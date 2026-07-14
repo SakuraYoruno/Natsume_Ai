@@ -13,6 +13,7 @@ TASK-0066: 验证 Web UI 面板端点可达、数据 API 联通、空/错误输�
 - /metrics 返回 200 且含 reason_code_distribution
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -33,8 +34,39 @@ pytestmark = pytest.mark.skipif(not HAS_FASTAPI, reason="FastAPI not installed")
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(monkeypatch):
+    """The historical trace contract now enters through operator auth."""
+
+    from host_brain.observability.operator_query_gateway import (
+        OPERATOR_QUERY_AUTH_BINDINGS_ENV,
+        OperatorQueryGateway,
+    )
+    from host_brain.app import obs_fastapi_app
+
+    token = "web-ui-contract-operator"
+    monkeypatch.setenv(
+        OPERATOR_QUERY_AUTH_BINDINGS_ENV,
+        json.dumps(
+            [
+                {
+                    "token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+                    "principal_id": "ops.web-ui-contract",
+                    "scopes": ["obs:trace:read", "obs:ui:read"],
+                }
+            ]
+        ),
+    )
+    previous_gateway = app.state.operator_query_gateway
+    app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
+    monkeypatch.setattr(
+        obs_fastapi_app,
+        "get_query_projection_store",
+        lambda: type("EmptyProjectionStore", (), {"get": lambda _self, _kind, _key: None})(),
+    )
+    try:
+        yield TestClient(app, headers={"Authorization": f"Bearer {token}"})
+    finally:
+        app.state.operator_query_gateway = previous_gateway
 
 
 # ---------------------------------------------------------------------------
@@ -42,14 +74,14 @@ def client():
 # ---------------------------------------------------------------------------
 
 class TestMonitorStaticBundle:
-    """Monitor 静态包由 nginx 直接 serve，测试只检查构建产物。"""
+    """Monitor 静态包由 release build 生成，仓库只冻结构建输入。"""
 
     def test_monitor_bundle_contains_spa_mount(self):
-        """React SPA bundle 存在，hostmain 不负责 HTTP serve。"""
+        """React SPA 源入口存在，hostmain 不负责 HTTP serve。"""
         from pathlib import Path
 
         project_root = Path(__file__).resolve().parents[2]
-        spa_index = project_root / "host_brain" / "app" / "static" / "monitor" / "index.html"
+        spa_index = project_root / "host_brain" / "app" / "monitor_ui" / "index.html"
         body = spa_index.read_text(encoding="utf-8-sig")
         assert "<title>" in body or '<div id="root">' in body
 
@@ -180,7 +212,7 @@ class TestPanelReadonlySafety:
         from pathlib import Path
 
         project_root = Path(__file__).resolve().parents[2]
-        body = (project_root / "host_brain" / "app" / "static" / "monitor" / "index.html").read_text(
+        body = (project_root / "host_brain" / "app" / "monitor_ui" / "index.html").read_text(
             encoding="utf-8-sig"
         ).lower()
         assert "<form" not in body or 'action="' not in body

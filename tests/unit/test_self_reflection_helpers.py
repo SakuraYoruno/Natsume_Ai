@@ -4,8 +4,6 @@ import json
 from types import SimpleNamespace
 
 import host_brain.persona.self_reflection as sr_mod
-from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.self_reflection import SelfReflection, build_self_reflection_pulse
 
 

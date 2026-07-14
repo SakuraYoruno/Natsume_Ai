@@ -1,4 +1,3 @@
-export { sendChatDebugStream } from './chatDebugApi.js'
 export { fetchInsightsSummarySnapshot } from './insightsApi.js'
 export { fetchErrors } from './logApi.js'
 export { fetchSessions, exportSessionsCsv } from './sessionsApi.js'

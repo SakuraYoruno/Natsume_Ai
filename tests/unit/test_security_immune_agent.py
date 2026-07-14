@@ -595,24 +595,29 @@ def test_defender_signals_get_defender_specific_response_actions(tmp_path: Path)
 def test_security_immune_obs_routes_filter_incidents(monkeypatch) -> None:
     monkeypatch.setattr(
         obs_security_routes,
-        "get_security_immune_agent",
-        lambda: type(
-            "FakeAgent",
-            (),
+        "read_domain_projection",
+        lambda **_kwargs: (
             {
-                "export_runtime_state": lambda self: {
-                    "asset_count": 1,
-                    "incident_count": 2,
-                    "generated_ts_ms": 123,
-                    "risk_counts": {"low": 1, "high": 1},
-                    "assets": [{"asset_id": "asset-1"}],
-                    "incidents": [
-                        {"incident_id": "low-1", "risk": "low"},
-                        {"incident_id": "high-1", "risk": "high"},
-                    ],
-                }
+                "asset_count": 1,
+                "incident_count": 2,
+                "generated_ts_ms": 123,
+                "risk_counts": {"low": 1, "high": 1},
+                "assets": [{"asset_id": "asset-1"}],
+                "incidents": [
+                    {"incident_id": "low-1", "risk": "low"},
+                    {"incident_id": "high-1", "risk": "high"},
+                ],
             },
-        )(),
+            {
+                "schema_version": "Natsume.operator.query_projection.v1",
+                "projection_version": 1,
+                "projection_cursor": 1,
+                "source_cursor": 123,
+                "freshness_ts_ms": 123,
+                "degraded_state": "HEALTHY",
+                "available": True,
+            },
+        ),
     )
     app = FastAPI()
     app.include_router(obs_router)

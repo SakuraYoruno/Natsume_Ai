@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import logging
-from typing import Literal
+from typing import Any, Literal, Mapping
 
+from host_brain.persistence.context_repository import ContextRepository
 from .config import conversation_summary_max_chars, conversation_summary_threshold
 from .schema import Turn
-from .store import TurnStore
 
 SummaryRenderLang = Literal["zh", "ja"]
 
@@ -28,8 +29,8 @@ class ConversationWindow:
 
 
 class ConversationHistory:
-    def __init__(self, store: TurnStore) -> None:
-        self._store = store
+    def __init__(self, repository: ContextRepository) -> None:
+        self._repository = repository
 
     def fetch_recent_turns(
         self,
@@ -42,23 +43,24 @@ class ConversationHistory:
     ) -> list[Turn]:
         effective_before_turn_index = before_turn_index
         if effective_before_turn_index is None and exclude_request_id:
-            boundary_turn = self._store.find_by_request(
+            boundary_row = self._repository.find_turn(
                 session_id=session_id,
                 request_id=exclude_request_id,
                 role="user",
-            ) or self._store.find_by_request(
+            ) or self._repository.find_turn(
                 session_id=session_id,
                 request_id=exclude_request_id,
             )
-            if boundary_turn is not None:
-                effective_before_turn_index = int(boundary_turn.turn_index)
-        return self._store.query_recent(
+            if boundary_row is not None:
+                effective_before_turn_index = int(boundary_row.get("turn_index") or 0)
+        rows = self._repository.query_recent_turns(
             session_id=session_id,
             limit=max(1, int(max_turns)),
             exclude_request_id=exclude_request_id,
             before_ts_ms=before_ts_ms,
             before_turn_index=effective_before_turn_index,
         )
+        return [_row_to_turn(row) for row in rows]
 
     def fetch_for_messages(
         self,
@@ -104,7 +106,7 @@ class ConversationHistory:
         threshold = int(summary_threshold if summary_threshold is not None else conversation_summary_threshold())
         if filtered and threshold > 0:
             newest_turn_index = int(filtered[0].turn_index)
-            older_turn_count = self._store.count_before_turn_index(
+            older_turn_count = self._repository.count_turns_before_index(
                 session_id=session_id,
                 before_turn_index=newest_turn_index,
                 exclude_request_id=exclude_request_id,
@@ -158,13 +160,15 @@ class ConversationHistory:
         render_target_lang: SummaryRenderLang = "zh",
         exclude_request_id: str | None = None,
     ) -> str:
-        older_turns = self._store.query_before_turn_index(
+        older_rows = self._repository.query_turns_before_index(
             session_id=session_id,
             before_turn_index=before_turn_index,
             limit=6,
             exclude_request_id=exclude_request_id,
         )
-        filtered, _sc, _se, _dd = self._normalize_turns_for_messages(older_turns)
+        filtered, _sc, _se, _dd = self._normalize_turns_for_messages(
+            [_row_to_turn(row) for row in older_rows]
+        )
         if not filtered:
             return ""
 
@@ -251,3 +255,33 @@ class ConversationHistory:
         if boundary >= max_chars // 2:
             return candidate[: boundary + 1].strip()
         return candidate.rstrip("，,、 ").strip()
+
+
+def _row_to_turn(row: Mapping[str, Any]) -> Turn:
+    raw_metadata = row.get("metadata")
+    metadata: dict[str, Any] | None = None
+    if isinstance(raw_metadata, Mapping):
+        metadata = dict(raw_metadata)
+    elif raw_metadata:
+        try:
+            decoded = json.loads(str(raw_metadata))
+            if isinstance(decoded, dict):
+                metadata = decoded
+        except (TypeError, json.JSONDecodeError):
+            pass
+    return Turn(
+        turn_id=str(row.get("turn_id") or ""),
+        session_id=str(row.get("session_id") or ""),
+        person_id=str(row.get("person_id") or ""),
+        request_id=str(row.get("request_id") or ""),
+        role=str(row.get("role") or "user"),
+        content=str(row.get("content") or ""),
+        ts_ms=int(row.get("ts_ms") or 0),
+        turn_index=int(row.get("turn_index") or 0),
+        lang=str(row.get("lang") or "zh"),
+        token_count=(
+            int(row["token_count"]) if row.get("token_count") is not None else None
+        ),
+        corrupted=bool(row.get("corrupted")),
+        metadata=metadata,
+    )

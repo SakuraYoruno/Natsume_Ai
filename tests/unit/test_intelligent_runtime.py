@@ -111,7 +111,7 @@ class _NoPlanningAgent:
 
 
 def _patch_dependencies(monkeypatch) -> None:
-    import host_brain.app.dependencies as deps
+    import host_brain.composition.process_services as deps
 
     monkeypatch.setattr(deps, "get_meta_learning_loop", lambda: _DummyMetaLearning())
     monkeypatch.setattr(deps, "get_multimodal_processor", lambda: _DummyMultimodalProcessor())
@@ -160,7 +160,7 @@ def test_build_prompt_intelligence_executes_safe_planning_and_skill_nodes(monkey
 
 def test_build_prompt_intelligence_skips_task_planning_for_plain_chat(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
-    import host_brain.app.dependencies as deps
+    import host_brain.composition.process_services as deps
 
     planner = _NoPlanningAgent()
     monkeypatch.setattr(deps, "get_planning_agent", lambda: planner)

@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.v1 import now_ms
 
 logger = logging.getLogger("Natsume.edge.tribe_bridge")
 

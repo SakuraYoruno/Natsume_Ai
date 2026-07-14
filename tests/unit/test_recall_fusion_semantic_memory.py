@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.persona.surface_memory_recall import build_surface_memory_recall_packet
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig

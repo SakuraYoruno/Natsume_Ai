@@ -143,12 +143,15 @@ def test_inner_world_monologue_tick_persists_recent_inner_stream_memory(monkeypa
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     monkeypatch.setenv("HOST_NON_CHAT_MEMORY_ENABLED", "true")
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
-    monkeypatch.setattr(
-        "host_brain.app.observability_persist.persist_background_event_memory",
-        lambda **kwargs: memory_calls.append(dict(kwargs)) or {"status": "SUCCESS", "memory_id": "mem_inner_1"},
+    persist_memory = (
+        lambda **kwargs: memory_calls.append(dict(kwargs))
+        or {"status": "SUCCESS", "memory_id": "mem_inner_1"}
     )
 
-    result = execute_inner_world_monologue_tick(args={"user_id": "u-memory"})
+    result = execute_inner_world_monologue_tick(
+        args={"user_id": "u-memory"},
+        context={"persist_background_event_memory": persist_memory},
+    )
 
     assert result["status"] == "OK"
     assert memory_calls
@@ -187,13 +190,20 @@ def test_inner_world_memory_dedupes_same_event_across_tick_kinds(monkeypatch) ->
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     monkeypatch.setenv("HOST_NON_CHAT_MEMORY_ENABLED", "true")
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
-    monkeypatch.setattr(
-        "host_brain.app.observability_persist.persist_background_event_memory",
-        lambda **kwargs: memory_calls.append(dict(kwargs)) or {"status": "OK", "memory_id": "mem_inner_1"},
+    persist_memory = (
+        lambda **kwargs: memory_calls.append(dict(kwargs))
+        or {"status": "OK", "memory_id": "mem_inner_1"}
     )
+    context = {"persist_background_event_memory": persist_memory}
 
-    execute_inner_world_monologue_tick(args={"user_id": "u-memory-dedupe"})
-    execute_inner_world_numeric_tick(args={"user_id": "u-memory-dedupe"})
+    execute_inner_world_monologue_tick(
+        args={"user_id": "u-memory-dedupe"},
+        context=context,
+    )
+    execute_inner_world_numeric_tick(
+        args={"user_id": "u-memory-dedupe"},
+        context=context,
+    )
 
     assert len(memory_calls) == 1
     metadata = memory_calls[0]["metadata"]

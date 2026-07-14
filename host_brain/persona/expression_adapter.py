@@ -16,8 +16,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-from host_brain.app.prompt_builder_utils import (
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
+from host_brain.model_runtime.prompt_builder_utils import (
     _resolve_template_payload_with_mirror,
 )
 
@@ -61,7 +61,7 @@ def _load_template_mapping(template_id: str, *, render_target_lang: str | None =
             render_target_lang=str(render_target_lang or "zh"),
         )
     else:
-        raw = resolve_prompt_template_json_merged(template_id)
+        raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

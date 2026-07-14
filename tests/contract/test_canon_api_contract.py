@@ -135,7 +135,7 @@ def test_submit_proposal_execution_claim_rejected(store: WorldCanonStore) -> Non
 # ---------------------------------------------------------------------------
 
 def test_approve_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger) -> None:
-    """T-Canon-API-04: 审核通过，SSOT 文件版本 +1，canon_change_log 可回放。"""
+    """T-Canon-API-04: 旧 Store 审核写入口已退役并 fail-closed。"""
     # 先提交提案
     store.submit_proposal(
         proposal_id="prop-approve",
@@ -146,29 +146,18 @@ def test_approve_proposal_success(store: WorldCanonStore, ledger: SQLiteLedger) 
         proposer_node_id="api.canon_proposals::req-approve",
     )
 
-    # 审核通过
-    doc = store.approve_proposal_with_content(
-        "prop-approve",
-        proposed_title="系统术语 v2",
-        proposed_tags=["system", "terms"],
-        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
-        approver_node_id="api.canon_proposals.approve::req-approve",
-    )
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
+        store.approve_proposal_with_content(
+            "prop-approve",
+            proposed_title="系统术语 v2",
+            proposed_tags=["system", "terms"],
+            proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决与执行。",
+            approver_node_id="api.canon_proposals.approve::req-approve",
+        )
 
-    # SSOT 文件版本 +1（原版本为 1，审核后为 2）
-    assert doc.version == 2
-    assert doc.doc_id == "wc-001-system-terms"
-
-    # 提案 status 变为 APPLIED
     updated = ledger.get_proposal("prop-approve")
     assert updated is not None
-    assert updated["status"] == "APPLIED"
-
-    # canon_change_log 可回放（通过 ledger 查询）
-    change_logs = ledger.canon_change_log if hasattr(ledger, "canon_change_log") else []
-    # 至少有一条变更记录（通过 upsert_document 写入）
-    # 验证 doc hash 已更新
-    assert doc.hash != ""
+    assert updated["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -186,16 +175,7 @@ def test_approve_non_pending_proposal_rejected(store: WorldCanonStore) -> None:
         proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-applied",
     )
-    store.approve_proposal_with_content(
-        "prop-already-applied",
-        proposed_title="系统术语 v2",
-        proposed_tags=[],
-        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
-        approver_node_id="api.canon_proposals.approve::req-applied",
-    )
-
-    # 再次 approve 应抛出 PermissionError（status 已是 APPLIED，非 pending）
-    with pytest.raises(PermissionError, match="cannot be approved"):
+    with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
         store.approve_proposal_with_content(
             "prop-already-applied",
             proposed_title="系统术语 v2",
@@ -253,12 +233,9 @@ def test_reject_non_pending_proposal_rejected(store: WorldCanonStore) -> None:
         proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
         proposer_node_id="api.canon_proposals::req-reject-applied",
     )
-    store.approve_proposal_with_content(
+    store.ledger.update_proposal_status(
         "prop-reject-applied",
-        proposed_title="系统术语 v2",
-        proposed_tags=[],
-        proposed_body="Natsume Ai 是一个意识主权本地智能体，语义内核负责叙事草案，Host 负责裁决。",
-        approver_node_id="api.canon_proposals.approve::req-reject-applied",
+        new_status="APPLIED",
     )
 
     with pytest.raises(PermissionError, match="cannot be rejected"):

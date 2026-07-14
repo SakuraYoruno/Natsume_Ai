@@ -1,7 +1,5 @@
 import React from 'react'
 import { RefreshCw, Wrench } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../../life/components/DigitalLifeRuntimeCard.jsx'
-import OrganSystemOverview from '../../life/components/lifeBody/OrganSystemOverview.jsx'
 import { LazyLoadingNotice, LoadingNotice } from '../../../shared/ui/LoadingNotice.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
@@ -72,6 +70,8 @@ function ToolsNotices({ noticeView }) {
 }
 
 function ToolsRuntimeContext({
+  DigitalLifeRuntimeCard,
+  OrganSystemOverview,
   showRuntimeContext,
   onRuntimeContextToggle,
   toolsOrganModel,
@@ -95,8 +95,10 @@ function ToolsRuntimeContext({
       </summary>
       {showRuntimeContext ? (
         <div className="space-y-4 border-t border-gray-100 p-4">
-          <OrganSystemOverview model={toolsOrganModel} />
-          <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+          {OrganSystemOverview ? <OrganSystemOverview model={toolsOrganModel} /> : null}
+          {DigitalLifeRuntimeCard ? (
+            <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+          ) : null}
         </div>
       ) : null}
     </details>
@@ -196,6 +198,8 @@ function ToolsOperationsLazySection({ pollingEnabled, pollingInterval, pollingTi
 }
 
 export default function ToolsDashboardSurface({
+  DigitalLifeRuntimeCard,
+  OrganSystemOverview,
   pollingEnabled,
   pollingInterval,
   pollingTick,
@@ -263,6 +267,8 @@ export default function ToolsDashboardSurface({
       />
 
       <ToolsRuntimeContext
+        DigitalLifeRuntimeCard={DigitalLifeRuntimeCard}
+        OrganSystemOverview={OrganSystemOverview}
         showRuntimeContext={showRuntimeContext}
         onRuntimeContextToggle={onRuntimeContextToggle}
         toolsOrganModel={toolsOrganModel}

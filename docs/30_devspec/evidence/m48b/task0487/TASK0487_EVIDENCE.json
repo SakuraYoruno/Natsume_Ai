@@ -1,0 +1,98 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0487",
+  "milestone": "M48-B",
+  "status": "DONE",
+  "implementation_commit": "45199c086960bc81c6cfa5eb0d8aab1c9735ea03",
+  "entry_gate_commit": "904e7286",
+  "completed_at": "2026-07-11",
+  "scope": {
+    "identity_contract": "natsume.identity.v1",
+    "secure_ingress_chain": [
+      "schema",
+      "pre_auth_attempt_rate",
+      "principal",
+      "credential",
+      "scope",
+      "authority_rate",
+      "idempotency_replay_claim",
+      "atomic_claim_audit",
+      "emergency_audit"
+    ],
+    "surface_policies": [
+      "host.input",
+      "obs.command",
+      "gateway.webhook",
+      "bridge.command"
+    ],
+    "runtime_mode_default": "OFF"
+  },
+  "security_invariants": [
+    "raw credential proof is excluded from canonical identity serialization and every audit sink",
+    "HMAC signs raw-body digest, method, normalized path, action, scopes, principal/key, nonce, idempotency and correlation",
+    "opaque bearer tokens are digest-compared and authority-bound",
+    "bad or oversized proof is rejected before expensive verification and registered through the attempt limiter adapter",
+    "pre-auth transport-only and transport+claim buckets prevent principal/key rotation from evading rate limits",
+    "an ALLOW claim and its primary audit row commit in one SQLite transaction",
+    "failed primary ALLOW audit aborts or short-leases the provisional claim and cannot execute",
+    "primary rejection-audit failure falls back to fsync JSONL while retaining the original reason",
+    "query/fragment paths, invalid correlation IDs and secret-pattern audit fields are never persisted",
+    "all decisions declare side_effects_executed=false"
+  ],
+  "migration": {
+    "asset": "host_brain/audit/migrations/0058_secure_ingress.sql",
+    "sha256": "e5b8790b6ac9058fb48ef0a2af9aa162985985eb4ee2eeab61788b233047b95b",
+    "catalog": "host_brain/audit/migrations",
+    "latest_version": 58,
+    "physical_asset_count": 43,
+    "integer_version_count": 42,
+    "historical_compatibility": {
+      "duplicate_0009": "checksum-bound physical asset ledger",
+      "gap_0023_0038": "0022/0039 anchor-bound",
+      "fts_0021": "exact checksum/error/postcondition only"
+    },
+    "runtime_inline_ddl": false
+  },
+  "validation": [
+    {
+      "kind": "focused_unit_contract",
+      "command": "python -m pytest tests/security/test_secure_ingress_identity_contract.py tests/security/test_secure_ingress_service.py tests/security/test_secure_ingress_adapter.py tests/security/test_secure_ingress_store.py tests/security/test_secure_ingress_surface_contract.py tests/security/test_secure_ingress_emergency_audit.py tests/contract/test_task0487_migration_compat_contract.py -q --tb=short",
+      "result": "125 passed in 5.18s"
+    },
+    {
+      "kind": "existing_migration_regression",
+      "command": "python -m pytest tests/contract/test_migration_runner_contract.py tests/unit/test_startup_orchestration.py -q --tb=short",
+      "result": "31 passed in 1.13s"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest tests/integration/test_task0487_secure_ingress_integration.py -q --tb=short",
+      "result": "1 passed in 2.09s",
+      "coverage": "empty central catalog to 0058; four surfaces; restart duplicate; missing principal/credential/signature/scope/idempotency/nonce; physical audit"
+    },
+    {
+      "kind": "static_boundary",
+      "result": "natsume_contracts imports no host_brain, edge_client, FastAPI or SQLite; secure_ingress runtime store contains no schema DDL; git diff --check passed"
+    }
+  ],
+  "feature_flag": {
+    "name": "HOST_SECURE_INGRESS_MODE",
+    "values": ["OFF", "SHADOW", "ENFORCE"],
+    "default": "OFF",
+    "invalid_value": "OFF",
+    "shadow_permits_execution": false
+  },
+  "rollback": [
+    "Keep HOST_SECURE_INGRESS_MODE=OFF; no production route is wired by TASK-0487.",
+    "Discard local test database clones; 0058 is expand-only and no destructive schema rollback is attempted.",
+    "If a later surface cutover fails, return that surface to OFF/read-only/drain while retaining durable audit evidence.",
+    "Never restore anonymous write, insecure-auth bypass, self-signed authority or unauthenticated remote bridge behavior."
+  ],
+  "downstream_cutover_owners": {
+    "TASK-0488": "Gateway and Host input raw-body/durable transport wiring",
+    "TASK-0489": "Obs command relocation and Query-only enforcement",
+    "TASK-0494": "Bridge loopback/remote exposure enforcement",
+    "TASK-0495": "cross-domain P0 golden/fault matrix"
+  },
+  "live_or_physical_effects_executed": false
+}

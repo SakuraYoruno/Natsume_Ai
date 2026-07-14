@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
@@ -15,7 +15,7 @@ from host_brain.app.context.retrieval_context import (
     build_retrieval_rows as _build_retrieval_rows,
 )
 from host_brain.app.chat_runtime_input import build_emotion_recall_text
-from host_brain.app.dependencies import get_ledger
+from host_brain.composition.process_services import get_ledger
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.prompt_context import (
@@ -279,9 +279,9 @@ def build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[s
 
     runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
     with soft_fail("chat.runtime_mode.activity_monitor", fallback=None) as box:
-        from host_brain.app import dependencies as _deps  # noqa: PLC0415
+        from host_brain.composition import process_services as _deps  # noqa: PLC0415
 
-        monitor = getattr(_deps, "_activity_monitor_ref", None)
+        monitor = _deps.get_activity_monitor()
         if monitor is not None and hasattr(monitor, "get_status"):
             activity_status = monitor.get_status()
             if isinstance(activity_status, Mapping):

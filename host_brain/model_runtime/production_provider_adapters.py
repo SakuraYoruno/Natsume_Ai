@@ -1,0 +1,226 @@
+"""Single-call production provider transport adapters.
+
+Credentials and HTTP clients are owned by the injected callables.  This
+module only validates that an authenticated callable was deliberately bound
+and converts the canonical attempt into a provider-neutral chat payload.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from typing import Any, Callable, Iterable, Mapping
+
+from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
+from host_brain.model_runtime.provider_adapters import (
+    CallableProviderAdapter,
+    ProviderAdapterError,
+    ProviderAdapterRegistry,
+    StreamCallable,
+)
+
+
+SUPPORTED_PRODUCTION_PROVIDERS = frozenset(
+    {"openai", "openai_compatible", "gemini", "deepseek", "codex", "minimax"}
+)
+_GENERATION_KEYS = frozenset(
+    {"temperature", "top_p", "top_k", "max_tokens", "stop", "seed", "presence_penalty", "frequency_penalty"}
+)
+
+
+class ProductionProviderConfigurationError(ProviderAdapterError):
+    pass
+
+
+ProviderPayloadCallable = Callable[[Mapping[str, Any]], Any]
+CredentialResolver = Callable[[str], str | None]
+BaseUrlResolver = Callable[[str], str | None]
+SingleAttemptTransport = Callable[..., str]
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionProviderBinding:
+    """Secret-free declaration for a pre-authenticated transport callable."""
+
+    provider: str
+    complete: ProviderPayloadCallable
+    stream: ProviderPayloadCallable | None = None
+    credential_available: bool = False
+    adapter_id: str | None = None
+    run_sync_in_thread: bool = False
+
+
+def production_adapter_id(provider: str) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized not in SUPPORTED_PRODUCTION_PROVIDERS:
+        raise ProductionProviderConfigurationError(f"unsupported production provider: {normalized or '<empty>'}")
+    return f"production.{normalized}"
+
+
+def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
+    raw = request.target.metadata.get("generation_parameters")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ProductionProviderConfigurationError("generation_parameters must be a mapping")
+    unknown = set(raw) - _GENERATION_KEYS
+    if unknown:
+        raise ProductionProviderConfigurationError(
+            "unsupported generation parameters: " + ", ".join(sorted(str(item) for item in unknown))
+        )
+    return {str(key): value for key, value in raw.items()}
+
+
+def production_provider_payload(
+    request: ProviderAttemptRequest,
+    *,
+    stream: bool,
+) -> dict[str, Any]:
+    """Create a credential-free payload for one injected transport call."""
+
+    payload: dict[str, Any] = {
+        "model": request.target.model_id,
+        "messages": request.prompt.as_message_dicts(),
+        "stream": bool(stream),
+        "request_id": request.request_id,
+    }
+    response_format = request.prompt.output_contract.response_format()
+    if response_format is not None:
+        payload["response_format"] = response_format
+    payload.update(_generation_parameters(request))
+    return payload
+
+
+def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapter:
+    provider = str(binding.provider or "").strip().lower()
+    default_adapter_id = production_adapter_id(provider)
+    if not callable(binding.complete):
+        raise ProductionProviderConfigurationError(f"provider {provider} has no complete callable")
+    if binding.stream is not None and not callable(binding.stream):
+        raise ProductionProviderConfigurationError(f"provider {provider} has invalid stream callable")
+    if not binding.credential_available:
+        # Do not include callable repr, credential values, or binding state.
+        raise ProductionProviderConfigurationError(f"provider credential unavailable: {provider}")
+
+    def _complete(request: ProviderAttemptRequest) -> Any:
+        return binding.complete(production_provider_payload(request, stream=False))
+
+    stream_fn: StreamCallable | None = None
+    if binding.stream is not None:
+        def _stream(request: ProviderAttemptRequest) -> Any:
+            assert binding.stream is not None
+            return binding.stream(production_provider_payload(request, stream=True))
+
+        stream_fn = _stream
+
+    adapter_id = str(binding.adapter_id or "").strip() or default_adapter_id
+    return CallableProviderAdapter(
+        adapter_id,
+        complete_fn=_complete,
+        stream_fn=stream_fn,
+        run_sync_in_thread=binding.run_sync_in_thread,
+    )
+
+
+def build_production_provider_registry(
+    bindings: Iterable[ProductionProviderBinding],
+) -> ProviderAdapterRegistry:
+    """Build an explicit registry; missing/unknown providers fail closed."""
+
+    resolved = tuple(bindings)
+    if not resolved:
+        raise ProductionProviderConfigurationError("no production provider bindings configured")
+    return ProviderAdapterRegistry(_build_adapter(binding) for binding in resolved)
+
+
+class VaultBackedSingleAttemptAdapter:
+    """Resolve a credential at call time and perform exactly one transport call.
+
+    No credential is stored in ``ModelAttemptRequest``, ``ProviderTarget`` or
+    audit metadata.  The adapter intentionally has no retry or fallback loop.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        *,
+        credential_resolver: CredentialResolver,
+        base_url_resolver: BaseUrlResolver,
+        transport: SingleAttemptTransport,
+    ) -> None:
+        self._provider = str(provider or "").strip().lower()
+        self._adapter_id = production_adapter_id(self._provider)
+        if not callable(credential_resolver) or not callable(base_url_resolver) or not callable(transport):
+            raise TypeError("vault-backed provider dependencies must be callable")
+        self._credential_resolver = credential_resolver
+        self._base_url_resolver = base_url_resolver
+        self._transport = transport
+
+    @property
+    def adapter_id(self) -> str:
+        return self._adapter_id
+
+    async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse:
+        credential = str(self._credential_resolver(self._provider) or "").strip()
+        if not credential and self._provider != "codex":
+            raise ProductionProviderConfigurationError(
+                f"provider credential unavailable: {self._provider}"
+            )
+        provider_name = "openai" if self._provider == "openai_compatible" else self._provider
+        content = await asyncio.to_thread(
+            self._transport,
+            provider_name=provider_name,
+            model_id=request.target.model_id,
+            api_key=credential,
+            timeout_ms=request.timeout_ms,
+            messages=request.prompt.as_message_dicts(),
+            gen_params=_generation_parameters(request),
+            response_format=request.prompt.output_contract.response_format(),
+            base_url_override=self._base_url_resolver(self._provider),
+            feature_key=f"model_attempt:{request.scene_type.lower()}",
+        )
+        return ProviderResponse(content=str(content or ""))
+
+    def stream(self, request: ProviderAttemptRequest):
+        return self._stream(request)
+
+    async def _stream(self, request: ProviderAttemptRequest):
+        response = await self.complete(request)
+        if response.content:
+            yield response.content
+
+
+def build_vault_backed_provider_registry(
+    providers: Iterable[str] = tuple(sorted(SUPPORTED_PRODUCTION_PROVIDERS)),
+    *,
+    credential_resolver: CredentialResolver,
+    base_url_resolver: BaseUrlResolver,
+    transport: SingleAttemptTransport,
+) -> ProviderAdapterRegistry:
+    resolved = tuple(dict.fromkeys(str(item or "").strip().lower() for item in providers))
+    if not resolved or any(not item for item in resolved):
+        raise ProductionProviderConfigurationError("production provider set must not be empty")
+    return ProviderAdapterRegistry(
+        VaultBackedSingleAttemptAdapter(
+            provider,
+            credential_resolver=credential_resolver,
+            base_url_resolver=base_url_resolver,
+            transport=transport,
+        )
+        for provider in resolved
+    )
+
+
+__all__ = [
+    "BaseUrlResolver",
+    "CredentialResolver",
+    "ProductionProviderBinding",
+    "ProductionProviderConfigurationError",
+    "SingleAttemptTransport",
+    "SUPPORTED_PRODUCTION_PROVIDERS",
+    "VaultBackedSingleAttemptAdapter",
+    "build_production_provider_registry",
+    "build_vault_backed_provider_registry",
+    "production_adapter_id",
+    "production_provider_payload",
+]

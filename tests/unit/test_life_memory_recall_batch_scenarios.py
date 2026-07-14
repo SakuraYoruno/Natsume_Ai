@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import plan_surface_memory_recall, recall_surface_memory_for_context
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
@@ -69,7 +70,10 @@ def _seed_recommendation(store: LifeMemoryStore, *, day: int) -> None:
     )
 
 
-def _service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+def _service(
+    ledger: SQLiteLedger,
+    store: LifeMemoryStore,
+) -> RecallFusionServiceContract:
     node_id = "surface_main_chain_memory_recall"
     routes = {
         "surface_life_collection": RecallRouteConfig(
@@ -99,6 +103,7 @@ def _service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     }
     return RecallFusionServiceContract(
         ledger=ledger,
+        life_memory_store=store,
         chroma_client=FakeChromaClient(),
         runtime_config=RecallRuntimeConfig(
             enabled=True,
@@ -226,7 +231,7 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
                 )
             )
             packet = recall_surface_memory_for_context(
-                recall_service=_service(ledger),
+                    recall_service=_service(ledger, store),
                 context=ThreeLayerContinuityContext(
                     current_user_message=str(case["message"]),
                     task_mode_hint="daily_chat",

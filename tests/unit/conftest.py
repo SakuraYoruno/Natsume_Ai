@@ -2,9 +2,40 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+
+
+@pytest.fixture()
+def surface_runtime_ports_factory():
+    """Build explicit, side-effect-free Surface ports for unit tests."""
+
+    def _build(**overrides: Any) -> SurfaceRuntimePorts:
+        values: dict[str, Any] = {
+            "get_ledger": lambda: SimpleNamespace(canonical_db_path=":memory:"),
+            "get_life_command_service": lambda: SimpleNamespace(),
+            "get_life_snapshot_reader": lambda: SimpleNamespace(),
+            "get_persistence_settings": lambda: SimpleNamespace(canonical_db_path=":memory:"),
+            "build_surface_context_packet": lambda **_kwargs: {},
+            "build_user_preference_pack": lambda **_kwargs: {},
+            "get_conversation_history": lambda: SimpleNamespace(
+                fetch_for_messages=lambda **_kwargs: []
+            ),
+            "get_conversation_experience_store": lambda: SimpleNamespace(
+                get_belief=lambda **_kwargs: None,
+                recall_lessons=lambda **_kwargs: [],
+            ),
+            "build_conversation_understanding_pack": lambda **_kwargs: {},
+            "build_memory_context_debug": lambda **_kwargs: {},
+        }
+        values.update(overrides)
+        return SurfaceRuntimePorts(**values)
+
+    return _build
 
 
 @pytest.fixture()

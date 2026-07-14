@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import importlib
-import inspect
 import logging
-import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -23,10 +19,83 @@ class SkillProviderSpec:
     default_enabled: bool = True
 
     def instantiate(self):
-        module_name, class_name = self.provider_path.split(":", 1)
-        module = importlib.import_module(module_name)
-        provider_cls = getattr(module, class_name)
-        return provider_cls()
+        if self.provider_path not in _TRUSTED_BUILTIN_PROVIDER_PATHS:
+            raise ValueError("SKILL_PROVIDER_NOT_TRUSTED_BUILTIN")
+        return _instantiate_builtin_provider(self.provider_path)
+
+
+def _instantiate_builtin_provider(provider_path: str):
+    """Construct one statically declared provider without a dynamic importer."""
+
+    if provider_path == "host_brain.skills.file_registry:FileSkillProvider":
+        from host_brain.skills.file_registry import FileSkillProvider
+
+        return FileSkillProvider()
+    if provider_path == "host_brain.skills.shell_registry:ShellSkillProvider":
+        from host_brain.skills.shell_registry import ShellSkillProvider
+
+        return ShellSkillProvider()
+    if provider_path == "host_brain.skills.notification_registry:NotificationSkillProvider":
+        from host_brain.skills.notification_registry import NotificationSkillProvider
+
+        return NotificationSkillProvider()
+    if provider_path == "host_brain.skills.ide_registry:IDESkillProvider":
+        from host_brain.skills.ide_registry import IDESkillProvider
+
+        return IDESkillProvider()
+    if provider_path == "host_brain.skills.agent_runtime_registry:AgentRuntimeSkillProvider":
+        from host_brain.skills.agent_runtime_registry import AgentRuntimeSkillProvider
+
+        return AgentRuntimeSkillProvider()
+    if provider_path == "host_brain.skills.browser_registry:BrowserSkillProvider":
+        from host_brain.skills.browser_registry import BrowserSkillProvider
+
+        return BrowserSkillProvider()
+    if provider_path == "host_brain.skills.personality_registry:PersonalitySkillProvider":
+        from host_brain.skills.personality_registry import PersonalitySkillProvider
+
+        return PersonalitySkillProvider()
+    if provider_path == "host_brain.skills.desktop_registry:DesktopSkillProvider":
+        from host_brain.skills.desktop_registry import DesktopSkillProvider
+
+        return DesktopSkillProvider()
+    if provider_path == "host_brain.skills.memory_registry:MemorySkillProvider":
+        from host_brain.skills.memory_registry import MemorySkillProvider
+
+        return MemorySkillProvider()
+    if provider_path == "host_brain.skills.repo_registry:RepoSkillProvider":
+        from host_brain.skills.repo_registry import RepoSkillProvider
+
+        return RepoSkillProvider()
+    if provider_path == "host_brain.skills.frontend_registry:FrontendSkillProvider":
+        from host_brain.skills.frontend_registry import FrontendSkillProvider
+
+        return FrontendSkillProvider()
+    if provider_path == "host_brain.skills.emotion_registry:EmotionSkillProvider":
+        from host_brain.skills.emotion_registry import EmotionSkillProvider
+
+        return EmotionSkillProvider()
+    if provider_path == "host_brain.skills.scheduler_registry:SchedulerSkillProvider":
+        from host_brain.skills.scheduler_registry import SchedulerSkillProvider
+
+        return SchedulerSkillProvider()
+    if provider_path == "host_brain.skills.system_registry:SystemSkillProvider":
+        from host_brain.skills.system_registry import SystemSkillProvider
+
+        return SystemSkillProvider()
+    if provider_path == "host_brain.skills.token_usage_registry:TokenUsageSkillProvider":
+        from host_brain.skills.token_usage_registry import TokenUsageSkillProvider
+
+        return TokenUsageSkillProvider()
+    if provider_path == "host_brain.skills.web_registry:WebSkillProvider":
+        from host_brain.skills.web_registry import WebSkillProvider
+
+        return WebSkillProvider()
+    if provider_path == "host_brain.skills.hub_skill_registry:HubSkillProvider":
+        from host_brain.skills.hub_skill_registry import HubSkillProvider
+
+        return HubSkillProvider()
+    raise ValueError("SKILL_PROVIDER_NOT_TRUSTED_BUILTIN")
 
 
 BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
@@ -47,6 +116,10 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_TOKEN_USAGE_ENABLED", "host_brain.skills.token_usage_registry:TokenUsageSkillProvider", "Token Usage Skills", "llm_token_usage_report"),
     SkillProviderSpec("HOST_SKILL_WEB_ENABLED", "host_brain.skills.web_registry:WebSkillProvider", "Web Skills", "web_search / http_request"),
     SkillProviderSpec("HOST_SKILL_HUB_ENABLED", "host_brain.skills.hub_skill_registry:HubSkillProvider", "Hub Skills", "hub_skill_install / hub_skill_search / hub_skill_list / hub_skill_remove"),
+)
+
+_TRUSTED_BUILTIN_PROVIDER_PATHS = frozenset(
+    spec.provider_path for spec in BUILTIN_SKILL_PROVIDER_SPECS
 )
 
 CUSTOM_PROVIDER_DIR = Path(__file__).with_name("custom_providers")
@@ -72,32 +145,11 @@ def _discover_custom_provider_paths(
     custom_dir: Path = CUSTOM_PROVIDER_DIR,
     package_name: str = CUSTOM_PROVIDER_PACKAGE,
 ) -> tuple[str, ...]:
-    if not custom_dir.exists() or not custom_dir.is_dir():
-        return ()
-
-    discovered: list[str] = []
-    for path in sorted(custom_dir.glob(CUSTOM_PROVIDER_GLOB)):
-        if path.name.startswith("_"):
-            continue
-        module_name = f"{package_name}.{path.stem}"
-        try:
-            importlib.invalidate_caches()
-            sys.modules.pop(module_name, None)
-            module = importlib.import_module(module_name)
-        except Exception as exc:
-            logger.warning("自定义 Skill Provider 导入失败，跳过: %s (%s)", module_name, exc)
-            continue
-
-        provider_cls = getattr(module, CUSTOM_PROVIDER_CLASS_ATTR, None)
-        if not inspect.isclass(provider_cls):
-            logger.warning(
-                "自定义 Skill Provider 缺少 %s，跳过: %s",
-                CUSTOM_PROVIDER_CLASS_ATTR,
-                module_name,
-            )
-            continue
-        discovered.append(f"{module_name}:{provider_cls.__name__}")
-    return tuple(discovered)
+    # Kept as a compatibility seam for callers that still import the helper.
+    # Production discovery is permanently closed: do not inspect the path,
+    # invalidate caches, evict modules, or import attacker-controlled code.
+    del logger, custom_dir, package_name
+    return ()
 
 
 def _register_provider_path(
@@ -107,19 +159,11 @@ def _register_provider_path(
     logger: logging.Logger,
     label: str,
 ) -> int:
-    try:
-        spec = SkillProviderSpec(
-            env_flag="",
-            provider_path=provider_path,
-            log_label=label,
-            log_summary=provider_path,
-        )
-        registry.register_decorated(spec.instantiate())
-        logger.info("%s 已注册（%s）", label, provider_path)
-        return 1
-    except Exception as exc:
-        logger.warning("%s 注册失败，跳过: %s", label, exc)
-        return 0
+    # Legacy API remains callable but cannot import or register any external
+    # module. Signed external bundles enter only through the quarantine intake.
+    del registry, provider_path
+    logger.warning("%s 已禁用：仅允许冻结的内建 Skill Provider", label)
+    return 0
 
 
 def register_configured_skill_providers(
@@ -131,6 +175,12 @@ def register_configured_skill_providers(
 ) -> int:
     count = 0
     for spec in specs:
+        if spec.provider_path not in _TRUSTED_BUILTIN_PROVIDER_PATHS:
+            logger.warning(
+                "Skill Provider 非冻结内建项，拒绝注册（%s）",
+                spec.provider_path,
+            )
+            continue
         if not parse_bool_env(spec.env_flag, default=spec.default_enabled):
             continue
         try:
@@ -139,22 +189,5 @@ def register_configured_skill_providers(
             count += 1
         except Exception as exc:
             logger.warning("%s 注册失败，跳过: %s", spec.log_label, exc)
-
-    if parse_bool_env(CUSTOM_PROVIDERS_ENABLED_ENV, default=True):
-        for provider_path in _discover_custom_provider_paths(logger=logger):
-            count += _register_provider_path(
-                registry,
-                provider_path,
-                logger=logger,
-                label="Custom Skill Provider",
-            )
-
-    for provider_path in _split_provider_paths(os.environ.get(EXTRA_PROVIDERS_ENV) or ""):
-        count += _register_provider_path(
-            registry,
-            provider_path,
-            logger=logger,
-            label="Extra Skill Provider",
-        )
 
     return count

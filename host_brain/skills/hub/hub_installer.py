@@ -1,47 +1,20 @@
-"""Skills Hub 远程安装器。
+"""Sealed compatibility facade for the legacy Skills Hub installer.
 
-支持从官方兼容来源安装 Skill：
-  natsume skills install github:owner/repo/skill-slug
-  natsume skills install skillshub:owner/repo/skill-slug
-  natsume skills install https://github.com/owner/repo/tree/main/skill-slug
-  natsume skills install ./local/path/to/skill-dir
-
-官方发现入口：
-  - ClawHub: https://clawhub.ai
-  - Skillshub: https://www.skillshubco.com
-
-安装流程：
-  1. 解析来源（GitHub URL / 本地路径）
-  2. 下载/复制 skill 目录到 hub/
-  3. 校验 SKILL.md 有效性
-  4. 更新 lock 文件
+Legacy local/GitHub/ClawHub install and remote-search requests do not carry a
+signed bundle inventory, SBOM, or sandbox envelope.  They are therefore
+rejected before filesystem, network, package-manager, or subprocess access.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-import shutil
-import subprocess
-import tempfile
-import time
-import urllib.request
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from host_brain.skills.hub.hub_loader import (
-    LOCK_FILENAME,
-    SKILL_MD_FILENAME,
-    _resolve_hub_skills_dir,
-    read_lock_file,
-    remove_lock_entry,
-    update_lock_entry,
-)
-from host_brain.skills.hub.manifest_parser import parse_skill_md
+from host_brain.skills.supply_chain import SupplyChainActivationMode, resolve_activation_mode
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +26,27 @@ OFFICIAL_SKILLSHUB_GITHUB_URL = os.environ.get("HOST_SKILL_SKILLSHUB_GITHUB_URL"
 OFFICIAL_SKILLSHUB_INSTALL_EXAMPLE = os.environ.get("HOST_SKILL_SKILLSHUB_INSTALL_EXAMPLE", "skillshub:anthropics/skills/frontend-design").strip() or "skillshub:anthropics/skills/frontend-design"
 
 
-OFFICIAL_CLAWHUB_NPX_PACKAGE = os.environ.get("HOST_SKILL_CLAWHUB_NPX_PACKAGE", "clawhub").strip() or "clawhub"
-HOST_SKILL_CLAWHUB_TIMEOUT_S = float(os.environ.get("HOST_SKILL_CLAWHUB_TIMEOUT_S", "120") or "120")
-HOST_SKILL_CLAWHUB_RETRY_LIMIT = int(os.environ.get("HOST_SKILL_CLAWHUB_RETRY_LIMIT", "2") or "2")
-HOST_SKILL_CLAWHUB_SEARCH_LIMIT = int(os.environ.get("HOST_SKILL_CLAWHUB_SEARCH_LIMIT", "8") or "8")
+_SAFE_SKILL_COMPONENT_RE = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,127}\Z")
+_SAFE_GITHUB_COMPONENT_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_SAFE_GITHUB_BRANCH_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/-]{0,254}\Z")
+
+
+def _activation_mode() -> tuple[SupplyChainActivationMode, bool]:
+    try:
+        resolution = resolve_activation_mode()
+    except Exception:
+        logger.exception("Hub installer: activation policy resolution failed")
+        return SupplyChainActivationMode.BUILTINS_ONLY, False
+    return resolution.mode, bool(resolution.valid)
+
+
+def _legacy_mutation_rejection() -> str:
+    mode, valid = _activation_mode()
+    if not valid:
+        return "SUPPLY_CHAIN_ACTIVATION_MODE_INVALID"
+    if mode is SupplyChainActivationMode.BUILTINS_ONLY:
+        return "SUPPLY_CHAIN_EXTERNAL_BUNDLES_DISABLED"
+    return "SUPPLY_CHAIN_SIGNED_BUNDLE_REQUIRED"
 
 
 def get_official_skill_hub_sources() -> list[dict[str, str]]:
@@ -68,54 +58,6 @@ def get_official_skill_hub_sources() -> list[dict[str, str]]:
     ]
 
 
-def _normalize_cli_output(*parts: str) -> str:
-    chunks: list[str] = []
-    for part in parts:
-        text = str(part or "").strip()
-        if text:
-            chunks.append(text)
-    combined = "\n".join(chunks).strip()
-    combined = combined.replace("\r", "")
-    return re.sub(r"\x1b\[[0-9;]*m", "", combined)
-
-
-
-def _extract_retry_after_seconds(message: str) -> float:
-    import re as _re
-
-    match = _re.search(r"retry in\s+(\d+(?:\.\d+)?)s", str(message or ""), _re.IGNORECASE)
-    if not match:
-        return 1.0
-    try:
-        return max(0.5, float(match.group(1)))
-    except ValueError:
-        return 1.0
-
-
-
-def _resolve_npx_command() -> str:
-    candidates = ["npx.cmd", "npx"] if os.name == "nt" else ["npx"]
-    for candidate in candidates:
-        resolved = shutil.which(candidate)
-        if resolved:
-            return resolved
-    return candidates[0]
-
-
-def _build_clawhub_base_command(*, workdir: Path, skills_dir: Path) -> list[str]:
-    return [
-        _resolve_npx_command(),
-        "-y",
-        OFFICIAL_CLAWHUB_NPX_PACKAGE,
-        "--no-input",
-        "--workdir",
-        str(workdir),
-        "--dir",
-        str(skills_dir.name),
-    ]
-
-
-
 def _run_clawhub_cli(
     command_args: list[str],
     *,
@@ -123,32 +65,9 @@ def _run_clawhub_cli(
     skills_dir: Path,
     timeout_s: float | None = None,
     retry_limit: int | None = None,
-) -> subprocess.CompletedProcess[str]:
-    timeout_value = float(timeout_s or HOST_SKILL_CLAWHUB_TIMEOUT_S)
-    max_retries = max(0, int(HOST_SKILL_CLAWHUB_RETRY_LIMIT if retry_limit is None else retry_limit))
-    base_cmd = _build_clawhub_base_command(workdir=workdir, skills_dir=skills_dir)
-    last_result: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(max_retries + 1):
-        result = subprocess.run(
-            [*base_cmd, *command_args],
-            cwd=str(workdir),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_value,
-            check=False,
-        )
-        last_result = result
-        output_text = _normalize_cli_output(result.stdout, result.stderr)
-        if result.returncode == 0:
-            return result
-        if "Rate limit exceeded" in output_text and attempt < max_retries:
-            time.sleep(_extract_retry_after_seconds(output_text))
-            continue
-        return result
-    assert last_result is not None
-    return last_result
+) -> Any:
+    del command_args, workdir, skills_dir, timeout_s, retry_limit
+    raise RuntimeError(_legacy_mutation_rejection())
 
 
 
@@ -179,26 +98,11 @@ def _parse_clawhub_search_output(stdout: str) -> list[SearchResult]:
 
 
 def _search_skills_via_clawhub_cli(query: str, *, skills_dir: Path | None = None) -> SearchResponse:
-    hub_dir = skills_dir or _resolve_hub_skills_dir()
-    workdir = hub_dir.parent
-    result = _run_clawhub_cli(
-        ["search", str(query or "").strip(), "--limit", str(HOST_SKILL_CLAWHUB_SEARCH_LIMIT)],
-        workdir=workdir,
-        skills_dir=hub_dir,
-    )
-    output_text = _normalize_cli_output(result.stdout, result.stderr)
-    parsed = _parse_clawhub_search_output(result.stdout)
-    if result.returncode != 0:
-        return SearchResponse(
-            results=[],
-            registry_url=OFFICIAL_CLAWHUB_HOME_URL,
-            error=output_text or "clawhub search failed",
-            discovery_sources=get_official_skill_hub_sources(),
-        )
+    del query, skills_dir
     return SearchResponse(
-        results=parsed,
+        results=[],
         registry_url=OFFICIAL_CLAWHUB_HOME_URL,
-        error=None,
+        error=_legacy_mutation_rejection(),
         discovery_sources=get_official_skill_hub_sources(),
     )
 
@@ -211,59 +115,15 @@ def _install_from_clawhub(
     source_str: str,
     force: bool,
 ) -> InstallResult:
-    workdir = hub_dir.parent
-    command = ["install", str(skill_slug or "").strip()]
-    if force:
-        command.append("--force")
-    result = _run_clawhub_cli(command, workdir=workdir, skills_dir=hub_dir)
-    output_text = _normalize_cli_output(result.stdout, result.stderr)
-    install_dir = hub_dir / skill_slug
-    if result.returncode != 0:
-        return InstallResult(
-            success=False,
-            name=skill_slug,
-            version="",
-            source=source_str,
-            install_dir=str(install_dir),
-            detail="",
-            error=output_text or "clawhub install failed",
-        )
-    skill_md = install_dir / SKILL_MD_FILENAME
-    if not skill_md.exists():
-        return InstallResult(
-            success=False,
-            name=skill_slug,
-            version="",
-            source=source_str,
-            install_dir=str(install_dir),
-            detail=output_text,
-            error=f"ClawHub install finished but SKILL.md was not found in {install_dir}",
-        )
-    try:
-        manifest = parse_skill_md(skill_md)
-    except Exception as exc:
-        return InstallResult(
-            success=False,
-            name=skill_slug,
-            version="",
-            source=source_str,
-            install_dir=str(install_dir),
-            detail=output_text,
-            error=f"SKILL.md parse error: {exc}",
-        )
-    update_lock_entry(
-        manifest.name,
-        manifest.version,
-        source_str,
-        skills_dir=hub_dir,
-    )
+    del hub_dir, force
     return InstallResult(
-        success=True,
-        name=manifest.name,
-        version=manifest.version,
+        success=False,
+        name=skill_slug if _is_safe_skill_component(skill_slug) else "",
+        version="",
         source=source_str,
-        install_dir=str(install_dir),
-        detail=output_text or f"Installed {manifest.name} from ClawHub",
+        install_dir="",
+        detail="",
+        error=_legacy_mutation_rejection(),
     )
 
 
@@ -306,6 +166,32 @@ class SearchResponse:
     discovery_sources: list[dict[str, str]] | None = None
 
 
+def _is_safe_skill_component(value: str) -> bool:
+    return bool(_SAFE_SKILL_COMPONENT_RE.fullmatch(str(value or "")))
+
+
+def _is_safe_github_branch(value: str) -> bool:
+    text = str(value or "")
+    if not _SAFE_GITHUB_BRANCH_RE.fullmatch(text):
+        return False
+    return all(part not in {"", ".", ".."} for part in text.split("/"))
+
+
+def _validated_github_parts(
+    owner: str,
+    repo: str,
+    branch: str,
+    slug: str,
+) -> tuple[str, str, str] | None:
+    if not _SAFE_GITHUB_COMPONENT_RE.fullmatch(owner):
+        return None
+    if not _SAFE_GITHUB_COMPONENT_RE.fullmatch(repo):
+        return None
+    if not _is_safe_github_branch(branch) or not _is_safe_skill_component(slug):
+        return None
+    return f"{owner}/{repo}", branch, slug
+
+
 
 def _parse_github_source(source: str) -> tuple[str, str, str] | None:
     """解析 GitHub 来源字符串。
@@ -328,24 +214,32 @@ def _parse_github_source(source: str) -> tuple[str, str, str] | None:
         parts = rest.split("/", 2)
         if len(parts) < 3:
             return None
-        owner_repo = f"{parts[0]}/{parts[1]}"
         slug_and_branch = parts[2]
         if "@" in slug_and_branch:
             slug, branch = slug_and_branch.rsplit("@", 1)
         else:
             slug, branch = slug_and_branch, "main"
-        return owner_repo, branch, slug
+        return _validated_github_parts(parts[0], parts[1], branch, slug)
 
     # https://github.com/owner/repo/tree/branch/slug
-    if "github.com" in source:
+    if normalized_source.lower().startswith("https://"):
         # 提取路径部分
         from urllib.parse import urlparse
 
-        parsed = urlparse(source)
+        parsed = urlparse(normalized_source)
+        if (
+            parsed.scheme.lower() != "https"
+            or (parsed.hostname or "").lower() != "github.com"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in {None, 443}
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         if len(path_parts) < 4:
             return None
-        owner_repo = f"{path_parts[0]}/{path_parts[1]}"
         # tree/branch/slug 或直接 slug
         if path_parts[2] == "tree" and len(path_parts) >= 5:
             branch = path_parts[3]
@@ -353,7 +247,7 @@ def _parse_github_source(source: str) -> tuple[str, str, str] | None:
         else:
             branch = "main"
             slug = "/".join(path_parts[2:])
-        return owner_repo, branch, slug
+        return _validated_github_parts(path_parts[0], path_parts[1], branch, slug)
 
     return None
 
@@ -366,59 +260,10 @@ def _download_github_skill(
     dest_dir: Path,
     timeout_s: float = 30.0,
 ) -> Path:
-    """从 GitHub 下载单个 skill 目录。
+    """The legacy ZIP path is sealed; signed intake owns all future I/O."""
 
-    策略：下载整个仓库 ZIP → 解压 → 提取目标 skill 目录
-    """
-    zip_url = f"https://github.com/{owner_repo}/archive/refs/heads/{branch}.zip"
-    logger.info("Hub install: downloading %s", zip_url)
-
-    with tempfile.TemporaryDirectory(prefix="natsume_hub_") as tmp:
-        tmp_path = Path(tmp)
-        zip_path = tmp_path / "repo.zip"
-
-        # 下载 ZIP
-        req = urllib.request.Request(zip_url, headers={"User-Agent": "Natsume-Ai-Hub/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            zip_path.write_bytes(resp.read())
-
-        # 解压
-        extract_dir = tmp_path / "extracted"
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(extract_dir)
-
-        # GitHub ZIP 解压后有一个顶层目录：repo-branch/
-        top_dirs = [d for d in extract_dir.iterdir() if d.is_dir()]
-        if not top_dirs:
-            raise FileNotFoundError("Empty ZIP archive")
-        repo_root = top_dirs[0]
-
-        # 找到目标 skill 目录
-        skill_src = repo_root / skill_slug
-        if not skill_src.exists() or not skill_src.is_dir():
-            # 尝试子目录搜索
-            for sub in repo_root.rglob(skill_slug):
-                if sub.is_dir() and (sub / SKILL_MD_FILENAME).exists():
-                    skill_src = sub
-                    break
-            else:
-                raise FileNotFoundError(
-                    f"Skill '{skill_slug}' not found in {owner_repo}@{branch}"
-                )
-
-        # 校验 SKILL.md 存在
-        if not (skill_src / SKILL_MD_FILENAME).exists():
-            raise FileNotFoundError(
-                f"SKILL.md not found in {skill_slug}/ of {owner_repo}@{branch}"
-            )
-
-        # 复制到目标目录
-        skill_dest = dest_dir / skill_slug
-        if skill_dest.exists():
-            shutil.rmtree(skill_dest)
-        shutil.copytree(skill_src, skill_dest)
-
-        return skill_dest
+    del owner_repo, branch, skill_slug, dest_dir, timeout_s
+    raise RuntimeError(_legacy_mutation_rejection())
 
 
 def install_skill(
@@ -443,48 +288,19 @@ def install_skill(
         - https://github.com/owner/repo/tree/branch/skill-slug
         - 本地目录路径
     """
-    hub_dir = skills_dir or _resolve_hub_skills_dir()
-    hub_dir.mkdir(parents=True, exist_ok=True)
-
-    # 本地路径安装
-    local_path = Path(source)
-    if local_path.exists() and local_path.is_dir():
-        return _install_from_local(local_path, hub_dir=hub_dir, force=force)
-
-    if str(source or "").strip().startswith("clawhub:"):
-        skill_slug = str(source or "").strip().split(":", 1)[-1].strip() or "unknown-skill"
-        return _install_from_clawhub(
-            skill_slug=skill_slug,
-            hub_dir=hub_dir,
-            source_str=str(source),
-            force=force,
-        )
-
-    # GitHub / Skillshub tap 安装
-    github_info = _parse_github_source(source)
-    if github_info:
-        owner_repo, branch, slug = github_info
-        return _install_from_github(
-            owner_repo=owner_repo,
-            branch=branch,
-            skill_slug=slug,
-            hub_dir=hub_dir,
-            source_str=source,
-            force=force,
-        )
-
+    # Gate before Path(source), mkdir, DNS, URL handling, subprocess lookup, or
+    # any filesystem mutation.  The legacy request does not carry the signed
+    # bundle, SBOM and sandbox envelope required by the quarantine intake API.
+    del skills_dir, force
+    source_text = str(source or "").strip()
     return InstallResult(
         success=False,
         name="",
         version="",
-        source=source,
+        source=source_text,
         install_dir="",
         detail="",
-        error=(
-            f"不支持的来源格式：{source}。支持 github:owner/repo/slug、"
-            f"skillshub:owner/repo/slug 和本地目录路径。"
-            f"你可以先去 {OFFICIAL_CLAWHUB_HOME_URL} 或 {OFFICIAL_SKILLSHUB_HOME_URL} 查找技能。"
-        ),
+        error=_legacy_mutation_rejection(),
     )
 
 
@@ -494,62 +310,17 @@ def _install_from_local(
     hub_dir: Path,
     force: bool,
 ) -> InstallResult:
-    """从本地目录安装 skill。"""
-    skill_md = source_dir / SKILL_MD_FILENAME
-    if not skill_md.exists():
-        return InstallResult(
-            success=False,
-            name=source_dir.name,
-            version="",
-            source=str(source_dir),
-            install_dir="",
-            detail="",
-            error=f"SKILL.md not found in {source_dir}",
-        )
+    """Reject raw local directories before following symlinks or UNC paths."""
 
-    try:
-        manifest = parse_skill_md(skill_md)
-    except Exception as exc:
-        return InstallResult(
-            success=False,
-            name=source_dir.name,
-            version="",
-            source=str(source_dir),
-            install_dir="",
-            detail="",
-            error=f"SKILL.md parse error: {exc}",
-        )
-
-    dest_dir = hub_dir / manifest.name
-    if dest_dir.exists() and not force:
-        return InstallResult(
-            success=False,
-            name=manifest.name,
-            version=manifest.version,
-            source=str(source_dir),
-            install_dir=str(dest_dir),
-            detail="",
-            error=f"Skill already installed: {manifest.name}. Use --force to overwrite.",
-        )
-
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    shutil.copytree(source_dir, dest_dir)
-
-    update_lock_entry(
-        manifest.name,
-        manifest.version,
-        f"local:{source_dir}",
-        skills_dir=hub_dir,
-    )
-
+    del hub_dir, force
     return InstallResult(
-        success=True,
-        name=manifest.name,
-        version=manifest.version,
+        success=False,
+        name=source_dir.name if _is_safe_skill_component(source_dir.name) else "",
+        version="",
         source=str(source_dir),
-        install_dir=str(dest_dir),
-        detail=f"Installed {manifest.name}@{manifest.version} from local path",
+        install_dir="",
+        detail="",
+        error=_legacy_mutation_rejection(),
     )
 
 
@@ -562,65 +333,17 @@ def _install_from_github(
     source_str: str,
     force: bool,
 ) -> InstallResult:
-    """从 GitHub 安装 skill。"""
-    dest_dir = hub_dir / skill_slug
-    if dest_dir.exists() and not force:
-        # 读取已安装版本
-        lock = read_lock_file(hub_dir)
-        existing = lock.get(skill_slug, {})
-        return InstallResult(
-            success=False,
-            name=skill_slug,
-            version=existing.get("version", ""),
-            source=source_str,
-            install_dir=str(dest_dir),
-            detail="",
-            error=f"Skill already installed: {skill_slug}. Use --force to overwrite.",
-        )
+    """Reject raw GitHub sources; signed bundle intake is the only path."""
 
-    try:
-        installed_dir = _download_github_skill(
-            owner_repo, branch, skill_slug, dest_dir=hub_dir,
-        )
-    except Exception as exc:
-        return InstallResult(
-            success=False,
-            name=skill_slug,
-            version="",
-            source=source_str,
-            install_dir="",
-            detail="",
-            error=f"Download failed: {exc}",
-        )
-
-    # 解析已安装的 SKILL.md
-    try:
-        manifest = parse_skill_md(installed_dir / SKILL_MD_FILENAME)
-    except Exception as exc:
-        # 安装成功但解析失败
-        return InstallResult(
-            success=True,
-            name=skill_slug,
-            version="unknown",
-            source=source_str,
-            install_dir=str(installed_dir),
-            detail=f"Installed but SKILL.md parse warning: {exc}",
-        )
-
-    update_lock_entry(
-        manifest.name,
-        manifest.version,
-        f"github:{owner_repo}/{skill_slug}@{branch}",
-        skills_dir=hub_dir,
-    )
-
+    del owner_repo, branch, hub_dir, force
     return InstallResult(
-        success=True,
-        name=manifest.name,
-        version=manifest.version,
+        success=False,
+        name=skill_slug if _is_safe_skill_component(skill_slug) else "",
+        version="",
         source=source_str,
-        install_dir=str(installed_dir),
-        detail=f"Installed {manifest.name}@{manifest.version} from {owner_repo}@{branch}",
+        install_dir="",
+        detail="",
+        error=_legacy_mutation_rejection(),
     )
 
 
@@ -629,76 +352,33 @@ def remove_skill(
     *,
     skills_dir: Path | None = None,
 ) -> RemoveResult:
-    """卸载 Skill（删除目录 + 清除 lock 条目）。"""
-    hub_dir = skills_dir or _resolve_hub_skills_dir()
-    skill_dir = hub_dir / name
+    """Reject legacy deletion; state transitions belong to the durable store."""
 
-    if not skill_dir.exists():
+    del skills_dir
+    normalized = str(name or "").strip()
+    if not _is_safe_skill_component(normalized):
         return RemoveResult(
             success=False,
-            name=name,
+            name="",
             detail="",
-            error=f"Skill not found: {name}",
+            error="SUPPLY_CHAIN_SKILL_NAME_INVALID",
         )
-
-    try:
-        shutil.rmtree(skill_dir)
-        remove_lock_entry(name, skills_dir=hub_dir)
-        return RemoveResult(
-            success=True,
-            name=name,
-            detail=f"Removed {name} from {hub_dir}",
-        )
-    except Exception as exc:
-        return RemoveResult(
-            success=False,
-            name=name,
-            detail="",
-            error=f"Remove failed: {exc}",
-        )
+    return RemoveResult(
+        success=False,
+        name=normalized,
+        detail="",
+        error="SUPPLY_CHAIN_MANAGED_REMOVAL_REQUIRED",
+    )
 
 
 def list_installed_skills(
     *,
     skills_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """列出所有已安装的 Hub Skills。"""
-    hub_dir = skills_dir or _resolve_hub_skills_dir()
-    lock = read_lock_file(hub_dir)
-    result: list[dict[str, Any]] = []
+    """Legacy live directories are not an authoritative installed catalog."""
 
-    if not hub_dir.exists():
-        return result
-
-    for item in sorted(hub_dir.iterdir()):
-        if not item.is_dir() or item.name.startswith(("_", ".")):
-            continue
-        skill_md = item / SKILL_MD_FILENAME
-        if not skill_md.exists():
-            continue
-
-        try:
-            manifest = parse_skill_md(skill_md)
-            lock_entry = lock.get(manifest.name, {})
-            result.append({
-                "name": manifest.name,
-                "version": manifest.version,
-                "description": manifest.description,
-                "author": manifest.author,
-                "tags": manifest.tags,
-                "source": lock_entry.get("source", "local"),
-                "installed_at": lock_entry.get("installed_at", ""),
-                "dir": str(item),
-            })
-        except Exception:
-            result.append({
-                "name": item.name,
-                "version": "?",
-                "description": "parse error",
-                "dir": str(item),
-            })
-
-    return result
+    del skills_dir
+    return []
 
 
 def search_remote_skills_with_status(
@@ -707,57 +387,15 @@ def search_remote_skills_with_status(
     registry_url: str | None = None,
     timeout_s: float = 10.0,
 ) -> SearchResponse:
-    """从远程 registry 搜索可用 Skills，并在需要时回退到 ClawHub CLI。"""
-    env_registry_url = os.environ.get("HOST_SKILL_HUB_REGISTRY_URL", "").strip()
-    url = str(registry_url or env_registry_url).strip()
-    discovery_sources = get_official_skill_hub_sources()
-    registry_error: str | None = None
+    """Remote legacy discovery is sealed because it bypasses signed intake."""
 
-    if url:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Natsume-Ai-Hub/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:
-            logger.warning("Hub search: registry fetch failed (%s): %s", url, exc)
-            registry_error = str(exc)
-        else:
-            if isinstance(data, list):
-                query_lower = query.lower()
-                results: list[SearchResult] = []
-                for entry in data:
-                    if not isinstance(entry, dict):
-                        continue
-                    name = str(entry.get("name") or "")
-                    desc = str(entry.get("description") or "")
-                    tags = list(entry.get("tags") or [])
-                    searchable = f"{name} {desc} {' '.join(tags)}".lower()
-                    if query_lower in searchable:
-                        results.append(SearchResult(
-                            name=name,
-                            version=str(entry.get("version") or ""),
-                            description=desc,
-                            author=str(entry.get("author") or ""),
-                            tags=tags,
-                        ))
-                return SearchResponse(results=results, registry_url=url, error=None, discovery_sources=discovery_sources)
-            registry_error = "registry payload is not a list"
-    else:
-        registry_error = (
-            f"当前还没有配置机器可读的技能 registry。"
-            f"你可以先去 ClawHub（{OFFICIAL_CLAWHUB_HOME_URL}）或 Skillshub（{OFFICIAL_SKILLSHUB_HOME_URL}）查找。"
-            f"安装时可使用 github:owner/repo/skill 或 {OFFICIAL_SKILLSHUB_INSTALL_EXAMPLE}。"
-        )
-
-    fallback = _search_skills_via_clawhub_cli(query)
-    if fallback.results:
-        return fallback
-    combined_error = _normalize_cli_output(registry_error or "", fallback.error or "") or None
+    del query, timeout_s
+    url = str(registry_url or "").strip()
     return SearchResponse(
         results=[],
-        registry_url=url or fallback.registry_url,
-        error=combined_error,
-        discovery_sources=discovery_sources,
+        registry_url=url or OFFICIAL_CLAWHUB_HOME_URL,
+        error=_legacy_mutation_rejection(),
+        discovery_sources=get_official_skill_hub_sources(),
     )
 
 
@@ -772,4 +410,3 @@ def search_remote_skills(
         registry_url=registry_url,
         timeout_s=timeout_s,
     ).results
-

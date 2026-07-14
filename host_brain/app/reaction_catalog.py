@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.app.response_form_contract import (
+from host_brain.persona.response_form_contract import (
     is_pure_media_response_form,
     normalize_response_form,
 )

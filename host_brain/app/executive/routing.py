@@ -44,7 +44,7 @@ def _hard_rule_route(
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
 
-    from host_brain.app.relational_chat_detector import build_relational_chat_reason_code
+    from host_brain.persona.relational_chat import build_relational_chat_reason_code
     relational_reason = build_relational_chat_reason_code(sanitized_message)
     if relational_reason:
         return _RouteSelection("chat", "", relational_reason)
@@ -126,7 +126,7 @@ def _should_force_complex_plan(
     if len(normalized_message) < min_chars:
         return False
 
-    from host_brain.app.capability_gap_detector import detect_capability_gap  # noqa: PLC0415
+    from host_brain.executive_runtime.capability_gap import detect_capability_gap  # noqa: PLC0415
     gap = detect_capability_gap(
         user_message=normalized_message,
         route_type=route.route_type,
@@ -138,7 +138,7 @@ def _should_force_complex_plan(
         return False
 
     try:
-        from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
+        from host_brain.composition.process_services import get_planning_agent  # noqa: PLC0415
         return bool(get_planning_agent().needs_planning(normalized_message))
     except Exception:
         return False
@@ -150,7 +150,7 @@ def _build_task_progress_sub_context(
     session_id: str,
     person_id: str,
 ) -> SimpleNamespace:
-    from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+    from host_brain.composition.process_services import get_runtime_task_registry  # noqa: PLC0415
 
     registry = get_runtime_task_registry()
     summary = registry.summarize_for_chat(

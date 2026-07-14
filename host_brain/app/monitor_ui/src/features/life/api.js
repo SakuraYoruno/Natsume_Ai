@@ -20,6 +20,14 @@ export function fetchDigitalLifeWallClockSoak(params = {}) {
   return endpointGet(digitalLife.wallClockSoak, params)
 }
 
+export function fetchLifeEvolutionSnapshot(params = {}) {
+  return endpointGet(digitalLife.lifeEvolutionSnapshot, params)
+}
+
+export function postLifeEvolutionPreview(body = {}) {
+  return endpointPost(digitalLife.lifeEvolutionPreview, body || {})
+}
+
 export function fetchLifeBody(params = {}) {
   return endpointGet(digitalLife.lifeBody, params)
 }

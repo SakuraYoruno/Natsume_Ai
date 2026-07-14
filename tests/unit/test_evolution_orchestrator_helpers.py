@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona import self_model as self_model_mod
 from host_brain.persona.evolution_orchestrator import (
     EvolutionCycleResult,

@@ -331,6 +331,21 @@ class TestTieredGovernanceEngineM42(unittest.TestCase):
         result = self._evaluate(self.engine_with_registry, "critical_skill", seq=1)
         self.assertEqual("APPROVE", result["decision"])
         self.assertEqual(RouteToken.GOV_AIRLOCK_REVIEW.value, result["committed_route_token"]["token"])
+        intent = _make_intent(
+            skill_name="critical_skill",
+            seq=1,
+            session_id="session::critical_skill::1",
+        )
+        validation = self.tokens.validate_bound_token(
+            result["tokens"]["approval_token_ref"],
+            expected_type="approval",
+            intent_id=intent["id"],
+            skill_name=intent["action"],
+            session_id=intent["session_id"],
+            seq=intent["seq"],
+            now_ts_ms=self.now_ms,
+        )
+        self.assertFalse(validation.valid, "AIRLOCK must never expose an executable approval token")
 
     def test_no_registry_backward_compat(self) -> None:
         """T-TG-ENGINE-06：未注入 registry → 保持现有行为（GOV_OK_RENDER），向后兼容。"""

@@ -13,7 +13,7 @@ from host_brain.agent_runtime.studios import (
     build_skill_forge_work_order,
     build_translation_work_order,
 )
-from host_brain.agent_runtime.work_order import build_work_order_id
+from host_brain.contracts.agent_runtime.work_order import build_work_order_id
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
 from host_brain.skills.registry import SkillRegistry
 
@@ -562,4 +562,3 @@ def build_agent_runtime_skill_registry(provider: AgentRuntimeSkillProvider | Non
 
 
 __all__ = ["AgentRuntimeSkillProvider", "build_agent_runtime_skill_registry"]
-

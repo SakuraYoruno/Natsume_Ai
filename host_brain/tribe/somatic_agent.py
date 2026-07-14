@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
 class SomaticAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """T-109：躯体感知 Agent 骨架。
 
     负责接收来自 edge_client 的躯体感知信号（BODY_SENSE_UPDATED），
@@ -51,7 +53,7 @@ class SomaticAgent:
         - SOMATIC_STATE_UPDATED：接收 edge_client SomaticAgent 上报的状态快照（T-165）
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("BODY_SENSE_UPDATED", self._on_body_sense_updated)
@@ -290,10 +292,10 @@ class SomaticAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.somatic_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("somatic_agent.somatic_narrative") or {}
+            _tpl = resolve_prompt_contract_json("somatic_agent.somatic_narrative") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -304,21 +306,12 @@ class SomaticAgent:
                 user_expression=str(user_expression or "NEUTRAL").upper(),
                 face_confidence=round(float(face_confidence), 3),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="somatic_narrator",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="somatic_narrative",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=32,
-                temperature=0.2,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _hint = str(_parsed.get("somatic_hint") or "").strip()[:40]
             if _hint:
                 _log.debug("SomaticAgent.generate_somatic_narrative: %s", _hint)

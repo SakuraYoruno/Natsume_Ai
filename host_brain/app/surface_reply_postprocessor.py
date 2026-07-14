@@ -1,4 +1,4 @@
-﻿"""surface_reply_postprocessor.py — Surface reply 后处理（净化、PII、COMMIT、异步后处理）。
+"""surface_reply_postprocessor.py — Surface reply 后处理（净化、PII、COMMIT、异步后处理）。
 
 拆分自 surface_reply.py（P2-12）：
   - PII 出口检查
@@ -28,19 +28,23 @@ async def _post_speak_sentence(
 ) -> None:
     """Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。"""
     try:
-        from host_brain.channels.edge_rpc_client import post_speak
+        from host_brain.channels.embodiment import submit_voice_command
         from host_brain.channels.tts_context_router import TtsContextRouter
         tts_params = TtsContextRouter().route(text=text, emotion_tag=emotion_tag)
-        await post_speak(
-            text=text,
-            utterance_id=utterance_id,
+        await submit_voice_command(
+            action="speak",
+            payload={
+                "text": text,
+                "utterance_id": utterance_id,
+                "session_id": session_id,
+                "emotion_tag": emotion_tag,
+                "speed": float(tts_params.speed_scale),
+                "pitch": float(tts_params.pitch_shift),
+                "style_note": str(tts_params.style_note or ""),
+                "lang_hint": str(tts_params.lang_hint or "zh"),
+            },
             request_id=request_id,
-            session_id=session_id,
-            emotion_tag=emotion_tag,
-            speed=float(tts_params.speed_scale),
-            pitch=float(tts_params.pitch_shift),
-            style_note=str(tts_params.style_note or ""),
-            lang_hint=str(tts_params.lang_hint or "zh"),
+            idempotency_key=f"{request_id}:sentence-tts:{utterance_id}",
         )
     except Exception as exc:
         _logger.debug("[%s] P7 sentence TTS failed (non-critical): %s", request_id, exc)
@@ -77,7 +81,7 @@ def log_input_completed(
 ) -> None:
     """同步写入 INPUT_COMPLETED 事件到 voice_event_log。"""
     try:
-        from host_brain.app.dependencies import get_ledger as _get_pre_ledger
+        from host_brain.composition.process_services import get_ledger as _get_pre_ledger
         _get_pre_ledger().log_voice_event({
             "request_id": request_id,
             "session_id": session_id,
@@ -139,9 +143,11 @@ def schedule_async_post_process(
 ) -> None:
     """调度异步后处理任务（fire-and-forget）。"""
     try:
-        from host_brain.app.agent_runtime_shared import _async_post_process
+        from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS
+        from host_brain.agent_runtime.postprocess import _async_post_process
         asyncio.create_task(
             _async_post_process(
+                application_ports=AGENT_RUNTIME_PORTS,
                 request_id=request_id,
                 person_id=person_id,
                 session_id=session_id,
@@ -174,58 +180,7 @@ def schedule_async_post_process(
 
 
 # ---------------------------------------------------------------------------
-# G2: Broca → TTS 参数映射表
-# ---------------------------------------------------------------------------
-
-# tone → emotion_tag 映射（LanguageSystemAgent.broca_generate_plan 产出的 tone）
-_BROCA_TONE_TO_EMOTION_TAG: dict[str, str] = {
-    "warm":        "LOVING",
-    "caring":      "LOVING",
-    "gentle":      "CALM",
-    "supportive":  "CALM",
-    "playful":     "HAPPY",
-    "cheerful":    "HAPPY",
-    "excited":     "HAPPY",
-    "serious":     "NEUTRAL",
-    "direct":      "NEUTRAL",
-    "balanced":    "NEUTRAL",
-    "cautious":    "NEUTRAL",
-    "empathetic":  "SAD",
-    "sad":         "SAD",
-    "concerned":   "SAD",
-    "angry":       "ANGRY",
-    "firm":        "ANGRY",
-    "surprised":   "SURPRISED",
-    "fearful":     "FEAR",
-}
-
-
-def broca_to_tts_params(
-    *,
-    tone: str = "balanced",
-    warmth_weight: float = 0.5,
-    emotion_tag: str = "NEUTRAL",
-) -> dict[str, Any]:
-    """G2: 将 Broca 规划参数映射为 TTS emotion_tag / emotion_intensity。
-
-    优先使用 emotion_tag（来自 LimbicAgent），
-    tone 作为辅助修正，warmth_weight 映射为 emotion_intensity。
-    """
-    # 优先使用已有 emotion_tag，若为 NEUTRAL 则尝试从 tone 推断
-    resolved_tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-    if resolved_tag == "NEUTRAL":
-        tone_key = str(tone or "balanced").strip().lower()
-        resolved_tag = _BROCA_TONE_TO_EMOTION_TAG.get(tone_key, "NEUTRAL")
-
-    # warmth_weight [0,1] → emotion_intensity [0.2, 0.9]
-    # 低暖度（0.0）→ 0.2（平静），高暖度（1.0）→ 0.9（强烈）
-    clamped = max(0.0, min(1.0, float(warmth_weight or 0.5)))
-    intensity = round(0.2 + clamped * 0.7, 3)
-
-    return {
-        "emotion_tag": resolved_tag,
-        "emotion_intensity": intensity,
-    }
+from host_brain.tribe.speech import broca_to_tts_params
 
 
 # ---------------------------------------------------------------------------

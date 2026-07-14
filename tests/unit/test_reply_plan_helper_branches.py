@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.context.affect_state import AffectStateBlock
-from host_brain.app.context.conversation_interpretation import ConversationInterpretation
-from host_brain.app.context.drive_state import DriveStateBlock
-from host_brain.app.context.interaction_thread import InteractionThreadState
-from host_brain.app.context.relationship_state import RelationshipStateBlock
+from host_brain.persona.context.affect_state import AffectStateBlock
+from host_brain.persona.context.conversation_interpretation import ConversationInterpretation
+from host_brain.persona.context.drive_state import DriveStateBlock
+from host_brain.persona.context.interaction_thread import InteractionThreadState
+from host_brain.persona.context.relationship_state import RelationshipStateBlock
 from host_brain.persona.reply_plan import (
     ReplyContract,
     ResponseTrajectory,
@@ -30,8 +30,8 @@ from host_brain.persona.reply_plan import (
     build_reply_plan_from_inputs,
     coerce_reply_plan,
 )
-from host_brain.app.context.tactic_ledger import TacticLedgerBlock
-from host_brain.app.context.topic_ledger import TopicLedgerBlock
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
 
 def test_coerce_reply_plan_reads_nested_contract_and_trajectory() -> None:

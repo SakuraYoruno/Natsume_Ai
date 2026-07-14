@@ -50,28 +50,17 @@ class MemorySleepReplayTask:
         """Select medium-strength lived episodes for sleep-time scene compaction."""
 
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
-        semantic_referenced_episode_ids = _semantic_referenced_episode_ids(self.store.ledger._conn)
-        rows = self.store.ledger._conn.execute(
-            """
-            SELECT *
-            FROM life_episode
-            WHERE status = ?
-              AND truth_state IN (?, ?)
-              AND COALESCE(retention_state, ?) IN (?, ?)
-              AND compressed_into_episode_id IS NULL
-            ORDER BY created_ts_ms ASC
-            LIMIT ?
-            """,
-            (
-                STATUS_ACTIVE,
-                TRUTH_VERIFIED,
-                TRUTH_NARRATIVE_ONLY,
-                RETENTION_WARM,
-                RETENTION_WARM,
-                RETENTION_COLD,
-                max(1, int(group_limit)) * max(2, int(max_group_size)) * 4,
-            ),
-        ).fetchall()
+        semantic_referenced_episode_ids = _semantic_referenced_episode_ids(
+            self.store.persistence
+        )
+        rows = self.store.persistence.list_episode_records(
+            truth_states=(TRUTH_VERIFIED, TRUTH_NARRATIVE_ONLY),
+            statuses=(STATUS_ACTIVE,),
+            retention_states=(RETENTION_WARM, RETENTION_COLD),
+            uncompressed_only=True,
+            order="created",
+            limit=max(1, int(group_limit)) * max(2, int(max_group_size)) * 4,
+        )
         buckets: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
         for row in rows:
             episode = dict(row)
@@ -180,4 +169,3 @@ class MemorySleepReplayTask:
             "replay_selected": len(replay_batch),
             "reflection_count": reflection_count,
         }
-

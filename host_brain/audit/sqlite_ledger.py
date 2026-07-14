@@ -14,7 +14,7 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import sqlite3
 
 from host_brain.audit.ledger_constants import (
@@ -171,25 +171,40 @@ class SQLiteLedger(
         *,
         check_same_thread: bool = True,
         wal_config: WalConfig | None = None,
+        initialize_schema: bool = True,
+        life_audit_anchor_writer: Callable[..., Any] | None = None,
     ) -> None:
         self.db_path = str(db_path)
         self._wal_config = wal_config or DEFAULT_WAL_CONFIG
         self._write_lock = threading.RLock()  # RLock allows re-entrant acquisition within transaction()
         self._wal_status: str = "UNKNOWN"
         self._wal_degradation_reason: str | None = None
+        self._life_audit_anchor_writer = life_audit_anchor_writer
 
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
+        database_row = self._conn.execute("PRAGMA database_list").fetchone()
+        database_file = str(database_row[2] or "") if database_row is not None else ""
+        self._canonical_db_path = (
+            str(Path(database_file).resolve()) if database_file else ":memory:"
+        )
         # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
         self._column_cache_lock = threading.Lock()
         self._table_name_cache: set[str] | None = None
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
-        self._ensure_schema()
+        if initialize_schema:
+            self._ensure_schema()
+
+    @property
+    def canonical_db_path(self) -> str:
+        """Frozen path of the SQLite main DB as opened, independent of later CWD changes."""
+
+        return self._canonical_db_path
 
     # -------------------------------------------------------------------
     # Properties（快捷访问各日志表）
@@ -382,8 +397,20 @@ class SQLiteLedger(
         self._insert("intent_log", payload)
 
     def log_governor(self, row: dict[str, Any]) -> None:
+        # approved_action_binding is an authorization artifact, not optional
+        # response decoration.  The legacy table has no dedicated column, so
+        # mirror it into the durable JSON tokens column before column filtering.
+        # Old rows without this binding intentionally remain unusable for
+        # scoped proactive/embodiment grants.
+        durable_row = dict(row)
+        binding = durable_row.get("approved_action_binding")
+        if isinstance(binding, dict):
+            raw_tokens = durable_row.get("tokens")
+            tokens = dict(raw_tokens) if isinstance(raw_tokens, dict) else {}
+            tokens["approved_action_binding"] = dict(binding)
+            durable_row["tokens"] = tokens
         available_columns = {key for key in GOVERNOR_COLUMNS if self._table_has_column("governor_log", key)}
-        payload = {key: row.get(key) for key in available_columns}
+        payload = {key: durable_row.get(key) for key in available_columns}
         # FIX-4.2：tribe_params_snapshot 需要 JSON 序列化（dict → str）
         if payload.get("tribe_params_snapshot") is not None and isinstance(payload["tribe_params_snapshot"], dict):
             payload["tribe_params_snapshot"] = json.dumps(
@@ -558,10 +585,11 @@ class SQLiteLedger(
         meta = dict(metadata or {})
         if not summary and not str(status or "").strip() and not str(reason_code or "").strip():
             return
+        writer = self._life_audit_anchor_writer
+        if writer is None:
+            return
         try:
-            from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
-
-            LifeMemoryStore(ledger=self).write_background_episode(
+            writer(
                 event_source=source,
                 event_id=str(event_id or "").strip() or None,
                 request_id=str(request_id or "").strip() or None,
@@ -1262,80 +1290,3 @@ class SQLiteLedger(
 
     def _ensure_schema(self) -> None:
         apply_schema(self._conn)
-        self._ensure_life_memory_columns()
-        self._ensure_canon_proposal_content_columns()
-
-    def _ensure_life_memory_columns(self) -> None:
-        additions = {
-            "actor_id": "TEXT",
-            "intent": "TEXT",
-            "action": "TEXT",
-            "result": "TEXT",
-            "base_salience": "REAL NOT NULL DEFAULT 0.0",
-            "memory_strength": "REAL NOT NULL DEFAULT 0.0",
-            "decay_profile_id": "TEXT NOT NULL DEFAULT 'NORMAL'",
-            "retention_state": "TEXT NOT NULL DEFAULT 'COLD'",
-            "last_recalled_ts_ms": "INTEGER",
-            "recall_count": "INTEGER NOT NULL DEFAULT 0",
-            "reinforcement_count": "INTEGER NOT NULL DEFAULT 0",
-            "compressed_into_episode_id": "TEXT",
-            "retention_until_ts_ms": "INTEGER",
-            "forget_reason": "TEXT",
-        }
-        changed = False
-        for column, ddl_type in additions.items():
-            if self._table_has_column("life_episode", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE life_episode ADD COLUMN {column} {ddl_type}"
-                    )
-            changed = True
-            with self._column_cache_lock:
-                self._column_cache.pop("life_episode", None)
-        if changed:
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        """
-                        UPDATE life_episode
-                        SET
-                            base_salience = COALESCE(NULLIF(base_salience, 0.0), COALESCE(salience, 0.0)),
-                            memory_strength = CASE
-                                WHEN COALESCE(memory_strength, 0.0) > 0.0 THEN memory_strength
-                                ELSE COALESCE(salience, 0.0)
-                            END,
-                            retention_state = CASE
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.75 THEN 'HOT'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.35 THEN 'WARM'
-                                WHEN COALESCE(NULLIF(memory_strength, 0.0), COALESCE(salience, 0.0)) >= 0.10 THEN 'COLD'
-                                ELSE 'GONE'
-                            END
-                        """
-                    )
-        with self._write_lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_life_episode_retention
-                    ON life_episode(retention_state, memory_strength, last_touched_ts_ms)
-                    """
-                )
-
-    def _ensure_canon_proposal_content_columns(self) -> None:
-        additions = {
-            "proposed_title": "TEXT",
-            "proposed_tags": "TEXT",
-            "proposed_body": "TEXT",
-        }
-        for column, ddl_type in additions.items():
-            if self._table_has_column("canon_proposal_log", column):
-                continue
-            with self._write_lock:
-                with self._conn:
-                    self._conn.execute(
-                        f"ALTER TABLE canon_proposal_log ADD COLUMN {column} {ddl_type}"
-                    )
-            with self._column_cache_lock:
-                self._column_cache.pop("canon_proposal_log", None)

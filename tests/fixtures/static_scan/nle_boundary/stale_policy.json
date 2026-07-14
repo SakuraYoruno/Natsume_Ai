@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "policy_id": "NLE_BOUNDARY_STALE_FIXTURE",
+  "rules": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "kind": "module_import",
+      "source_roots": ["edge_client"],
+      "forbidden_module_prefixes": ["host_brain.app", "host_brain.audit"],
+      "module_scope_only": true
+    }
+  ],
+  "allowlist": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "path": "edge_client/removed_dependency.py",
+      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
+      "owner": "FIXTURE",
+      "reason": "The source edge was removed, so this entry must fail as stale.",
+      "remove_task": "FIXTURE-REMOVE"
+    }
+  ]
+}

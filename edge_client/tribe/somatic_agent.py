@@ -406,7 +406,7 @@ class SomaticAgent:
             )
 
             # 上报为 emotion_inference_updated 事件（source 标记为 face_capture）
-            from host_brain.core.ids import now_ms  # noqa: PLC0415
+            from natsume_contracts.edge.v1 import now_ms  # noqa: PLC0415
             self.publish_emotion_inference_updated(
                 request_id=f"face_capture_{now_ms()}",
                 session_id="face_capture",

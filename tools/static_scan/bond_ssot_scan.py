@@ -12,7 +12,16 @@ from typing import Any
 RULE_ID = "T-SSOT-01"
 RULE_NAME = "BOND_SINGLE_WRITER"
 WRITE_METHOD = "write_bond_event"
+STAGE_WRITE_METHOD = "apply_event"
+DIRECT_STATE_ATTRIBUTES = frozenset({"total_score", "current_stage", "rift"})
 DEFAULT_ALLOWED_WRITER = "host_brain/bond/bond_dynamics.py"
+DEFAULT_ALLOWED_STAGE_WRITER = "host_brain/bond/bond_dynamics.py"
+DEFAULT_ALLOWED_STATE_MUTATORS = frozenset(
+    {
+        "host_brain/bond/bond_dynamics.py",
+        "host_brain/bond/bond_stage_engine.py",
+    }
+)
 SKIP_DIR_NAMES = {
     ".git",
     ".hg",
@@ -34,14 +43,16 @@ def scan_file(
     file_path: str | Path,
     *,
     allowed_writer: str = DEFAULT_ALLOWED_WRITER,
+    allowed_stage_writer: str = DEFAULT_ALLOWED_STAGE_WRITER,
+    allowed_state_mutators: frozenset[str] = DEFAULT_ALLOWED_STATE_MUTATORS,
 ) -> list[dict[str, Any]]:
     path = Path(file_path)
     if path.suffix.lower() != ".py":
         return []
     normalized = _normalize(path)
     allowed = _normalize(allowed_writer)
-    if normalized.endswith(allowed):
-        return []
+    stage_allowed = _normalize(allowed_stage_writer)
+    state_allowed = {_normalize(item) for item in allowed_state_mutators}
 
     try:
         source = path.read_text(encoding="utf-8-sig")
@@ -56,21 +67,51 @@ def scan_file(
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if _called_name(node.func) != WRITE_METHOD:
-            continue
-        violations.append(
-            {
-                "rule_id": RULE_ID,
-                "rule_name": RULE_NAME,
-                "path": normalized,
-                "line": int(getattr(node, "lineno", 0) or 0),
-                "column": int(getattr(node, "col_offset", 0) or 0),
-                "message": (
-                    "Non-single-writer Neo4j write detected: "
-                    f"{WRITE_METHOD} can only be called in {allowed}"
-                ),
-            }
-        )
+        called = _called_name(node.func)
+        if called == WRITE_METHOD and not normalized.endswith(allowed):
+            violations.append(
+                _violation(
+                    path=normalized,
+                    node=node,
+                    message=(
+                        "Non-single-writer Neo4j write detected: "
+                        f"{WRITE_METHOD} can only be called in {allowed}"
+                    ),
+                )
+            )
+        if called == STAGE_WRITE_METHOD and not normalized.endswith(stage_allowed):
+            violations.append(
+                _violation(
+                    path=normalized,
+                    node=node,
+                    message=(
+                        "Non-governed Bond stage mutation detected: "
+                        f"{STAGE_WRITE_METHOD} can only be called in {stage_allowed}"
+                    ),
+                )
+            )
+
+    if not any(normalized.endswith(item) for item in state_allowed):
+        for node in ast.walk(tree):
+            targets: list[ast.AST] = []
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                raw_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in raw_targets:
+                    targets.extend(_flatten_targets(target))
+            elif isinstance(node, ast.AugAssign):
+                targets.extend(_flatten_targets(node.target))
+            for target in targets:
+                if isinstance(target, ast.Attribute) and target.attr in DIRECT_STATE_ATTRIBUTES:
+                    violations.append(
+                        _violation(
+                            path=normalized,
+                            node=target,
+                            message=(
+                                "Direct Bond state mutation detected: "
+                                f".{target.attr} can only change inside BondDynamics/BondStageEngine"
+                            ),
+                        )
+                    )
     return violations
 
 
@@ -107,6 +148,26 @@ def _called_name(func: ast.AST) -> str:
     if isinstance(func, ast.Name):
         return str(func.id)
     return ""
+
+
+def _flatten_targets(target: ast.AST) -> list[ast.AST]:
+    if isinstance(target, (ast.Tuple, ast.List)):
+        values: list[ast.AST] = []
+        for item in target.elts:
+            values.extend(_flatten_targets(item))
+        return values
+    return [target]
+
+
+def _violation(*, path: str, node: ast.AST, message: str) -> dict[str, Any]:
+    return {
+        "rule_id": RULE_ID,
+        "rule_name": RULE_NAME,
+        "path": path,
+        "line": int(getattr(node, "lineno", 0) or 0),
+        "column": int(getattr(node, "col_offset", 0) or 0),
+        "message": message,
+    }
 
 
 def _normalize(path: str | Path) -> str:

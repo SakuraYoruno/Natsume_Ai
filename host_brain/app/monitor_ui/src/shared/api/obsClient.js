@@ -64,7 +64,7 @@ export function createObsEventSource(path, params = {}) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
     throw new Error('EventSource not available')
   }
-  return new EventSource(buildQueryPath(path, params))
+  return new EventSource(buildQueryPath(path, params), { withCredentials: true })
 }
 
 export function createObsWebSocket(path) {

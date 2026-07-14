@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from host_brain.app.context.conversation_interpretation import interpret_conversation
-from host_brain.app.context.soul_runtime import get_compiled_soul
-from host_brain.app.context.topic_ledger import TopicLedgerBlock, TopicLedgerEntry
+from host_brain.persona.context.conversation_interpretation import interpret_conversation
+from host_brain.persona.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock, TopicLedgerEntry
 
 
 def test_conversation_interpretation_first_identity_probe_is_new() -> None:

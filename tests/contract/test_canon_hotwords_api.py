@@ -7,6 +7,7 @@ T-Canon-HW-API-02：max_words 参数生效 — max_words=2 时返回不超过 2 
 from __future__ import annotations
 
 import os
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,15 +21,18 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("Natsume_AUDIT_DB", ":memory:")
     monkeypatch.setenv("Natsume_WORLD_CANON_ROOT", str(tmp_path / "world"))
 
-    # 重置模块级单例，确保 fixture 隔离
     import host_brain.app.canon_routes as cr
-    cr._canon_store = None
-    cr._ledger_provider = None
-
+    from host_brain.audit.migration_runner import SQLiteMigrationRunner
     from host_brain.audit.sqlite_ledger import SQLiteLedger
-    from host_brain.memory.canon_world_store import WorldCanonStore
+    from host_brain.composition.canon import build_process_canon_container
+    from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
 
-    ledger = SQLiteLedger(db_path=":memory:")
+    db_path = tmp_path / "canon-hotwords.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="canon-hotwords-contract",
+    )
+    assert migrated.success, migrated.as_dict()
+    ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
     store = WorldCanonStore(world_root=str(tmp_path / "world"), ledger=ledger)
 
     # 预置两个 active 文档
@@ -36,27 +40,29 @@ def client(tmp_path, monkeypatch):
         ("hw-doc-001", "夏目贵志", ["主角", "人类"]),
         ("hw-doc-002", "猫咪老师", ["妖怪", "斑"]),
     ]:
-        store.submit_proposal(
-            proposal_id=f"p-{doc_id}",
-            target_doc_id=doc_id,
-            proposed_title=title,
-            proposed_tags=tags,
-            proposed_body=f"{title} 的详细描述，用于 API 测试。",
-            ts_ms=1000,
+        payload = {
+            "doc_id": doc_id,
+            "version": 1,
+            "status": "active",
+            "title": title,
+            "tags": tags,
+            "body": f"{title} 的详细描述，用于 API 测试。",
+            "updated_by": "test-fixture",
+            "ts_ms": 1000,
+        }
+        payload["hash"] = compute_world_canon_hash(payload)
+        store._doc_path(doc_id).write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
-        store.approve_proposal_with_content(
-            f"p-{doc_id}",
-            proposed_title=title,
-            proposed_tags=tags,
-            proposed_body=f"{title} 的详细描述，用于 API 测试。",
-            ts_ms=2000,
-        )
-
-    # 注入 store 和 ledger 到 canon_routes
-    cr._canon_store = store
-    cr.set_ledger_provider(lambda: ledger)
 
     from host_brain.app.asgi import app
+    container = build_process_canon_container(
+        ledger=ledger,
+        canonical_db_path=db_path,
+        world_root=tmp_path / "world",
+    )
+    container.application.sync_startup(import_legacy=False)
+    cr.set_canon_service_provider(lambda: container.application)
     return TestClient(app)
 
 

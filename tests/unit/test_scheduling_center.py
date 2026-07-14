@@ -28,24 +28,34 @@ def test_scheduling_center_builds_registry_driven_seed_tasks(monkeypatch) -> Non
     task_ids = scheduler_seed_task_ids()
 
     assert task_ids == [
-        "proactive_talk_periodic",
+        "life_tick",
         "evolution_cycle_daily",
         "lightnovel_recommender_daily",
         "diary_writer_daily",
         "dream_generator_sleep",
         "life_memory_sleep_replay_daily",
+        "gaming_companion_tick",
+        "emergent_growth_weekly",
+    ]
+    assert task_ids.count("life_tick") == 1
+    assert {
+        "inner_world_tick",
         "inner_world_numeric_tick",
         "inner_world_monologue_tick",
         "silence_tick",
         "body_sense_tick",
-        "gaming_companion_tick",
-        "emergent_growth_weekly",
         "emotion_decay_tick",
-    ]
-    assert "inner_world_tick" not in task_ids
+        "proactive_talk_periodic",
+    }.isdisjoint(task_ids)
 
     configs = {task.task_id: task for task in build_personality_scheduler_seed_task_configs()}
-    assert configs["proactive_talk_periodic"].intent_template["skill_name"] == "proactive_talk"
+    assert configs["life_tick"].intent_template == {
+        "skill_name": "life_tick",
+        "args": {"person_id": "default", "timezone": "Asia/Shanghai"},
+        "proposer_node_id": "scheduler",
+    }
+    assert configs["life_tick"].trigger_mode is TriggerMode.INTERVAL
+    assert configs["life_tick"].resource_profile["periodic_authority"] == "scheduler_clock"
     assert configs["evolution_cycle_daily"].priority is TaskPriority.MEDIUM
     assert configs["evolution_cycle_daily"].trigger_config == {"hour": 3, "minute": 20, "catch_up_window_minutes": 720}
     assert configs["emergent_growth_weekly"].trigger_config == {
@@ -61,8 +71,7 @@ def test_scheduling_center_builds_registry_driven_seed_tasks(monkeypatch) -> Non
     assert configs["life_memory_sleep_replay_daily"].resource_profile["uses_llm"] is False
     assert configs["gaming_companion_tick"].resource_profile["resource_class"] == "gpu_heavy"
     assert configs["gaming_companion_tick"].resource_profile["uses_gpu"] is True
-    assert configs["inner_world_numeric_tick"].trigger_mode is TriggerMode.INTERVAL
-    assert configs["inner_world_numeric_tick"].resource_profile["resource_class"] == "light_tick"
+    assert configs["life_tick"].resource_profile["resource_class"] == "light_tick"
 
 
 def test_scheduling_center_resolves_env_overrides(monkeypatch) -> None:

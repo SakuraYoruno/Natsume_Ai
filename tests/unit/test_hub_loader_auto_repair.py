@@ -1,87 +1,75 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-
 from host_brain.skills.hub import hub_loader
-from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.skills.registry import SkillRegistry
 
 
-def test_load_executor_function_auto_repairs_and_retries(monkeypatch, tmp_path: Path) -> None:
+def test_load_executor_never_imports_or_auto_repairs(monkeypatch, tmp_path: Path) -> None:
     skill_dir = tmp_path / "demo-skill"
     skill_dir.mkdir()
     executor_file = skill_dir / "executor.py"
-    executor_file.write_text("def execute(payload):\n    return payload\n", encoding="utf-8")
-
-    calls = {"count": 0}
-
-    class _FakeLoader:
-        def exec_module(self, module):
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise ModuleNotFoundError("No module named 'demo_dep'")
-            module.execute = lambda payload: {"ok": True, **payload}
+    sentinel = tmp_path / "executed.txt"
+    executor_file.write_text(
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setenv("HOST_SKILL_AUTO_REPAIR_ENABLED", "true")
-    monkeypatch.setattr(hub_loader.importlib.util, "spec_from_file_location", lambda module_name, file_path: SimpleNamespace(loader=_FakeLoader()))
-    monkeypatch.setattr(hub_loader.importlib.util, "module_from_spec", lambda spec: SimpleNamespace())
-    monkeypatch.setattr(hub_loader, "repair_skill_loading_failure", lambda skill_dir, exc: {"success": True, "actions": [{"ok": True}]})
 
     fn = hub_loader._load_custom_executor(skill_dir, tool_name="demo_tool")
 
-    assert callable(fn)
-    assert calls["count"] == 2
-    assert fn({"x": 1})["ok"] is True
+    assert fn is None
+    assert not sentinel.exists()
 
 
-def test_load_hub_skill_auto_repairs_registration_failure(monkeypatch, tmp_path: Path) -> None:
+def test_staged_unsigned_skill_never_registers_or_executes(monkeypatch, tmp_path: Path) -> None:
     skill_dir = tmp_path / "demo-skill"
-    skill_dir.mkdir()
-    manifest = SimpleNamespace(
-        name="demo_skill",
-        version="1.0.0",
-        description="demo",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=True,
-        require_confirm=False,
-        tool="demo_tool",
-        action="run",
-        validate=lambda: [],
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: demo-skill\n"
+        "version: 1.0.0\n"
+        "description: demo\n"
+        "clearance: LOW\n"
+        "risk_level: 1\n"
+        "scope: host\n"
+        "tool: demo_tool\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    sentinel = tmp_path / "executed.txt"
+    (skill_dir / "executor.py").write_text(
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('executed')\n",
+        encoding="utf-8",
     )
     registry = SkillRegistry()
 
-    calls = {"provider": 0}
-
-    class _Provider:
-        def __skill_meta_entries__(self):
-            return [
-                SkillMeta(
-                    skill_name="demo_skill",
-                    clearance="LOW",
-                    risk_level=1,
-                    scope="host",
-                    reversible=True,
-                    handler=lambda args, ctx: {"ok": True, **dict(args or {})},
-                    require_confirm=False,
-                    description="demo",
-                )
-            ]
-
-    def fake_load_custom_provider(_skill_dir):
-        calls["provider"] += 1
-        if calls["provider"] == 1:
-            raise ModuleNotFoundError("No module named 'demo_dep'")
-        return _Provider()
-
+    monkeypatch.setenv("HOST_SUPPLY_CHAIN_ACTIVATION_MODE", "STAGED")
     monkeypatch.setenv("HOST_SKILL_AUTO_REPAIR_ENABLED", "true")
-    monkeypatch.setattr(hub_loader, "parse_skill_md", lambda path: manifest)
-    monkeypatch.setattr(hub_loader, "_load_custom_executor", lambda *args, **kwargs: None)
-    monkeypatch.setattr(hub_loader, "_load_custom_provider", fake_load_custom_provider)
-    monkeypatch.setattr(hub_loader, "repair_skill_loading_failure", lambda skill_dir, exc: {"success": True, "actions": [{"ok": True}]})
+    monkeypatch.delenv("HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON", raising=False)
 
-    info = hub_loader._load_single_skill(skill_dir=skill_dir, skill_md=skill_dir / "SKILL.md", registry=registry, executor_registry=None)
+    result = hub_loader.load_hub_skills(registry, skills_dir=tmp_path)
 
-    assert info.status == "REGISTERED"
-    assert calls["provider"] == 2
+    assert result.registered_count == 0
+    assert result.activation_eligible_count == 0
+    assert result.error_count == 1
+    assert result.skills[0].reason_code == "SUPPLY_CHAIN_SIGNING_KEYS_UNAVAILABLE"
+    assert registry.list_skill_names() == []
+    assert not sentinel.exists()
+
+
+def test_builtins_only_returns_before_scan(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("HOST_SUPPLY_CHAIN_ACTIVATION_MODE", raising=False)
+    monkeypatch.setattr(
+        hub_loader,
+        "_scan_single_dir",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")),
+    )
+
+    result = hub_loader.load_hub_skills(SkillRegistry(), skills_dir=tmp_path / "missing")
+
+    assert result.activation_mode == "BUILTINS_ONLY"
+    assert result.total_dirs_scanned == 0
+    assert result.registered_count == 0
+    assert result.reason_code == "SUPPLY_CHAIN_EXTERNAL_BUNDLES_DISABLED"

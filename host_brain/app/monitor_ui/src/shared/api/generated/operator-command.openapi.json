@@ -1,0 +1,4565 @@
+{
+  "components": {
+    "schemas": {
+      "OperatorCommandReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "audit_ref": {
+            "type": "string"
+          },
+          "certainty": {
+            "type": "string"
+          },
+          "claim_ref": {
+            "type": "string"
+          },
+          "command_id": {
+            "type": "string"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "executed": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "result_ref": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "duplicate",
+              "rejected",
+              "conflict",
+              "uncertain",
+              "unavailable",
+              "shadow"
+            ],
+            "type": "string"
+          },
+          "terminal_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed",
+          "command_id",
+          "duplicate",
+          "executed",
+          "reason_code",
+          "status"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "idempotency": {
+        "in": "header",
+        "name": "X-Natsume-Idempotency-Key",
+        "type": "apiKey"
+      },
+      "identity": {
+        "in": "header",
+        "name": "X-Natsume-Identity",
+        "type": "apiKey"
+      },
+      "nonce": {
+        "in": "header",
+        "name": "X-Natsume-Nonce",
+        "type": "apiKey"
+      },
+      "proof": {
+        "in": "header",
+        "name": "X-Natsume-Proof",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Natsume Operator Command Gateway",
+    "version": "1.0.0",
+    "x-natsume-contract": "natsume.operator-command-gateway.v1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/host/obs-commands/avatar.behavior.apply": {
+      "post": {
+        "operationId": "execute_avatar_behavior_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "avatar.behavior.apply",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "behavior_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "body_action_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "duration_s": {
+                        "type": "number"
+                      },
+                      "emotion_intensity": {
+                        "type": "number"
+                      },
+                      "emotion_tag": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "source": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "talk_state": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "behavior_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute avatar.behavior.apply",
+        "x-natsume-action": "obs:command:avatar.behavior.apply",
+        "x-natsume-command-id": "avatar.behavior.apply",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:avatar:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.adoption.accept": {
+      "post": {
+        "operationId": "execute_bio_adoption_accept",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.adoption.accept",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidate_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.adoption.accept",
+        "x-natsume-action": "obs:command:bio.adoption.accept",
+        "x-natsume-command-id": "bio.adoption.accept",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.adoption.reject": {
+      "post": {
+        "operationId": "execute_bio_adoption_reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.adoption.reject",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidate_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.adoption.reject",
+        "x-natsume-action": "obs:command:bio.adoption.reject",
+        "x-natsume-command-id": "bio.adoption.reject",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.daily_cycle.run": {
+      "post": {
+        "operationId": "execute_bio_daily_cycle_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.daily_cycle.run",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "inputs": {
+                        "type": "object"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.daily_cycle.run",
+        "x-natsume-action": "obs:command:bio.daily_cycle.run",
+        "x-natsume-command-id": "bio.daily_cycle.run",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_inbox.intake_packets": {
+      "post": {
+        "operationId": "execute_bio_owner_inbox_intake_packets",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_inbox.intake_packets",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_inbox.intake_packets",
+        "x-natsume-action": "obs:command:bio.owner_inbox.intake_packets",
+        "x-natsume-command-id": "bio.owner_inbox.intake_packets",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_inbox.materialize": {
+      "post": {
+        "operationId": "execute_bio_owner_inbox_materialize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_inbox.materialize",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_inbox.materialize",
+        "x-natsume-action": "obs:command:bio.owner_inbox.materialize",
+        "x-natsume-command-id": "bio.owner_inbox.materialize",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_queue.consume": {
+      "post": {
+        "operationId": "execute_bio_owner_queue_consume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_queue.consume",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_queue.consume",
+        "x-natsume-action": "obs:command:bio.owner_queue.consume",
+        "x-natsume-command-id": "bio.owner_queue.consume",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_state.accept": {
+      "post": {
+        "operationId": "execute_bio_owner_state_accept",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_state.accept",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidate_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_state.accept",
+        "x-natsume-action": "obs:command:bio.owner_state.accept",
+        "x-natsume-command-id": "bio.owner_state.accept",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_state.import": {
+      "post": {
+        "operationId": "execute_bio_owner_state_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_state.import",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_state.import",
+        "x-natsume-action": "obs:command:bio.owner_state.import",
+        "x-natsume-command-id": "bio.owner_state.import",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bio.owner_state.reject": {
+      "post": {
+        "operationId": "execute_bio_owner_state_reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bio.owner_state.reject",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidate_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "dry_run": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "run_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bio.owner_state.reject",
+        "x-natsume-action": "obs:command:bio.owner_state.reject",
+        "x-natsume-command-id": "bio.owner_state.reject",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:bio-ops:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/bond.event.submit": {
+      "post": {
+        "operationId": "execute_bond_event_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "bond.event.submit",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "emotion_intensity": {
+                        "type": "number"
+                      },
+                      "emotion_tag": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "evidence_refs": {},
+                      "update_kind": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "user_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "user_id",
+                      "update_kind"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute bond.event.submit",
+        "x-natsume-action": "obs:command:bond.event.submit",
+        "x-natsume-command-id": "bond.event.submit",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "bond:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/canon.proposal.approve": {
+      "post": {
+        "operationId": "execute_canon_proposal_approve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "canon.proposal.approve",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "apply_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "approval_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "base_version": {
+                        "type": "integer"
+                      },
+                      "evidence_refs": {},
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "session_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_hash": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_version": {
+                        "type": "integer"
+                      },
+                      "target_doc_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "trace_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id",
+                      "apply_id",
+                      "subject_version",
+                      "subject_hash",
+                      "target_doc_id",
+                      "base_version",
+                      "approval_token_ref",
+                      "session_id",
+                      "trace_id",
+                      "evidence_refs"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute canon.proposal.approve",
+        "x-natsume-action": "obs:command:canon.proposal.approve",
+        "x-natsume-command-id": "canon.proposal.approve",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "canon:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/canon.proposal.reject": {
+      "post": {
+        "operationId": "execute_canon_proposal_reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "canon.proposal.reject",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute canon.proposal.reject",
+        "x-natsume-action": "obs:command:canon.proposal.reject",
+        "x-natsume-command-id": "canon.proposal.reject",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "canon:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/canon.proposal.rollback": {
+      "post": {
+        "operationId": "execute_canon_proposal_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "canon.proposal.rollback",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "apply_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "approval_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "base_version": {
+                        "type": "integer"
+                      },
+                      "evidence_refs": {},
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "session_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_hash": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_version": {
+                        "type": "integer"
+                      },
+                      "target_doc_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "trace_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id",
+                      "apply_id",
+                      "subject_version",
+                      "subject_hash",
+                      "target_doc_id",
+                      "base_version",
+                      "approval_token_ref",
+                      "session_id",
+                      "trace_id",
+                      "evidence_refs"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute canon.proposal.rollback",
+        "x-natsume-action": "obs:command:canon.proposal.rollback",
+        "x-natsume-command-id": "canon.proposal.rollback",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "canon:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/canon.proposal.submit": {
+      "post": {
+        "operationId": "execute_canon_proposal_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "canon.proposal.submit",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "proposed_body": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "proposed_tags": {},
+                      "proposed_title": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "summary": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "target_doc_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id",
+                      "target_doc_id",
+                      "proposed_title",
+                      "proposed_body"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute canon.proposal.submit",
+        "x-natsume-action": "obs:command:canon.proposal.submit",
+        "x-natsume-command-id": "canon.proposal.submit",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "canon:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/capability_forge.proposal.approve": {
+      "post": {
+        "operationId": "execute_capability_forge_proposal_approve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "capability_forge.proposal.approve",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approval_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "target_stage": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id",
+                      "approval_token_ref"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute capability_forge.proposal.approve",
+        "x-natsume-action": "obs:command:capability_forge.proposal.approve",
+        "x-natsume-command-id": "capability_forge.proposal.approve",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:capability-forge:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/capability_forge.proposal.create": {
+      "post": {
+        "operationId": "execute_capability_forge_proposal_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "capability_forge.proposal.create",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "canary_traffic_percent": {
+                        "type": "integer"
+                      },
+                      "candidate_key": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "session_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "session_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute capability_forge.proposal.create",
+        "x-natsume-action": "obs:command:capability_forge.proposal.create",
+        "x-natsume-command-id": "capability_forge.proposal.create",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:capability-forge:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/capability_forge.proposal.rollback": {
+      "post": {
+        "operationId": "execute_capability_forge_proposal_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "capability_forge.proposal.rollback",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "proposal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "proposal_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute capability_forge.proposal.rollback",
+        "x-natsume-action": "obs:command:capability_forge.proposal.rollback",
+        "x-natsume-command-id": "capability_forge.proposal.rollback",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:capability-forge:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/capability_forge.runtime.match": {
+      "post": {
+        "operationId": "execute_capability_forge_runtime_match",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "capability_forge.runtime.match",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "missing_capability_tags": {},
+                      "reason_code": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "suggested_family": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "suggested_family"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute capability_forge.runtime.match",
+        "x-natsume-action": "obs:command:capability_forge.runtime.match",
+        "x-natsume-command-id": "capability_forge.runtime.match",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:capability-forge:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/edge.command.push": {
+      "post": {
+        "operationId": "execute_edge_command_push",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "edge.command.push",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "command_type": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "payload": {
+                        "type": "object"
+                      },
+                      "target_agent": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "command_type",
+                      "target_agent"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute edge.command.push",
+        "x-natsume-action": "obs:command:edge.command.push",
+        "x-natsume-command-id": "edge.command.push",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "device:edge:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/mate.action.submit": {
+      "post": {
+        "operationId": "execute_mate_action_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "mate.action.submit",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "duration": {
+                        "type": "number"
+                      },
+                      "emotion_tag": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "expression": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "intensity": {
+                        "type": "number"
+                      },
+                      "position_x": {
+                        "type": "number"
+                      },
+                      "position_y": {
+                        "type": "number"
+                      },
+                      "preset": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "scale": {
+                        "type": "number"
+                      },
+                      "state": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "touch_type": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "ttl": {
+                        "type": "number"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute mate.action.submit",
+        "x-natsume-action": "obs:command:mate.action.submit",
+        "x-natsume-command-id": "mate.action.submit",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "device:mate:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/mate.say.submit": {
+      "post": {
+        "operationId": "execute_mate_say_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "mate.say.submit",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "emotion": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "ttl": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute mate.say.submit",
+        "x-natsume-action": "obs:command:mate.say.submit",
+        "x-natsume-command-id": "mate.say.submit",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "device:mate:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/scheduler.task.disable": {
+      "post": {
+        "operationId": "execute_scheduler_task_disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "scheduler.task.disable",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "expected_head_version": {
+                        "type": "integer"
+                      },
+                      "task_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "task_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute scheduler.task.disable",
+        "x-natsume-action": "obs:command:scheduler.task.disable",
+        "x-natsume-command-id": "scheduler.task.disable",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "scheduler:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/scheduler.task.enable": {
+      "post": {
+        "operationId": "execute_scheduler_task_enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "scheduler.task.enable",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "expected_head_version": {
+                        "type": "integer"
+                      },
+                      "task_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "task_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute scheduler.task.enable",
+        "x-natsume-action": "obs:command:scheduler.task.enable",
+        "x-natsume-command-id": "scheduler.task.enable",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "scheduler:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/scheduler.task.trigger": {
+      "post": {
+        "operationId": "execute_scheduler_task_trigger",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "scheduler.task.trigger",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "payload": {
+                        "type": "object"
+                      },
+                      "task_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "task_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute scheduler.task.trigger",
+        "x-natsume-action": "obs:command:scheduler.task.trigger",
+        "x-natsume-command-id": "scheduler.task.trigger",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "scheduler:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/security.hunt.run_once": {
+      "post": {
+        "operationId": "execute_security_hunt_run_once",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "security.hunt.run_once",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute security.hunt.run_once",
+        "x-natsume-action": "obs:command:security.hunt.run_once",
+        "x-natsume-command-id": "security.hunt.run_once",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "security:hunt:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/skill_provider.install": {
+      "post": {
+        "operationId": "execute_skill_provider_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "skill_provider.install",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activate_now": {
+                        "type": "boolean"
+                      },
+                      "filename": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "source_code": {}
+                    },
+                    "required": [
+                      "filename",
+                      "source_code"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute skill_provider.install",
+        "x-natsume-action": "obs:command:skill_provider.install",
+        "x-natsume-command-id": "skill_provider.install",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "skill-provider:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/sys_mode.auto_rules.update": {
+      "post": {
+        "operationId": "execute_sys_mode_auto_rules_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "sys_mode.auto_rules.update",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "rules": {
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "rules"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute sys_mode.auto_rules.update",
+        "x-natsume-action": "obs:command:sys_mode.auto_rules.update",
+        "x-natsume-command-id": "sys_mode.auto_rules.update",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:sys-mode:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/sys_mode.event.submit": {
+      "post": {
+        "operationId": "execute_sys_mode_event_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "sys_mode.event.submit",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "event_type": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "event_type"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute sys_mode.event.submit",
+        "x-natsume-action": "obs:command:sys_mode.event.submit",
+        "x-natsume-command-id": "sys_mode.event.submit",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:sys-mode:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/sys_mode.switch": {
+      "post": {
+        "operationId": "execute_sys_mode_switch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "sys_mode.switch",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "reason": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "source": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "target_mode": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "target_mode"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute sys_mode.switch",
+        "x-natsume-action": "obs:command:sys_mode.switch",
+        "x-natsume-command-id": "sys_mode.switch",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:sys-mode:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/task_review.approve": {
+      "post": {
+        "operationId": "execute_task_review_approve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_review.approve",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "checkpoint_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "resume_phase": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "review_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_version": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "review_id",
+                      "subject_ref",
+                      "subject_version",
+                      "resume_phase",
+                      "checkpoint_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_review.approve",
+        "x-natsume-action": "obs:command:task_review.approve",
+        "x-natsume-command-id": "task_review.approve",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-review:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/task_review.reject": {
+      "post": {
+        "operationId": "execute_task_review_reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_review.reject",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "review_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "review_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_review.reject",
+        "x-natsume-action": "obs:command:task_review.reject",
+        "x-natsume-command-id": "task_review.reject",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-review:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/task_review.resume": {
+      "post": {
+        "operationId": "execute_task_review_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_review.resume",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "checkpoint_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "resume_phase": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "resume_result_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "resume_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "review_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "subject_version": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "review_id",
+                      "resume_token_ref",
+                      "subject_ref",
+                      "subject_version",
+                      "resume_phase",
+                      "checkpoint_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_review.resume",
+        "x-natsume-action": "obs:command:task_review.resume",
+        "x-natsume-command-id": "task_review.resume",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-review:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/tool.execute": {
+      "post": {
+        "operationId": "execute_tool_execute",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "tool.execute",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "approval_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "args": {
+                        "type": "object"
+                      },
+                      "confirm_token_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "context": {
+                        "type": "object"
+                      },
+                      "intent_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "seq": {
+                        "type": "integer"
+                      },
+                      "session_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "thread_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "tool_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "turn_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tool_id",
+                      "intent_id",
+                      "session_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute tool.execute",
+        "x-natsume-action": "obs:command:tool.execute",
+        "x-natsume-command-id": "tool.execute",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "tool:execute"
+        ]
+      }
+    }
+  }
+}

@@ -2,9 +2,11 @@
 标题：开发规格 DevSpec（当前代码工程契约参考）
 
 # Natsume Ai 开发规格（DevSpec）
-版本：v2.3
-日期：2026-06-30
+版本：v2.6
+日期：2026-07-12
 定位：当前代码的工程契约参考手册。每条契约应能追溯到具体文件、路由或运行时边界。
+
+状态说明：§1～§14 主要记录当前代码事实；§15 保留 M48 历史工程合同；§16 是 Architecture Waves v2 的 `ADOPTED_TARGET_ARCHITECTURE` 合同。能力只有在所属 Wave 完成 production cutover、旧路径收敛并通过分层验收后才能描述为当前运行事实；旧 TASK/Seal 状态不再决定能力状态。
 
 ---
 
@@ -191,27 +193,63 @@ Surface 禁令：
 
 6 平台适配器：wechat、qq、feishu、wecom、telegram、line。
 
-全链路：
+TASK-0488 后的 HTTP Webhook 主链：
 ```
-平台 Webhook
+平台原始 HTTP Webhook
   → gateway/server.py
+  → webhook_security.py（保留 exact body/header/query，先验签/认证解密）
   → adapter.parse_inbound()
   → MessageNormalizer.normalize()
-  → GatewayRouter.route()
-  → EdgeInputReporter._send()
+  → GatewayDeliveryRuntime.accept_inbound()
+  → 0059 gateway_transport_inbox（commit 后才返回 accepted）
+  → fenced worker / dispatch_started
+  → EdgeInputReporter.deliver_gateway_payload()
   → POST /v1/host/input
+  → TASK-0487 Host Secure Ingress + durable claim
   → input_routes 后续主链
-  → edge_rpc_client.post_gateway_reply()
-  → POST /v1/gateway/reply
-  → OutboundDispatcher.dispatch()
+  → edge_transport.submit_gateway_reply()
+  → signed POST /v1/gateway/reply
+  → 0059 gateway_transport_outbox
+  → OutboundDispatcher.prepare_payload()（零副作用冻结/选 adapter）
+  → fenced worker / dispatch_started
+  → OutboundDispatcher.dispatch_prepared()（至多调用一次）
   → platform adapter.send_reply()
+  → adapter-confirmation ACK；不确定副作用入 DLQ 且禁止自动重发
 ```
+
+`EDGE_GATEWAY_TRANSPORT_MODE` 只接受 `DURABLE`；缺省、历史值和非法值都收敛到
+`DURABLE`，不存在 legacy queue 或 shadow ACK 路径。
+`EDGE_GATEWAY_ACCEPT_NEW_INTAKE=false` 可同时停止 HTTP、DB watcher 与 Telegram
+新输入，DURABLE worker 继续处理已提交记录。凭据、verifier 与 0059
+schema 在任何 producer/worker 前完成 preflight；HTTP bind/readiness 或 Telegram
+连接失败会逆序停止 server、producer、平台连接与 worker，禁止 orphan runtime。
+Inbox/outbox 以业务幂等键、tenant/principal、payload digest、ordering key、
+lease/fencing 和 attempt ledger 约束重复、乱序与重启恢复；DLQ replay 必须携带
+operator ref，原记录原位恢复，不能创建第二身份。
+
+平台原始 body 仅在请求内存中用于认证；0059 只保存 SHA-256 与字节数，不保存
+明文原始 body。LINE 使用 exact raw-body HMAC；飞书和企微在运行装配中默认完成认证解密；
+QQ、WeChat HTTP bridge、Telegram 以及 Host reply 使用 Natsume internal raw-body
+HMAC。Host reply 使用独立密钥，禁止回退通用 Edge RPC key。DURABLE 下 DB watcher /
+MTProto 等非 HTTP 入口与 HTTP 共用 0059 inbox；`EdgeInputReporter` 只执行一次
+冻结字节投递，不拥有本地 cache、retry thread 或第二 DLQ。共享 channel SDK 与 composition port
+由 `TASK-0592` 收口；Edge 对 Host Store/签名实现的临时导入由 `TASK-0493`、
+`TASK-0584` 移除，禁止复制 Store 形成第二真相源。
+
+当前 adapter 的布尔成功只能证明本地 `ADAPTER_CONFIRMED`，不能冒充远端平台
+message ID/receipt；provider receipt 对账由 `TASK-0592` 移除。Gateway proof 的
+独立 durable replay/rate claim 同样由 `TASK-0592` 补齐；Host response receipt 的独立
+签名与 `/v1/host/input` raw middleware 前置审计分别由 `TASK-0592`、`TASK-0512`
+收口，以上限制不得在 TASK-0488 证据中写成已完成能力。
 
 关键文件：
 - `edge_client/gateway/server.py` — Gateway 服务入口。
-- `edge_client/gateway/adapter/` — 各平台适配器。
-- `edge_client/gateway/router.py` — 消息路由。
-- `host_brain/channels/edge_rpc_client.py` — Host → Edge/Gateway 推送。
+- `edge_client/gateway/webhook_security.py` — 平台 raw-body 验签与认证解密。
+- `edge_client/gateway/delivery_runtime.py` — durable worker 与唯一 transport owner。
+- `host_brain/eventing/gateway_transport.py` — 0059 inbox/outbox/attempt 唯一 Store。
+- `edge_client/gateway/adapters/` — 各平台适配器。
+- `host_brain/channels/edge_transport.py` — typed Host → Edge/Gateway HMAC transport。
+- `host_brain/channels/edge_rpc_client.py` — 仅剩待 Obs 清理包删除的 avatar facade。
 
 ---
 
@@ -441,3 +479,282 @@ CandidateScoring.score_candidates()
 - `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`（v4.2）— 模块详细参考。
 - `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`（v1.1）— Pentest 专项架构。
 - `host_brain/pentest/CAPABILITY.md`（v2.3）— Pentest 能力边界。
+
+---
+
+## 15. M48 长期演化安全收敛契约
+
+正式任务入口：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。本节冻结工程契约；具体顺序、文件边界、停止条件和回滚由该执行文档定义。
+
+### 15.1 领域写边界
+
+- Domain 只能写领域自有 Store；Persona、Bond、LifeMemory 和 WorldCanon 的 direct write 必须由静态扫描阻断。
+- WorldCanon 唯一写入口是受治理 Apply Service；候选 ID 不提供授权语义。
+- Pentest 历史迁移采用 backfill/shadow/final-delta/domain-only，不允许持续 Canon 双写。
+- M48 新增 SQLite schema 使用现有 central audit migration catalog；独立组件 catalog 必须先具备 scoped migration metadata，不能复用无 scope 的 migration ID。
+
+### 15.2 Canonical Task Runtime
+
+- WorkOrder v3 在 v2 上增加 root/parent/task lineage、graph revision、attempt、业务幂等 scope、status version 和 review refs。
+- Planner 必须只产生并消费同一 `graph_id/revision`；循环依赖进入 `PLAN_CYCLE`，不得忽略依赖执行。
+- Child WorkOrder 是 SubAgentRequest 的唯一任务来源 adapter，必须保留 root/parent/graph/node lineage、授权和 Context refs。
+- TaskStore 必须持久化 Graph、Node、Attempt、Lease、Heartbeat、IdempotencyReservation、BudgetReservation 和 transactional outbox。
+- BudgetReservation 覆盖 token/tool/time/concurrency/retry/model cost，预留与消费可对账；超限只能阻断、降级或进入 Review。
+- 状态变更必须使用 expected-version CAS；进程重启后通过 lease/attempt ownership 恢复。
+- scheduler shadow 阶段只比较调度决策，禁止同时执行真实副作用。
+
+### 15.3 执行前审批、执行后验收
+
+执行前状态：
+
+```text
+READY → WAITING_APPROVAL → READY | CANCELLED
+```
+
+执行后状态：
+
+```text
+EXECUTED → VERIFYING → VERIFIED | VERIFICATION_FAILED
+VERIFIED → ACCEPTED | WAITING_ACCEPTANCE_REVIEW
+WAITING_ACCEPTANCE_REVIEW → ACCEPTED | FAILED | RETRY_PENDING | CANCELLED
+```
+
+- `VerificationResult.status` 只允许 `PASS|FAIL|ERROR|NOT_RUN`；required verification 仅 `PASS` 可继续。
+- Acceptance 必须逐项关联 criterion、evidence 和 verdict；确定性失败不能被 LLM 覆盖。
+- Review token 绑定 subject、version、actor、expiry 和一次性消费；POST review resume 不得重放已执行副作用。
+
+### 15.4 Runtime Event 与 Context
+
+- 关键状态变化与 event outbox 必须同事务提交；SSE 使用 cursor、至少一次投递和客户端去重。
+- durable payload 只允许 decision summary、input/output refs、evidence refs 和脱敏元数据；禁止 raw thought、secret、cookie 和未授权私密正文。
+- Context 沿用 `AgentContextEnvelope`，增加 tokenizer 预算、source refs、授权 profile、实际 token、截断原因和污染检测，不新建平行 Context Pack。
+
+### 15.5 Digital Life 演化层
+
+- `digital_life_state` 使用 expected-version OCC；schema 迁出运行时代码并进入受控 migration catalog。
+- WorldProjection 是只读投影；事实携带 source/confidence/observed/expires/conflict/epistemic type。
+- AppraisalRecord 连接 event、affect/drive、episode/expression；不替代现有 VAD/inner weather。
+- BondDynamics 保持单写者；score/stage 只作为兼容 projection，rift/repair/boundary 语义不得丢失。
+- SceneDecision 只影响表达和主动性；ActionArbiter 只能收紧 Governor，不能覆盖用户显式目标或提权。
+
+### 15.6 Capability、守护与身份
+
+- Capability Scorecard 联邦聚合现有 registries；自动仅可降级，升级必须有评测证据和人工 Review。
+- DegradationState 复用 startup/health/heartbeat/resource manager，记录进入、恢复、证据和受影响能力。
+- Identity Snapshot 复用 SelfModel、漂移检测和 release manifest；V1 只允许 snapshot/diff/review，不自动迁移人格。
+
+### 15.7 M48 测试契约
+
+| 测试段 | 覆盖范围 |
+|---|---|
+| T-NLE-01～03 | 基线/边界、Pentest 迁移、Canon Apply 单入口 |
+| T-NLE-04～07 | v2/v3 契约、单 revision 规划、TaskStore、shadow scheduler |
+| T-NLE-08～11 | Verification、Acceptance、Review/Resume、主链切流/drain |
+| T-NLE-12～13 | durable event/redaction/SSE replay、Context 授权与预算 |
+| T-NLE-14～17 | Life OCC、WorldProjection、Appraisal/Bond、Scene/Arbiter |
+| T-NLE-18～20 | Capability、Degradation、Identity Snapshot |
+| T-NLE-21～24 | Monitor UI 三组 read model 与最终封板/回滚演练 |
+
+---
+
+## 16. Architecture Waves v2 完整目标架构合同
+
+目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
+
+Master 执行文档：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`。
+
+M48 地基执行：`docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
+
+本节冻结目标工程边界，对应 `FR-ARCH-001`～`FR-ARCH-010`。目标蓝图解释最终归宿和设计理由；Master v2 以 AW-00～AW-08 定义执行顺序、生产切流、验证层级、停止条件与回滚。历史 `TASK-0461～TASK-0622` 只保留需求和测试追踪，不再作为独立执行、提交或 Seal 单元。三者发生冲突时，以实际代码事实修订 Master 并继续推进；产品验收边界仍以 PRD 为准。
+
+### 16.1 目标层次与依赖方向
+
+目标包层次：
+
+```text
+natsume_contracts
+  ↑
+kernel / domain kernels
+  ↑
+application / orchestration / runtime services
+  ↑
+api / adapters / infrastructure / UI clients
+
+composition → concrete implementations（唯一装配例外）
+```
+
+- `natsume_contracts` 只依赖 stdlib 和批准的最小 schema 库，不得依赖 Host、Edge、FastAPI、SQLite 或 provider。
+- Domain/Kernel 只依赖 contracts、kernel primitives 和 domain ports，不得依赖 `app`、HTTP、数据库连接、全局 container 或具体 LLM provider。
+- Application/Orchestration 通过 ports 调用 Domain、Task、Model、Capability、Persistence 和 Device 能力，不接触 FastAPI request 或 adapter 私有对象。
+- API 只做认证、DTO mapping、idempotency envelope 和 application service 调用；Repository/Adapter 实现 ports，但不得反向成为领域真相源。
+- Composition 可导入所有具体实现；任何业务层不得反向导入 Composition。
+- `edge_client` 只能依赖 `natsume_contracts` 与 Edge 自有层；Domain Pack 只能依赖 Pack SDK 和公开 ports。
+- 目标层之间双向 package dependency 必须为 0。临时例外必须具备 ADR、owner、usage telemetry 和删除版本。
+
+### 16.2 跨运行面合同
+
+以下合同必须版本化并置于实现无关的 contract package：
+
+| 合同 | 必备字段/语义 |
+|---|---|
+| `IdentityEnvelope` | principal、tenant/user/session/device、actor、delegation、scope |
+| `CommandEnvelope` | command/version、principal、authorization、idempotency、budget、correlation/causation |
+| `QueryEnvelope` | query/version、principal、scope、cursor、freshness requirement |
+| `RuntimeEvent` | event/schema version、identity、correlation/causation、observed/ingested time、visibility、evidence refs |
+| `AuthorizationGrant` | subject、action、scope、version、actor、expiry、once/consumption state |
+| `SideEffectReceipt` | action/attempt/idempotency、target、status、result/evidence refs、completed time |
+| `DeviceEnvelope` | device identity、protocol/capability version、command sequence、lease、receipt |
+
+- 合同升级采用 expand → compatibility window → consumer migration → remove；不得原地改变既有字段语义。
+- Host/Edge/Gateway/UI 通过 schema/protocol negotiation 明确兼容性；不兼容必须 fail closed 或进入明确 `DegradationState`。
+- OpenAPI、SSE event schema 和 UI generated client 必须来自同一版本化合同；重复 method/path handler 为 0。
+
+### 16.3 Command、Query 与 Event Plane
+
+- 所有外部写请求经 Secure Ingress 进入 Governed Command Plane；route 不得直接操作 Repository、Ledger `_conn`、Neo4j、Chroma 或设备 adapter。
+- Query/Observability Plane 只读取版本化 projection；read model 必须包含 `schema_version`、`source_cursor`、`freshness` 和 `degraded_state`。
+- 关键状态变化与 journal/outbox 在同一 UoW 中提交；consumer 使用 durable offset、幂等消费和 dead letter。
+- SSE、进程内 EventBus、Neo4j、Chroma、Tribe Registry 和 UI cache 均为 projection/transport/cache，不得作为状态真相源。
+- durable payload 只保存 decision summary、输入输出引用、证据引用与脱敏元数据；禁止 raw thought、secret、完整 cookie 和未授权私密正文。
+
+### 16.4 Bounded Context 与唯一真相源
+
+| Context | 唯一写模型 | 兼容投影/适配器 |
+|---|---|---|
+| Authorization | `AuthorizationGrant` + Token Repository | route/UI risk display |
+| Task | `TaskGraph` + `TaskAttempt` + `BudgetReservation` | execution/trace UI |
+| Runtime Event | `EventJournal` + Transactional Outbox | SSE/EventBus/metrics |
+| Life | `LifeEventJournal` + versioned reducers | `digital_life_state` compatibility projection |
+| Affect | `NatsumeAffectProjection` | `UserAffectObservation`、VAD compatibility |
+| Homeostasis | `HomeostasisProjection` | Tribe organ contribution |
+| Relationship | `RelationshipProjection` | Neo4j、Bond summary、SocialBrain cache |
+| Memory | `LifeMemoryService` | Chroma/FTS/semantic projection |
+| Canon | Canon proposal/review/apply aggregate | prompt/retrieval citation projection |
+| Knowledge | Domain/Personal Knowledge Document Store | vector/full-text index |
+| Proactive | `IntentDecision` + durable outbox | recent episode/read model |
+| Embodiment | `EmbodimentCommand` + receipt | VTS/VRM/MateEngine/Pet adapter |
+| Identity | immutable baseline + adaptive overlay version | release snapshot/diff |
+| Capability | `CapabilityCatalog` + signed `SkillBundle` | registry/UI compatibility view |
+
+每个长期字段只能有一个 writer；所有 projection 必须能从 journal 或权威 store 重建、对账和迁移。不得以“缓存更快”“旧代码仍调用”或“不同设备”作为第二真相源的理由。
+
+### 16.5 Host Runtime 合同
+
+- `composition` 统一装配 Settings、Feature Flags、Service Catalog、Clock、UoW、Task/Agent Runtime、Model/Capability Plane、Governor 和生命周期；业务代码不得读取第二套全局配置真源。
+- Secure Ingress → Application/Orchestration → Task Runtime/Agent Runtime → governed side effect 是唯一生产执行路径。
+- `Plan once, execute same revision`：规划、审批、执行、验证、验收和 replay 必须引用同一 `graph_id/revision`。
+- TaskStore 持久化 Node、Attempt、Lease、Heartbeat、Budget、IdempotencyReservation 和 Outbox；恢复依据 attempt ownership，不依据进程内对象。
+- 同一 action 只能有一个有效 AuthorizationGrant、一个 Task/Attempt lineage 和一个 SideEffectReceipt。
+- Obs、legacy routes、scheduler 和 Domain Pack 不得形成平行 Planner、Governor、Review、Model Gateway、EventBus 或副作用执行器。
+
+### 16.6 Digital Life Kernel 合同
+
+目标数据流：
+
+```text
+Input/Time/Work/Device Receipt
+  → LifeEventJournal
+  → World/Appraisal/Affect/Homeostasis/Relationship projections
+  → SceneResolver
+  → IntentArbiter
+  → Surface Expression | Proactive Outbox | Embodiment Outbox
+  → Feedback/Receipt
+  → LifeEventJournal
+```
+
+- LifeContinuity、LifeOrgans、Tribe、InnerWorld、DigitalLifeSupervisor 与 Scheduler 必须收敛到同一 coordinator、clock 和 event/reducer 流；不得长期保留双核。
+- Surface Context build 是纯读操作；预览、重试、取消和 replay 不得推进生命状态或产生新 LifeEvent。
+- 用户情绪观察与夏目自身 Affect 是不同 contract、字段和 writer；Relationship 必须完整持久化 trust/safety/dependency/rift/repair/boundary，而非只恢复 stage/score。
+- Tribe Agent 只能输出 `StateContribution`；私密 Inner Narrative 使用独立 store、retention 和 redaction，不进入通用 trace/memory/prompt。
+- SceneDecision 可影响表达和主动性；IntentArbiter 只能在 Governor 授权范围内选择或收紧，不能覆盖用户显式目标或提权。
+- 主动行为与具身动作均通过 durable outbox、lease、idempotency 和 receipt；人格成长走 proposal → shadow evaluation → activate version → rollback。
+
+### 16.7 Memory、Knowledge 与 Persistence 合同
+
+- 现有 `memory_event` 应演进为统一 Life/Runtime Event Journal 的兼容后端，不得再创建平行、无迁移计划的事件真源。
+- `LifeMemoryService` 是生活记忆唯一写服务；Episodic、Semantic、Distillation、Correction、Forgetting 与 Recall 通过明确 service/port 协作。
+- WorldCanon 只有 proposal/review/apply 单写入口；Apply 校验 subject、version、expiry、once 和批准内容 hash。
+- Core Canon、Persona、Pentest、BioOps、Personal Knowledge 等 namespace 必须隔离；跨域 promotion 保留来源、证据、审批和撤销记录。
+- SQLite schema 只由受控 migration catalog 管理；production runtime inline DDL 和业务模块直接访问 Ledger 私有 `_conn` 必须归零。
+- Repository/UoW 统一 transaction、WAL、timeout、backup/restore；Neo4j、Chroma 和全文索引均通过 outbox 投影并可重建。
+
+### 16.8 Domain Pack 合同
+
+每个 Pack 只能提供以下公开 contribution：
+
+```text
+manifest
+commands / capabilities / tools
+state repository port
+knowledge namespace
+verifier / acceptance profile
+risk profile
+benchmark suite
+read-model / UI contribution
+```
+
+- Pack 不得拥有平台级 TaskGraph、Scheduler、Governor、Review、Model Gateway、EventBus、Identity 或核心状态 writer。
+- Pack 不能直接导入 Host global container、Persona/Bond/LifeMemory/Canon private store 或其他 Pack 私有实现。
+- Pack 生命周期必须支持发现、签名校验、staged activation、disable、upgrade、rollback 和使用量审计。
+- 首批 Pack 为 Code、Research/Browser、Media、Personal Knowledge、Desktop Automation、Hardware/Embodiment、Pentest Lab、BioOps、MCP/External Providers。
+
+### 16.9 Model、Prompt、Capability 与 Governance 合同
+
+- 唯一模型尝试合同为 `ModelRequest → RouteDecision → ProviderAttempt → StructuredResult`；统一 provider registry、role/profile、timeout/retry/fallback/circuit breaker、token/cost/latency budget、usage 和 route trace。
+- Prompt 模板声明 version、owner、input contract、slots 和 output schema；Persona/Task/Domain 仅通过已注册 slots 组合。
+- `CapabilityCatalog` 联邦呈现 Skill、Tool、MCP、Agent 和 Pack；所有执行必须经过唯一 Tool/Capability Broker。
+- Governor 是授权单写者；风险转换必须保留来源尺度与证据，Capability maturity 只可附加收紧，自动升级和自动提权禁止。
+- `SkillBundle`/Provider bundle 必须具备 digest、signature、SBOM、quarantine、sandbox、staged activation 和 rollback；未隔离 Python 源码不得热导入 Host。
+
+### 16.10 Edge Device Runtime 合同
+
+- Edge 必须可作为独立发布单元安装、测试和回滚，只依赖共享 contracts 与 Edge 自有 composition/application/ports/adapters。
+- Host、Edge、Gateway、Desktop Pet、MateEngine、VTS/VRM 通过 Service Catalog 协商 endpoint、principal、protocol version、capability 和 health。
+- Gateway webhook 保留 raw body/header 用于平台验签，并使用 durable inbox/outbox、ack、idempotency、replay protection 和 DLQ。
+- 物理输出的最终 authority 只属于 Edge Device Runtime；Host 仅发送 `EmbodimentCommand`，adapter 必须回传 receipt。
+- Bridge 默认 loopback + token/HMAC；远程暴露必须显式启用、限定 scope/rate 并审计。
+
+### 16.11 Query/Observability Plane 与 Operator Console 合同
+
+- Obs 只承载 Query/Projection/Trace/Metrics/Replay；任何变更 Policy、Review、Domain、Device 或 Release 的动作必须回到 Secure Ingress。
+- Operator Console 分为 Operate、Understand、Replay/Lab；route visibility 由后端 role/capability read model 决定，前端 risk 标签不构成授权。
+- UI 不直接查询业务表、domain private store 或进程全局缓存；不得显示 raw thought、secret、cookie 或未授权 identity/memory 正文。
+- 前端 client 从版本化 OpenAPI 生成，并通过 typecheck、unit/component、a11y、E2E、权限矩阵和 degraded-state 测试。
+
+TASK-0489/0490 的局部实现细节与旧 handoff 状态已从工程合同移除；其代码事实由 AW-00 的 production composition、signed intake 和定向测试直接验收。Git 历史仍保留原始实现记录，但不再建立任务级批准门槛。
+
+### 16.12 Evolution、Identity 与 Release 合同
+
+- 本节的 Evolution 新能力属于 AW-08 Core Release 之后的独立 Follow-up Goal；AW-00～AW-08 只冻结其边界，不实施 TASK-0609～0619，也不允许其阻塞核心架构封板。
+- Evolution Lab 提供 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 identity migration analysis；输出只能进入受治理 proposal/review，不得直接改写生产状态。
+- Identity 使用 immutable baseline + versioned adaptive overlay；激活前必须产生 replay/shadow evaluation、IdentitySnapshot/diff、审批和 rollback target。
+- ReleaseManifest 包含 commit、package、schema、protocol、model/prompt/avatar assets、SBOM、Gate 结果和 rollback compatibility。
+- 发布 Gate 覆盖 Golden Paths、replay、chaos、performance、security、migration、backup/restore、Edge 独立安装、UI 合同、identity regression 和 rollback drill。
+
+### 16.13 兼容、迁移与退役规则
+
+1. 迁移顺序固定为行为特征化 → contract/port 提取 → 新实现经旧 facade 接入 → shadow compare → 单 vertical slice 切新请求 → legacy drain → 删除旧 writer/facade。
+2. Shadow 只能比较决策和输出，禁止同时执行真实副作用。
+3. 双写不是默认策略；确需同步时只能由 transactional outbox 驱动，并具备 reconciliation、停止和 rollback 证据。
+4. 兼容 facade 必须声明 owner、usage telemetry、introduced version、remove-by version 和 fallback 行为；不得新增业务逻辑。
+5. 旧 projection 只读保留至对账完成；旧任务由旧执行器 drain，禁止跨执行器恢复。
+6. facade usage=0、所属 Architecture Wave 的 integration 与 rollback drill 通过后必须删除旧入口、旧 writer、runtime DDL 和 feature flag，不把退役统一拖到最终阶段。
+7. 不允许以“暂时兼容”为名永久保留新旧目录两套 Runtime、Life Core、Memory writer、Model Gateway、Governor 或 Device authority。
+
+### 16.14 Architecture Wave 合同
+
+| Wave | 目标主题 | 需求映射 | 退出 Gate |
+|---|---|---|---|
+| AW-00 | 平台安全能力生产接线 | FR-ARCH-002、007～009 | Obs/Pentest/Signed Intake/Bridge/Service Catalog 进入真实 lifecycle，默认 fail closed |
+| AW-01 | Contracts、Kernel、Composition 与依赖脊柱 | FR-ARCH-001～002 | 单 composition root、typed config、import guard 和真实无-global slice |
+| AW-02 | Governed Host Command/Task/Agent 主链 | FR-ARCH-003 | production chat/host input 使用 same revision、单 executor/receipt |
+| AW-03 | Durable Data/Event/Memory/Canon 脊柱 | FR-ARCH-005 | UoW/Journal/Outbox、projection rebuild，inline DDL/private conn 为 0 |
+| AW-04 | Digital Life 单内核 | FR-NLE-001～005、FR-ARCH-004 | 单 clock/writer、Surface 纯读、主动/具身 outbox |
+| AW-05 | Model/Prompt/Governor/Capability 与 Domain Packs | FR-ARCH-006～007 | 单 ModelAttempt/Broker/Grant 路径，Pack 无第二平台内核 |
+| AW-06 | Edge/Gateway/Device Authority | FR-ARCH-008 | Edge contracts-only 独立安装，物理输出 authority 唯一 |
+| AW-07 | Query/Observability 与 Operator Plane | FR-ARCH-009 | Query-only projection、generated client、写动作回 Secure Ingress |
+| AW-08 | Decompat 与 Core Release | FR-ARCH-010 | 旧 authority 删除，`CODE_COMPLETE → PROGRAM_ACCEPTANCE → DONE`，一次完整质量矩阵、真实 smoke 与 rollback Gate |
+
+AW-02/AW-03 及 AW-04/AW-05/AW-06 允许按 Master DAG 并行。执行状态只维护到 Architecture Wave；不得恢复“一个 TASK 同时只能一个 IN_PROGRESS”、逐任务证据、逐任务提交或外部 Seal 阻塞本地代码的旧机制。
+
+历史 TASK-0609～0619 在 Core Release 后进入独立 Evolution Follow-up Goal；它们不参与 AW-08 DONE 判定。

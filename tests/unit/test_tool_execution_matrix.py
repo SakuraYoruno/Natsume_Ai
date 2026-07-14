@@ -3,21 +3,36 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import host_brain.app.dependencies as dependencies
+import host_brain.composition.process_services as dependencies
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.tool_execution_matrix import (
     build_browser_observation_matrix,
     build_default_tool_execution_matrix,
     run_memory_tool_closed_loop,
     run_tool_execution_matrix,
 )
+from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.skills.impl import browser_executor
 
 
-def _prepare_registry(monkeypatch) -> None:
+def _prepare_registry(monkeypatch, tmp_path: Path) -> SQLiteLedger:
     monkeypatch.setenv("HOST_SKILL_HUB_ENABLED", "0")
     monkeypatch.setenv("HOST_SKILL_CUSTOM_PROVIDERS_ENABLED", "0")
     monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
-    dependencies._skill_registry = None
+    configure_process_service_ports()
+    container = dependencies.get_process_service_container()
+    ledger = SQLiteLedger(str(tmp_path / "governor.sqlite3"), check_same_thread=False)
+    for field_name in (
+        "skill_registry",
+        "token_service",
+        "intent_engine",
+        "tool_catalog",
+        "tool_broker",
+        "capability_runtime_composition",
+    ):
+        monkeypatch.setattr(container, field_name, None)
+    monkeypatch.setattr(container, "ledger", ledger)
+    return ledger
 
 
 def test_default_tool_execution_matrix_is_safe_and_value_focused() -> None:
@@ -50,8 +65,8 @@ def test_default_tool_execution_matrix_is_safe_and_value_focused() -> None:
     assert all(probe.requires_confirm is False for probe in probes)
 
 
-def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkeypatch) -> None:
-    _prepare_registry(monkeypatch)
+def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkeypatch, tmp_path: Path) -> None:
+    ledger = _prepare_registry(monkeypatch, tmp_path)
 
     try:
         summary = run_tool_execution_matrix(
@@ -61,7 +76,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
             person_id="unit-tool-matrix-person",
         )
     finally:
-        dependencies._skill_registry = None
+        dependencies.get_process_service_container().skill_registry = None
+        ledger.close()
 
     assert summary["status"] == "PASSED"
     assert summary["total"] == 19
@@ -131,8 +147,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
     }
 
 
-def test_browser_observation_matrix_runs_safe_browser_probe_path(monkeypatch) -> None:
-    _prepare_registry(monkeypatch)
+def test_browser_observation_matrix_runs_safe_browser_probe_path(monkeypatch, tmp_path: Path) -> None:
+    ledger = _prepare_registry(monkeypatch, tmp_path)
 
     def fake_navigate(payload):
         return {
@@ -164,7 +180,8 @@ def test_browser_observation_matrix_runs_safe_browser_probe_path(monkeypatch) ->
             person_id="unit-browser-matrix-person",
         )
     finally:
-        dependencies._skill_registry = None
+        dependencies.get_process_service_container().skill_registry = None
+        ledger.close()
 
     assert summary["status"] == "PASSED"
     assert summary["total"] == 2
@@ -175,8 +192,8 @@ def test_browser_observation_matrix_runs_safe_browser_probe_path(monkeypatch) ->
     }
 
 
-def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(monkeypatch) -> None:
-    _prepare_registry(monkeypatch)
+def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(monkeypatch, tmp_path: Path) -> None:
+    ledger = _prepare_registry(monkeypatch, tmp_path)
     writes: list[dict[str, object]] = []
 
     class _StoreStub:
@@ -248,7 +265,8 @@ def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(m
             person_id="unit-memory-loop-person",
         )
     finally:
-        dependencies._skill_registry = None
+        dependencies.get_process_service_container().skill_registry = None
+        ledger.close()
 
     assert summary["status"] == "PASSED"
     assert summary["store"]["success"] is True
@@ -260,8 +278,8 @@ def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(m
     assert "source:tool_execution_matrix" in writes[0]["evidence_refs"]
 
 
-def test_memory_tool_closed_loop_uses_recent_episode_scope(monkeypatch) -> None:
-    _prepare_registry(monkeypatch)
+def test_memory_tool_closed_loop_uses_recent_episode_scope(monkeypatch, tmp_path: Path) -> None:
+    ledger = _prepare_registry(monkeypatch, tmp_path)
     writes: list[dict[str, object]] = []
 
     class _StoreStub:
@@ -323,7 +341,8 @@ def test_memory_tool_closed_loop_uses_recent_episode_scope(monkeypatch) -> None:
             person_id="unit-memory-loop-fallback-person",
         )
     finally:
-        dependencies._skill_registry = None
+        dependencies.get_process_service_container().skill_registry = None
+        ledger.close()
 
     assert summary["status"] == "PASSED"
     assert summary["search"]["recalled"] is True

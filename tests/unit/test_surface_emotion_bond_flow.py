@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.relationship_state import resolve_relationship_state
+from host_brain.persona.context.relationship_state import resolve_relationship_state
 from host_brain.app.surface_emotion_bond_flow import (
     apply_surface_emotion_bond_flow,
     plan_surface_emotion_bond_update,

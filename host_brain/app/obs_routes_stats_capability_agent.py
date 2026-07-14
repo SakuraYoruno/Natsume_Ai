@@ -32,15 +32,16 @@ from pydantic import BaseModel, Field
 
 from host_brain.app.obs_routes_core import (
     router,
-    _env_int,
-    _get_ledger,
-    _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
 )
+from host_brain.app.observability_runtime.capability_stats_projection import (
+    filter_forge_candidates,
+    read_capability_forge_projection,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
-_CAPABILITY_GAP_STATS_CACHE_TTL_MS = _env_int("OBS_CAPABILITY_GAP_STATS_CACHE_TTL_MS", 5000, minimum=0)
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ def get_semantic_recall_stats():
     """Ref #103: 语义召回器统计端点。"""
     now = _now_ms()
     try:
-        from host_brain.app.dependencies import get_semantic_recaller
+        from host_brain.composition.process_services import get_semantic_recaller
         recaller = get_semantic_recaller()
         mock_doc_count = len(getattr(recaller, "_mock_store", []))
         return SemanticRecallStatsResponse(
@@ -202,11 +203,15 @@ def _extract_immune_gate_event_fields(row: Dict[str, Any]) -> Optional[Dict[str,
     payload_dict = dict(payload) if isinstance(payload, dict) else {}
     source_payload: Optional[Dict[str, Any]] = None
     if event_type == "IMMUNE_CHAT_GATE":
-        source_payload = payload_dict
+        source_payload = payload_dict or dict(row)
     elif event_type.startswith("INPUT_"):
         gate_payload = payload_dict.get("immune_gate")
         if isinstance(gate_payload, dict):
             source_payload = dict(gate_payload)
+        elif str(row.get("decision") or "").strip():
+            # The public query projection flattens only non-sensitive immune
+            # decision metadata; raw input payloads never cross this boundary.
+            source_payload = dict(row)
     if source_payload is None:
         return None
     decision = str(source_payload.get("decision") or "").strip().upper()
@@ -266,7 +271,7 @@ def _dedupe_ordered_values(values: List[str], *, limit: int) -> List[str]:
 def get_immune_gate_stats(window_minutes: int = Query(60, ge=1, le=10080), limit: int = Query(20, ge=1, le=200)):
     """免疫门统计。"""
     from collections import Counter
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     try:
@@ -300,7 +305,7 @@ def get_immune_gate_replay(request_id: str, limit: int = Query(120, ge=1, le=500
     request_key = str(request_id or "").strip()
     if not request_key:
         raise HTTPException(status_code=422, detail={"reason_code": "IMMUNE_REPLAY_INVALID_REQUEST_ID", "detail": "request_id is required"})
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     try:
         rows = ledger.fetch_by_request_id("voice_event_log", request_key) if hasattr(ledger, "fetch_by_request_id") else []
     except Exception:
@@ -403,7 +408,7 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
     limit = int(limit if isinstance(limit, int) else getattr(limit, "default", 10))
     include_legacy = bool(include_legacy if isinstance(include_legacy, bool) else getattr(include_legacy, "default", False))
     now = _now_ms()
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     suite = None
     embed_cfg = None
     rows = []
@@ -456,7 +461,7 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
     episodic_write_provider = cfg_provider
     if not episodic_write_model_id or not episodic_write_provider:
         try:
-            import host_brain.app.dependencies as _deps
+            import host_brain.composition.process_services as _deps
             episodic_store = _deps.get_episodic_store()
             if not episodic_write_model_id:
                 episodic_write_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
@@ -679,44 +684,46 @@ def _build_capability_gap_runtime_quality(snapshot: Optional[Mapping[str, Any]])
 @router.get("/capability-gaps/stats", response_model=CapabilityGapStatsResponse)
 def get_capability_gaps_stats(limit_recent: int = Query(20, ge=1, le=200), limit_hotspots: int = Query(8, ge=1, le=50), limit_candidates: int = Query(8, ge=1, le=50), min_candidate_detected: int = Query(3, ge=1, le=100), min_candidate_sessions: int = Query(2, ge=1, le=100), min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0), min_candidate_failed: int = Query(2, ge=0, le=100)):
     """能力缺口统计。"""
-    def _build_response() -> CapabilityGapStatsResponse:
-        from host_brain.app.dependencies import get_capability_forge_service, get_capability_gap_telemetry
-
-        snapshot = get_capability_gap_telemetry().snapshot(limit_recent=limit_recent, limit_hotspots=limit_hotspots, limit_candidates=limit_candidates, min_candidate_detected=min_candidate_detected, min_candidate_sessions=min_candidate_sessions, min_candidate_failure_rate=min_candidate_failure_rate, min_candidate_failed=min_candidate_failed)
-        try:
-            forge_quality_snapshot = get_capability_forge_service().runtime_quality_stats(limit=8)
-        except Exception:
-            forge_quality_snapshot = {"timestamp": _now_ms(), "summary": {"tracked_proposals": 0, "unhealthy_proposals": 0, "critical_proposals": 0, "avg_health_score": 0.0, "avg_window_failure_rate": 0.0, "avg_window_p95_latency_ms": 0.0}, "items": []}
-        return CapabilityGapStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), detected_total=int(snapshot.get("detected_total") or 0), executed_total=int(snapshot.get("executed_total") or 0), success_total=int(snapshot.get("success_total") or 0), failed_total=int(snapshot.get("failed_total") or 0), success_rate=float(snapshot.get("success_rate") or 0.0), active_runtime_capabilities=int(snapshot.get("active_runtime_capabilities") or 0), by_reason=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_reason") or []) if isinstance(item, Mapping)], by_family=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_family") or []) if isinstance(item, Mapping)], by_executor=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_executor") or []) if isinstance(item, Mapping)], hotspots=_build_capability_gap_hotspots(snapshot), forge_candidates=_build_capability_gap_forge_candidates(snapshot), forge_runtime_quality=_build_capability_gap_runtime_quality(forge_quality_snapshot), candidate_thresholds=_build_capability_gap_thresholds(snapshot), recent_events=[dict(item) for item in list(snapshot.get("recent_events") or []) if isinstance(item, Mapping)])
-
-    return _get_obs_route_cached_response(
-        cache_name="capability_gap_stats",
-        cache_key={
-            "limit_recent": int(limit_recent),
-            "limit_hotspots": int(limit_hotspots),
-            "limit_candidates": int(limit_candidates),
-            "min_candidate_detected": int(min_candidate_detected),
-            "min_candidate_sessions": int(min_candidate_sessions),
-            "min_candidate_failure_rate": float(min_candidate_failure_rate),
-            "min_candidate_failed": int(min_candidate_failed),
-        },
-        ttl_ms=_CAPABILITY_GAP_STATS_CACHE_TTL_MS,
-        builder=_build_response,
+    projected, _meta = read_capability_forge_projection()
+    envelope = dict(projected or {})
+    snapshot = dict(envelope.get("gap") or {})
+    candidates, thresholds = filter_forge_candidates(
+        list(snapshot.get("forge_candidates") or []),
+        limit=limit_candidates,
+        min_detected_count=min_candidate_detected,
+        min_unique_sessions=min_candidate_sessions,
+        min_failure_rate=min_candidate_failure_rate,
+        min_failed_count=min_candidate_failed,
     )
+    snapshot["hotspots"] = list(snapshot.get("hotspots") or [])[:limit_hotspots]
+    snapshot["forge_candidates"] = candidates
+    snapshot["candidate_thresholds"] = thresholds
+    recent = list(snapshot.get("recent_events") or [])[-limit_recent:]
+    return CapabilityGapStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), detected_total=int(snapshot.get("detected_total") or 0), executed_total=int(snapshot.get("executed_total") or 0), success_total=int(snapshot.get("success_total") or 0), failed_total=int(snapshot.get("failed_total") or 0), success_rate=float(snapshot.get("success_rate") or 0.0), active_runtime_capabilities=int(snapshot.get("active_runtime_capabilities") or 0), by_reason=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_reason") or []) if isinstance(item, Mapping)], by_family=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_family") or []) if isinstance(item, Mapping)], by_executor=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_executor") or []) if isinstance(item, Mapping)], hotspots=_build_capability_gap_hotspots(snapshot), forge_candidates=_build_capability_gap_forge_candidates(snapshot), forge_runtime_quality=_build_capability_gap_runtime_quality(envelope.get("runtime_quality")), candidate_thresholds=_build_capability_gap_thresholds(snapshot), recent_events=[dict(item) for item in recent if isinstance(item, Mapping)])
 
 
 @router.get("/capability-gaps/forge-candidates", response_model=CapabilityGapForgeCandidatesResponse)
 def get_capability_gap_forge_candidates(limit: int = Query(20, ge=1, le=200), min_candidate_detected: int = Query(3, ge=1, le=100), min_candidate_sessions: int = Query(2, ge=1, le=100), min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0), min_candidate_failed: int = Query(2, ge=0, le=100)):
     """能力缺口 Forge 候选列表。"""
-    from host_brain.app.dependencies import get_capability_gap_telemetry
-    snapshot = get_capability_gap_telemetry().snapshot(limit_recent=10, limit_hotspots=5, limit_candidates=limit, min_candidate_detected=min_candidate_detected, min_candidate_sessions=min_candidate_sessions, min_candidate_failure_rate=min_candidate_failure_rate, min_candidate_failed=min_candidate_failed)
+    projected, _meta = read_capability_forge_projection()
+    snapshot = dict(dict(projected or {}).get("gap") or {})
+    selected, thresholds = filter_forge_candidates(
+        list(snapshot.get("forge_candidates") or []),
+        limit=limit,
+        min_detected_count=min_candidate_detected,
+        min_unique_sessions=min_candidate_sessions,
+        min_failure_rate=min_candidate_failure_rate,
+        min_failed_count=min_candidate_failed,
+    )
+    snapshot["candidate_thresholds"] = thresholds
+    snapshot["forge_candidates"] = selected
     candidates = _build_capability_gap_forge_candidates(snapshot)
     return CapabilityGapForgeCandidatesResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), candidate_thresholds=_build_capability_gap_thresholds(snapshot), total_candidates=len(candidates), candidates=candidates)
 
 
 @router.post("/capability-gaps/forge-proposals/preview", response_model=CapabilityForgePreviewResponse)
 def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> CapabilityForgePreviewResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     candidate = get_capability_forge_service().resolve_candidate(body.candidate_key)
     if candidate is None:
         raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND", "detail": "No forge candidate or hotspot is currently available"})
@@ -727,9 +734,8 @@ def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> Ca
     return CapabilityForgePreviewResponse(timestamp=_now_ms(), candidate=dict(candidate), recommended_release_plan={"shadow": {"enabled": True}, "canary": {"enabled": True, "traffic_percent": int(body.canary_traffic_percent)}, "full": {"enabled": True}, "rollback": {"enabled": True, "observe_window_minutes": 30}}, recommendation=recommendation)
 
 
-@router.post("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalResponse)
 def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     try:
         proposal = get_capability_forge_service().create_proposal(session_id=body.session_id, proposer=body.proposer, candidate_key=body.candidate_key, canary_traffic_percent=body.canary_traffic_percent)
     except ValueError as exc:
@@ -741,23 +747,38 @@ def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> Capa
 
 @router.get("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalListResponse)
 def list_capability_forge_proposals(status: Optional[str] = Query(None), limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeProposalListResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
-    items = get_capability_forge_service().list_proposals(status=status, limit=limit)
-    return CapabilityForgeProposalListResponse(timestamp=_now_ms(), total=len(items), items=items)
+    projected, _meta = read_capability_forge_projection()
+    envelope = dict(projected or {})
+    status_filter = str(status or "").strip().upper()
+    items = [
+        dict(item)
+        for item in list(envelope.get("proposals") or [])
+        if isinstance(item, Mapping)
+        and (not status_filter or str(item.get("status") or "").upper() == status_filter)
+    ][:limit]
+    return CapabilityForgeProposalListResponse(timestamp=int(envelope.get("timestamp") or _now_ms()), total=len(items), items=items)
 
 
 @router.get("/capability-gaps/forge-proposals/{proposal_id}", response_model=CapabilityForgeProposalResponse)
 def get_capability_forge_proposal(proposal_id: str) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
-    proposal = get_capability_forge_service().get_proposal(proposal_id)
+    projected, _meta = read_capability_forge_projection()
+    envelope = dict(projected or {})
+    proposal = next(
+        (
+            dict(item)
+            for item in list(envelope.get("proposals") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("proposal_id") or "") == str(proposal_id)
+        ),
+        None,
+    )
     if proposal is None:
         raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_PROPOSAL_NOT_FOUND", "detail": f"proposal_id={proposal_id}"})
-    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
+    return CapabilityForgeProposalResponse(timestamp=int(envelope.get("timestamp") or _now_ms()), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/{proposal_id}/approve", response_model=CapabilityForgeProposalResponse)
 def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApproveRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     stage = str(body.target_stage or "").strip().lower()
     if stage not in {"shadow", "canary", "full"}:
         raise HTTPException(status_code=422, detail={"reason_code": "CAPABILITY_FORGE_INVALID_STAGE", "detail": "target_stage must be shadow/canary/full"})
@@ -772,9 +793,8 @@ def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApp
     return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/{proposal_id}/rollback", response_model=CapabilityForgeProposalResponse)
 def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRollbackRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     try:
         proposal = get_capability_forge_service().rollback(proposal_id=proposal_id, operator=body.operator, reason=body.reason)
     except KeyError:
@@ -784,29 +804,28 @@ def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRo
     return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/runtime-match", response_model=CapabilityForgeRuntimeMatchResponse)
 def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> CapabilityForgeRuntimeMatchResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
+    from host_brain.composition.process_services import get_capability_forge_service
     decision = get_capability_forge_service().get_runtime_route_override(request_id=body.request_id, suggested_family=body.suggested_family, missing_capability_tags=body.missing_capability_tags, reason_code=body.reason_code)
     return CapabilityForgeRuntimeMatchResponse(timestamp=_now_ms(), decision=dict(decision))
 
 
 @router.get("/capability-gaps/forge-runtime/stats", response_model=CapabilityForgeRuntimeStatsResponse)
 def capability_forge_runtime_stats() -> CapabilityForgeRuntimeStatsResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
-    snapshot = get_capability_forge_service().runtime_match_stats()
+    projected, _meta = read_capability_forge_projection()
+    snapshot = dict(dict(projected or {}).get("runtime_stats") or {})
     return CapabilityForgeRuntimeStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), counters={str(k): int(v or 0) for k, v in dict(snapshot.get("counters") or {}).items()}, apply_rate=float(snapshot.get("apply_rate") or 0.0))
 
 
 @router.get("/capability-gaps/forge-runtime/tuning", response_model=CapabilityForgeRuntimeTuningResponse)
 def capability_forge_runtime_tuning_stats(limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeRuntimeTuningResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
-    snapshot = get_capability_forge_service().runtime_tuning_stats(limit=limit)
-    return CapabilityForgeRuntimeTuningResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary={str(k): int(v or 0) for k, v in dict(snapshot.get("summary") or {}).items()}, items=[dict(item) for item in list(snapshot.get("items") or []) if isinstance(item, Mapping)])
+    projected, _meta = read_capability_forge_projection()
+    snapshot = dict(dict(projected or {}).get("runtime_tuning") or {})
+    return CapabilityForgeRuntimeTuningResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary={str(k): int(v or 0) for k, v in dict(snapshot.get("summary") or {}).items()}, items=[dict(item) for item in list(snapshot.get("items") or [])[:limit] if isinstance(item, Mapping)])
 
 
 @router.get("/capability-gaps/forge-runtime/quality", response_model=CapabilityForgeRuntimeQualityResponse)
 def capability_forge_runtime_quality_stats(limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeRuntimeQualityResponse:
-    from host_brain.app.dependencies import get_capability_forge_service
-    snapshot = get_capability_forge_service().runtime_quality_stats(limit=limit)
-    return CapabilityForgeRuntimeQualityResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary=dict(snapshot.get("summary") or {}), items=[dict(item) for item in list(snapshot.get("items") or []) if isinstance(item, Mapping)])
+    projected, _meta = read_capability_forge_projection()
+    snapshot = dict(dict(projected or {}).get("runtime_quality") or {})
+    return CapabilityForgeRuntimeQualityResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary=dict(snapshot.get("summary") or {}), items=[dict(item) for item in list(snapshot.get("items") or [])[:limit] if isinstance(item, Mapping)])

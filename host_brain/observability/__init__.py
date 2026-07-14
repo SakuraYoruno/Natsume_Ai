@@ -16,7 +16,6 @@ from host_brain.observability.service_health_aggregator import (
     ServiceHealthResult,
     validate_health_response,
 )
-from host_brain.observability.session_query import SessionQueryService
 
 __all__ = [
     "ALL_SERVICES",
@@ -29,7 +28,6 @@ __all__ = [
     "ObsMode",
     "ServiceHealthAggregator",
     "ServiceHealthResult",
-    "SessionQueryService",
     "UnifiedTimelineEntry",
     "build_cross_timeline",
     "build_obs_metrics_response",

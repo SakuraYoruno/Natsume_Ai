@@ -58,23 +58,23 @@ def find_event(events: List[Dict[str, Any]], phase: str, **kwargs) -> Dict[str, 
 # 共享 Fixture：内存账本 + 测试 App
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def mem_ledger():
-    """内存 SQLite 账本，模块级共享，不污染生产数据。"""
+    """每个测试显式拥有独立的内存 SQLite 账本。"""
     from host_brain.audit.sqlite_ledger import SQLiteLedger
     ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
     yield ledger
     ledger.close()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def test_client(mem_ledger):
-    """构建 FastAPI TestClient，注入内存账本，mock 所有外部依赖。"""
+    """构建与当前测试账本同生命周期的 TestClient。"""
     # 注入内存账本
-    import host_brain.app.dependencies as _deps
-    _deps._ledger = mem_ledger
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
+    import host_brain.composition.process_services as _deps
+    _deps.get_process_service_container().ledger = mem_ledger
+    _deps.get_process_service_container().bond_stage_engine = None
+    _deps.get_process_service_container().bond_update_queue = None
 
     # mock LLM 推理（避免真实 API 调用）
     async def _mock_llm_runtime(*args, **kwargs):
@@ -115,23 +115,23 @@ def test_client(mem_ledger):
         yield client
 
     # 清理单例，避免跨测试污染
-    _deps._ledger = None
-    _deps._intent_engine = None
-    _deps._skill_registry = None
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
-    _deps._retrieval_pipeline = None
-    _deps._obs_metrics_collector = None
+    _deps.get_process_service_container().ledger = None
+    _deps.get_process_service_container().intent_engine = None
+    _deps.get_process_service_container().skill_registry = None
+    _deps.get_process_service_container().bond_stage_engine = None
+    _deps.get_process_service_container().bond_update_queue = None
+    _deps.get_process_service_container().retrieval_pipeline = None
+    _deps.get_process_service_container().obs_metrics_collector = None
 
 
 @pytest.fixture(autouse=True)
 def _rebind_mem_ledger_each_test(mem_ledger):
     """Ensure this module always uses the injected in-memory ledger."""
-    import host_brain.app.dependencies as _deps
+    import host_brain.composition.process_services as _deps
 
-    _deps._ledger = mem_ledger
-    _deps._bond_stage_engine = None
-    _deps._bond_update_queue = None
+    _deps.get_process_service_container().ledger = mem_ledger
+    _deps.get_process_service_container().bond_stage_engine = None
+    _deps.get_process_service_container().bond_update_queue = None
     yield
 
 

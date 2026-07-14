@@ -9,7 +9,7 @@ import subprocess
 from typing import Any
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT, REPO_ROOT, sanitize_segment
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 
 DEFAULT_CLONE_ROOT = REPO_ROOT / "artifacts" / "codex_clones"
@@ -100,6 +100,18 @@ class WorkspacePolicy:
             branch = self._git_branch(resolution.path)
             if branch in {"main", "master"} and work_order.run_mode == "self_evolve":
                 return False, "self_evolve cannot run on main/master"
+        durable_review_required = (
+            bool(work_order.review_policy.get("durable_review_required"))
+            or bool(work_order.review_policy.get("require_durable_review"))
+            or bool(work_order.approval_policy.get("require_review_token"))
+            or bool(work_order.approval_policy.get("review_id"))
+        )
+        if durable_review_required and not work_order.approval_policy.get("review_resume_token_ref"):
+            return (
+                False,
+                "approval_policy.review_resume_token_ref is required; "
+                "approval_policy.confirmed=true is not sufficient",
+            )
         if work_order.approval_policy.get("require_confirm") and not work_order.approval_policy.get("confirmed"):
             return False, "approval_policy.confirmed=true is required"
         return True, None

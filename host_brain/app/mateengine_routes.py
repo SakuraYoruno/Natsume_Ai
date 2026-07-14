@@ -7,14 +7,14 @@ from pydantic import BaseModel, Field
 
 from host_brain.channels.mateengine import (
     EVENT_MOB_PROXIMITY,
+    NATSUME_TEXT_PREFIX,
     SUPPORTED_SIGNAL_EVENTS,
     SUPPORTED_MATEENGINE_ACTIONS,
-    get_mateengine_bridge_health,
+    build_mateengine_signal_payload,
     list_mateengine_pose_presets,
-    send_mateengine_action,
-    send_mateengine_say,
-    send_mateengine_signal,
 )
+from host_brain.channels.embodiment import queue_mateengine_command
+from natsume_contracts.edge.v1 import new_request_id
 
 
 router = APIRouter(prefix="/v1/mateengine", tags=["mateengine"])
@@ -66,28 +66,29 @@ class MateEngineActionRequest(BaseModel):
 @router.get("/capabilities")
 async def mateengine_capabilities() -> dict[str, Any]:
     return {
-        "transport": "udp",
-        "signal_port": 32145,
-        "bridge_http": "http://127.0.0.1:18770",
+        "transport": "edge_embodiment_command_v1",
+        "physical_owner": "edge_client",
+        "host_direct_effects": False,
         "events": sorted(SUPPORTED_SIGNAL_EVENTS),
         "actions": sorted(SUPPORTED_MATEENGINE_ACTIONS),
         "pose_presets": list_mateengine_pose_presets(),
         "notes": [
-            "Host desktop pet control targets the local MateEngine model, not the Edge VTS model.",
-            "High-level actions are translated to MateEngine bridge /command calls on 127.0.0.1:18770.",
-            "Free-text say(text) still uses the NATSUME_TEXT:: MateEngine patch when the bridge forwards it.",
+            "Host authors versioned commands; Edge exclusively owns MateEngine transport.",
+            "Every command carries command_id, authority/grant refs, deadline and idempotency key.",
         ],
     }
 
 
 @router.get("/health")
 async def mateengine_health() -> dict[str, Any]:
-    return get_mateengine_bridge_health().to_dict()
+    return queue_mateengine_command(
+        action="health", payload={}, request_id=new_request_id()
+    ).as_dict()
 
 
 @router.post("/signal", response_model=MateEngineSignalResponse)
 async def mateengine_signal(request: MateEngineSignalRequest) -> MateEngineSignalResponse:
-    result = send_mateengine_signal(
+    payload = build_mateengine_signal_payload(
         event_type=request.event_type,
         name=request.name,
         event_id=request.event_id,
@@ -95,35 +96,69 @@ async def mateengine_signal(request: MateEngineSignalRequest) -> MateEngineSigna
         distance=request.distance,
         biome=request.biome,
     )
-    return MateEngineSignalResponse(**result.to_dict())
+    receipt = queue_mateengine_command(
+        action="signal", payload={"signal": payload}, request_id=new_request_id()
+    )
+    event = dict(receipt.event or {})
+    return MateEngineSignalResponse(
+        ok=receipt.success, status=receipt.status.lower(),
+        host=str(event.get("host") or "127.0.0.1"),
+        port=int(event.get("port") or 32145), payload=payload,
+        bytes_sent=int(event.get("bytes_sent") or 0),
+        error=None if receipt.success else receipt.detail,
+    )
 
 
 @router.post("/say", response_model=MateEngineSignalResponse)
 async def mateengine_say(request: MateEngineSayRequest) -> MateEngineSignalResponse:
-    result = send_mateengine_say(
-        text=request.text,
-        emotion=request.emotion,
-        ttl=request.ttl,
+    signal = build_mateengine_signal_payload(
+        event_type=EVENT_MOB_PROXIMITY,
+        name=NATSUME_TEXT_PREFIX + request.text,
+        event_id="natsume_say",
+        phase="enter",
+        distance=1.0,
     )
-    return MateEngineSignalResponse(**result.to_dict())
+    if request.emotion:
+        signal["emotion"] = request.emotion
+    if request.ttl is not None:
+        signal["ttl"] = request.ttl
+    receipt = queue_mateengine_command(
+        action="signal", payload={"signal": signal}, request_id=new_request_id()
+    )
+    event = dict(receipt.event or {})
+    return MateEngineSignalResponse(
+        ok=receipt.success, status=receipt.status.lower(),
+        host=str(event.get("host") or "127.0.0.1"),
+        port=int(event.get("port") or 32145), payload=signal,
+        bytes_sent=int(event.get("bytes_sent") or 0),
+        error=None if receipt.success else receipt.detail,
+    )
 
 
 @router.post("/action")
 async def mateengine_action(request: MateEngineActionRequest) -> dict[str, Any]:
-    return send_mateengine_action(
-        action=request.action,
-        state=request.state,
-        touch_type=request.touch_type,
-        emotion_tag=request.emotion_tag,
-        expression=request.expression,
-        preset=request.preset,
-        text=request.text,
-        enabled=request.enabled,
-        ttl=request.ttl,
-        duration=request.duration,
-        intensity=request.intensity,
-        scale=request.scale,
-        position_x=request.position_x,
-        position_y=request.position_y,
+    action = str(request.action or "state").strip().lower()
+    if action in {"idle", "reset"} or str(request.state or "").lower() == "idle":
+        command: dict[str, Any] = {"type": "reset"}
+    elif action in {"state", "thinking", "listening", "speak", "speaking", "emote", "expression"}:
+        emotion = str(request.emotion_tag or request.expression or request.preset or "NEUTRAL").upper()
+        command = {
+            "type": "expression", "preset": emotion, "emotion_tag": emotion,
+            "value": request.intensity, "ttl": request.duration or request.ttl,
+        }
+    elif action in {"say", "show"}:
+        command = {"type": "say", "text": request.text or "", "ttl": request.ttl}
+    else:
+        command = {
+            "type": action, "state": request.state, "touch_type": request.touch_type,
+            "preset": request.preset, "enabled": request.enabled,
+            "duration": request.duration, "value": request.intensity,
+            "scale": request.scale, "position_x": request.position_x,
+            "position_y": request.position_y,
+        }
+    command = {key: value for key, value in command.items() if value is not None}
+    return queue_mateengine_command(
+        action="command",
+        payload={"command": command},
         request_id=request.request_id,
-    ).to_dict()
+    ).as_dict()

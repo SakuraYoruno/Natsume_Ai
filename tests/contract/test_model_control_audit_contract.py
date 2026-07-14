@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from host_brain.composition import process_services as dependencies
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     ORCH_PARAM_DRIFT,
@@ -29,11 +30,54 @@ from host_brain.integrations.graph_runtime import (
     GraphRuntimeContract,
 )
 from host_brain.integrations.graph_contract import build_model_param_hash
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    InMemoryAttemptAuditRepository,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 NOW_MS = 1_800_200_000_000
+
+
+@pytest.fixture(autouse=True)
+def _canonical_model_composition():  # noqa: ANN202
+    composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(
+            RouteDecision(
+                "route-graph-contract",
+                (ProviderTarget("graph-test", "mock", "mock-model-v1", timeout_ms=3000),),
+                "contract-test",
+                max_attempts=1,
+            )
+        ),
+        provider_adapters=[
+            CallableProviderAdapter(
+                "graph-test",
+                complete_fn=lambda _: json.dumps(
+                    {
+                        "narrative": {"text": "ok"},
+                        "intent_draft": {},
+                        "meta": {"draft_only": True},
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ],
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+    dependencies.reset_model_runtime_composition(composition)
+    try:
+        yield
+    finally:
+        dependencies.reset_model_runtime_composition()
 
 
 def _make_runtime() -> tuple[GraphRuntimeContract, SQLiteLedger]:
@@ -46,7 +90,7 @@ def _inline_model_graph(*, expected_param_hash: str | None = None, require_appro
     """构建内联模型节点图配置。"""
     binding: dict[str, Any] = {
         "node_id": "respond",
-        "model_node_id": "test_model",
+        "model_node_id": "renderer_ja_c_style",
         "task": "CHAT",
         "required": True,
     }
@@ -59,10 +103,6 @@ def _inline_model_graph(*, expected_param_hash: str | None = None, require_appro
         "temperature": 0.5,
         "max_output_tokens": 200,
         "timeout_ms": 3000,
-        "provider_fn": lambda _: json.dumps(
-            {"narrative": {"text": "ok"}, "intent_draft": {}, "meta": {"draft_only": True}},
-            ensure_ascii=False,
-        ),
     }
     if expected_param_hash is not None:
         model_node["expected_param_hash"] = expected_param_hash
@@ -72,7 +112,7 @@ def _inline_model_graph(*, expected_param_hash: str | None = None, require_appro
         "version": "v1",
         "entry_node": "respond",
         "model_profile_id": "audit_test_profile",
-        "model_nodes": {"test_model": model_node},
+        "model_nodes": {"renderer_ja_c_style": model_node},
         "node_bindings": [binding],
         "edges": [],
         "fallback_edges": [],

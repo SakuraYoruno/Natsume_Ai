@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class FailureResult:
 # ---------------------------------------------------------------------------
 
 def _load_user_responses() -> Dict[str, str]:
-    raw = resolve_prompt_template_json_merged("failure_matrix.user_responses")
+    raw = resolve_prompt_spec_json("failure_matrix.user_responses")
     if isinstance(raw, dict):
         return {str(key): str(value or "") for key, value in raw.items()}
     return {}

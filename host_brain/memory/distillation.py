@@ -16,14 +16,15 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import LLM_POOL_EXHAUSTED
 from host_brain.core.ids import now_ms, new_request_id
-from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text, resolve_codex_cli_model
-from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync
+from host_brain.integrations.codex_cli_provider import resolve_codex_cli_model
+from host_brain.model_runtime.invocation import complete_compiled_prompt_sync
+from host_brain.model_runtime.live_prompts import MEMORY_DISTILLATION_PROMPT_ID
 from host_brain.memory.episodic import EpisodicStore
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 DEFAULT_CODEX_DISTILLATION_MODEL = "gpt-5.5"
@@ -44,22 +45,8 @@ class LlmSummaryClient(Protocol):
 
 
 def _load_distillation_llm_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("memory_distillation.llm_summary.prompt")
+    raw = resolve_prompt_contract_json("memory_distillation.llm_summary.prompt")
     return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _pool_credentials_available() -> bool:
-    for key in (
-        "HOST_GEMINI_API_KEY",
-        "GEMINI_API_KEY",
-        "HOST_MINIMAX_API_KEY",
-        "MINIMAX_API_KEY",
-        "OPENAI_API_KEY",
-        "HOST_OPENAI_API_KEY",
-    ):
-        if str(os.environ.get(key) or "").strip():
-            return True
-    return False
 
 
 def _truncate_text(text: Any, *, limit: int) -> str:
@@ -87,11 +74,13 @@ class PoolSummaryClient:
         cognitive_tier: str = "B",
         timeout_ms: int = 2600,
         render_target_lang: str = "zh",
+        model_attempt_service: Any,
     ) -> None:
         self._scene_type = str(scene_type or "MEMORY_DISTILLATION").strip().upper() or "MEMORY_DISTILLATION"
         self._cognitive_tier = str(cognitive_tier or "B").strip().upper() or "B"
         self._timeout_ms = max(800, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+        self._model_attempt_service = model_attempt_service
 
     def summarize(
         self,
@@ -100,9 +89,6 @@ class PoolSummaryClient:
         query_text: str,
         max_tokens: int = 200,
     ) -> str:
-        if not _pool_credentials_available():
-            raise RuntimeError("llm pool credentials unavailable")
-
         snippets = [
             f"{index + 1}. {_truncate_text(text, limit=220)}"
             for index, text in enumerate(list(texts or [])[:6])
@@ -131,7 +117,9 @@ class PoolSummaryClient:
             memory_lines="\n".join(snippets),
             max_tokens=max(64, min(int(max_tokens or 200), 400)),
         )
-        result = complete_llm_with_pool_sync(
+        result = complete_compiled_prompt_sync(
+            attempt_service=self._model_attempt_service,
+            prompt_id=MEMORY_DISTILLATION_PROMPT_ID,
             request_id=new_request_id(),
             scene_type=self._scene_type,
             cognitive_tier=self._cognitive_tier,
@@ -139,12 +127,10 @@ class PoolSummaryClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout_ms=self._timeout_ms,
-            gen_params={"temperature": 0.35},
-            response_format="json_object",
+            deadline_ms=self._timeout_ms,
         )
-        if result.pool_exhausted:
-            raise RuntimeError(LLM_POOL_EXHAUSTED)
+        if not result.success:
+            raise RuntimeError(result.error_code or "MODEL_ATTEMPT_FAILED")
         parsed = json.loads(result.content)
         summary = _truncate_text(parsed.get("summary"), limit=320)
         if not summary:
@@ -153,7 +139,11 @@ class PoolSummaryClient:
 
 
 class CodexCliSummaryClient:
-    """Local Codex CLI summary client for evidence-grounded memory distillation."""
+    """Compatibility name for governed background memory distillation.
+
+    Provider/model selection is no longer owned by this domain client.  The
+    server-side RoutePolicy may still select a Codex adapter for the scene.
+    """
 
     def __init__(
         self,
@@ -161,10 +151,12 @@ class CodexCliSummaryClient:
         model_id: str | None = None,
         timeout_ms: int = 120_000,
         render_target_lang: str = "zh",
+        model_attempt_service: Any,
     ) -> None:
-        self._model_id = resolve_memory_distillation_codex_model(model_id)
+        del model_id
         self._timeout_ms = max(5_000, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+        self._model_attempt_service = model_attempt_service
 
     def summarize(
         self,
@@ -197,17 +189,22 @@ class CodexCliSummaryClient:
             f"{chr(10).join(snippets)}\n\n"
             "请输出 JSON：{\"summary\":\"...\"}"
         )
-        raw = invoke_codex_cli_text(
-            model_id=self._model_id,
+        result = complete_compiled_prompt_sync(
+            attempt_service=self._model_attempt_service,
+            prompt_id=MEMORY_DISTILLATION_PROMPT_ID,
+            request_id=new_request_id(),
+            scene_type="MEMORY_DISTILLATION_BACKGROUND",
+            cognitive_tier="B",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout_ms=self._timeout_ms,
-            response_format={"type": "json_object"},
-            feature_key="memory_distillation",
+            deadline_ms=self._timeout_ms,
+            foreground=False,
         )
-        parsed = _parse_summary_json(raw)
+        if not result.success:
+            raise RuntimeError(result.error_code or "MODEL_ATTEMPT_FAILED")
+        parsed = _parse_summary_json(result.content)
         summary = _truncate_text(parsed.get("summary"), limit=320)
         if not summary:
             raise ValueError("empty distillation summary")
@@ -244,12 +241,14 @@ def build_default_llm_summary_client(
     *,
     render_target_lang: str = "zh",
     timeout_ms: int = 2600,
+    model_attempt_service: Any,
 ) -> LlmSummaryClient:
     return PoolSummaryClient(
         scene_type="MEMORY_DISTILLATION",
         cognitive_tier="B",
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
+        model_attempt_service=model_attempt_service,
     )
 
 
@@ -258,11 +257,13 @@ def build_codex_cli_summary_client(
     model_id: str | None = None,
     render_target_lang: str = "zh",
     timeout_ms: int = 120_000,
+    model_attempt_service: Any,
 ) -> LlmSummaryClient:
     return CodexCliSummaryClient(
         model_id=model_id,
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
+        model_attempt_service=model_attempt_service,
     )
 
 

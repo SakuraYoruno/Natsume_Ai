@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   Wand2,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../../../life/components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import LoadingNotice from '../../../../shared/ui/LoadingNotice.jsx'
 import MetricCard from '../../../../shared/ui/MetricCard.jsx'
@@ -259,6 +258,7 @@ function PromptTemplateDetail({
 }
 
 export default function PromptConfigSurface({
+  DigitalLifeRuntimeCard,
   filters,
   selectedId,
   runtimeSnapshot,
@@ -290,7 +290,9 @@ export default function PromptConfigSurface({
     <div className="space-y-6">
       <PromptConfigHeader refreshingView={refreshingView} onRefreshView={onRefreshView} />
       <div id="prompt-runtime-context" className="scroll-mt-24">
-        <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+        {DigitalLifeRuntimeCard ? (
+          <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+        ) : null}
       </div>
       <PromptConfigHero summary={summary} sampleMeta={sampleMeta} />
 

@@ -1,11 +1,40 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.8
+版本：v2.0
 
-定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
+定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；当前未维护 `requirements_trace.csv`，本 Markdown 是追溯 SSOT。
 
 ---
+## 维护记录（2026-07-11）
+
+- 本次增量：TASK-0470 / T-NLE-08 完成，Verification 从报告字段升级为 fail-closed 状态门；命令验证增加 allowlist、timeout、workspace policy 与结构化 reason code。
+- 本次增量：TASK-0471 / T-NLE-09 完成，Acceptance Judge 具备 criterion verdict、evidence refs、Critic candidate 分层与 final decision；`ACCEPTED` 状态需要 `ACCEPT` judgement。
+- 本次增量：TASK-0472 / T-NLE-10 完成，Review / Resume 从布尔提示升级为 durable ReviewStore、绑定 subject version/checkpoint 的一次性 resume token、PRE/POST 分态与稳定拒绝码。
+- 本次增量：TASK-0473 / T-NLE-11 完成，Canonical Runtime cutover 控制面具备 new-task assignment、canary owner gate、kill switch、legacy drain report、cross-executor resume guard 与 duplicate side-effect detector。
+- 本次增量：TASK-0474 / T-NLE-12 完成，Runtime Event 从内存 EventBus 投影升级为 0056 durable timeline、cursor/backfill、TaskStore outbox publisher、Tribe/reference adapters、内部 JSON/SSE replay、client dedupe key 与敏感字段 fail-closed gate。
+- 本次增量：TASK-0475 / T-NLE-13 完成，既有 `AgentContextEnvelope` 升级为 v2，新增 refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed、dispatcher 安全审计摘要与 runtime event 安全投影。
+- 本次增量：TASK-0476 / T-NLE-14 完成，Digital Life state 写入升级为 expected-version CAS，新增 0057 OCC migration、`LifeStateCommandService`、冲突/显式 fallback audit 与 20 并发无 silent overwrite 验证；生产副本未迁移。
+- 本次增量：TASK-0477 / T-NLE-15 完成，只读 WorldProjection 提供 `Natsume.world_projection.v1` snapshot、GET read API、source/confidence/observed/expires/epistemic/conflict facts、StateArbiter 冲突可见、过期 fact 可见，且空库查询不初始化 Life state。
+- 本次增量：TASK-0478 / T-NLE-16 完成，新增 `Natsume.appraisal.record.v1` 确定性 emotional event adapter 与 `Natsume.bond.projection.v1` 只读 projection；Bond API/真实闭环验证器统一经 `BondDynamicsWriter.apply_update()`，T-SSOT-01 同时阻止 stage direct call 与 score/stage/rift 直接改写，boundary 不改变关系权限。
+- 本次增量：TASK-0479 / T-NLE-17 完成，新增 source-preserving SceneDecision、ProactiveVoice/Surface adapter、Governor intent/action/scope/risk/token binding、fail-closed route/AIRLOCK gate、shared TokenService handler 前门、Governor-monotonic ActionArbiter 与 dry-run Runtime Event；显式用户目标优先，scene/affect/relationship 只能收紧主动性和表达。
+- 本次增量：TASK-0480 / T-NLE-18 完成，federated capability scorecard 从实际 Skill/MCP/Pentest/Agent registry 生成 canonical risk 与 L0～L5 maturity；自动流程只允许降级，升级仅形成带 evidence 的 MASTER Review candidate，Governor policy 只收紧。
+- 本次增量：TASK-0481 / T-NLE-19 完成，DegradationState 具备 durable restore、transition/recovery evidence、一次性 Review resume，并在 ActionArbiter、MCP、Skill、Canon、Pentest、TTS/VTS/SSE 和 remote resume 前门 fail-closed。
+- 本次增量：TASK-0482 / T-NLE-20 完成，Release Identity Snapshot 提供 immutable snapshot、字段级 diff、重大差异 MASTER Review、private-body exclusion 与前一 release ref rollback。
+- 本次增量：TASK-0483 / T-NLE-21 完成，新增 versioned Execution/Review operator read model、只读 Obs routes、DAG/attempt/budget/verification/review/token-bound resume/cursor replay UI 与回滚门；Monitor E2E 96/96、集成后全量 NLE 206 passed。
+- 本次增量：TASK-0484 / T-NLE-22 完成，Life evolution read views 从实际 World/Appraisal/Bond/Scene/ActionArbiter producer 构建版本化只读投影，空值不伪造，preview 不执行且不写 Life Core。
+- 本次增量：TASK-0485 / T-NLE-23 完成，governance snapshot 与 Skills/System Config/Security UI 显示 maturity、risk、degradation、recovery、identity diff 和 Pentest isolation；无自动升级，非 Lab 高风险入口 fail-closed，Review 链接只指向真实 durable Review。
+- 状态口径：M48-A 的 TASK-0461～TASK-0485 已完成；TASK-0486 本地验证与 Seal 资产已完成，但 Release Seal 为 BLOCKED。M48-B Entry Gate 尚缺 MASTER 批准，TASK-0487～0622 仍为 PROGRAMMED。
+- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。新增 `ReviewStore` 与 0055 migration；Review resume token 绑定 review/subject/version/phase/checkpoint，过期、串用、重复 resume 均 fail-closed；声明 durable review 的写 WorkOrder 不能仅靠 `confirmed=true` 通过。新增 `CanonicalRuntimeRouter`；`CoreSettings` 支持 `legacy|shadow|canonical`、canary、kill switch 和 canonical owner，默认仍为 legacy/0% canary。新增 `RuntimeEventStore` 与 0056 migration；runtime replay 受 `HOST_RUNTIME_EVENT_REPLAY_ENABLED` 默认关闭保护，EventBus 继续只是通知投影。新增 ContextEnvelope v2；私有/raw refs 与污染上下文 fail-closed，公共输出仅保留 refs/计数/预算摘要。新增 Digital Life OCC：`digital_life_state` 支持 expected-version CAS、冲突结果和 OCC audit，旧 fallback 为显式 single-writer 兼容路径。新增 WorldProjection：只读 `WorldProjectionReadModel` 与 GET snapshot API，不写 Life/Canon/Memory。新增 Appraisal/Bond convergence：纯事件适配器不替代 VAD/inner weather，BondProjection 只读并将 score/stage 标为兼容投影，所有生产写调用收敛到有 evidence 的 BondDynamics command。
+
+## 维护记录（2026-07-10）
+
+- 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。
+- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～TASK-0485 已完成；TASK-0486 为 BLOCKED，尚未通过 MASTER Seal。M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
+- 本次同步范围：M48 长期演化安全收敛的 PRD、DevSpec、DevTasks 与 T-NLE 正式闭环。
+- 新增映射：FR-NLE-001～005 → DevSpec §15 → TASK-0461～0486 → T-NLE-01～24。
+- 代码状态：正式执行文档已冻结；M48-A 的 TASK-0461～TASK-0485 为 DONE，TASK-0486 为 BLOCKED；M48 Seal Result 已生成且为 BLOCKED，M48-B 仍未解锁。
+
 ## 维护记录（2026-06-04）
 - 本次同步范围：PRD v1.6、DevSpec v1.9、ModelPlane v1.5、DevTasks v2.0 的当前代码口径校准；不新增 PRD 需求编号。
 - 代码与文档事实：`/v1/chat` 主链以 `chat_routes.py`、`chat_handler.py`、`thalamus_agent`、`Governor`、`agent_runtime_shared`、`executive_runtime_core`、`chat_agent`、`surface_main_chain_adapter` 与 `ReplyEnvelope` 为当前收口；屏幕/图像相关能力只作为高门槛观测或兼容场景，不构成默认本地界面执行；Bond 后端可为 SQLite/内存/Neo4j，不把 Neo4j 写死为唯一 SSOT。
@@ -1267,3 +1296,185 @@
 - 验收测试（T-xx）：T-Gov-01；T-GOV-R8-01~04；T-SCHED-02
 - 当前进展（2026-03-18）：PRD/DevSpec 已同步 R1~R8 与六模式 sys_mode 门控矩阵，测试映射已登记。
 - 覆盖状态：SPEC_READY
+
+## R-178（M48 领域与 Canon 写边界收敛）
+
+- 系统级需求：Domain Pack 只写领域状态；Pentest 知识迁出 WorldCanon；Canon Apply 使用绑定授权和唯一写入口。
+- PRD 需求编号（FR）：FR-NLE-001；FR-CANON；FR-SECURITY-LAB。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0461、TASK-0463～0465。
+- DevSpec 落点：DevSpec §15.1。
+- DevTasks（TASK）：TASK-0461；TASK-0463～TASK-0465。
+- 验收测试（T-xx）：T-NLE-01～03；T-WCanon-01～03；T-SSOT-01。
+- 当前进展（2026-07-10）：TASK-0461、0463～0465 已完成；Pentest domain-only 与 promotion candidate 已落地，Canon Apply 以 Ed25519 review attestation、durable once-only token、per-target journal/fence/lease/recovery 及恢复前全不变量重验成为唯一生产写入口；部署时必须配置受信 runtime 公钥，私钥只允许离线治理工具持有。当前 identity permit + static 闭集属于同进程源码约束，不声明进程级隔离；独立 writer/OS ACL/IPC capability 由后续架构任务下沉。
+- 覆盖状态：IMPLEMENTED_VERIFIED
+
+## R-179（M48 Canonical Task Runtime 与治理闭环）
+
+- 系统级需求：复杂任务只规划一次；Graph/Node/Attempt/Lease/幂等持久化；Verification/Judge/Review 完成后再切主链。
+- PRD 需求编号（FR）：FR-NLE-002；FR-NLE-003；FR-AGENT-RUNTIME；FR-SECURITY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §3、§4、§9 TASK-0466～0473。
+- DevSpec 落点：DevSpec §15.2～15.3。
+- DevTasks（TASK）：TASK-0466～TASK-0473。
+- 验收测试（T-xx）：T-NLE-04～11；T-Orch-01；T-Gov-01。
+- 当前进展（2026-07-11）：canonical contracts、Durable TaskStore、same-revision planner adapters 与 Canonical Scheduler shadow 已实施并通过 T-NLE-04～07；legacy JobRegistry 仍为 authority，Verification/Judge/Review 与 Worker 主链切流仍待后续任务。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-180（M48 Runtime Event 与 Context 治理）
+
+- 系统级需求：停止 durable raw thought；关键事件先持久化再广播；SSE cursor 补发；Context 使用引用授权与 token 预算。
+- PRD 需求编号（FR）：FR-NLE-003；FR-OBS；NFR-AUDIT；NFR-SAFETY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §3.6、§9 TASK-0462、TASK-0474～0475。
+- DevSpec 落点：DevSpec §15.4。
+- DevTasks（TASK）：TASK-0462；TASK-0474～TASK-0475。
+- 验收测试（T-xx）：T-NLE-12～13；T-Audit-01；T-Replay-01。
+- 当前进展（2026-07-10）：事件与 Context 契约已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-181（M48 Digital Life 长期演化最小闭环）
+
+- 系统级需求：Life OCC、只读 WorldProjection、Appraisal/Bond 证据链、SceneDecision 与只收紧权限的 ActionArbiter。
+- PRD 需求编号（FR）：FR-NLE-004；FR-EMOTION；FR-PROACTIVE；FR-BOND-RIFT-001。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0476～0479。
+- DevSpec 落点：DevSpec §15.5。
+- DevTasks（TASK）：TASK-0476～TASK-0479。
+- 验收测试（T-xx）：T-NLE-14～17；T-50～T-54；T-BOND-RIFT-01～02。
+- 当前进展（2026-07-11）：TASK-0476～TASK-0479 / T-NLE-14～17 已完成。Life state 使用 OCC；WorldProjection 只读且显示来源/TTL/冲突；Appraisal/Bond 可回放并保持单写/边界语义；SceneDecision 继承来源 TTL 并实际影响 ProactiveVoice/Surface，ActionArbiter 只消费已绑定且 route-committed 的 Governor authority，handler 前 token 一次性消费，保持用户显式目标且 preview 无外部副作用。
+- 覆盖状态：DONE
+
+## R-182（M48 安全升级、Operator 观测与发布封板）
+
+- 系统级需求：Capability maturity 只收紧权限；DegradationState 可恢复；Identity Snapshot 可审查；现有 Monitor UI 增量呈现并完成回滚演练。
+- PRD 需求编号（FR）：FR-NLE-005；FR-OBS；NFR-RELIABILITY；NFR-SAFETY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0480～0486。
+- DevSpec 落点：DevSpec §15.6～15.7。
+- DevTasks（TASK）：TASK-0480～TASK-0486。
+- 验收测试（T-xx）：T-NLE-18～24；T-Boot-01；T-Svc-01；T-Release-01。
+- 当前进展（2026-07-11）：TASK-0480～TASK-0485 / T-NLE-18～23 已完成。TASK-0486 / T-NLE-24 已完成本地 full-chain、Monitor build/targeted E2E、rollback matrix 与 Seal runner；结果为 BLOCKED，原因是 previous identity continuity、Redis/Host/Obs/Neo4j/Chroma/Docker live 环境、生产 rollback 授权与 MASTER Seal 均缺失。
+- 覆盖状态：BLOCKED
+
+## M48-B～M57 完整架构重构（R-183～R-192）
+
+下表登记每个里程碑的主需求映射，不表示需求只在该阶段生效。`FR-ARCH-001` 由 M49 建界、M57 终验；`FR-ARCH-002` 由 M48-B/M49 建界，并在 M50、M55、M56 的 Host/Edge/Query 切片中持续验收。
+
+| 里程碑 | FR | Trace | DevTasks | Tests |
+|---|---|---|---|---|
+| M48-B | FR-ARCH-002；FR-ARCH-007～009 | R-183 | TASK-0487～0496 | T-ARCH-01～03 |
+| M49 | FR-ARCH-001～002 | R-184 | TASK-0497～0510 | T-ARCH-04～06 |
+| M50 | FR-ARCH-003 | R-185 | TASK-0511～0524 | T-ARCH-07～09 |
+| M51 | FR-ARCH-004 | R-186 | TASK-0525～0538 | T-ARCH-10～12 |
+| M52 | FR-ARCH-005 | R-187 | TASK-0539～0552 | T-ARCH-13～15 |
+| M53 | FR-ARCH-006 | R-188 | TASK-0553～0566 | T-ARCH-16～18 |
+| M54 | FR-ARCH-007 | R-189 | TASK-0567～0580 | T-ARCH-19～21 |
+| M55 | FR-ARCH-008 | R-190 | TASK-0581～0594 | T-ARCH-22～24 |
+| M56 | FR-ARCH-009 | R-191 | TASK-0595～0608 | T-ARCH-25～27 |
+| M57 | FR-ARCH-010 | R-192 | TASK-0609～0622 | T-ARCH-28～30 |
+
+## R-183（M48-B 平台 P0 安全封口）
+
+- 系统级需求：统一 Host/Obs/Gateway/Bridge 写接口的身份与授权边界，修复 webhook/reply、Skill 安装、Pentest 审批、本地 Bridge 暴露和端口冲突等 P0 风险，并建立可审计的服务拓扑。
+- PRD 需求编号（FR）：FR-ARCH-002；FR-ARCH-007～009。
+- 来源：完整架构目标 §2.5、§4、§9、§14、§16；完整架构重构正式执行程序 M48-B。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
+- DevTasks（TASK）：TASK-0487～TASK-0496。
+- 验收测试（T-xx）：T-ARCH-01～03。
+- 当前进展（2026-07-12）：M48-B Entry Gate 五项条款均 PASS。TASK-0487～0488 与 TASK-0493 已完成；TASK-0489～0492 的本地安全内核/Service Catalog 已落地，但 protected production route/provider/startup handoff 未完成，状态保持 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`。TASK-0493 已把默认 `FREEZE_NEW` 的 contracts-only AST 守卫接入 Delivery Gate，冻结 122 条内容寻址 finding、54 个全部截止 TASK-0581 的迁移组；guard unit `64 passed`、contract/aggregator `47 passed`、唯一 integration 首次 `1 passed`，独立复审 P0/P1 cleared。TASK-0494 已把 Mate/Desktop/WeChat owned Bridge 收敛为默认 DISABLED、loopback-only 基线和显式 REMOTE_APPROVED，补齐专属 HMAC identity/scope、credential-global rate、durable replay/audit、bounded admission/queue、path/URL binding 与 auth-before-effect；focused `86 passed`、唯一 integration 首次 `1 passed`、C# `0 errors`，三路复审 P0/P1 cleared。TASK-0495 已落地不可变五域 `ISOLATED_ONLY` profile、no-real-I/O guard、双 fresh-root Host/Obs/Gateway/Skill/Pentest/Bridge golden/fault matrix、provider real-or-stable-failure construction 以及精确 durable claim/result/audit 语义；focused `172 passed`，最终 changed-boundary atomic E2E `1 passed`，最终复审 P0/P1 cleared。TASK-0496 三路只读 Safety Seal 审计已生成机器可读 `BLOCKED` 结果：本地 owned 控制、九任务 evidence 与隔离 matrix PASS；Host unsigned Mate producer/raw 32145/startup、Edge signed WeChat producer、Gateway callback credential、production router/provider catalog、真实 Service Catalog reservation/live cutover、TASK-0491 到期例外、TASK-0486 Release Seal、identity/live/prod rollback 和独立 MASTER 签署均未闭环。故 TASK-0494～0495 保持 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，TASK-0496 保持 `BLOCKED`；rollback 维持所有 production mode default-off/fail-closed，M49 尚未解锁。
+- 覆盖状态：IN_PROGRESS
+
+## R-184（M49 Contracts、Kernel、Composition 与依赖治理）
+
+- 系统级需求：提取版本化共享 contracts 和稳定 kernel ports，以唯一 Composition Root 管理生命周期，建立依赖护栏，并为 Host/Worker/Query 隔离装配及 Edge 后续独立安装提供合同与 composition 前提。
+- PRD 需求编号（FR）：FR-ARCH-001～002。
+- 来源：完整架构目标 §2.1～2.2、§4～6、§14、§16；完整架构重构正式执行程序 M49。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M49。
+- DevTasks（TASK）：TASK-0497～TASK-0510。
+- 验收测试（T-xx）：T-ARCH-04～06。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-185（M50 Host Application 与 Task/Agent Runtime 分层）
+
+- 系统级需求：将接口、应用编排、领域规则与基础设施分层，建立唯一 Canonical Task/Agent Runtime，收敛重复 planner/executor/scheduler 并以可度量 facade 完成巨石拆分和退役。
+- PRD 需求编号（FR）：FR-ARCH-003。
+- 来源：完整架构目标 §2.1～2.2、§5～6、§14、§16；完整架构重构正式执行程序 M50。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M50。
+- DevTasks（TASK）：TASK-0511～TASK-0524。
+- 验收测试（T-xx）：T-ARCH-07～09。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-186（M51 Digital Life Kernel、Surface 与 Identity）
+
+- 系统级需求：收敛 Digital Life 的时钟、状态、写者、Scene/Surface/Action 边界，建立可重放 journal 和版本化 Identity migration/regression/rollback 闭环。
+- PRD 需求编号（FR）：FR-ARCH-004。
+- 来源：完整架构目标 §2.3、§7～8、§14～16；完整架构重构正式执行程序 M51。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M51。
+- DevTasks（TASK）：TASK-0525～TASK-0538。
+- 验收测试（T-xx）：T-ARCH-10～12。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-187（M52 Memory、Knowledge、Event 与 Persistence）
+
+- 系统级需求：以 Storage Catalog、component-scoped migrations、EventStore/outbox 和可重建 projections 明确数据所有权；隔离领域知识并使 Canon promotion、备份恢复和 schema 演进可验证。
+- PRD 需求编号（FR）：FR-ARCH-005。
+- 来源：完整架构目标 §2.4、§7、§10、§14、§16；完整架构重构正式执行程序 M52。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M52。
+- DevTasks（TASK）：TASK-0539～TASK-0552。
+- 验收测试（T-xx）：T-ARCH-13～15。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-188（M53 Domain Pack 与 Capability Platform）
+
+- 系统级需求：提供版本化 Domain Pack SDK/manifest 和统一 Capability Catalog/执行门；将 Pentest 迁入隔离 Lab 和共享任务治理，禁止领域反向依赖平台及直接污染 WorldCanon。
+- PRD 需求编号（FR）：FR-ARCH-006。
+- 来源：完整架构目标 §2.5～2.6、§11～12、§14、§16；完整架构重构正式执行程序 M53。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M53。
+- DevTasks（TASK）：TASK-0553～TASK-0566。
+- 验收测试（T-xx）：T-ARCH-16～18。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-189（M54 Model、Prompt、Governor 与 Security Plane）
+
+- 系统级需求：统一 Model Gateway、Prompt/Context assets、Governor grant 和 Skill/Provider 供应链，使模型调用、授权、出网和不受信代码执行具备单一门禁、审计、隔离及回滚。
+- PRD 需求编号（FR）：FR-ARCH-007。
+- 来源：完整架构目标 §2.5～2.6、§9、§11、§14、§16；完整架构重构正式执行程序 M54。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M54。
+- DevTasks（TASK）：TASK-0567～TASK-0580。
+- 验收测试（T-xx）：T-ARCH-19～21。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-190（M55 Edge、Gateway、Voice、Avatar 与 Device Runtime）
+
+- 系统级需求：由独立 Edge Device Runtime 统一拥有 Gateway、Voice、Avatar 与设备副作用，消除 Host 直连旁路、Host/Edge 循环依赖、端口碰撞和分散情绪映射，并提供版本化具身协议与安全降级。
+- PRD 需求编号（FR）：FR-ARCH-008。
+- 来源：完整架构目标 §4～6、§9、§14、§16；完整架构重构正式执行程序 M55。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M55。
+- DevTasks（TASK）：TASK-0581～TASK-0594。
+- 验收测试（T-xx）：T-ARCH-22～24。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-191（M56 Query/Observability Plane 与 Operator Console）
+
+- 系统级需求：将 Obs 收敛为只读 Query Plane，以版本化 read model、OpenAPI 生成 client、role/capability 授权和统一 correlation 构造可回放、可运维且满足 SLO 的 Operator Console。
+- PRD 需求编号（FR）：FR-ARCH-009。
+- 来源：完整架构目标 §2.7、§4、§10、§13～14、§16；完整架构重构正式执行程序 M56。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M56。
+- DevTasks（TASK）：TASK-0595～TASK-0608。
+- 验收测试（T-xx）：T-ARCH-25～27。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-192（M57 Evolution Lab、Decompat、Release 与最终封板）
+
+- 系统级需求：建立隔离 Evolution Lab 与受治理的 Skill/Identity promotion；完成兼容层和重复运行时退役，并以可复现 ReleaseManifest v2、组件矩阵 CI、灾备和回滚演练完成最终封板。
+- PRD 需求编号（FR）：FR-ARCH-010。
+- 来源：完整架构目标 §14～17；完整架构重构正式执行程序 M57。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M57。
+- DevTasks（TASK）：TASK-0609～TASK-0622。
+- 验收测试（T-xx）：T-ARCH-28～30。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
 from host_brain.tribe.events import emit_tribe_event
@@ -17,6 +18,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 @dataclass(slots=True)
 class MotorCortexAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="motor_cortex_agent",
@@ -33,7 +35,7 @@ class MotorCortexAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision)
@@ -388,7 +390,7 @@ class MotorCortexAgent:
         speak_ok = False
         speak_reason: str | None = None
         try:
-            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+            from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
             import asyncio as _asyncio  # noqa: PLC0415
 
             async def _do_speak() -> None:
@@ -398,17 +400,21 @@ class MotorCortexAgent:
                     text=resolved_text,
                     emotion_tag=resolved_emotion_tag,
                 )
-                await post_speak(
-                    text=resolved_text,
-                    utterance_id=resolved_utterance_id,
+                await submit_voice_command(
+                    action="speak",
+                    payload={
+                        "text": resolved_text,
+                        "utterance_id": resolved_utterance_id,
+                        "session_id": str(session_id or ""),
+                        "emotion_tag": resolved_emotion_tag,
+                        "emotion_intensity": resolved_intensity,
+                        "speed": float(tts_params.speed_scale),
+                        "pitch": float(tts_params.pitch_shift),
+                        "style_note": str(tts_params.style_note or ""),
+                        "lang_hint": str(tts_params.lang_hint or "zh"),
+                    },
                     request_id=str(request_id or ""),
-                    session_id=str(session_id or ""),
-                    emotion_tag=resolved_emotion_tag,
-                    emotion_intensity=resolved_intensity,
-                    speed=float(tts_params.speed_scale),
-                    pitch=float(tts_params.pitch_shift),
-                    style_note=str(tts_params.style_note or ""),
-                    lang_hint=str(tts_params.lang_hint or "zh"),
+                    idempotency_key=f"{str(request_id or resolved_utterance_id)}:motor-speak:{resolved_utterance_id}",
                 )
 
             try:
@@ -596,10 +602,10 @@ class MotorCortexAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.motor_cortex_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("motor_cortex_agent.speak_style") or {}
+            _tpl = resolve_prompt_contract_json("motor_cortex_agent.speak_style") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -611,21 +617,12 @@ class MotorCortexAgent:
                 arousal=round(float(arousal), 3),
                 tone_hint=str(tone_hint or "balanced"),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=1000,
-                agent_role="motor_speak_planner",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="motor_speak_style",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=48,
-                temperature=0.1,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _speed = max(0.8, min(1.2, float(_parsed.get("speed") or 1.0)))
             _result = {
                 "speed": round(_speed, 2),

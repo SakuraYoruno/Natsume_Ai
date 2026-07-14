@@ -108,19 +108,6 @@ def build_validation_plan(args: argparse.Namespace, run_root: Path) -> list[Vali
             timeout_seconds=120,
         ),
         ValidationCommand(
-            name="surface_memory_emotion_loop",
-            command=(
-                py,
-                "tools/validate_surface_memory_emotion_loop.py",
-                "--mode",
-                "live",
-                "--out-dir",
-                str(run_root / "surface_memory_emotion_loop"),
-            ),
-            out_dir=run_root / "surface_memory_emotion_loop",
-            timeout_seconds=300,
-        ),
-        ValidationCommand(
             name="surface_organ_system",
             command=(
                 py,
@@ -143,38 +130,6 @@ def build_validation_plan(args: argparse.Namespace, run_root: Path) -> list[Vali
             ),
             out_dir=run_root / "organ_influence_matrix",
             timeout_seconds=120,
-        ),
-        ValidationCommand(
-            name="inner_world_self_loop",
-            command=(
-                py,
-                "tools/validate_inner_world_self_loop.py",
-                "--mode",
-                "live",
-                "--run-id",
-                run_id,
-                "--out-dir",
-                str(run_root / "inner_world_self_loop"),
-            ),
-            out_dir=run_root / "inner_world_self_loop",
-            timeout_seconds=600,
-        ),
-        ValidationCommand(
-            name="full_digital_life_loop",
-            command=(
-                py,
-                "tools/validate_full_digital_life_loop.py",
-                "--mode",
-                "live",
-                "--run-id",
-                run_id,
-                "--max-turns",
-                max_turns,
-                "--out-dir",
-                str(run_root / "full_digital_life_loop"),
-            ),
-            out_dir=run_root / "full_digital_life_loop",
-            timeout_seconds=600,
         ),
         ValidationCommand(
             name="digital_life_background_runtime",

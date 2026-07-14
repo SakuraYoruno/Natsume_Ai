@@ -14,6 +14,7 @@ async def handle_edge_events_route(
     request_body: EdgeEventsRequest,
     get_ledger: Callable[[], Any],
     logger: logging.Logger,
+    input_dispatcher: Callable[..., Any],
 ) -> EdgeEventsResponse:
     bridge_waiters: list[Any] = []
     loop = asyncio.get_running_loop()
@@ -22,6 +23,7 @@ async def handle_edge_events_route(
         request_body=request_body,
         get_ledger=get_ledger,
         logger=logger,
+        input_dispatcher=input_dispatcher,
         inline_waiters=bridge_waiters,
         main_loop=loop,
     )

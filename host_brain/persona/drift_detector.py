@@ -32,13 +32,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 
 _logger = logging.getLogger("Natsume.drift_detector")
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_spec_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

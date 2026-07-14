@@ -12,6 +12,121 @@ from typing import Any, Mapping
 import yaml
 
 from host_brain.integrations.graph_contract import build_model_param_hash
+from host_brain.model_runtime.graph_semantics import graph_model_semantic
+
+
+_MODEL_NODE_ALLOWED_FIELDS = frozenset(
+    {
+        "available",
+        "candidate_nodes",
+        "expected_param_hash",
+        "max_output_tokens",
+        "model_id",
+        "model_profile_id",
+        "provider",
+        "selected_node",
+        "selector_env",
+        "source",
+        "temperature",
+        "timeout_ms",
+        "top_k",
+        "top_p",
+    }
+)
+_TRANSPORT_FIELD_TOKENS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "base_url",
+        "base_url_override",
+        "bearer",
+        "client",
+        "credential",
+        "credentials",
+        "endpoint",
+        "provider_fn",
+        "secret",
+        "token",
+        "transport",
+    }
+)
+
+
+def _normalized_field_name(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def _transport_field(name: Any) -> bool:
+    normalized = _normalized_field_name(name)
+    return any(
+        normalized == token
+        or normalized.startswith(f"{token}_")
+        or normalized.endswith(f"_{token}")
+        for token in _TRANSPORT_FIELD_TOKENS
+    )
+
+
+def _reject_unsafe_value(value: Any, *, path: str) -> None:
+    if callable(value):
+        raise ValueError(f"graph model node callable forbidden: {path}")
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            key_name = str(key)
+            nested_path = f"{path}.{key_name}"
+            if _transport_field(key_name):
+                raise ValueError(f"graph model node transport field forbidden: {nested_path}")
+            _reject_unsafe_value(nested, path=nested_path)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for index, nested in enumerate(value):
+            _reject_unsafe_value(nested, path=f"{path}[{index}]")
+
+
+def _copy_serializable_value(value: Any, *, path: str) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [
+            _copy_serializable_value(nested, path=f"{path}[{index}]")
+            for index, nested in enumerate(value)
+        ]
+    raise ValueError(
+        f"graph model node value must be JSON-serializable scalar/list: {path}"
+    )
+
+
+def sanitize_model_node_spec(
+    model_node_id: str,
+    spec: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project one graph model node onto the secret-free control-plane schema.
+
+    Unknown fields, transport configuration, credentials and callables are
+    rejected instead of being copied into executable graph state.
+    """
+
+    normalized_id = str(model_node_id or "").strip()
+    if not normalized_id:
+        raise ValueError("graph model node id must be non-empty")
+    _reject_unsafe_value(spec, path=f"model_nodes.{normalized_id}")
+    unknown = {
+        str(key)
+        for key in spec
+        if _normalized_field_name(key) not in _MODEL_NODE_ALLOWED_FIELDS
+    }
+    if unknown:
+        raise ValueError(
+            f"graph model node fields not allowed for {normalized_id}: "
+            + ", ".join(sorted(unknown))
+        )
+    return {
+        _normalized_field_name(key): _copy_serializable_value(
+            value,
+            path=f"model_nodes.{normalized_id}.{key}",
+        )
+        for key, value in spec.items()
+    }
 
 
 def resolve_model_nodes(
@@ -25,6 +140,8 @@ def resolve_model_nodes(
     explicit = _normalize_model_nodes(graph_config.get("model_nodes"))
     overrides = _normalize_model_nodes(graph_config.get("model_node_overrides"))
     if explicit:
+        for model_node_id in explicit:
+            graph_model_semantic(model_node_id)
         if not overrides:
             return explicit
         merged: dict[str, dict[str, Any]] = {}
@@ -33,7 +150,7 @@ def resolve_model_nodes(
             override_row = overrides.get(key)
             if isinstance(override_row, Mapping):
                 merged_row.update(dict(override_row))
-            merged[key] = merged_row
+            merged[key] = sanitize_model_node_spec(key, merged_row)
         return merged
     if not model_profile_id:
         return {}
@@ -79,6 +196,7 @@ def resolve_model_nodes(
 
         if not selected_model_node_id:
             raise KeyError(f"model node candidate missing for node={node_id}")
+        graph_model_semantic(selected_model_node_id)
 
         row = dict(registry_nodes.get(selected_model_node_id) or {})
         if not row:
@@ -126,6 +244,7 @@ def resolve_model_nodes(
             max_output_tokens=node_config.get("max_output_tokens"),
             timeout_ms=node_config.get("timeout_ms"),
         )
+        node_config = sanitize_model_node_spec(selected_model_node_id, node_config)
         resolved[selected_model_node_id] = dict(node_config)
         if node_id != selected_model_node_id:
             resolved[node_id] = dict(node_config)
@@ -142,7 +261,7 @@ def _normalize_model_nodes(raw: Any) -> dict[str, dict[str, Any]]:
         for key, row in raw.items():
             if not isinstance(row, Mapping):
                 continue
-            out[str(key)] = dict(row)
+            out[str(key)] = sanitize_model_node_spec(str(key), row)
         return out
     return {}
 
@@ -220,3 +339,6 @@ def _apply_node_overrides(
         if not isinstance(override_row, Mapping):
             continue
         node_config.update(dict(override_row))
+
+
+__all__ = ["resolve_model_nodes", "sanitize_model_node_spec"]

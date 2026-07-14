@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.app.prompt_specs import get_prompt_spec, list_prompt_specs, resolve_prompt_spec_json
+from host_brain.model_runtime.prompt_specs import get_prompt_spec, list_prompt_specs, resolve_prompt_spec_json
 
 
 def test_prompt_specs_expose_versioned_agent_prompt_catalog() -> None:
@@ -41,7 +41,9 @@ def test_prompt_specs_expose_versioned_agent_prompt_catalog() -> None:
 
     pentest = resolve_prompt_spec_json("pentest_agent_handler.system_prompt_extra")
     assert isinstance(pentest, str)
-    assert "PTES" in pentest
+    assert "Pentest Domain Pack" in pentest
+    assert "pentest.secure-run" in pentest
+    assert "side_effects_executed=false" in pentest
 
     spec = get_prompt_spec("pentest_agent_handler.system_prompt_extra")
     assert spec.category == "agent_prompt"

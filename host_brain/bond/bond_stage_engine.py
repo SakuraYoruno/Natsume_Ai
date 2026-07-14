@@ -20,11 +20,14 @@ import logging
 import json
 import math
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import BOND_EVIDENCE_REQUIRED
 from host_brain.core.ids import new_request_id, now_ms
+from host_brain.persistence.bond_history_repository import BondHistoryRepository
 
 _logger = logging.getLogger("Natsume.bond_stage_engine")
 
@@ -578,6 +581,15 @@ class BondStageEngine:
 
         M27-E：emotion_intensity > 0.7 的互动额外加权 1.5x（OPT-26）。
         """
+        refs = list(
+            dict.fromkeys(
+                str(ref).strip()
+                for ref in list(evidence_refs or [])
+                if str(ref).strip()
+            )
+        )
+        if not refs:
+            raise ValueError(BOND_EVIDENCE_REQUIRED)
         req_id = request_id or new_request_id()
         ts = int(ts_ms if ts_ms is not None else now_ms())
         uid = str(user_id).strip()
@@ -650,7 +662,7 @@ class BondStageEngine:
             transition_status=transition_status,
             score_delta=delta,
             total_score=state.total_score,
-            evidence_refs=list(evidence_refs),
+            evidence_refs=refs,
             transition_id=transition_id,
             ts_ms=ts,
             detail=detail,
@@ -773,6 +785,22 @@ class BondStageEngine:
         """获取用户当前 Bond 积分状态。"""
         return self._get_or_create_state(str(user_id).strip())
 
+    def peek_state(self, user_id: str) -> BondScoreState | None:
+        """Read a detached state snapshot without creating/logging a new user.
+
+        Persisted state may be replayed from the existing audit log, but this
+        method never populates ``_states`` and never emits the legacy INIT row.
+        Returning a deep copy also prevents projection consumers from mutating
+        the live in-process score/stage object.
+        """
+        uid = str(user_id or "").strip()
+        if not uid:
+            return None
+        state = self._states.get(uid)
+        if state is None:
+            state = self._restore_state_from_log(uid)
+        return deepcopy(state) if state is not None else None
+
     def get_bond_state(self, *, session_id: str | None = None, user_id: str | None = None) -> BondStateSnapshot:
         identity = str(user_id or session_id or "").strip()
         state = self._get_or_create_state(identity)
@@ -821,116 +849,81 @@ class BondStageEngine:
         if self._ledger is None:
             return None
         try:
-            db_path = getattr(self._ledger, "_db_path", None) or getattr(self._ledger, "db_path", None)
-            if not db_path:
+            repository = BondHistoryRepository.from_ledger(self._ledger)
+            if repository is None:
                 return None
-            import sqlite3 as _sqlite3
-            conn = _sqlite3.connect(db_path)
-            try:
-                # 优先：读最近一条 STAGE_TRANSITION 的 payload.total_score
-                # 注意：STAGE_TRANSITION 可能写入 bond_stage_transition_log 或 bond_update_log，
-                # 需要同时查两张表，取最新的一条
-                row = None
-                # 先尝试 bond_stage_transition_log（log_bond_stage_transition 路径）
+            snapshot = repository.load_restore_snapshot(user_id=user_id)
+            row = snapshot["transition"]
+
+            # 策略1：优先从最近一条 STAGE_TRANSITION 的 payload 中读取 total_score
+            if row is not None:
                 try:
-                    row = conn.execute(
-                        "SELECT payload, ts_ms FROM bond_stage_transition_log "
-                        "WHERE transition_status IN ('PROMOTED','DEMOTED','STABLE') "
-                        "AND user_id=? "
-                        "ORDER BY ts_ms DESC LIMIT 1",
-                        (user_id,),
-                    ).fetchone()
-                except Exception:
-                    pass  # 表不存在时降级到 bond_update_log
-                # 再尝试 bond_update_log（log_bond_update 路径）
-                if row is None:
-                    row = conn.execute(
-                        "SELECT payload, ts_ms FROM bond_update_log "
-                        "WHERE update_kind='STAGE_TRANSITION' AND status='SUCCESS' "
-                        "AND user_id=? "
-                        "ORDER BY ts_ms DESC LIMIT 1",
-                        (user_id,),
-                    ).fetchone()
-
-                import json as _json
-
-                # 策略1：优先从最近一条 STAGE_TRANSITION 的 payload 中读取 total_score
-                # 这是最可靠的恢复方式，避免累加历史负分事件导致积分偏低
-                if row is not None:
-                    try:
-                        payload_data = _json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
-                        saved_score = int(payload_data.get("total_score", 0))
-                        saved_ts = int(row[1] or 0)
-                        if saved_score > 0:
-                            # 在 STAGE_TRANSITION 之后的增量事件也需要累加
-                            delta_rows = conn.execute(
-                                "SELECT update_kind, payload, ts_ms FROM bond_update_log "
-                                "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
-                                "AND status IN ('OK','SUCCESS') "
-                                "AND ts_ms > ? "
-                                "AND user_id=? "
-                                "ORDER BY ts_ms ASC",
-                                (saved_ts, user_id),
-                            ).fetchall()
-                            total_score, delta_count, last_delta_ts, recent_scores = self._restore_score_from_event_rows(
-                                delta_rows,
+                    payload_data = (
+                        json.loads(row[0])
+                        if isinstance(row[0], str)
+                        else (row[0] or {})
+                    )
+                    saved_score = int(payload_data.get("total_score", 0))
+                    saved_ts = int(row[1] or 0)
+                    if saved_score > 0:
+                        total_score, delta_count, last_delta_ts, recent_scores = (
+                            self._restore_score_from_event_rows(
+                                snapshot["delta_rows"],
                                 initial_score=saved_score,
                             )
-                            last_ts = max(saved_ts, last_delta_ts)
-                            event_count_row = conn.execute(
-                                "SELECT COUNT(*), MAX(ts_ms) FROM bond_update_log "
-                                "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
-                                "AND status IN ('OK','SUCCESS') "
-                                "AND user_id=?",
-                                (user_id,),
-                            ).fetchone()
-                            event_count = int(event_count_row[0] or 0) if event_count_row else delta_count
-                            if event_count_row and event_count_row[1]:
-                                last_ts = max(last_ts, int(event_count_row[1]))
-                            stage = self._compute_stage(total_score)
-                            state = BondScoreState(
-                                user_id=user_id,
-                                total_score=total_score,
-                                current_stage=stage,
-                                event_count=event_count,
-                                last_event_ts_ms=last_ts,
-                                recent_scores=recent_scores,
+                        )
+                        last_ts = max(saved_ts, last_delta_ts)
+                        event_count = int(snapshot["event_count"] or delta_count)
+                        if snapshot["last_event_ts_ms"]:
+                            last_ts = max(
+                                last_ts,
+                                int(snapshot["last_event_ts_ms"]),
                             )
-                            _logger.info(
-                                "Bond 状态从 STAGE_TRANSITION 恢复: user=%s stage=%s score=%d events=%d",
-                                user_id, stage, total_score, event_count,
-                            )
-                            return state
-                    except Exception as _parse_exc:
-                        _logger.warning("Bond STAGE_TRANSITION payload 解析失败，降级为累加模式: %s", _parse_exc)
+                        stage = self._compute_stage(total_score)
+                        state = BondScoreState(
+                            user_id=user_id,
+                            total_score=total_score,
+                            current_stage=stage,
+                            event_count=event_count,
+                            last_event_ts_ms=last_ts,
+                            recent_scores=recent_scores,
+                        )
+                        _logger.info(
+                            "Bond 状态从 STAGE_TRANSITION 恢复: user=%s stage=%s score=%d events=%d",
+                            user_id,
+                            stage,
+                            total_score,
+                            event_count,
+                        )
+                        return state
+                except Exception as parse_exc:
+                    _logger.warning(
+                        "Bond STAGE_TRANSITION payload 解析失败，降级为累加模式: %s",
+                        parse_exc,
+                    )
 
-                # 策略2：无 STAGE_TRANSITION 时，累加所有历史事件积分（排除负分衰减事件）
-                event_rows = conn.execute(
-                    "SELECT update_kind, payload, ts_ms FROM bond_update_log "
-                    "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION','IDLE_DECAY') "
-                    "AND status IN ('OK','SUCCESS') "
-                    "AND user_id=? "
-                    "ORDER BY ts_ms ASC",
-                    (user_id,),
-                ).fetchall()
-                total_score, event_count, last_ts, recent_scores = self._restore_score_from_event_rows(event_rows)
-                if total_score > 0:
-                    stage = self._compute_stage(total_score)
-                    state = BondScoreState(
-                        user_id=user_id,
-                        total_score=total_score,
-                        current_stage=stage,
-                        event_count=event_count,
-                        last_event_ts_ms=last_ts,
-                        recent_scores=recent_scores,
-                    )
-                    _logger.info(
-                        "Bond 状态从日志恢复: user=%s stage=%s score=%d events=%d",
-                        user_id, stage, total_score, event_count,
-                    )
-                    return state
-            finally:
-                conn.close()
+            # 策略2：无有效 transition 时，累加全部非衰减历史事件。
+            total_score, event_count, last_ts, recent_scores = (
+                self._restore_score_from_event_rows(snapshot["fallback_rows"])
+            )
+            if total_score > 0:
+                stage = self._compute_stage(total_score)
+                state = BondScoreState(
+                    user_id=user_id,
+                    total_score=total_score,
+                    current_stage=stage,
+                    event_count=event_count,
+                    last_event_ts_ms=last_ts,
+                    recent_scores=recent_scores,
+                )
+                _logger.info(
+                    "Bond 状态从日志恢复: user=%s stage=%s score=%d events=%d",
+                    user_id,
+                    stage,
+                    total_score,
+                    event_count,
+                )
+                return state
         except Exception as exc:
             _logger.warning("Bond 状态恢复失败（降级为新状态）: %s", exc)
         return None

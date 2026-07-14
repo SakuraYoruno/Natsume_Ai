@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from host_brain.app.skill_dag_planner import build_skill_dag_plan, merge_plan_steps_with_dag
+from host_brain.executive_runtime.skill_dag import build_skill_dag_plan, merge_plan_steps_with_dag
 
 
 def test_build_skill_dag_plan_creates_parallel_cluster_and_barrier() -> None:
@@ -110,4 +110,3 @@ def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
     assert dag.nodes[0].args_payload["workspace_strategy"] == "runtime_repo"
     assert dag.nodes[0].args_payload["task"] == "fix failing test"
     assert merged_steps[0]["args_payload"]["workspace_strategy"] == "runtime_repo"
-

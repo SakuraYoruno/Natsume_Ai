@@ -9,7 +9,7 @@ test_bond_sqlite_persistence.py —— 审计修复 #10 单元测试
 from __future__ import annotations
 
 import os
-import tempfile
+import shutil
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -19,6 +19,25 @@ from host_brain.bond.neo4j_client import (
     InMemoryNeo4jBondClient,
     SqliteBondClient,
 )
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+
+
+@pytest.fixture(scope="module")
+def bond_schema_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    db_path = tmp_path_factory.mktemp("bond-schema") / "template.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="bond-sqlite-unit-template",
+        ts_ms=1_800_000_000_000,
+    )
+    assert result.success is True, result.as_dict()
+    return db_path
+
+
+@pytest.fixture
+def migrated_bond_db(bond_schema_template: Path, tmp_path: Path) -> Path:
+    db_path = tmp_path / "bond.sqlite3"
+    shutil.copyfile(bond_schema_template, db_path)
+    return db_path
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +47,9 @@ from host_brain.bond.neo4j_client import (
 class TestSqliteBondClientPersistence:
     """SqliteBondClient 持久化测试。"""
 
-    def test_write_and_read_survives_reconnect(self, tmp_path):
+    def test_write_and_read_survives_reconnect(self, migrated_bond_db: Path):
         """验证写入事件后重新连接（模拟进程重启）仍可读取。"""
-        db_path = tmp_path / "bond_test.db"
+        db_path = migrated_bond_db
 
         # 第一次连接：写入事件
         client1 = SqliteBondClient(db_path=db_path)
@@ -55,9 +74,9 @@ class TestSqliteBondClientPersistence:
         assert event["user_id"] == "user-alice"
         assert event["payload"]["emotion_tag"] == "JOY"
 
-    def test_trace_user_events_returns_all_events(self, tmp_path):
+    def test_trace_user_events_returns_all_events(self, migrated_bond_db: Path):
         """验证 trace_user_events 返回用户所有事件（按时间排序）。"""
-        db_path = tmp_path / "bond_trace.db"
+        db_path = migrated_bond_db
         client = SqliteBondClient(db_path=db_path)
 
         for i in range(3):
@@ -79,9 +98,9 @@ class TestSqliteBondClientPersistence:
         ts_list = [e["ts_ms"] for e in events]
         assert ts_list == sorted(ts_list)
 
-    def test_upsert_replaces_existing_event(self, tmp_path):
+    def test_upsert_replaces_existing_event(self, migrated_bond_db: Path):
         """验证 INSERT OR REPLACE 语义：相同 event_id 会覆盖旧记录。"""
-        db_path = tmp_path / "bond_upsert.db"
+        db_path = migrated_bond_db
         client = SqliteBondClient(db_path=db_path)
 
         client.write_bond_event(
@@ -111,9 +130,9 @@ class TestSqliteBondClientPersistence:
         assert event is not None
         assert event["payload"]["version"] == 2
 
-    def test_single_writer_policy_enforced(self, tmp_path):
+    def test_single_writer_policy_enforced(self, migrated_bond_db: Path):
         """验证单写者策略：非法 writer_id 抛出 PermissionError。"""
-        db_path = tmp_path / "bond_perm.db"
+        db_path = migrated_bond_db
         client = SqliteBondClient(db_path=db_path)
 
         with pytest.raises(PermissionError):
@@ -129,9 +148,9 @@ class TestSqliteBondClientPersistence:
                 ts_ms=1000000,
             )
 
-    def test_empty_evidence_refs_raises(self, tmp_path):
+    def test_empty_evidence_refs_raises(self, migrated_bond_db: Path):
         """验证空 evidence_refs 抛出 ValueError。"""
-        db_path = tmp_path / "bond_evidence.db"
+        db_path = migrated_bond_db
         client = SqliteBondClient(db_path=db_path)
 
         with pytest.raises(ValueError):
@@ -147,9 +166,9 @@ class TestSqliteBondClientPersistence:
                 ts_ms=1000000,
             )
 
-    def test_get_event_returns_none_for_missing(self, tmp_path):
+    def test_get_event_returns_none_for_missing(self, migrated_bond_db: Path):
         """验证 get_event 对不存在的 event_id 返回 None。"""
-        db_path = tmp_path / "bond_missing.db"
+        db_path = migrated_bond_db
         client = SqliteBondClient(db_path=db_path)
         assert client.get_event("nonexistent") is None
 
@@ -163,7 +182,7 @@ class TestGetBondNeo4jClient:
 
     def test_default_returns_in_memory_client(self):
         """验证默认（无环境变量）返回 InMemoryNeo4jBondClient。"""
-        from host_brain.app.dependencies import get_bond_neo4j_client
+        from host_brain.composition.process_services import get_bond_neo4j_client
 
         with patch.dict(os.environ, {}, clear=False):
             # 清除相关环境变量
@@ -180,7 +199,7 @@ class TestGetBondNeo4jClient:
 
     def test_sqlite_backend_returns_sqlite_client(self, tmp_path):
         """验证 HOST_BOND_BACKEND=sqlite 返回 SqliteBondClient。"""
-        from host_brain.app.dependencies import get_bond_neo4j_client
+        from host_brain.composition.process_services import get_bond_neo4j_client
 
         db_path = str(tmp_path / "bond_env.db")
         with patch.dict(os.environ, {
@@ -192,7 +211,7 @@ class TestGetBondNeo4jClient:
 
     def test_sqlite_path_env_auto_upgrades_to_sqlite(self, tmp_path):
         """验证仅设置 HOST_BOND_SQLITE_PATH 也会自动升级为 SqliteBondClient。"""
-        from host_brain.app.dependencies import get_bond_neo4j_client
+        from host_brain.composition.process_services import get_bond_neo4j_client
 
         db_path = str(tmp_path / "bond_auto.db")
         env_backup = os.environ.pop("HOST_BOND_BACKEND", None)
@@ -214,7 +233,7 @@ class TestBondUpdateQueueWriterFactory:
 
     def test_writer_factory_uses_get_bond_neo4j_client(self, tmp_path):
         """验证 writer_factory 创建的 BondDynamicsWriter 使用持久化客户端。"""
-        from host_brain.app.dependencies import get_bond_neo4j_client
+        from host_brain.composition.process_services import get_bond_neo4j_client
         from host_brain.bond.bond_dynamics import BondDynamicsWriter
 
         db_path = str(tmp_path / "bond_queue.db")

@@ -1,28 +1,28 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from host_brain.app.context.affect_state import AffectStateBlock, resolve_affect_state
-from host_brain.app.context.conversation_interpretation import (
+from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
+from host_brain.persona.context.conversation_interpretation import (
     ConversationInterpretation,
     coerce_conversation_interpretation,
 )
-from host_brain.app.context.drive_state import DriveStateBlock, resolve_drive_state
-from host_brain.app.context.interaction_thread import (
+from host_brain.persona.context.drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.persona.context.interaction_thread import (
     InteractionThreadState,
     coerce_interaction_thread_state,
 )
-from host_brain.app.context.relationship_state import (
+from host_brain.persona.context.relationship_state import (
     RelationshipStateBlock,
     _LOVER_STAGES,
     _SOULMATE_STAGES,
     resolve_relationship_state,
 )
-from host_brain.app.reply_modality_router import route_reply_modality
-from host_brain.app.response_form_contract import normalize_response_form
-from host_brain.app.context.tactic_ledger import TacticLedgerBlock, coerce_tactic_ledger_block
-from host_brain.app.context.topic_ledger import TopicLedgerBlock, coerce_topic_ledger_block
+from host_brain.persona.reply_modality_router import route_reply_modality
+from host_brain.persona.response_form_contract import normalize_response_form
+from host_brain.persona.context.tactic_ledger import TacticLedgerBlock, coerce_tactic_ledger_block
+from host_brain.persona.context.topic_ledger import TopicLedgerBlock, coerce_topic_ledger_block
 from host_brain.persona.affect_policy import build_affect_policy
 from host_brain.persona.reply_tactics import (
     canonical_tactic_signature,

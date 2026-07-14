@@ -152,6 +152,7 @@ def _apply_signature_texture_scoring(
     from host_brain.persona.surface.scene_constants import (
         _LOVER_RELATIONSHIP_STAGES,
         _SIGNATURE_FLAT_SAFE_RE,
+        _SIGNATURE_TEXTURE_STAGES,
     )
 
     if _positive_stage_scene_blocked(reason_codes):
@@ -190,7 +191,7 @@ def _apply_signature_texture_scoring(
         reason_codes.append("SIGNATURE_TEXTURE_MATCH:" + ",".join(hits[:5]))
         return min(9.0, delta)
 
-    if stage in _LOVER_RELATIONSHIP_STAGES and 6 <= len(text) <= 46:
+    if stage in _SIGNATURE_TEXTURE_STAGES and 6 <= len(text) <= 46:
         missing_is_visible = bool(_SIGNATURE_FLAT_SAFE_RE.search(text)) or not any(
             _relationship_marker_hit(text, marker)
             for marker in relationship_profile.prefer_markers

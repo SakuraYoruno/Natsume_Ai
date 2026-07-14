@@ -1,0 +1,20 @@
+[project]
+name = "natsume-contracts"
+version = "0.1.0"
+description = "Runtime-neutral versioned contracts for Natsume components"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+  "natsume_contracts",
+  "natsume_contracts.edge",
+  "natsume_contracts.identity",
+  "natsume_contracts.life",
+  "natsume_contracts.task",
+]
+package-dir = {natsume_contracts = "."}

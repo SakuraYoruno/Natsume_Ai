@@ -1,1 +1,0 @@
-import{c as e,f as t,p as n}from"./endpointClient-ChPAN55a.js";function r(r={}){return e(n(t.operations.promptBuilderStats,{},r))}export{r as t};

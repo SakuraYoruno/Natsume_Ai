@@ -1,0 +1,107 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0493",
+  "milestone": "M48-B",
+  "status": "DONE",
+  "baseline_commit": "840680d18f21c8b3c2d42668bd06129e440d63af",
+  "implementation_commit": "c9b72d5a9681ddd526406e446db456648192d8dd",
+  "recorded_at": "2026-07-12",
+  "scope": {
+    "feature_flag": "EDGE_CONTRACTS_ONLY_GUARD_MODE",
+    "modes": ["FREEZE_NEW", "REPORT", "ENFORCE"],
+    "default_mode": "FREEZE_NEW",
+    "delivery_gate_mode": "FREEZE_NEW pinned in code; environment cannot downgrade it",
+    "source_roots": ["edge_client", "host_brain", "natsume_contracts"],
+    "host_composition_exception": "host_brain/composition/** is the sole Host-to-Edge concrete wiring exception",
+    "runtime_modules_imported_by_scanner": false,
+    "live_services_sockets_network_or_devices_changed": false
+  },
+  "inventory": {
+    "schema_version": 1,
+    "policy_id": "TASK-0493_EDGE_CONTRACTS_ONLY",
+    "finding_count": 122,
+    "fingerprints_sha256": "sha256:30d220048dc6f6e15013d4f3246cee96eca7d665cb37604e2c728a0c013c9bed",
+    "directions": {
+      "EDGE_TO_HOST": 97,
+      "HOST_TO_EDGE": 25,
+      "CONTRACTS_TO_IMPLEMENTATION": 0
+    },
+    "kinds": {
+      "edge_to_host_static_imports": 96,
+      "edge_to_host_filesystem_couplings": 1,
+      "host_to_edge_static_imports": 19,
+      "host_to_edge_content_addressed_dynamic_risks": 6
+    },
+    "scan_violations": 0,
+    "reproducible_source_snapshot": "840680d18f21c8b3c2d42668bd06129e440d63af"
+  },
+  "migration": {
+    "manifest": "tools/architecture/edge_host_import_migration.json",
+    "content_sha256": "sha256:bdb8b12e3068d7d3d9bca0637be9601c34ab442470c732c1eb9b537cca46b898",
+    "group_count": 54,
+    "edge_to_host_groups": 42,
+    "host_to_edge_groups": 12,
+    "remove_by": "TASK-0581",
+    "mapping": "every finding maps to exactly one owned migration group and every group maps current debt"
+  },
+  "guard_invariants": [
+    "all Python and stub files in the guarded roots are parsed as UTF-8-SIG AST without importing owner runtime modules",
+    "module, local, conditional, TYPE_CHECKING, try/except and constant dynamic imports are included",
+    "fingerprints include direction, exact path, typed scope, predicate-addressed control context, kind, symbol, binding and occurrence",
+    "line-only movement is tolerated while function-to-class, eager-to-conditional and predicate changes create new and stale fingerprints",
+    "importlib, importlib.util, importlib.machinery, runpy, pkgutil, pydoc, zipimport, builtins and exec/eval/compile loader families fail closed",
+    "keyword calls, star imports, reflective attribute or dictionary lookup, higher-order calls, tuple/default/named aliases, callable containers, class attributes, return and yield escape paths are covered",
+    "unresolved Edge or Contracts dynamic execution is a terminal scan failure in every mode including REPORT",
+    "existing unresolved Host loader sites are frozen with a full source-file SHA-256 and owned TASK-0581 migration entries",
+    "natsume_contracts permits only an explicit pure standard-library allowlist and rejects framework, storage, provider, network and other external implementations",
+    "constant names, concatenation, f-strings, constant conditions and format expressions cannot hide the recorded Edge-to-Host filesystem coupling",
+    "FREEZE_NEW rejects both new debt and stale baseline or migration entries; ENFORCE rejects all remaining implementation edges",
+    "no baseline regeneration, accept-current or runtime-import backdoor is shipped"
+  ],
+  "recorded_non_import_couplings": [
+    "Edge gateway default data path enters host_brain and is enforced as E2H-042",
+    "Edge VTS mapping documents manual synchronization with a Host mapping surface",
+    "Host release manifest generation hashes Edge ASR source",
+    "Edge TTS setup injects repository-root/PYTHONPATH state",
+    "Host and Edge still share HOST_INTERNAL_TRIBE_TOKEN naming"
+  ],
+  "validation": [
+    {
+      "kind": "guard_unit_wave",
+      "command": "python -m pytest tests/unit/test_task0493_edge_contracts_guard.py -q",
+      "result": "64 passed in 8.99s",
+      "coverage": "modes, exact debt, static/local imports, content-addressed dynamic loader families, aliases, callable flow, predicate fingerprints, Contracts allowlist, path folding, migration tamper and non-downgradable delivery adapter"
+    },
+    {
+      "kind": "contract_and_aggregator_wave",
+      "command": "python -m pytest tests/contract/test_task0493_edge_contracts_guard_contract.py tests/unit/test_nle_boundary_scan.py -q",
+      "result": "47 passed in 14.27s",
+      "coverage": "repository inventory/digests, cleanup commit reproducibility, 54 migration groups and static-scan aggregation"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest tests/integration/test_task0493_edge_contracts_delivery_gate_integration.py -q",
+      "result": "1 passed, 17 warnings in 99.92s",
+      "execution_count": 1,
+      "first_attempt_passed": true,
+      "coverage": "the real Delivery Gate aggregate executes the exact non-downgradable FREEZE_NEW boundary",
+      "real_socket_process_network_or_physical_effects": false,
+      "warnings": "existing invalid-escape DeprecationWarnings from unrelated scanned repository sources"
+    },
+    {
+      "kind": "independent_read_only_audit",
+      "result": "P0/P1 cleared after remediation of dynamic-loader, callable-flow, predicate, Contracts purity and constant-path bypass classes"
+    },
+    {
+      "kind": "static_validation",
+      "result": "py_compile, git diff --check, exact digest/migration invariants and baseline source-root diff passed"
+    }
+  ],
+  "rollback": [
+    "Keep the Delivery Gate pinned to FREEZE_NEW; REPORT is diagnostics only and must never replace CI authority.",
+    "When a new dependency is rejected, remove or route it through natsume_contracts or an approved port; do not enlarge the baseline to obtain green.",
+    "When recorded debt disappears, intentionally shrink both baseline and migration evidence; stale debt remains blocking.",
+    "Do not switch to ENFORCE until TASK-0581 removes all implementation edges and independent Edge install/import/test passes.",
+    "On invalid mode, baseline, manifest or incomplete dynamic analysis, fail closed and preserve the last reviewed evidence."
+  ]
+}

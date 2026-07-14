@@ -8,7 +8,10 @@ This adapter keeps only the pieces required by the current architecture:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -22,6 +25,53 @@ from edge_client.runtime_texts import edge_runtime_text
 from edge_client.services.wx_db_service import WxDbService, WxMessage
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wechat")
+
+
+_SENSITIVE_INBOUND_KEYS = frozenset(
+    {
+        "accesstoken",
+        "appsecret",
+        "apitoken",
+        "authorization",
+        "bearertoken",
+        "bodybytes",
+        "cookie",
+        "encrypt",
+        "encryptedbody",
+        "msgsignature",
+        "password",
+        "rawbody",
+        "rawbytes",
+        "rawpayload",
+        "refreshtoken",
+        "requestbody",
+        "secret",
+        "setcookie",
+        "signature",
+        "token",
+        "verificationtoken",
+        "verifytoken",
+        "webhooksignature",
+        "xwechattoken",
+    }
+)
+_SENSITIVE_INBOUND_KEY_PARTS = frozenset(
+    {
+        "authorization",
+        "bodybytes",
+        "cookie",
+        "credential",
+        "encrypt",
+        "password",
+        "rawbody",
+        "rawbytes",
+        "rawpayload",
+        "requestbody",
+        "secret",
+        "signature",
+        "token",
+    }
+)
 
 
 class WeChatAdapter(AbstractPlatformAdapter):
@@ -76,6 +126,11 @@ class WeChatAdapter(AbstractPlatformAdapter):
             if msg_type == MsgType.TEXT and (not content):
                 self._stats["inbound_skipped"] += 1
                 return None
+            identity_sha256 = self._canonical_inbound_digest(raw_payload)
+            msg_id = self._resolve_inbound_msg_id(
+                raw_payload,
+                identity_sha256=identity_sha256,
+            )
             ts_ms = self._resolve_inbound_ts_ms(raw_payload)
             media_url = self._resolve_inbound_media_url(raw_payload)
             sender_name = str(raw_payload.get("sender_name") or raw_payload.get("sender") or from_wxid or "").strip() or None
@@ -85,14 +140,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
             )
             self._stats["inbound_parsed"] += 1
             attachments = self._build_attachments(
-                msg_id=str(raw_payload.get("msg_id") or raw_payload.get("id") or f"wechat-{ts_ms}"),
+                msg_id=msg_id,
                 msg_type=msg_type,
                 media_url=media_url,
                 content=content,
                 raw_payload=raw_payload,
             )
             return UnifiedMessage(
-                msg_id=str(raw_payload.get("msg_id") or raw_payload.get("id") or f"wechat-{ts_ms}"),
+                msg_id=msg_id,
                 platform=Platform.WECHAT,
                 from_id=from_wxid or conversation_id,
                 to_id=self._resolve_inbound_to_wxid(raw_payload),
@@ -104,10 +159,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 media_url=media_url,
                 attachments=attachments,
                 sender_name=sender_name,
-                raw_extra=dict(raw_payload),
+                raw_extra=self._safe_inbound_extra(raw_payload),
             )
         except Exception as exc:
-            logger.warning("WeChatAdapter: parse_inbound failed: %s", exc)
+            # Exception messages can echo malformed payload values.  Keep the
+            # operational signal without writing tokens or raw bodies to logs.
+            logger.warning(
+                "WeChatAdapter: parse_inbound failed error_type=%s",
+                exc.__class__.__name__,
+            )
             self._stats["inbound_skipped"] += 1
             return None
 
@@ -324,11 +384,6 @@ class WeChatAdapter(AbstractPlatformAdapter):
     @staticmethod
     def _bridge_backend() -> str:
         backend = str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4") or "wxautox4").strip().lower() or "wxautox4"
-        if backend == "uia":
-            logger.warning(
-                "WeChatAdapter: legacy EDGE_WECHAT_BRIDGE_BACKEND=uia is no longer supported; falling back to wxautox4"
-            )
-            return "wxautox4"
         if backend in {"wxautox4", "external"}:
             return backend
         return "wxautox4"
@@ -780,16 +835,113 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return 1
 
     @staticmethod
+    def _normalized_inbound_key(value: object) -> str:
+        return "".join(char for char in str(value).lower() if char.isalnum())
+
+    @classmethod
+    def _safe_inbound_value(cls, value: Any) -> Any:
+        """Return a deterministic JSON-safe value without auth/raw-body fields."""
+        if isinstance(value, dict):
+            safe: dict[str, Any] = {}
+            for key, item in value.items():
+                normalized_key = cls._normalized_inbound_key(key)
+                if (
+                    normalized_key in _SENSITIVE_INBOUND_KEYS
+                    or any(
+                        part in normalized_key
+                        for part in _SENSITIVE_INBOUND_KEY_PARTS
+                    )
+                ):
+                    continue
+                safe[str(key)] = cls._safe_inbound_value(item)
+            return safe
+        if isinstance(value, (list, tuple)):
+            return [cls._safe_inbound_value(item) for item in value]
+        if value is None or isinstance(value, (str, int, bool)):
+            return value
+        if isinstance(value, float):
+            if math.isfinite(value):
+                return value
+            return {"type": "non_finite_float", "value": str(value)}
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            raw_bytes = bytes(value)
+            return {
+                "type": "bytes_digest",
+                "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+                "size_bytes": len(raw_bytes),
+            }
+        return {"type": type(value).__name__, "value": str(value)}
+
+    @classmethod
+    def _safe_inbound_extra(cls, raw_payload: dict[str, Any]) -> dict[str, Any]:
+        safe = cls._safe_inbound_value(raw_payload)
+        return safe if isinstance(safe, dict) else {}
+
+    @classmethod
+    def _canonical_inbound_digest(cls, raw_payload: dict[str, Any]) -> str:
+        canonical_payload = cls._safe_inbound_extra(raw_payload)
+        encoded = json.dumps(
+            canonical_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _resolve_inbound_msg_id(
+        raw_payload: dict[str, Any],
+        *,
+        identity_sha256: str,
+    ) -> str:
+        # Prefer the platform/bridge identifier.  The digest fallback binds the
+        # semantic payload and is stable across JSON object key ordering.
+        for key in (
+            "msg_id",
+            "message_id",
+            "id",
+            "MsgId",
+            "MsgID",
+            "NewMsgId",
+            "new_msg_id",
+            "MsgSvrID",
+            "msg_svr_id",
+            "SvrId",
+            "server_id",
+        ):
+            raw_value = raw_payload.get(key)
+            if raw_value is None:
+                continue
+            value = str(raw_value).strip()
+            if value:
+                return value
+        return f"wechat-sha256-{identity_sha256}"
+
+    @staticmethod
     def _resolve_inbound_ts_ms(raw_payload: dict[str, Any]) -> int:
-        for key, multiplier in (("ts_ms", 1), ("ts", 1000), ("CreateTime", 1000)):
+        for key, multiplier in (
+            ("ts_ms", 1),
+            ("timestamp_ms", 1),
+            ("ts", 1000),
+            ("timestamp", 1000),
+            ("CreateTime", 1000),
+            ("create_time", 1000),
+        ):
             raw_value = raw_payload.get(key)
             if raw_value is None or raw_value == "":
                 continue
+            if isinstance(raw_value, bool):
+                continue
             try:
-                return int(float(raw_value) * multiplier)
+                parsed = float(raw_value)
+                if not math.isfinite(parsed):
+                    continue
+                return int(parsed * multiplier)
             except (TypeError, ValueError):
                 continue
-        return int(time.time() * 1000)
+        # Do not manufacture an event time from the local wall clock: retries
+        # of the same authenticated body must produce the same durable payload.
+        return 0
 
     @staticmethod
     def _fallback_content_for_msg_type(msg_type: MsgType) -> str:

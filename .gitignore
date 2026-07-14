@@ -40,6 +40,9 @@ ENV/
 # --- Node.js ---
 node_modules/
 host_brain/app/monitor_ui/test-results/
+# Vite output is a release-staging artifact.  Source, lockfiles and the
+# generated API contract remain tracked; content-hashed bundles do not.
+/host_brain/app/static/monitor/
 
 # --- Build / package artifacts ---
 build/

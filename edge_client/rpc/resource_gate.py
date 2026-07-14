@@ -5,14 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    EdgeVoiceEventLedger,
+    RESOURCE_GATE_PREEMPTED,
     VOICE_GATE_PREEMPTED,
     VOICE_GATE_PRIORITY_BLOCKED,
     VOICE_GATE_RESOURCE_LIMITED,
     VOICE_GATE_TASK_INVALID,
+    new_request_id,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 
 
 TASK_ASR_INGRESS = "ASR_INGRESS"
@@ -51,7 +53,7 @@ class ResourceGateDecision:
 # M15-E: ResourcePreemptionEvent（优先级抢占审计事件）
 # ---------------------------------------------------------------------------
 
-from host_brain.core.errors import RESOURCE_GATE_PREEMPTED as _RESOURCE_GATE_PREEMPTED  # noqa: E402
+_RESOURCE_GATE_PREEMPTED = RESOURCE_GATE_PREEMPTED
 
 
 @dataclass(frozen=True)
@@ -92,8 +94,6 @@ def build_resource_preemption_event(
     - preemptor/preempted 必须是合法的 TASK_* 常量
     - evidence_ref 必填
     """
-    from host_brain.core.ids import new_request_id as _new_request_id, now_ms as _now_ms
-
     valid_tasks = set(TASK_PRIORITY.keys())
     if preemptor not in valid_tasks:
         raise ValueError(f"invalid preemptor task: {preemptor!r}")
@@ -103,11 +103,11 @@ def build_resource_preemption_event(
         raise ValueError("ResourcePreemptionEvent requires evidence_ref")
 
     return ResourcePreemptionEvent(
-        event_id=event_id or _new_request_id(),
+        event_id=event_id or new_request_id(),
         preemptor=str(preemptor),
         preempted=str(preempted),
         reason_code=_RESOURCE_GATE_PREEMPTED,
-        ts_ms=int(ts_ms if ts_ms is not None else _now_ms()),
+        ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
         evidence_ref=str(evidence_ref),
     )
 
@@ -118,7 +118,7 @@ class VoiceResourceGate:
     def __init__(
         self,
         *,
-        ledger: SQLiteLedger | None = None,
+        ledger: EdgeVoiceEventLedger | None = None,
         vram_soft_limit_ratio: float = 0.90,
         max_fallback_queue_depth: int = 1,
     ) -> None:

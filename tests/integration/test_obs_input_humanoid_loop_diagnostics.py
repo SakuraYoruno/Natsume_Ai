@@ -4,25 +4,25 @@ import time
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from tests.fakes.obs_projection_runtime import LedgerStatsRefreshingTestClient, compose_durable_obs_projection_runtime
 
 
 @pytest.fixture
-def ledger():
-    db = SQLiteLedger(":memory:", check_same_thread=False)
-    yield db
-    db.close()
+def ledger(tmp_path, request):
+    composition = compose_durable_obs_projection_runtime(tmp_path, request_id="obs-input-diagnostics")
+    runtime = composition.__enter__()
+    request.addfinalizer(lambda: composition.__exit__(None, None, None))
+    yield runtime.ledger
 
 
 @pytest.fixture
 def client(ledger):
     app = FastAPI()
     app.include_router(router)
-    set_ledger_provider(lambda: ledger)
-    return TestClient(app)
+    return LedgerStatsRefreshingTestClient(app)
 
 
 def _log_input_event(
@@ -158,8 +158,9 @@ def test_input_humanoid_loop_diagnostics_returns_root_cause_summary(client, ledg
 
     no_touch_item = by_request["req-diag-no-touch"]
     assert no_touch_item["root_cause_code"] == "COMPLETED_WITHOUT_HUMANOID_TOUCH"
-    assert no_touch_item["input_text"] == "发封邮件告诉我今天的安排"
-    assert no_touch_item["output_text"] == "今天的安排已经整理好了"
+    # Private input/output bodies never enter the operator projection.
+    assert no_touch_item["input_text"] is None
+    assert no_touch_item["output_text"] is None
     assert "ACK_TOUCH_LOW" in no_touch_item["evidence_codes"]
 
     deviation_item = by_request["req-diag-deviation"]

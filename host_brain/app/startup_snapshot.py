@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 from host_brain.core.ids import now_ms
+
+
+_current_snapshot_lock = threading.Lock()
+_current_snapshot: "StartupHealthSnapshot | None" = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,23 @@ def snapshot_to_dict(snapshot: StartupHealthSnapshot) -> dict[str, Any]:
         "bond_migration_summary": snapshot.bond_migration_summary,
         "snapshot_hash": snapshot.snapshot_hash,
     }
+
+
+def set_current_startup_snapshot(snapshot: StartupHealthSnapshot) -> None:
+    """Publish the immutable snapshot produced by the startup source job."""
+
+    if not isinstance(snapshot, StartupHealthSnapshot):
+        raise TypeError("snapshot must be a StartupHealthSnapshot")
+    global _current_snapshot
+    with _current_snapshot_lock:
+        _current_snapshot = snapshot
+
+
+def peek_current_startup_snapshot() -> StartupHealthSnapshot | None:
+    """Peek the startup snapshot; never rebuild probes or initialize stores."""
+
+    with _current_snapshot_lock:
+        return _current_snapshot
 
 
 def verify_snapshot_hash(snapshot: StartupHealthSnapshot) -> bool:

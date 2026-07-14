@@ -31,12 +31,18 @@ class _FakePrefrontal:
         }
 
 
-def test_emergent_growth_weekly_delegates_to_prefrontal(monkeypatch) -> None:
+def test_emergent_growth_weekly_delegates_to_prefrontal() -> None:
     fake_prefrontal = _FakePrefrontal()
-    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_prefrontal_agent", lambda: fake_prefrontal)
-    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: object())
 
-    result = execute_emergent_growth_weekly(args={"user_id": "u-eg", "lookback_days": 9, "use_llm": False})
+    result = execute_emergent_growth_weekly(
+        args={"user_id": "u-eg", "lookback_days": 9},
+        context={
+            "request_id": "req-eg-weekly",
+            "model_attempt_service": object(),
+            "prefrontal_agent": fake_prefrontal,
+            "episodic_store": object(),
+        },
+    )
 
     assert result["status"] == "OK"
     assert result["growth_result"]["applied"] is True

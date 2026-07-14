@@ -2,64 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
-import sqlite3
 import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from host_brain.app.settings.codex_spark import CodexSparkReplyJudgeSettings
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
 
-_DEFAULT_MODEL_ID = "gpt-5.3-codex-spark"
-_DEFAULT_TIMEOUT_MS = 12_000
+
 _MAX_TEXT_CHARS = 420
 
 
-def _parse_bool(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    text = str(value).strip().lower()
-    if not text:
-        return default
-    if text in {"1", "true", "yes", "on", "y"}:
-        return True
-    if text in {"0", "false", "no", "off", "n"}:
-        return False
-    return default
-
-
-def _parse_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except Exception:
-        parsed = default
-    return max(minimum, min(maximum, parsed))
-
-
 def _enabled() -> bool:
-    return _parse_bool(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_ENABLED"), default=False)
+    return bool(CodexSparkReplyJudgeSettings().enabled)
 
 
 def _rewrite_enabled() -> bool:
-    return _parse_bool(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_REWRITE_ENABLED"), default=True)
+    return bool(CodexSparkReplyJudgeSettings().rewrite_enabled)
 
 
 def _judge_mode() -> str:
-    return str(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_MODE") or "suspicious").strip().lower()
-
-
-def _model_id() -> str:
-    return str(os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_MODEL_ID") or _DEFAULT_MODEL_ID).strip() or _DEFAULT_MODEL_ID
+    return str(CodexSparkReplyJudgeSettings().mode or "suspicious").strip().lower()
 
 
 def _timeout_ms() -> int:
-    return _parse_int(
-        os.environ.get("HOST_CODEX_SPARK_REPLY_JUDGE_TIMEOUT_MS"),
-        default=_DEFAULT_TIMEOUT_MS,
-        minimum=1_000,
-        maximum=60_000,
-    )
+    return int(CodexSparkReplyJudgeSettings().timeout_ms)
 
 
 def _compact_text(value: Any, *, limit: int = _MAX_TEXT_CHARS) -> str:
@@ -85,40 +54,7 @@ def _jsonable(value: Any, *, depth: int = 0) -> Any:
 
 
 def _audit_db_path() -> Path:
-    configured = str(os.environ.get("HOST_AUDIT_DB_PATH") or os.environ.get("AUDIT_DB_PATH") or "").strip()
-    if configured:
-        return Path(configured)
-    return Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
-
-
-def _current_request_boundary_ms(*, person_id: str, session_id: str, request_id: str) -> int:
-    rid = str(request_id or "").strip()
-    if not rid:
-        return 0
-    db_path = _audit_db_path()
-    if not db_path.exists():
-        return 0
-    try:
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT created_at_ms
-                FROM memory_event
-                WHERE active = 1
-                  AND visibility = 'visible'
-                  AND role = 'user'
-                  AND person_id = ?
-                  AND (? = '' OR session_id = ?)
-                  AND json_extract(refs_json, '$.request_id') = ?
-                ORDER BY created_at_ms ASC
-                LIMIT 1
-                """,
-                (person_id, session_id, session_id, rid),
-            ).fetchone()
-            return int(row["created_at_ms"] or 0) if row is not None else 0
-    except Exception:
-        return 0
+    return Path(CodexSparkReplyJudgeSettings().resolved_audit_db_path)
 
 
 def _recent_visible_events(
@@ -131,46 +67,31 @@ def _recent_visible_events(
     db_path = _audit_db_path()
     if not db_path.exists():
         return []
-    boundary_ms = _current_request_boundary_ms(
-        person_id=person_id,
-        session_id=session_id,
-        request_id=request_id,
-    )
     rows: list[dict[str, Any]] = []
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            boundary_clause = "AND created_at_ms <= ?" if boundary_ms else ""
-            query = f"""
-                SELECT event_id, session_id, source_kind, event_kind, role, content, content_summary, created_at_ms
-                FROM memory_event
-                WHERE active = 1
-                  AND visibility = 'visible'
-                  AND person_id = ?
-                  AND (? = '' OR session_id = ?)
-                  {boundary_clause}
-                ORDER BY created_at_ms DESC
-                LIMIT ?
-            """
-            if boundary_ms:
-                params = (person_id, session_id, session_id, int(boundary_ms), max(1, int(limit)))
-            else:
-                params = (person_id, session_id, session_id, max(1, int(limit)))
-            for row in conn.execute(query, params):
-                rows.append(
-                    {
-                        "event_id": str(row["event_id"] or ""),
-                        "session_id": str(row["session_id"] or ""),
-                        "source_kind": str(row["source_kind"] or ""),
-                        "event_kind": str(row["event_kind"] or ""),
-                        "role": str(row["role"] or ""),
-                        "content": _compact_text(row["content"] or row["content_summary"], limit=260),
-                        "created_at_ms": int(row["created_at_ms"] or 0),
-                    }
-                )
+        persisted = MemoryEventRepository(db_path).list_visible_reply_context(
+            person_id=person_id,
+            session_id=session_id,
+            request_id=request_id,
+            limit=limit,
+        )
+        for row in persisted:
+            rows.append(
+                {
+                    "event_id": str(row.get("event_id") or ""),
+                    "session_id": str(row.get("session_id") or ""),
+                    "source_kind": str(row.get("source_kind") or ""),
+                    "event_kind": str(row.get("event_kind") or ""),
+                    "role": str(row.get("role") or ""),
+                    "content": _compact_text(
+                        row.get("content") or row.get("content_summary"),
+                        limit=260,
+                    ),
+                    "created_at_ms": int(row.get("created_at_ms") or 0),
+                }
+            )
     except Exception:
         return []
-    rows.reverse()
     return rows
 
 
@@ -301,18 +222,28 @@ def _messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
 
 
 def _judge_sync(payload: Mapping[str, Any], *, request_id: str) -> dict[str, Any]:
-    from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text  # noqa: PLC0415
+    from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+    from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
+    from host_brain.model_runtime.live_prompts import SURFACE_REPLY_JUDGE_PROMPT_ID  # noqa: PLC0415
+    from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-    raw = invoke_codex_cli_text(
-        model_id=_model_id(),
+    result = complete_compiled_prompt_sync(
+        attempt_service=get_model_attempt_service(),
+        prompt_id=SURFACE_REPLY_JUDGE_PROMPT_ID,
+        request_id=f"{request_id or int(time.time() * 1000)}:surface-reply-judge",
+        scene_type="SURFACE_REPLY_JUDGE",
+        cognitive_tier="B",
         messages=_messages(payload),
-        timeout_ms=_timeout_ms(),
-        response_format={"type": "json_object"},
-        feature_key=f"surface_spark_reply_judge:{request_id or int(time.time() * 1000)}",
+        deadline_ms=_timeout_ms(),
+        foreground=True,
+        metadata={"caller": "surface_reply_judge", "parent_request_id": request_id},
     )
-    parsed = _extract_json_object(raw)
+    if not result.success:
+        raise RuntimeError(result.error_code or "SURFACE_REPLY_JUDGE_MODEL_FAILED")
+    parsed = _extract_json_object(result.content)
     if not parsed:
         return {"ok": True, "action": "keep", "issues": ["INVALID_JUDGE_JSON"], "final_reply": ""}
+    parsed["_model_attempt"] = model_attempt_result_trace(result)
     return parsed
 
 
@@ -329,7 +260,7 @@ async def judge_surface_reply_with_codex_spark(
     if mode not in {"always", "all"} and not _looks_suspicious_candidate(candidate):
         return candidate, {
             "status": "SKIPPED",
-            "model_id": _model_id(),
+            "model_id": "server_owned_route",
             "reason_code": "SPARK_REPLY_JUDGE_NOT_SUSPICIOUS",
         }
 
@@ -341,11 +272,12 @@ async def judge_surface_reply_with_codex_spark(
     except Exception as exc:
         return candidate, {
             "status": "DEGRADED",
-            "model_id": _model_id(),
+            "model_id": "server_owned_route",
             "latency_ms": max(0, int(time.time() * 1000) - started_ms),
             "error": type(exc).__name__,
         }
 
+    model_attempt = dict(judged.pop("_model_attempt", {}) or {})
     final_reply = _compact_text(judged.get("final_reply"), limit=900)
     action = str(judged.get("action") or "").strip().lower()
     ok = bool(judged.get("ok", action != "rewrite"))
@@ -355,7 +287,9 @@ async def judge_surface_reply_with_codex_spark(
 
     meta = {
         "status": "OK",
-        "model_id": _model_id(),
+        "model_id": str(model_attempt.get("final_model") or ""),
+        "provider": str(model_attempt.get("final_provider") or ""),
+        "model_attempt": model_attempt,
         "latency_ms": max(0, int(time.time() * 1000) - started_ms),
         "ok": ok,
         "action": "rewrite" if should_rewrite else "keep",

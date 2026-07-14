@@ -21,10 +21,9 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_skill_manifest,
     get_chat_runtime_user_message,
 )
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json,
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
+from host_brain.model_runtime.prompt_contract import (
+    resolve_prompt_contract_json,
+    resolve_prompt_contract_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -166,7 +165,7 @@ def _set_injection_meta(meta: dict[str, Any]) -> None:
     """内部：将注入检测结果写入线程局部变量（同时写入 utils 模块，保持一致性）。"""
     _injection_meta_local.meta = meta
     try:
-        from host_brain.app.prompt_builder_utils import _injection_meta_local as _utils_local  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_builder_utils import _injection_meta_local as _utils_local  # noqa: PLC0415
         _utils_local.meta = meta
     except Exception:
         pass
@@ -266,7 +265,7 @@ def _merge_localized_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]
 
 def _resolve_localized_template_payload(template_id: str, *, render_target_lang: str) -> Any:
     lang_key = _normalize_template_lang(render_target_lang)
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     if isinstance(raw, Mapping):
         localized = raw.get(lang_key)
         if localized is not None:
@@ -287,7 +286,7 @@ def _load_template_mapping(
             render_target_lang=render_target_lang or "zh",
         )
         if render_target_lang
-        else resolve_prompt_template_json_merged(template_id)
+        else resolve_prompt_contract_json(template_id)
     )
     return dict(raw) if isinstance(raw, Mapping) else {}
 
@@ -385,7 +384,7 @@ def _build_direct_response_priority(
     follow_up_hint: str = "",
     bond_stage: str = "",
 ) -> str:
-    from host_brain.app.prompt_builder_utils import _build_direct_response_priority as _build_direct_response_priority_shared  # noqa: PLC0415
+    from host_brain.model_runtime.prompt_builder_utils import _build_direct_response_priority as _build_direct_response_priority_shared  # noqa: PLC0415
 
     return _build_direct_response_priority_shared(
         user_message=user_message,
@@ -686,7 +685,7 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
 from host_brain.app.node_generation_prompt import render_node_generation_prompt  # noqa: F401, E402
 
 # 工具函数已移至 prompt_builder_utils.py，此处重新导出以保持向后兼容
-from host_brain.app.prompt_builder_utils import (  # noqa: F401, E402
+from host_brain.model_runtime.prompt_builder_utils import (  # noqa: F401, E402
     CHAT_DIRECT_NODE_ID as _CHAT_DIRECT_NODE_ID_ALIAS,
     CHAT_RENDER_NODE_ID as _CHAT_RENDER_NODE_ID_ALIAS,
     CHAT_INTENT_SOURCE_NODE_ID as _CHAT_INTENT_SOURCE_NODE_ID_ALIAS,

@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -42,11 +44,11 @@ def test_auto_sync_runs_in_sync_mode(monkeypatch, tmp_path: Path) -> None:
     assert not any(key.startswith("include_") and key.endswith("style") for key in kwargs)
 
 
-def test_world_store_upsert_triggers_auto_sync(tmp_path: Path) -> None:
+def test_world_store_raw_upsert_is_blocked_before_auto_sync(tmp_path: Path) -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
         store = WorldCanonStore(world_root=tmp_path / "world", ledger=ledger)
-        with patch("host_brain.memory.canon_world_store.trigger_canon_vector_auto_sync") as trigger_mock:
+        with pytest.raises(PermissionError, match="CANON_DIRECT_WRITE_FORBIDDEN"):
             store.upsert(
                 doc_id="academy_rules",
                 title="Academy Rules",
@@ -54,10 +56,5 @@ def test_world_store_upsert_triggers_auto_sync(tmp_path: Path) -> None:
                 tags=["world"],
                 proposal_id="proposal_world_auto_sync",
             )
-        trigger_mock.assert_called_once()
-        kwargs = trigger_mock.call_args.kwargs
-        assert kwargs["include_world"] is True
-        assert not any(key.startswith("include_") and key.endswith("style") for key in kwargs)
     finally:
         ledger.close()
-

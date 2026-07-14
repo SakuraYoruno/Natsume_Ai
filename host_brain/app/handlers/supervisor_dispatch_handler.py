@@ -5,13 +5,13 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.agents.agent_contract import (
+from host_brain.agent_runtime.agent_contract import (
     RISK_MODE_GUARDED,
     RISK_MODE_SAFE,
     RISK_MODE_STRICT,
     validate_supervisor_proposal,
 )
-from host_brain.app.agents.agent_registry import (
+from host_brain.agent_runtime.agent_registry import (
     AGENT_ID_CHAT,
     AGENT_ID_EMOTION,
     AGENT_ID_INTENT,
@@ -30,11 +30,11 @@ from host_brain.app.prompt_builder import (
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 
 def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("supervisor_dispatch_handler.prompt_templates")
+    raw = resolve_prompt_contract_json("supervisor_dispatch_handler.prompt_templates")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

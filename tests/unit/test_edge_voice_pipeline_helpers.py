@@ -399,7 +399,7 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         pipeline = self._build_pipeline(vts_driver=vts)
 
         with patch(
-            "host_brain.channels.vts_mapping_store.sub_emotion_to_hotkey",
+            "edge_client.runtime.voice_pipeline.sub_emotion_to_hotkey",
             return_value="hotkey-smile",
         ):
             pipeline._vts_before_playback_hook(

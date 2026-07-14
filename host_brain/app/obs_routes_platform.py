@@ -8,16 +8,19 @@ import json
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.dependencies import get_skill_registry
-from host_brain.skills.custom_provider_installer import list_custom_provider_infos
-from host_brain.skills.hub.hub_installer import list_installed_skills as list_installed_hub_skills
+from host_brain.app.observability_runtime.live_source_projection import (
+    GATEWAY_STATS_MAX_AGE_MS,
+    GATEWAY_STATS_SOURCE_KEY,
+    GATEWAY_STATS_SOURCE_KIND,
+    read_operator_live_projection,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -26,7 +29,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 import asyncio
 
-from .obs_routes_core import router, _get_ledger, _now_ms, _safe_json
+from .obs_routes_core import router, _now_ms, _safe_json
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +41,7 @@ def get_failure_events(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
-    ledger: "SQLiteLedger" = Depends(_get_ledger),
+    ledger: Any = Depends(get_projection_ledger_view),
 ):
     """
     Ref #115: 失败事件统计端点。
@@ -139,6 +142,7 @@ class GatewayStatsResponse(BaseModel):
     humanize_typing_speed_cps: int = 12
     window_minutes: int = 60
     timestamp: int = 0
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 _GATEWAY_REMOTE_HEALTH_CACHE: Dict[str, Any] = {
@@ -212,7 +216,7 @@ async def _fetch_remote_gateway_health() -> Dict[str, Any]:
     stale = dict(cached) if isinstance(cached, dict) else {}
     try:
         import httpx
-        from host_brain.channels.edge_rpc_client import _resolve_gateway_base_urls
+        from host_brain.channels.edge_transport import resolve_gateway_base_urls
     except Exception:
         return stale
 
@@ -223,7 +227,7 @@ async def _fetch_remote_gateway_health() -> Dict[str, Any]:
         timeout_ms = 3000
     timeout_s = max(0.5, min(float(timeout_ms) / 1000.0, 5.0))
 
-    for base_url in _resolve_gateway_base_urls():
+    for base_url in resolve_gateway_base_urls():
         url = f"{base_url}/v1/gateway/health"
         try:
             async with httpx.AsyncClient(timeout=timeout_s, trust_env=False) as client:
@@ -255,18 +259,15 @@ def _resolve_remote_gateway_health_fetcher():
     return fetcher if callable(fetcher) else _fetch_remote_gateway_health
 
 
-@router.get("/gateway/stats", response_model=GatewayStatsResponse)
-async def get_gateway_stats(
-    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
-    ledger: "SQLiteLedger" = Depends(_get_ledger),
-):
-    """
-    Gateway 六平台消息统计端点。
+def _compose_gateway_stats_response(
+    source: Dict[str, Any],
+    window_minutes: int,
+    *,
+    projection: Dict[str, Any],
+) -> GatewayStatsResponse:
+    """Pure projection shaping; all I/O belongs to the background job."""
 
-    聚合各平台的消息收发量、错误数、延迟、在线状态、Bridge 健康和通话状态。
-    """
-    import os
-    now = _now_ms()
+    now = int(source.get("generated_at_ms") or _now_ms())
     since_ms = now - window_minutes * 60 * 1000
 
     PLATFORMS = ["wechat", "qq", "telegram", "feishu", "wecom", "line"]
@@ -275,7 +276,7 @@ async def get_gateway_stats(
     total_in = 0
     total_out = 0
     total_err = 0
-    remote_gateway_health = await _resolve_remote_gateway_health_fetcher()()
+    remote_gateway_health = dict(source.get("remote_gateway_health") or {})
     remote_gateway_body = (
         remote_gateway_health.get("body")
         if isinstance(remote_gateway_health, dict)
@@ -287,24 +288,17 @@ async def get_gateway_stats(
         else {}
     )
     remote_health_source = str(remote_gateway_health.get("base_url") or "").strip()
-    try:
-        channel_rows = ledger.fetch_by_time_range(
-            "channel_io_log",
-            start_ms=since_ms,
-            end_ms=now,
-            limit=5000,
-        )
-    except Exception:
-        channel_rows = []
-    try:
-        voice_rows = ledger.fetch_by_time_range(
-            "voice_event_log",
-            start_ms=since_ms,
-            end_ms=now,
-            limit=5000,
-        )
-    except Exception:
-        voice_rows = []
+    channel_rows = [
+        dict(row)
+        for row in list(source.get("channel_rows") or [])
+        if isinstance(row, dict) and since_ms <= int(row.get("ts_ms") or 0) <= now
+    ]
+    voice_rows = [
+        dict(row)
+        for row in list(source.get("voice_rows") or [])
+        if isinstance(row, dict) and since_ms <= int(row.get("ts_ms") or 0) <= now
+    ]
+    runtime_config = dict(source.get("runtime_config") or {})
 
     for plat in PLATFORMS:
         try:
@@ -398,7 +392,7 @@ async def get_gateway_stats(
             call_active = 0
             status_detail = None
             if plat == "wechat":
-                bridge_backend = os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+                bridge_backend = str(runtime_config.get("wechat_bridge_backend") or "uia")
                 if combined_rows:
                     bridge_status = f"{bridge_backend}:active"
                 recent_call_window = now - 5 * 60 * 1000
@@ -420,7 +414,7 @@ async def get_gateway_stats(
                         status_detail = "adapter health via remote gateway"
                 if plat == "wechat" and not bridge_status:
                     remote_bridge_backend = (
-                        str(remote_adapter.get("bridge_backend") or os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia")).strip()
+                        str(remote_adapter.get("bridge_backend") or runtime_config.get("wechat_bridge_backend") or "uia").strip()
                         or "uia"
                     )
                     remote_bridge_status = str(remote_adapter.get("status") or "unknown").strip().lower() or "unknown"
@@ -452,8 +446,8 @@ async def get_gateway_stats(
             logger.warning("get_gateway_stats: platform %s error: %s", plat, exc)
             platform_stats.append(GatewayPlatformStats(platform=plat, status=f"ERROR: {exc}"))
 
-    humanize_enabled = os.environ.get("EDGE_HUMANIZE_ENABLED", "false").lower() == "true"
-    humanize_cps = int(os.environ.get("EDGE_HUMANIZE_TYPING_SPEED_CPS", "12"))
+    humanize_enabled = bool(runtime_config.get("humanize_enabled", False))
+    humanize_cps = int(runtime_config.get("humanize_typing_speed_cps") or 12)
 
     return GatewayStatsResponse(
         platforms=platform_stats,
@@ -464,6 +458,25 @@ async def get_gateway_stats(
         humanize_typing_speed_cps=humanize_cps,
         window_minutes=window_minutes,
         timestamp=now,
+        projection=projection,
+    )
+
+
+@router.get("/gateway/stats", response_model=GatewayStatsResponse)
+def get_gateway_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+):
+    """Read the materialized gateway source and apply a pure window filter."""
+
+    source, projection = read_operator_live_projection(
+        GATEWAY_STATS_SOURCE_KIND,
+        GATEWAY_STATS_SOURCE_KEY,
+        max_age_ms=GATEWAY_STATS_MAX_AGE_MS,
+    )
+    return _compose_gateway_stats_response(
+        source or {"generated_at_ms": _now_ms()},
+        window_minutes,
+        projection=projection,
     )
 
 
@@ -481,139 +494,46 @@ class SkillHubEntry(BaseModel):
     status: str = "loaded"
 
 class SkillHubStatsResponse(BaseModel):
+    schema_version: str = "Natsume.operator.skill_pack_catalog.v1"
     hub_enabled: bool = True
     total_skills: int = 0
     loaded_skills: int = 0
     failed_skills: int = 0
-    skills: List[SkillHubEntry] = []
-    external_dirs_scanned: List[str] = []
+    skills: List[SkillHubEntry] = Field(default_factory=list)
+    external_dirs_scanned: List[str] = Field(default_factory=list)
+    domain_pack_count: int = 0
+    domain_packs: List[Dict[str, Any]] = Field(default_factory=list)
     timestamp: int = 0
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 @router.get("/skills-hub/stats", response_model=SkillHubStatsResponse)
 def get_skills_hub_stats():
-    """
-    Skills Hub 统计端点。
-
-    返回已加载的外部 Skill 列表、Hub 开关状态、扫描目录等信息。
-    """
-    import os
-    now = _now_ms()
-
-    hub_enabled = os.environ.get("HOST_SKILL_HUB_ENABLED", "true").lower() == "true"
-    skills_list: List[SkillHubEntry] = []
-    failed_count = 0
-    external_dirs: List[str] = []
-
-    if hub_enabled:
-        try:
-            registry = get_skill_registry()
-            active_skills = list(registry.all())
-            active_skill_names = {str(item.skill_name) for item in active_skills}
-
-            installed_hub_rows = list_installed_hub_skills()
-            installed_hub_by_name = {
-                str(row.get("name") or "").strip(): dict(row)
-                for row in installed_hub_rows
-                if str(row.get("name") or "").strip()
-            }
-
-            custom_provider_infos = list_custom_provider_infos(active_skill_names=active_skill_names)
-            custom_skill_names = {
-                str(skill_name).strip()
-                for info in custom_provider_infos
-                for skill_name in info.declared_skill_names
-                if str(skill_name).strip()
-            }
-            failed_count += sum(1 for info in custom_provider_infos if str(info.status or "").upper() == "ERROR")
-
-            for meta in active_skills:
-                hub_row = installed_hub_by_name.get(str(meta.skill_name))
-                if hub_row is not None:
-                    source = str(hub_row.get("source") or "hub").strip().lower() or "hub"
-                    version = str(hub_row.get("version") or "")
-                    author = str(hub_row.get("author") or "")
-                elif str(meta.skill_name) in custom_skill_names:
-                    source = "external"
-                    version = ""
-                    author = ""
-                else:
-                    source = "builtin"
-                    version = ""
-                    author = ""
-
-                skills_list.append(SkillHubEntry(
-                    name=str(meta.skill_name),
-                    version=version,
-                    author=author,
-                    clearance=str(meta.clearance or "LOW").upper(),
-                    risk_level=int(meta.risk_level or 1),
-                    source=source,
-                    status="loaded",
-                ))
-
-            loaded_names = {skill.name for skill in skills_list}
-            for hub_row in installed_hub_rows:
-                hub_name = str(hub_row.get("name") or "").strip()
-                if not hub_name or hub_name in loaded_names:
-                    continue
-                skills_list.append(SkillHubEntry(
-                    name=hub_name,
-                    version=str(hub_row.get("version") or ""),
-                    author=str(hub_row.get("author") or ""),
-                    clearance="LOW",
-                    risk_level=1,
-                    source=str(hub_row.get("source") or "hub").strip().lower() or "hub",
-                    status="installed",
-                ))
-
-            external_dirs.extend(
-                sorted({
-                    str(Path(str(row.get("dir") or "")).parent)
-                    for row in installed_hub_rows
-                    if str(row.get("dir") or "").strip()
-                })
-            )
-        except Exception as exc:
-            logger.warning("get_skills_hub_stats: registry load failed: %s", exc)
-            failed_count += 1
-
-        # 扫描外部目录
-        scan_external = os.environ.get("HOST_SKILL_SCAN_EXTERNAL", "true").lower() == "true"
-        if scan_external:
-            home = os.path.expanduser("~")
-            for d in [
-                os.path.join(home, ".skillhub", "skills"),
-                os.path.join(home, ".openclaw", "skills"),
-                os.path.join(home, ".codebuddy", "skills"),
-            ]:
-                if os.path.isdir(d):
-                    external_dirs.append(d)
-        extra_dirs = os.environ.get("HOST_SKILL_EXTERNAL_DIRS", "").strip()
-        if extra_dirs:
-            for d in extra_dirs.split(","):
-                d = d.strip()
-                if d and os.path.isdir(d):
-                    external_dirs.append(d)
-
-    deduped_skills: List[SkillHubEntry] = []
-    seen_skill_names: set[str] = set()
-    for skill in skills_list:
-        if skill.name in seen_skill_names:
-            continue
-        seen_skill_names.add(skill.name)
-        deduped_skills.append(skill)
-    skills_list = deduped_skills
-    external_dirs = sorted({str(path).strip() for path in external_dirs if str(path).strip()})
-
-    return SkillHubStatsResponse(
-        hub_enabled=hub_enabled,
-        total_skills=len(skills_list) + failed_count,
-        loaded_skills=sum(1 for skill in skills_list if skill.status == "loaded"),
-        failed_skills=failed_count,
-        skills=skills_list,
-        external_dirs_scanned=external_dirs,
-        timestamp=now,
+    """Read the durable Skill/Domain-Pack catalog; never scan on GET."""
+    from host_brain.app.observability_runtime.domain_state_projection import (
+        SKILL_PACK_CATALOG_KEY,
+        SKILL_PACK_CATALOG_KIND,
+        SKILL_PACK_CATALOG_MAX_AGE_MS,
+        read_domain_projection,
     )
+
+    payload, projection = read_domain_projection(
+        kind=SKILL_PACK_CATALOG_KIND,
+        key=SKILL_PACK_CATALOG_KEY,
+        max_age_ms=SKILL_PACK_CATALOG_MAX_AGE_MS,
+    )
+    body = dict(payload or {})
+    body.setdefault("schema_version", "Natsume.operator.skill_pack_catalog.v1")
+    body.setdefault("hub_enabled", False)
+    body.setdefault("total_skills", 0)
+    body.setdefault("loaded_skills", 0)
+    body.setdefault("failed_skills", 0)
+    body.setdefault("skills", [])
+    body.setdefault("external_dirs_scanned", [])
+    body.setdefault("domain_pack_count", 0)
+    body.setdefault("domain_packs", [])
+    body.setdefault("timestamp", 0)
+    body["projection"] = projection
+    return SkillHubStatsResponse(**body)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -633,6 +553,29 @@ async def ws_health(websocket: WebSocket):
     连接后每 10s 推送一次全服务健康快照（与 GET /obs/services/health 格式一致）。
     告警事件（服务 DOWN/DEGRADED 变化）立即推送。
     """
+    # WebSocket traffic does not cross the HTTP middleware.  Authenticate and
+    # authorize before ``accept`` and, critically, before resolving the
+    # projection store or any other source dependency.
+    from host_brain.observability.operator_query_gateway import OperatorQueryGateway
+
+    gateway = getattr(websocket.app.state, "operator_query_gateway", None)
+    if not isinstance(gateway, OperatorQueryGateway):
+        await websocket.close(code=1011, reason="OPERATOR_QUERY_GATEWAY_UNAVAILABLE")
+        return
+    context = gateway.open_asgi_context(websocket.scope)
+    try:
+        gateway.authorize_route(
+            context,
+            method="GET",
+            path="/obs/ws/health",
+        )
+    except HTTPException as exc:
+        await websocket.close(
+            code=4401 if int(exc.status_code) == 401 else 4403,
+            reason=str(exc.detail),
+        )
+        return
+
     await websocket.accept()
     _ws_clients.append(websocket)
     logger.info("WebSocket health client connected (total: %d)", len(_ws_clients))
@@ -642,23 +585,10 @@ async def ws_health(websocket: WebSocket):
     try:
         while True:
             try:
-                # 获取最新健康数据（与 GET /obs/services/health 逻辑一致）
-                ledger = _get_ledger_instance()
-                if ledger:
-                    try:
-                        from host_brain.observability import service_health_heartbeat as heartbeat
-
-                        if not heartbeat.has_fresh_core_service_cache():
-                            await heartbeat.prime_core_service_cache_once()
-                    except Exception:
-                        pass
-                    now_ms = _now_ms()
-                    since_ms = now_ms - 60 * 60 * 1000  # 默认 1h 窗口
-                    probe_registry, _extra = _build_probe_registry(ledger, since_ms)
-                    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
-                    health_data = await aggregator.aggregate()
-                else:
-                    health_data = {"services": [], "total": 0, "up": 0, "down": 0, "degraded": 0, "unknown": 0, "timestamp": _now_ms()}
+                # Read the same durable, background-maintained projection as
+                # GET /obs/services/health.  A query connection never primes a
+                # cache, launches a probe, or scans the ledger.
+                health_data = _read_ws_health_projection()
 
                 services = health_data.get("services", [])
                 current_statuses: Dict[str, str] = {}
@@ -684,20 +614,20 @@ async def ws_health(websocket: WebSocket):
                 prev_statuses = current_statuses
 
                 # 推送健康快照
-                payload = {
+                payload = gateway.serialize_public({
                     "type": "health_snapshot",
                     "data": health_data,
                     "alerts": alerts,
                     "ts_ms": _now_ms(),
-                }
+                }).payload
                 await websocket.send_json(payload)
 
             except Exception as exc:
-                logger.warning("WebSocket health push error: %s", exc)
+                logger.warning("WebSocket health push error: %s", type(exc).__name__)
                 try:
                     await websocket.send_json({
                         "type": "error",
-                        "detail": str(exc),
+                        "detail": "OBS_HEALTH_STREAM_UNAVAILABLE",
                         "ts_ms": _now_ms(),
                     })
                 except Exception:
@@ -715,11 +645,42 @@ async def ws_health(websocket: WebSocket):
         logger.info("WebSocket health client disconnected (remaining: %d)", len(_ws_clients))
 
 
-def _get_ledger_instance():
-    """尝试获取 ledger 实例（辅助函数）。"""
+def _read_ws_health_projection() -> dict[str, Any]:
+    """Read only the durable service-health projection."""
+    from host_brain.app.obs_routes_health import _read_query_projection
+    from host_brain.app.observability_runtime.health_device_projection import (
+        HEALTH_MAX_AGE_MS,
+        SERVICE_HEALTH_KEY,
+        SERVICE_HEALTH_KIND,
+    )
+
     try:
-        if _ledger_provider and callable(_ledger_provider):
-            return _ledger_provider()
+        payload, meta = _read_query_projection(
+            kind=SERVICE_HEALTH_KIND,
+            key=SERVICE_HEALTH_KEY,
+            max_age_ms=HEALTH_MAX_AGE_MS,
+        )
     except Exception:
-        pass
-    return None
+        payload, meta = None, {
+            "degraded_state": "SOURCE_UNAVAILABLE",
+            "reason_code": "OPERATOR_PROJECTION_UNAVAILABLE",
+        }
+    body = dict(payload or {})
+    services = list(body.get("services") or [])
+    counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}
+    for service in services:
+        status_value = str((service or {}).get("status") or "UNKNOWN").upper()
+        counts[status_value if status_value in counts else "UNKNOWN"] += 1
+    body.update(
+        {
+            "services": services,
+            "total": len(services),
+            "up": counts["UP"],
+            "degraded": counts["DEGRADED"],
+            "down": counts["DOWN"],
+            "unknown": counts["UNKNOWN"],
+            "timestamp": int(body.get("timestamp") or _now_ms()),
+            "projection": dict(meta or {}),
+        }
+    )
+    return body

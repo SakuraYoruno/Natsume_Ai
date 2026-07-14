@@ -10,10 +10,10 @@ import sys
 
 import pytest
 
+from host_brain.app.process_service_wiring import configure_process_service_ports
 
-_PROD_ENV_TEST_FILES = {
-    "test_bond_phase5.py",
-}
+configure_process_service_ports()
+
 
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_action_planner.py",
@@ -44,12 +44,10 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_motive_runtime_background.py",
     "test_persona_engine_phase1.py",
     "test_persona_phase4.py",
-    "test_plan_graph_templates.py",
     "test_proactive_voice_templates.py",
     "test_prompt_builder_emotion_binding_templates.py",
     "test_prompt_builder_helpers_extra.py",
     "test_prompt_context_emotion_pulse_templates.py",
-    "test_provider_factory_templates.py",
     "test_react_loop_templates.py",
     "test_repair_agent_handler.py",
     "test_self_model_helpers_extra.py",
@@ -60,7 +58,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
 }
 
 _CI_UNSTABLE_TEST_FILES = {
-    "test_bond_phase5.py",
     *_RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES,
 }
 
@@ -69,45 +66,26 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
     """Best-effort singleton/runtime reset to reduce cross-test contamination."""
 
     try:
-        import host_brain.app.dependencies as dep
+        import host_brain.composition.process_services as dep
 
-        dep._intent_engine = None
-        dep._skill_registry = None
-        dep._policy_cache = None
-        dep._ledger = None
-        dep._bond_stage_engine = None
-        dep._retrieval_pipeline = None
-        dep._retrieval_orchestrator = None
-        dep._obs_metrics_collector = None
-        dep._graph_runtime = None
-        dep._main_chain = None
-        dep._routing_matrix = None
-        dep._memory_guard = None
-        dep._state_arbiter = None
-        dep._state_write_arbiter = None
-        dep._distillation_engine = None
-        dep._semantic_recaller = None
-        dep._context_compressor = None
-        dep._emotion_timeline = None
-        dep._tool_catalog = None
-        dep._tool_broker = None
-        dep._mcp_tool_broker = None
-        dep._shared_memory_index = None
-        dep._milestone_tracker = None
-        dep._hard_state = None
-        dep._activity_monitor_ref = None
-
-        mcp_registry = getattr(dep, "_mcp_tool_registry", None)
+        container = dep.get_process_service_container()
+        capability_composition = container.capability_runtime_composition
+        if capability_composition is not None:
+            with contextlib.suppress(Exception):
+                capability_composition.broker.close()
+        mcp_registry = container.mcp_tool_registry
         if mcp_registry is not None:
             with contextlib.suppress(Exception):
                 mcp_registry.close()
-        dep._mcp_tool_registry = None
-
-        bond_queue = getattr(dep, "_bond_update_queue", None)
+        bond_queue = container.bond_update_queue
         if bond_queue is not None:
             with contextlib.suppress(Exception):
                 bond_queue.shutdown()
-        dep._bond_update_queue = None
+        ledger = container.ledger
+        if ledger is not None:
+            with contextlib.suppress(Exception):
+                ledger.close()
+        container.clear_service_references()
     except Exception:
         pass
 
@@ -122,6 +100,8 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         bond_routes = sys.modules.get("host_brain.app.bond_routes")
         asgi_app = sys.modules.get("host_brain.app.asgi")
         if bond_routes is not None:
+            if hasattr(bond_routes, "set_bond_writer_provider"):
+                bond_routes.set_bond_writer_provider(None)
             if asgi_app is not None and hasattr(asgi_app, "resolve_bond_engine"):
                 bond_routes.set_bond_engine_provider(asgi_app.resolve_bond_engine)
             else:
@@ -173,14 +153,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         if body_sense is not None:
             body_sense._GLOBAL_BODY_SENSE = None
 
-        silence = sys.modules.get("host_brain.persona.emotional_silence")
-        if silence is not None:
-            silence._GLOBAL_SILENCE_ENGINE = None
-
-        inner_world = sys.modules.get("host_brain.persona.inner_world")
-        if inner_world is not None:
-            inner_world._global_inner_world = None
-
         drift_detector = sys.modules.get("host_brain.persona.drift_detector")
         if drift_detector is not None:
             drift_detector._GLOBAL_DRIFT_DETECTOR = None
@@ -202,6 +174,15 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         except Exception:
             pass
 
+    try:
+        from host_brain.app.settings.persistence import get_persistence_settings
+        from host_brain.input_runtime.settings import get_input_settings
+
+        get_persistence_settings.cache_clear()
+        get_input_settings.cache_clear()
+    except Exception:
+        pass
+
 
 @pytest.fixture(autouse=True)
 def _reset_host_brain_singletons():
@@ -209,8 +190,22 @@ def _reset_host_brain_singletons():
 
     env_snapshot = dict(os.environ)
     _reset_host_brain_runtime_state()
-    yield
-    _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
+    from host_brain.observability.degradation_state import (
+        DegradationStateMachine,
+        set_global_degradation_state_machine,
+    )
+
+    # Production correctly restores the durable latch from audit.sqlite3. A
+    # test process must not inherit whichever ignored developer DB happens to
+    # exist in its worktree, so the default test boundary is an explicit
+    # healthy in-memory machine. Degradation contracts install their own
+    # machine and still exercise every fail-closed path.
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
+        _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -263,8 +258,6 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.runtime_probe)
         if "_docker" in filename:
             item.add_marker(pytest.mark.docker)
-        if filename in _PROD_ENV_TEST_FILES:
-            item.add_marker(pytest.mark.prod_env)
         if filename in _CI_UNSTABLE_TEST_FILES:
             item.add_marker(pytest.mark.ci_unstable)
 

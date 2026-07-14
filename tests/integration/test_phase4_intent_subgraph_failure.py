@@ -58,7 +58,7 @@ def test_intent_exec_subgraph_failure_contained_and_consumable(monkeypatch, inte
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
+    from host_brain.composition.process_services import get_graph_runtime
 
     runtime = get_graph_runtime()
     request_id = "p4-integration-fail-001"

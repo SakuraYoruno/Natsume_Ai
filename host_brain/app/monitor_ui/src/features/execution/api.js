@@ -1,13 +1,9 @@
-import { ENDPOINT_REGISTRY, endpointPath } from '../../shared/api/endpointRegistry.js'
+import { ENDPOINT_REGISTRY } from '../../shared/api/endpointRegistry.js'
 import { endpointGet, endpointPost, endpointRequest } from '../../shared/api/endpointClient.js'
-import { httpStreamPost } from '../../shared/api/httpClient.js'
 
-const { execution } = ENDPOINT_REGISTRY
+const { execution, pentest } = ENDPOINT_REGISTRY
 
 const REQUEST_TIMEOUT_MS = 35_000
-const SSE_HEADERS = { Accept: 'text/event-stream' }
-
-export { sendChatDebugStream } from '../../shared/api/chatDebug.js'
 export {
   fetchAgentLoopHistory,
   fetchAgentLoopStats,
@@ -21,23 +17,12 @@ export function fetchAgentInfo() {
   return endpointGet(execution.agentInfo)
 }
 
-export function runAgentLoopStream(payload, options = {}) {
-  return httpStreamPost(endpointPath(execution.agentRun), payload, {
-    ...options,
-    headers: { ...SSE_HEADERS, ...(options.headers || {}) },
-  })
-}
-
 export function fetchGatewayStats(params = {}) {
   return endpointGet(execution.gatewayStats, params)
 }
 
 export function fetchWeChatStats(params = {}) {
   return endpointGet(execution.wechatStats, params)
-}
-
-export function resetWeChatChannel(params = {}) {
-  return endpointPost(execution.wechatReset, {}, {}, params)
 }
 
 export function fetchSchedulerTasks() {
@@ -70,6 +55,10 @@ export function triggerSchedulerTask(taskId) {
 
 export function fetchToolHealth() {
   return endpointGet(execution.toolHealth)
+}
+
+export function fetchToolsPentestCapabilities() {
+  return endpointGet(pentest.capabilities)
 }
 
 export function fetchToolMetaPack(params = {}) {

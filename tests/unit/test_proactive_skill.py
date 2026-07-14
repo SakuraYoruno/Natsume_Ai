@@ -21,6 +21,7 @@ from host_brain.skills.impl.proactive_talk import (
     STATUS_DEGRADED,
 )
 from host_brain.core.errors import SCHED_CONDITION_UNMET
+from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard
 
 
 # ── 辅助工厂 ──
@@ -72,9 +73,10 @@ class TestProactiveTalkTrigger:
         )
         assert result["status"] == STATUS_EXECUTED
         assert result["reason_code"] is None
-        assert len(pushed) == 1
-        assert pushed[0]["type"] == "proactive_talk"
-        assert "主人晚上好" in pushed[0]["content"]
+        assert pushed == []
+        message = result["delivery_intent"]["payload"]
+        assert message["type"] == "proactive_talk"
+        assert "主人晚上好" in message["content"]
 
     def test_audit_chain_fields(self) -> None:
         pusher, _ = _make_ui_pusher()
@@ -192,7 +194,8 @@ class TestProactiveTalkQABlock:
             ),
         )
         assert result["status"] == STATUS_EXECUTED
-        assert len(pushed) == 1
+        assert pushed == []
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
 
     def test_llm_fallback_marker_uses_template(self) -> None:
         pusher, pushed = _make_ui_pusher()
@@ -206,7 +209,8 @@ class TestProactiveTalkQABlock:
         )
         assert result["status"] == STATUS_EXECUTED
         assert result["template_fallback_used"] is True
-        assert len(pushed) == 1
+        assert pushed == []
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
 
 
 # ── T-PROACT-05 ──
@@ -226,10 +230,11 @@ class TestProactiveTalkEdgeUnavailable:
                 ui_pusher=_bad_pusher,
             ),
         )
-        # 推送失败时仍返回 EXECUTED（静默降级），push_result 含 error
+        # Policy never invokes transport; Edge availability is handled by the
+        # durable outbox dispatcher after command commit.
         assert result["status"] == STATUS_EXECUTED
-        assert result["push_result"] is not None
-        assert "error" in result["push_result"]
+        assert result["push_result"] is None
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
 
     def test_no_ui_pusher_still_executed(self) -> None:
         result = execute_proactive_talk(
@@ -263,7 +268,8 @@ class TestProactiveTalkSleepMode:
             ),
         )
         assert result["status"] == STATUS_EXECUTED
-        assert len(pushed) == 1
+        assert pushed == []
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
 
     def test_normal_mode_allowed(self) -> None:
         assert "normal" in ALLOWED_MODES
@@ -309,7 +315,8 @@ class TestProactiveTalkBioOpsActiveSilence:
         assert result["status"] == STATUS_EXECUTED
         assert result["bio_ops_runtime_trace"]["proposal_only"] is True
         assert result["bio_ops_runtime_trace"]["active_silence"]["silence_policy"] == "normal_presence"
-        assert pushed
+        assert pushed == []
+        assert result["delivery_intent"]["destination"] == "edge.proactive"
 
 
 class TestProactiveTalkMotiveState:
@@ -367,7 +374,7 @@ class TestProactiveTalkMotiveState:
         assert result["motive_state"]["dominant_motive"] == "reach_out"
         assert captured["motive_state"]["reach_out_drive"] == 0.78
         assert "主动靠近对方" in str(captured["motive_hint"])
-        assert pushed[0]["dominant_motive"] == "reach_out"
+        assert result["delivery_intent"]["payload"]["dominant_motive"] == "reach_out"
 
 
 class TestProactiveTalkRenderPolicy:
@@ -413,7 +420,8 @@ class TestProactiveTalkRenderPolicy:
 
         assert result["status"] == STATUS_EXECUTED
         assert result["render_policy"]["should_be_withdrawn"] is True
-        assert pushed[0]["type"] == "proactive_talk"
+        assert pushed == []
+        assert result["delivery_intent"]["payload"]["type"] == "proactive_talk"
 
     def test_render_policy_hard_guard_softens_proactive_message(self) -> None:
         pusher, pushed = _make_ui_pusher()
@@ -429,9 +437,11 @@ class TestProactiveTalkRenderPolicy:
                     "intimacy_ceiling": 0.2,
                     "humor_ceiling": 0.1,
                 },
+                render_policy_hard_guard=_apply_render_policy_hard_guard,
             ),
         )
 
         assert result["status"] == STATUS_EXECUTED
         assert result["render_policy"]["humor_ceiling"] == 0.1
-        assert pushed[0]["content"] == "你先缓一缓。"
+        assert pushed == []
+        assert result["delivery_intent"]["payload"]["content"] == "你先缓一缓。"

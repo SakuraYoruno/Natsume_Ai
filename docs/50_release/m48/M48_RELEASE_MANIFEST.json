@@ -1,0 +1,49 @@
+{
+  "schema_version": "Natsume.release.m48_seal_manifest.v1",
+  "release_id": "release://natsume-ai/m48-a/2026-07-11",
+  "milestone": "M48-A",
+  "git_commit_hash": "ac9d3788602b14c27752278e75725740f0fe64ca",
+  "identity_snapshot_ref": "unavailable://identity/current-m48-a-candidate",
+  "identity_previous_release_ref": "unavailable://identity/previous-release",
+  "required_evidence_ids": [
+    "release_seal_contract",
+    "offline_release_integration",
+    "final_python_wave",
+    "targeted_failure_closure",
+    "external_dependency_classification",
+    "monitor_build_and_node",
+    "monitor_e2e_targeted_closure",
+    "migration_restart_replay_faults",
+    "static_and_doc_gate",
+    "identity_previous_release_continuity",
+    "redis_live_integration",
+    "live_service_probe",
+    "production_cutover_and_rollback"
+  ],
+  "required_rollback_ids": [
+    "runtime_mode_canary",
+    "runtime_event_replay",
+    "life_projection",
+    "action_arbiter",
+    "capability_maturity",
+    "degradation_state",
+    "operator_life_governance_ui",
+    "pentest_lab_gate",
+    "identity_snapshot",
+    "production_migration"
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "m48-evidence",
+      "kind": "EVIDENCE",
+      "path": "docs/50_release/m48/M48_EVIDENCE.json",
+      "sha256": "sha256:70e3cf0b2c4459cb38a577d06927ce7dacc29c8cfa10b09faf38c7f29b87df9e"
+    },
+    {
+      "artifact_id": "m48-rollback-matrix",
+      "kind": "ROLLBACK_MATRIX",
+      "path": "docs/50_release/m48/M48_ROLLBACK_MATRIX.json",
+      "sha256": "sha256:ce6556ae9ddb0e86ace2011c3db829b699f55c068f6c30d517daff08bc0ef3d7"
+    }
+  ]
+}

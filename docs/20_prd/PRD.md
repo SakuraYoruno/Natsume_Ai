@@ -2,9 +2,11 @@
 标题：产品需求文档（PRD）
 
 # Natsume Ai 产品需求文档（PRD）
-版本：v2.3
-日期：2026-06-30
-定位：基于当前代码事实的系统能力描述，记录系统实际提供的入口、边界、执行契约与验收口径。
+版本：v2.6
+日期：2026-07-11
+定位：以当前代码事实为基线，记录已提供能力与已批准待实施需求的入口、边界和验收口径；规划项必须显式标注，不能写成已实现事实。
+
+状态说明：`FR-NLE-001`～`FR-NLE-005` 是 M48-A `READY_FOR_EXECUTION` 规划项；`TASK-0461`～`TASK-0485` 已完成；`TASK-0486` 已完成本地验证与 Seal 资产，但状态为 `BLOCKED`。Canonical Scheduler 已提供 owner-confirmed、read-only、无副作用 shadow 决策与 legacy diff；Verification 已提供 fail-closed allowlist runner、VerificationResult/evidence refs 与 required non-PASS 状态阻断；Acceptance Judge 已提供 criterion-level verdict、final decision 与 `ACCEPTED` 状态门；Review / Resume 已提供 durable ReviewStore、绑定 subject version/checkpoint 的一次性 resume token、PRE/POST 分态与 `confirmed=true` 不可绕过的 durable review 声明；Canonical Runtime cutover 控制面已提供 `legacy|shadow|canonical` assignment、canary owner gate、kill switch、legacy drain 与 cross-executor resume guard，生产默认仍为 legacy/0% canary；Runtime Event 已提供 0056 durable timeline、TaskStore outbox publisher、EventBus/reference adapters、内部 JSON/SSE replay 与 dedupe key，replay 默认关闭且禁止字段 fail-closed；Context 已在既有 `AgentContextEnvelope` 上升级到 v2，具备 refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed 与安全审计摘要；Digital Life 状态保存已提供 expected-version CAS、0057 OCC migration、冲突/显式 fallback 审计与 20 并发无 silent overwrite 验证；WorldProjection 已提供只读 snapshot read model，facts 带 source/confidence/observed/expires/epistemic/conflict 字段，且不反写 Life/Canon/Memory；AppraisalRecord 已把既有 emotional episode/aftereffect 确定性连接到 appraisal、affect/drive、expression 与 boundary signal，Bond score/stage 仅作为只读兼容投影，所有生产写调用收敛到 BondDynamics command；SceneDecision 已接入 ProactiveVoice 与 Surface 表达约束，ActionArbiter 消费 Governor 的 intent/action/scope/static-risk/token binding，只有一致的可执行 route token 才能进入共享 TokenService 的一次性 handler 前门，AIRLOCK 永远暂停，显式用户目标保持优先且 dry-run 可生成脱敏 Runtime Event；Execution/Review Operator UI 已提供版本化只读 DAG/attempt/budget/verification/review/resume/cursor replay 视图，resume 继续受 token/subject/version/phase/checkpoint 绑定；Federated Capability Maturity 从 Skill、MCP、Pentest 与 Agent Runtime registry 生成 canonical risk 1–5 和 L0–L5 scorecard，自动流程只允许降级，升级候选只有持久化为 durable Review 后才提供定位链接；DegradationState 具备 durable restore、transition/recovery evidence，并在 ActionArbiter、MCP、Skill、Canon、Pentest、TTS/VTS/SSE 与 remote resume 前门 fail-closed；Release Identity Snapshot 提供 immutable snapshot、字段级 diff、MASTER Review candidate 与前一 release ref 回滚计划，不含私密人格或记忆正文；Life evolution read views 从实际 World/Appraisal/Bond/Scene/ActionArbiter producer 提供只读投影，空数据显式 `UNAVAILABLE`，dry-run 不执行也不写 Life Core；Capability/Health/Identity governance views 已在 Skills、System Config 与 Security Pentest 页面呈现治理状态，非 Lab 高风险入口保持禁用。AgentJobRegistry 仍是 legacy job authority，未切 durable read authority；生产副本迁移前仍需备份与 dry-run 批准。`FR-ARCH-001`～`FR-ARCH-010` 是 M48～M57 `ADOPTED_TARGET_ARCHITECTURE` 目标需求，`TASK-0487～0622` 为尚未解锁实施的 `PROGRAMMED`。其余章节主要描述 2026-06-30 已核验的当前能力。规划项只有在对应 TASK、测试与 Seal 证据成立后才转为已实现事实。
 
 ---
 
@@ -180,6 +182,190 @@ Host Main 由 `host_brain/app/asgi.py` 暴露 ASGI app，并通过 `app_factory`
 - 声明式 Intent 调度（`host_brain/scheduler/`）：NatsumeScheduler + SchedulerHealthReporter。
 - Host 常驻任务调度（`host_brain/app/automation/task_scheduler.py`）：HostTaskScheduler。
 - 两者分开管理：声明式调度面向业务 intent，常驻调度面向系统维护任务。
+
+### FR-NLE：V1 长期演化安全收敛
+
+#### FR-NLE-001：领域与核心状态边界
+
+- Domain Pack 只能写本领域状态；不得直接写 Persona、Bond、LifeMemory 或 WorldCanon。
+- WorldCanon 变更必须经过唯一受治理 Apply 入口；候选编号本身不构成审批。
+- 现有领域数据迁移必须可对账、可回滚，并保留来源与证据引用。
+
+验收口径：
+
+- Pentest 在 domain-only 模式下对 WorldCanon 的直接读写为 0。
+- 无有效授权、授权过期、主体/版本不匹配或重复消费时，Canon Apply 必须拒绝并留下审计证据。
+
+#### FR-NLE-002：统一、持久的任务控制面
+
+- 一个复杂任务只生成并消费同一 TaskGraph revision；Planner 不得在执行阶段静默生成第二份计划。
+- Child WorkOrder 与 SubAgent request 必须保留 root/parent/graph/node lineage、权限和 Context 引用，不能由调用者拼装无来源字典。
+- TaskGraph 的依赖、attempt、lease、heartbeat、retry、cancel、recovery 和业务幂等状态必须持久化。
+- token、tool、time、concurrency、retry 和 model cost 预算必须可预留、计量、阻断和回放；模型不得自行扩大预算。
+- 新旧执行器切换只影响新任务；存量任务不得跨执行器恢复或重复执行副作用。
+
+验收口径：
+
+- 未满足依赖的节点启动数为 0；循环依赖显式阻断。
+- 进程重启后任务可恢复；同一业务副作用不因重规划、重试或重复 resume 再次执行。
+
+#### FR-NLE-003：验证、审查与事件回放
+
+- required verification 只有 `PASS` 可进入已验证状态；`FAIL`、`ERROR` 和 `NOT_RUN` 均 fail closed。
+- 执行前审批与执行后验收审查必须使用不同状态和恢复阶段。
+- 关键 Task、Review、Verification 和裁决事件必须先持久化再广播，并支持 cursor 补发和客户端去重。
+- durable trace 不得包含原始模型内部推理、密钥、完整 cookie 或未授权私密记忆正文。
+
+验收口径：
+
+- 验证失败仍被接受、无效 token 被消费、重复 resume 再次产生副作用的数量均为 0。
+- 关键事件可完整回放；SSE 重连无静默缺失；禁止字段泄漏数量为 0。
+
+#### FR-NLE-004：Digital Life 长期演化最小闭环
+
+- Digital Life 状态写入必须使用版本条件更新，禁止 silent overwrite。
+- World Model 是现有事实源的只读投影；推断内容必须携带来源、置信度、观察时间、过期时间和冲突状态。
+- Appraisal、Bond、Scene 和 Action Arbitration 必须复用现有情绪、关系、主动行为与 Governor 能力，不建立平行状态真源。
+- 情绪或关系推断可以收紧表达和主动性，但不得覆盖用户显式任务或放宽安全门禁。
+
+当前完成项（2026-07-11）：TASK-0476 / T-NLE-14 已完成 Digital Life state OCC；TASK-0477 / T-NLE-15 已完成只读 WorldProjection；TASK-0478 / T-NLE-16 已完成 Appraisal/Bond 收敛。TASK-0479 / T-NLE-17 已完成 source-preserving SceneDecision、ProactiveVoice/Surface 实际接线、Governor authority binding、fail-closed route/AIRLOCK gate、共享 TokenService handler 前门、只收紧的 ActionArbiter、显式用户目标优先和无外部副作用 preview；执行切流开关 `HOST_ACTION_ARBITER_ENABLED` 默认关闭，非法 route pair 与 AIRLOCK 不受兼容开关放宽。M48 Digital Life 最小闭环的四张任务卡均已完成。
+
+验收口径：
+
+- 并发状态写入无静默覆盖；WorldProjection 不提供反写接口。
+- 代表性互动可从事件回放至 Appraisal、affect/drive、表达策略；Bond 的边界、裂痕和修复语义保持一致。
+
+#### FR-NLE-005：安全升级与 Operator 观测
+
+- Capability maturity 只作为权限附加收紧条件；自动降级允许，自动升级禁止。
+- 核心依赖故障必须进入可解释的 DegradationState，并在恢复时留下健康证据。
+- 发布前必须生成可比较的 Identity Snapshot；重大人格差异需人工审查。
+- Monitor UI 应在现有信息架构中展示 TaskGraph、Review、Trace、World/Scene、Capability、Health 和 Identity read model。
+
+验收口径：
+
+- 成熟度不会把原本需要审批的能力提升为无审批执行。
+- 新观测页面不提供绕过 Review 的写入口，也不显示 raw thought 或未授权私密正文。
+
+### FR-ARCH：V1 完整架构重构（M48～M57）
+
+目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
+
+正式执行入口：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`。
+
+本组需求定义 M48 安全地基之后的完整目标产品边界，不表示当前代码已经具备这些能力。目标是收敛现有巨石、循环依赖、重复真相源和并行运行时；禁止以长期双核、长期双写或新增另一套平台能力完成表面迁移。
+
+#### FR-ARCH-001：模块分层与依赖治理（M49 建界，M57 终验）
+
+- 产品应采用模块化单体优先的目标形态，并形成 Contracts/Kernel、Domain、Application、Interface/Adapter、Composition 的明确边界。
+- 业务依赖只能由外向内；Composition 是装配具体实现的唯一例外，业务包不得反向导入 Composition、HTTP route、全局依赖容器或 provider 实现。
+- `host_brain/app` 必须从隐式系统内核退化为明确的 interface/application/legacy facade；巨型混合职责文件按行为切片拆分，不得通过复制再造新巨石。
+
+验收口径：
+
+- 目标包之间双向依赖为 0；所有临时例外均有 ADR、owner 和删除版本。
+- 新增超过 800 行的混合职责文件为 0；现有超过 1500 行的生产巨石已拆分或取得纯数据/生成代码例外批准。
+
+#### FR-ARCH-002：跨运行面合同与 Command/Query/Event 分离（M48-B/M49 建界，M56 终验）
+
+- Host、Edge、Gateway 与 Operator UI 必须共享独立、版本化的 identity、ID、error、command、query、event、risk 和 embodiment 合同，不共享 Host 实现包。
+- 所有写请求进入 Governed Command Plane；Query Plane 只读版本化投影；关键状态变化与 Event/Outbox 同事务提交。
+- 合同必须携带 schema/protocol version、principal、correlation/causation、idempotency、visibility 和 evidence refs，并提供兼容窗口与协商规则。
+
+验收口径：
+
+- Edge 对 `host_brain.*` 实现包导入为 0；重复 method/path handler 为 0。
+- Runtime inline DDL 为 0；空库、旧库、备份恢复和回滚演练使用同一受控 migration catalog 通过。
+
+#### FR-ARCH-003：统一 Host Runtime 与任务执行主链（M50）
+
+- Secure Ingress、Conversation/Work Orchestration、Task Runtime、Agent Runtime、Governor、Lifecycle 和 Service Catalog 必须形成单一生产主链。
+- 一个任务只能消费同一 TaskGraph revision；授权、预算、attempt、lease、verification、acceptance 和副作用 receipt 必须沿同一 lineage 可恢复、可回放。
+- 工具、消息、主动行为及其他外部副作用必须经过 durable outbox；Obs 或 legacy route 不得形成第二条写主链。
+
+验收口径：
+
+- 同一 action 只有一个有效 AuthorizationGrant、Task/Attempt lineage 和副作用 receipt。
+- 重启、重试、重复 resume 和新旧执行器切换不会重复执行副作用；旧任务由旧执行器 drain，不跨执行器恢复。
+
+#### FR-ARCH-004：单核 Digital Life 与长期人格连续性（M51）
+
+- LifeEventJournal 与版本化 reducers/projections 是生命状态唯一推进模型；LifeContinuity、LifeOrgans、Tribe、InnerWorld、Surface 和 Scheduler 不得各自推进平行生命时钟。
+- 用户情绪观察与夏目自身 Affect 必须使用不同类型和 writer；Relationship、Homeostasis、World、Scene、Intent 和 Identity 均有唯一写模型。
+- Surface Context 构造必须纯读；Tribe Agent 只能提交 `StateContribution`；主动行为和具身动作必须通过 durable outbox 并产生 receipt。
+- 人格成长必须经过 proposal、shadow evaluation、版本激活和 rollback，不得直接改写不可变人格基线。
+
+验收口径：
+
+- 预览、重试和回放不会推进生命状态；并发写入无 silent overwrite。
+- 同一事件可确定性重放出 Affect、Drive、Relationship、Scene 和 Expression 投影；重启前后裂痕、修复、边界与身份版本一致。
+
+#### FR-ARCH-005：统一 Memory、Knowledge 与 Data Plane（M52）
+
+- LifeMemoryService 是生活记忆唯一写服务；Episodic、Semantic、Distillation、Canon 与领域知识必须有明确 namespace、promotion 和 retention 边界。
+- EventJournal、Transactional Outbox、Repository/UoW 和 versioned projection 构成统一 Data Plane；业务模块不得直接持有 Ledger 私有连接或运行时建表。
+- Neo4j、Chroma、Tribe Registry、进程缓存和 Monitor cache 只能作为可重建 projection/cache，不能成为长期状态真相源。
+- WorldCanon 只能通过 proposal/review/apply 聚合写入，并校验批准内容 hash；Pentest 等领域知识不得进入普通人格对话权威 Canon。
+
+验收口径：
+
+- 每个长期字段只有一个 writer，所有 projection 均能从 journal/权威 store 重建并对账。
+- 普通聊天检索 Pentest 私有知识为 0；备份、恢复、压缩、遗忘和索引重建均有可重复证据。
+
+#### FR-ARCH-006：Domain Pack 平台（M53）
+
+- Code、Research、Media、Personal Knowledge、Desktop、Hardware、Pentest、BioOps 和 MCP 等领域必须通过统一 Pack SDK/Registry 接入。
+- Pack 只提供 manifest、capability/tool、领域 repository port、knowledge namespace、verifier/acceptance、risk、benchmark 和 UI contribution。
+- Pack 不得拥有第二套 TaskGraph、Scheduler、Governor、Review、Model Gateway、EventBus、Persona、Bond 或身份系统，也不得直接导入全局容器和其他领域私有 Store。
+
+验收口径：
+
+- 每个 Pack 可独立启停、版本化、授权、观测和回滚；停用单个 Pack 不破坏 Host 核心主链。
+- 静态依赖扫描和运行时权限测试均证明 Pack 不能跨领域直接写核心状态。
+
+#### FR-ARCH-007：统一 Model、Prompt、Capability 与 Governance Plane（M54）
+
+- 模型调用必须收敛为 `ModelRequest → RouteDecision → ProviderAttempt → StructuredResult`，统一 timeout、retry、fallback、熔断、预算、usage 和 route trace。
+- Prompt 模板必须版本化并声明 owner、input contract、slots 与 output schema；业务模块不得绕过 Model Plane 调用私有 provider helper。
+- CapabilityCatalog、唯一 Tool/Capability Broker、Governor、Review Token 与签名 SkillBundle 必须共享统一风险及授权语义；maturity 只能收紧权限。
+
+验收口径：
+
+- 一次模型请求的所有 provider attempt、预算消耗、降级原因和结构化验证可串联回放。
+- 未签名、无 SBOM、未隔离或未审批的 Skill/Provider bundle 不能在 Host 进程激活；自动提权数量为 0。
+
+#### FR-ARCH-008：独立 Edge Device Runtime（M55）
+
+- Edge 必须可独立安装和升级，只依赖版本化共享合同与 Edge 自有层；Host 不得反向依赖 Edge 私有实现。
+- Gateway、Voice、Avatar、Desktop Pet、MateEngine、VTS/VRM 和硬件适配器必须通过统一设备身份、协议版本、capability handshake、inbox/outbox 和 receipt 接入。
+- 物理输出只能由 Edge Device Runtime 持有最终 authority；所有本地 Bridge 默认 loopback 且要求 token/HMAC，远程暴露必须显式配置和审计。
+
+验收口径：
+
+- Edge 独立安装测试通过，Host 实现导入为 0；协议不兼容时 fail closed 并给出可解释降级状态。
+- 同一具身命令不会被多个出口重复执行，断线重连后 receipt 可对账且不会重放已完成副作用。
+
+#### FR-ARCH-009：只读 Query Plane 与 Operator Console（M56）
+
+- Obs 必须成为只读 Query/Observability Plane；read model 必须携带 schema version、freshness、source cursor 和 degraded state。
+- Operator Console 应提供 Operate、Understand、Replay/Lab 三个受治理产品面；任何写动作必须重新进入 Secure Ingress，UI 风险标签不能代替后端授权。
+- UI client 应由版本化 OpenAPI/合同生成，并纳入 type、unit/component、a11y、E2E 与权限可见性验证。
+
+验收口径：
+
+- Query/UI 不直接查询业务私有表、进程全局缓存或未授权私密正文；Obs 绕过 Command Plane 的写入口为 0。
+- raw thought、secret、cookie 和未授权私密记忆泄漏为 0；重放视图可按 cursor 解释完整因果链。
+
+#### FR-ARCH-010：Evolution Lab、兼容退役与 Release 治理（M57）
+
+- Evolution Lab 负责 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 Identity Migration；评测结果只能生成受审提案，不能直接改写生产策略、人格或能力权限。
+- 完整迁移采用 Strangler + Contract-First + Shadow Compare；shadow 只比较结果，禁止同时执行真实副作用，兼容 facade 必须声明 owner、usage telemetry 和删除版本。
+- ReleaseManifest 必须覆盖 commit、package、schema、protocol、model/prompt/avatar assets、SBOM、质量 Gate 和 rollback compatibility。
+
+验收口径：
+
+- compatibility facade 在 usage=0 且经过两个稳定发布窗口后按计划删除；无永久双核或永久双写。
+- Golden Paths、replay、chaos、performance、security、backup/restore、identity regression 与 rollback drill 全部具有 Seal 证据后，M57 才可标记完成。
 
 ---
 

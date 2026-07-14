@@ -16,6 +16,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.observability_runtime.health_device_projection import (
+    DEVICE_MAX_AGE_MS,
+    DEVICE_STATUS_KIND,
+    read_projection_payload,
+)
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    CHECKPOINT_INDEX_KEY,
+    CHECKPOINT_INDEX_KIND,
+    CHECKPOINT_KIND,
+    read,
+    response_meta,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -36,7 +49,6 @@ from .obs_routes_core import (
     router,
     _extract_input_dispatch_latency_ms,
     _fetch_request_rows,
-    _get_ledger,
     _is_input_dispatch_event,
     _normalize_input_dispatch_source,
     _now_ms,
@@ -49,19 +61,44 @@ from .obs_routes_core import (
 # ---------------------------------------------------------------------------
 @router.get("/avatar/state", response_model=Dict[str, Any])
 async def get_avatar_state():
-    """Read-only Edge avatar behavior state for monitor pages."""
+    """Read the durable avatar projection without issuing a device command."""
     now = _now_ms()
     try:
-        from host_brain.channels.edge_rpc_client import post_vts  # noqa: PLC0415
+        from host_brain.composition.process_services import get_query_projection_store  # noqa: PLC0415
 
-        result = await post_vts(action="status", request_id=f"obs_avatar_state_{now}")
+        payload, meta = read_projection_payload(
+            get_query_projection_store(),
+            kind=DEVICE_STATUS_KIND,
+            key="avatar",
+            max_age_ms=DEVICE_MAX_AGE_MS,
+        )
+        if payload is None:
+            return {
+                "status": "DEGRADED",
+                "success": False,
+                "reason_code": str(meta.get("reason_code") or "DEVICE_STATUS_PROJECTION_EMPTY"),
+                "detail": "avatar status projection is empty or stale",
+                "latency_ms": None,
+                "event": {},
+                "schema_version": str(meta.get("schema_version") or "Natsume.operator.query_projection.v1"),
+                "projection_version": int(meta.get("projection_version") or 0),
+                "cursor": int(meta.get("source_cursor") or 0),
+                "freshness_ts_ms": int(meta.get("freshness_ts_ms") or 0),
+                "degraded_state": str(meta.get("degraded_state") or "REBUILDING"),
+                "timestamp": now,
+            }
         return {
-            "status": "OK" if bool(result.success) else "DEGRADED",
-            "success": bool(result.success),
-            "reason_code": result.reason_code,
-            "detail": result.detail,
-            "latency_ms": int(result.latency_ms or 0),
-            "event": dict(result.event or {}),
+            "status": str(payload.get("status") or "UNKNOWN"),
+            "success": bool(payload.get("success", False)),
+            "reason_code": payload.get("reason_code"),
+            "detail": str(payload.get("detail") or ""),
+            "latency_ms": payload.get("latency_ms"),
+            "event": dict(payload.get("event") or {}),
+            "schema_version": str(meta.get("schema_version") or "Natsume.operator.query_projection.v1"),
+            "projection_version": int(meta.get("projection_version") or 0),
+            "cursor": int(meta.get("source_cursor") or 0),
+            "freshness_ts_ms": int(meta.get("freshness_ts_ms") or 0),
+            "degraded_state": str(meta.get("degraded_state") or "HEALTHY"),
             "timestamp": now,
         }
     except Exception as exc:
@@ -70,9 +107,14 @@ async def get_avatar_state():
             "status": "DEGRADED",
             "success": False,
             "reason_code": "EDGE_AVATAR_STATE_UNAVAILABLE",
-            "detail": str(exc)[:300],
+            "detail": "avatar status projection is unavailable",
             "latency_ms": None,
             "event": {},
+            "schema_version": "Natsume.operator.query_projection.v1",
+            "projection_version": 0,
+            "cursor": 0,
+            "freshness_ts_ms": 0,
+            "degraded_state": "SOURCE_UNAVAILABLE",
             "timestamp": now,
         }
 
@@ -87,14 +129,13 @@ class AvatarBehaviorRequest(BaseModel):
     source: Optional[str] = "monitor"
 
 
-@router.post("/avatar/behavior", response_model=Dict[str, Any])
 async def post_avatar_behavior_control(body: AvatarBehaviorRequest):
     """Apply a safe high-level avatar behavior from monitor controls."""
     now = _now_ms()
     try:
-        from host_brain.channels.edge_rpc_client import post_avatar_behavior  # noqa: PLC0415
+        from host_brain.channels.embodiment import submit_avatar_behavior  # noqa: PLC0415
 
-        result = await post_avatar_behavior(
+        result = await submit_avatar_behavior(
             behavior_id=body.behavior_id,
             emotion_tag=body.emotion_tag,
             body_action_id=body.body_action_id,
@@ -151,7 +192,7 @@ def get_vts_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -275,7 +316,7 @@ def get_distillation_stats(
     limit: int = Query(10, ge=1, le=50, description="最近循环条数"),
 ):
     """Ref #31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -370,7 +411,7 @@ def get_wechat_stats(
     limit: int = Query(20, ge=1, le=100, description="最近事件条数"),
 ):
     """Ref #37: WeChat 通道统计 — 通道健康状态、频率限制统计、最近 channel_io_log 事件。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -491,40 +532,6 @@ def get_wechat_stats(
     )
 
 
-@router.post("/wechat/reset", response_model=Dict[str, Any])
-def reset_wechat_channel(
-    reason: Optional[str] = Query(None, description="重置原因"),
-):
-    """Ref #37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
-    try:
-        from host_brain.channels.wechat import WeChatChannel  # noqa: PLC0415
-        _channel = WeChatChannel.get_instance()
-        if _channel is not None and hasattr(_channel, "reset_rate_limits"):
-            _channel.reset_rate_limits()
-            return {
-                "status": "OK",
-                "reason_code": "WECHAT_CHANNEL_RESET",
-                "detail": f"WeChat 通道频率限制已重置（原因：{reason or 'manual'}）",
-                "timestamp": _now_ms(),
-            }
-    except (ImportError, AttributeError):
-        pass
-    except Exception as exc:
-        logger.warning("WeChat 通道重置失败: %s", exc)
-        return {
-            "status": "DEGRADED",
-            "reason_code": "WECHAT_RESET_FAILED",
-            "detail": str(exc)[:200],
-            "timestamp": _now_ms(),
-        }
-    return {
-        "status": "OK",
-        "reason_code": "WECHAT_CHANNEL_RESET_NOOP",
-        "detail": "WeChat 通道重置（无状态实例，已记录）",
-        "timestamp": _now_ms(),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Ref #34: GET /obs/retention/stats  — AuditRetention 保留策略统计
 # ---------------------------------------------------------------------------
@@ -548,7 +555,7 @@ def get_retention_stats(
     limit: int = Query(5, ge=1, le=20, description="最近执行记录条数"),
 ):
     """Ref #34: AuditRetention 保留策略执行统计。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
 
     # 从 error_log 中查询 S_AUDIT_RETENTION 阶段的记录
@@ -636,7 +643,7 @@ def get_qa_stats(
     limit: int = Query(20, ge=1, le=100, description="最近违规条数"),
 ):
     """Ref #40: QA 违规统计 — 违规码分布、降级率、重写成功率、时序趋势、最近违规列表。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -757,7 +764,7 @@ def get_llm_call_stats(
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
     """Ref #41: LLM 调用成本统计 — 按 model_id 分组的 token 消耗/平均延迟/调用次数。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -859,6 +866,11 @@ class CheckpointsResponse(BaseModel):
     total: int
     items: List[CheckpointItem]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 class CheckpointDetailResponse(BaseModel):
     checkpoint_id: str
@@ -869,41 +881,28 @@ class CheckpointDetailResponse(BaseModel):
     is_expired: bool
     payload: Optional[Any]
     timestamp: int
+    schema_version: str = "Natsume.operator.query_projection.v1"
+    projection_version: int = 0
+    cursor: int = 0
+    freshness_ts_ms: int = 0
+    degraded_state: str = "REBUILDING"
 
 @router.get("/checkpoints", response_model=CheckpointsResponse)
 def get_checkpoints(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
     include_expired: bool = Query(False, description="是否包含已超时的 checkpoint"),
 ):
-    """Ref #42: 最近 checkpoint 列表（checkpoint_id/request_id/interrupt_reason/resume_deadline_at/是否已超时）。"""
-    ledger = _get_ledger()
+    """Ref #42: 从 durable checkpoint index projection 读取列表。"""
     now = _now_ms()
-
-    rows = []
-    checkpoint_table = _resolve_fetch_table(ledger, "checkpoints", "graph_checkpoint")
-    if checkpoint_table:
-        try:
-            rows = ledger.fetch_by_time_range(checkpoint_table, start_ms=0, end_ms=now)
-        except Exception:
-            rows = []
-
-    # 按创建时间倒序
-    rows_sorted = sorted(rows, key=lambda r: r.get("created_at_ms") or r.get("ts_ms") or 0, reverse=True)
-
-    items = []
-    for r in rows_sorted:
+    payload, meta = read(CHECKPOINT_INDEX_KIND, CHECKPOINT_INDEX_KEY)
+    items: list[CheckpointItem] = []
+    for r in list((payload or {}).get("items") or []):
+        if not isinstance(r, Mapping):
+            continue
         deadline = r.get("resume_deadline_at")
         is_expired = bool(deadline and int(deadline) < now)
         if not include_expired and is_expired:
             continue
-        payload_raw = r.get("payload") or r.get("payload_json")
-        payload_summary = None
-        if payload_raw:
-            try:
-                ps = json.dumps(payload_raw) if not isinstance(payload_raw, str) else payload_raw
-                payload_summary = ps[:120] + "…" if len(ps) > 120 else ps
-            except Exception:
-                pass
         items.append(CheckpointItem(
             checkpoint_id=str(r.get("checkpoint_id") or r.get("id") or ""),
             request_id=r.get("request_id"),
@@ -911,54 +910,43 @@ def get_checkpoints(
             resume_deadline_at=int(deadline) if deadline else None,
             created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0),
             is_expired=is_expired,
-            payload_summary=payload_summary,
+            payload_summary=None,
         ))
         if len(items) >= limit:
             break
 
-    return CheckpointsResponse(total=len(items), items=items, timestamp=now)
+    return CheckpointsResponse(
+        total=len(items), items=items, timestamp=now, **response_meta(meta)
+    )
 
 
 @router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
 def get_checkpoint_detail(checkpoint_id: str):
-    """Ref #42: 单个 checkpoint 详情（含完整 payload）。"""
-    ledger = _get_ledger()
+    """Ref #42: 单个 checkpoint 公共元数据；正文 payload 永不投影。"""
     now = _now_ms()
-
-    rows = []
-    for table in ("checkpoints", "graph_checkpoint"):
-        try:
-            all_rows = ledger.fetch_by_time_range(table, start_ms=0, end_ms=now)
-            rows = [
-                r for r in all_rows
-                if str(r.get("checkpoint_id") or r.get("id") or "") == checkpoint_id
-            ]
-            if rows:
-                break
-        except Exception:
-            continue
-
-    if not rows:
+    payload, meta = read(CHECKPOINT_KIND, checkpoint_id)
+    if payload is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": "checkpoint_not_found", "checkpoint_id": checkpoint_id},
+            detail={
+                "error": "checkpoint_projection_not_ready",
+                "checkpoint_id": checkpoint_id,
+                **response_meta(meta),
+            },
         )
-
-    r = rows[0]
-    deadline = r.get("resume_deadline_at")
+    deadline = payload.get("resume_deadline_at")
     is_expired = bool(deadline and int(deadline) < now)
-    payload_raw = r.get("payload") or r.get("payload_json")
-    payload = _safe_json(payload_raw) if payload_raw else None
 
     return CheckpointDetailResponse(
         checkpoint_id=checkpoint_id,
-        request_id=r.get("request_id"),
-        interrupt_reason=r.get("interrupt_reason"),
+        request_id=payload.get("request_id"),
+        interrupt_reason=payload.get("interrupt_reason"),
         resume_deadline_at=int(deadline) if deadline else None,
-        created_at_ms=int(r.get("created_at_ms") or r.get("ts_ms") or 0),
+        created_at_ms=int(payload.get("created_at_ms") or 0),
         is_expired=is_expired,
-        payload=payload,
+        payload=None,
         timestamp=now,
+        **response_meta(meta),
     )
 
 
@@ -985,7 +973,7 @@ def get_rate_limit_backend_stats(
     top_k: int = Query(20, ge=1, le=100, description="返回 Top-K 活跃 key"),
 ):
     """Ref #43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
 
     # 尝试从 rate_limit_store_log 读取最新状态快照
@@ -1071,7 +1059,7 @@ def get_vault_stats(
     limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
 ):
     """Ref #44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
 
     rows = []
@@ -1149,7 +1137,7 @@ def get_llm_route_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 

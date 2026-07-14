@@ -3,17 +3,9 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any, Callable, Mapping
 
-
-class StateScope(str, Enum):
-    """Logical write scopes for runtime state domains."""
-
-    SOUL_STATE = "soul_state"
-    RUNTIME_STATE = "runtime_state"
-    MEMORY_STATE = "memory_state"
-    EXECUTION_STATE = "execution_state"
+from host_brain.memory.state_write_contract import StateScope
 
 
 STATE_WRITE_POLICY_VERSION = "1.0"
@@ -234,4 +226,3 @@ __all__ = [
     "StateWriteDecision",
     "StateWriteResult",
 ]
-

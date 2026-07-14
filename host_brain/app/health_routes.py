@@ -10,17 +10,16 @@ import os
 import time
 from json import loads as json_loads
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, status
+from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
-from host_brain.app.dependencies import collect_dependency_probes, get_ledger
+from host_brain.composition.process_services import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,
     build_service_health_report,
-    build_startup_report,
-    emit_runtime_bootstrap_logs,
 )
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.app.schemas import (
@@ -28,16 +27,58 @@ from host_brain.app.schemas import (
     ReadinessResponse,
 )
 from host_brain.core.errors import (
-    CANON_SYNC_FAILED,
     STARTUP_MCP_DEGRADED,
 )
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.memory.canon_sync import detect_world_version_drift
-from edge_client.rpc.health import build_edge_transport_probe_statuses
+from host_brain.app.settings import get_persistence_settings
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    CANON_SYNC_KEY,
+    CANON_SYNC_KIND,
+    STARTUP_SNAPSHOT_KEY,
+    STARTUP_SNAPSHOT_KIND,
+    read as read_query_projection,
+    response_meta,
+)
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()
+
+
+def _apply_host_health_status(health_report: dict[str, Any]) -> None:
+    """Derive the public Host status from service and durability state."""
+
+    summary = dict(health_report.get("summary") or {})
+    required_unavailable = int(summary.get("required_unavailable") or 0)
+    optional_unavailable = int(summary.get("optional_unavailable") or 0)
+    public_status = "FAILED" if required_unavailable else (
+        "DEGRADED" if optional_unavailable else "OK"
+    )
+    if required_unavailable:
+        summary["overall_status"] = "DOWN"
+    elif optional_unavailable:
+        summary["overall_status"] = "DEGRADED"
+    else:
+        summary["overall_status"] = "UP"
+
+    degradation = dict(health_report.get("degradation_state") or {})
+    durability_required = bool(degradation.get("durability_required"))
+    durability_status = str(degradation.get("durability_status") or "").upper()
+    if durability_required and durability_status != "READY":
+        if durability_status == "FAILED":
+            public_status = "FAILED"
+            summary["overall_status"] = "DOWN"
+        elif public_status == "OK":
+            public_status = "DEGRADED"
+            summary["overall_status"] = "DEGRADED"
+        if not health_report.get("reason_code"):
+            health_report["reason_code"] = (
+                str(degradation.get("last_durable_error") or "").strip()
+                or "DURABILITY_NOT_READY"
+            )
+
+    health_report["summary"] = summary
+    health_report["status"] = public_status
 
 
 def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None, str | None]:
@@ -96,6 +137,7 @@ async def build_live_health_report(
 
     _host_result = load_host_config()
     _runtime_statuses: dict[str, Any] = {}
+    _dep_probes: dict[str, Any] = {}
     if _host_result.success and _host_result.config is not None:
         _runtime_statuses = build_host_runtime_statuses(_host_result.config)
 
@@ -118,12 +160,39 @@ async def build_live_health_report(
                     detail=str(_edge_exc),
                 )
             )
-    return build_service_health_report(
+    health_report = build_service_health_report(
         runtime_statuses=_runtime_statuses,
         request_id=req_id,
         ledger=get_ledger(),
         ts_ms=ts_value,
     )
+    try:
+        from host_brain.observability.degradation_state import (  # noqa: PLC0415
+            get_degradation_state,
+            reconcile_service_observations,
+        )
+
+        if _dep_probes:
+            reconcile_service_observations(
+                [
+                    {
+                        "service_id": service_id,
+                        "status": "UP" if bool(dict(row or {}).get("available")) else "DOWN",
+                        "owner": "edge",
+                        "ts_ms": ts_value,
+                        "detail": dict(row or {}).get("detail"),
+                    }
+                    for service_id, row in _dep_probes.items()
+                    if isinstance(row, Mapping)
+                ],
+                source_ref=f"health-report://{req_id}",
+                now_ms=ts_value,
+            )
+        health_report["degradation_state"] = get_degradation_state()
+    except Exception as degradation_exc:
+        _logger.warning("Health degradation projection skipped: %s", degradation_exc)
+    _apply_host_health_status(health_report)
+    return health_report
 
 
 async def build_live_readiness_report(
@@ -189,6 +258,14 @@ async def health_check(
         )
 
 
+@router.get("/health/degradation")
+async def degradation_health_state() -> Dict[str, Any]:
+    """Read-only unified dependency degradation snapshot."""
+    from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+
+    return get_degradation_state()
+
+
 @router.get("/ready", response_model=ReadinessResponse)
 async def environment_readiness(
     include_immune_proposal: bool = Query(
@@ -231,7 +308,7 @@ async def environment_readiness(
 async def mcp_health_check() -> HealthResponse:
     """MCP registry health endpoint."""
     ts_ms = int(time.time() * 1000)
-    db_path = str(os.environ.get("HOST_MCP_REGISTRY_DB") or "host_brain/data/mcp_registry.sqlite3").strip()
+    db_path = str(get_persistence_settings().canonical_db_path).strip()
     status_text = "OK"
     reason_code = None
     detail = "mcp registry reachable"
@@ -266,67 +343,36 @@ async def mcp_health_check() -> HealthResponse:
 
 @router.get("/health/canon_sync", response_model=HealthResponse)
 async def canon_sync_health_check() -> HealthResponse:
-    """World canon sync health endpoint."""
+    """Read the independently refreshed canon-sync projection."""
     ts_ms = int(time.time() * 1000)
-    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    status_text = "OK"
-    reason_code = None
-    detail = "canon sync healthy"
-    drift_count = 0
-    drift_sample: list[dict[str, Any]] = []
-    try:
-        drifts = detect_world_version_drift(world_root=world_root, ledger=get_ledger())
-        drift_count = len(drifts)
-        if drift_count > 0:
-            status_text = "DEGRADED"
-            reason_code = CANON_SYNC_FAILED
-            detail = "world canon version drift detected"
-            drift_sample = [dict(row) for row in drifts[:5]]
-    except Exception as exc:
-        status_text = "DEGRADED"
-        reason_code = CANON_SYNC_FAILED
-        detail = str(exc)
+    payload, meta = read_query_projection(CANON_SYNC_KIND, CANON_SYNC_KEY)
     return HealthResponse(
-        status=status_text,
+        status=str((payload or {}).get("status") or "DEGRADED"),
         version="0.1.0",
         timestamp=ts_ms,
         details={
-            "world_root": world_root,
-            "drift_count": drift_count,
-            "drift_sample": drift_sample,
-            "reason_code": reason_code,
-            "detail": detail,
+            "drift_count": int((payload or {}).get("drift_count") or 0),
+            "drift_sample": list((payload or {}).get("drift_sample") or []),
+            "reason_code": (payload or {}).get("reason_code") or meta.get("reason_code"),
+            "detail": (payload or {}).get("detail") or "canon sync projection unavailable",
+            **response_meta(meta),
         },
     )
 
 
 @router.get("/startup")
 async def startup_report() -> Dict[str, Any]:
-    """Startup report endpoint."""
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
+    """Return the immutable startup snapshot; never rerun startup probes."""
 
-    try:
-        dependency_probes = await collect_dependency_probes()
-        report = build_startup_report(
-            runtime_statuses={},
-            dependency_probes=dependency_probes,
-            request_id=request_id,
-            ledger=get_ledger(),
-            ts_ms=ts_ms,
-        )
-        emit_runtime_bootstrap_logs(startup_report=report)
-        return {
-            "request_id": request_id,
-            "timestamp": ts_ms,
-            "report": report,
-        }
-    except Exception as exc:
-        _logger.error("Startup report failed", extra={"request_id": request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate startup report",
-        )
+    payload, meta = read_query_projection(STARTUP_SNAPSHOT_KIND, STARTUP_SNAPSHOT_KEY)
+    ts_ms = int((payload or {}).get("ts_ms") or 0)
+    request_id = str((payload or {}).get("request_id") or "startup-projection")
+    return {
+        "request_id": request_id,
+        "timestamp": ts_ms,
+        "report": dict(payload or {}),
+        **response_meta(meta),
+    }
 
 
 @router.get("/health/env-readiness")

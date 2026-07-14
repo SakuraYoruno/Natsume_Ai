@@ -15,6 +15,9 @@ PACKAGE_JSON = MONITOR_UI_ROOT / "package.json"
 PLAYWRIGHT_CONFIG = MONITOR_UI_ROOT / "playwright.config.js"
 ROUTE_SMOKE_SPEC = MONITOR_UI_ROOT / "e2e" / "monitor-route-smoke.spec.js"
 INTERACTION_SMOKE_SPEC = MONITOR_UI_ROOT / "e2e" / "monitor-interactions-smoke.spec.js"
+CANONICAL_REGRESSION_SPEC = MONITOR_UI_ROOT / "e2e" / "monitor-canonical-regression.spec.js"
+CORE_RELEASE_SPEC = MONITOR_UI_ROOT / "e2e" / "core-release-real-interaction.spec.js"
+OPERATOR_SESSION_HELPER = MONITOR_UI_ROOT / "e2e" / "operator-session.js"
 
 NAV_GROUPS = {
     "Cockpit",
@@ -151,12 +154,24 @@ def test_monitor_ui_has_manifest_driven_playwright_route_smoke() -> None:
     assert package_data.get("devDependencies", {}).get("@playwright/test")
     assert scripts.get("test:e2e") == "npm run build && playwright test"
     assert scripts.get("test:e2e:routes") == "npm run build && playwright test e2e/monitor-route-smoke.spec.js"
-    assert scripts.get("test:e2e:interactions") == "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js"
+    assert scripts.get("test:e2e:interactions") == (
+        "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js "
+        "e2e/monitor-canonical-regression.spec.js"
+    )
 
     config = PLAYWRIGHT_CONFIG.read_text(encoding="utf-8")
     assert "defineConfig" in config
     assert "MONITOR_UI_BASE_URL" in config
-    assert "npm run preview -- --host 127.0.0.1 --port 4173" in config
+    assert "MONITOR_UI_PREVIEW_PORT" in config
+    assert "resolvePlaywrightArtifactPolicy" in config
+    artifact_policy = (MONITOR_UI_ROOT / "playwrightArtifactPolicy.js").read_text(encoding="utf-8")
+    assert "MONITOR_UI_PLAYWRIGHT_OUTPUT_DIR" in artifact_policy
+    assert "MONITOR_UI_OPERATOR_SESSION_TOKEN" in artifact_policy
+    assert "natsume-monitor-playwright-${processId}" in artifact_policy
+    assert "trace: hasOperatorSession ? 'off'" in artifact_policy
+    assert "screenshot: hasOperatorSession ? 'off'" in artifact_policy
+    assert "video: hasOperatorSession ? 'off'" in artifact_policy
+    assert "npm run preview -- --host 127.0.0.1 --port ${previewPort}" in config
     assert "reuseExistingServer: true" in config
 
     spec = ROUTE_SMOKE_SPEC.read_text(encoding="utf-8")
@@ -168,17 +183,45 @@ def test_monitor_ui_has_manifest_driven_playwright_route_smoke() -> None:
     assert "new URL(`#${concreteRoutePath(routePath)}`, baseURL)" in spec
 
     interaction_spec = INTERACTION_SMOKE_SPEC.read_text(encoding="utf-8")
+    canonical_spec = CANONICAL_REGRESSION_SPEC.read_text(encoding="utf-8")
+    regression_specs = interaction_spec + canonical_spec
     for route_path in [
-        "/security/pentest",
+        "/security/immune",
         "/execution/tools",
         "/execution/automation",
         "/observability/insights",
     ]:
-        assert route_path in interaction_spec
+        assert route_path in regression_specs
     for expected_fixture in [
-        "stubPentestApis",
+        "stubSecurityImmuneApis",
         "stubToolsApis",
         "stubAutomationApis",
         "stubInsightsApis",
     ]:
-        assert f"async function {expected_fixture}(" in interaction_spec
+        assert f"async function {expected_fixture}(" in regression_specs
+
+    assert "/security/pentest" not in regression_specs
+    assert "stubPentestApis" not in regression_specs
+
+    core_spec = CORE_RELEASE_SPEC.read_text(encoding="utf-8")
+    session_helper = OPERATOR_SESSION_HELPER.read_text(encoding="utf-8")
+    assert "installRequiredOperatorSession" in core_spec
+    assert "installOptionalOperatorSession" not in core_spec
+    assert "'/obs/runtime-snapshot'" in core_spec
+    for protected_path in [
+        "/obs/security/runtime",
+        "/obs/security/assets",
+        "/obs/security/incidents?min_risk=low",
+        "/obs/trace-feed/snapshot",
+        "/obs/sessions",
+    ]:
+        assert protected_path in core_spec
+    assert "page.route(" not in core_spec
+    assert "hasTrustedProjection" in core_spec
+    assert "hasCoherentReadableProjection" in core_spec
+    assert "OPERATOR_PROJECTION_STALE" in core_spec
+    assert "SSE 实时流已连接" in core_spec
+    assert "部分接口降级" in core_spec
+    assert "/obs/digital-life/runtime-snapshot" not in core_spec
+    assert "MONITOR_UI_OPERATOR_SESSION_TOKEN is required" in session_helper
+    assert "refuses non-loopback plaintext HTTP" in session_helper

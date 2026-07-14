@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from edge_client.app.fastapi_app import _handle_visual_locate
-from edge_client.channels.input_reporter import EdgeInputReporter, InputSourceType
 from edge_client.gateway.adapters.line_adapter import LineAdapter
 from edge_client.runtime_texts import edge_runtime_text
 
@@ -24,16 +23,6 @@ def test_line_adapter_placeholders_use_runtime_texts() -> None:
         "location",
         {"title": "", "address": "Shanghai", "latitude": "1", "longitude": "2"},
     ) == "[位置:位置 Shanghai (1,2)]"
-
-
-def test_input_reporter_send_success_uses_runtime_text() -> None:
-    reporter = EdgeInputReporter(host_url="http://example.com")
-    reporter._do_http_post = lambda _payload: None  # type: ignore[method-assign]
-
-    result = reporter._send({}, InputSourceType.ASR)
-
-    assert result.success is True
-    assert result.detail == "上报成功"
 
 
 def test_handle_visual_locate_uses_runtime_text() -> None:

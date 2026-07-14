@@ -40,6 +40,22 @@ class CoreSettings(BaseSettings):
     log_level: LogLevel = Field(default="INFO", alias="HOST_APP_LOG_LEVEL")
     host_app_host: str = Field(default="127.0.0.1", alias="HOST_APP_HOST")
     host_app_port: int = Field(default=18080, ge=1, le=65535, alias="HOST_APP_PORT")
+    uvicorn_access_log_enabled: bool = Field(
+        default=False,
+        alias="HOST_UVICORN_ACCESS_LOG_ENABLED",
+    )
+    startup_eager_warmup: bool = Field(
+        default=False,
+        alias="HOST_STARTUP_EAGER_WARMUP",
+    )
+    resource_manager_enabled: bool = Field(
+        default=False,
+        alias="HOST_RESOURCE_MANAGER_ENABLED",
+    )
+    resource_manager_run_on_startup: bool = Field(
+        default=True,
+        alias="HOST_RESOURCE_MANAGER_RUN_ON_STARTUP",
+    )
 
     # OPT-4 第三批：运行时特性开关 / 调度参数（原散落在各 app 模块里）
     prefrontal_plan_enabled: bool = Field(
@@ -47,6 +63,21 @@ class CoreSettings(BaseSettings):
     )
     skill_dag_parallel_window: int = Field(
         default=4, ge=1, le=16, alias="HOST_SKILL_DAG_PARALLEL_WINDOW"
+    )
+    task_runtime_canonical_owner: str = Field(
+        default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
+    )
+    runtime_event_replay_enabled: bool = Field(
+        default=False, alias="HOST_RUNTIME_EVENT_REPLAY_ENABLED"
+    )
+    nle_operator_views_enabled: bool = Field(
+        default=False, alias="HOST_NLE_OPERATOR_VIEWS_ENABLED"
+    )
+    nle_life_views_enabled: bool = Field(
+        default=False, alias="HOST_NLE_LIFE_VIEWS_ENABLED"
+    )
+    nle_governance_views_enabled: bool = Field(
+        default=False, alias="HOST_NLE_GOVERNANCE_VIEWS_ENABLED"
     )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
@@ -86,6 +117,41 @@ class CoreSettings(BaseSettings):
                 domain=domain, field_name="skill_dag_parallel_window",
                 env_key="HOST_SKILL_DAG_PARALLEL_WINDOW",
                 default_value=4, current_value=s.skill_dag_parallel_window, is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_canonical_owner",
+                env_key="HOST_TASK_RUNTIME_CANONICAL_OWNER",
+                default_value="",
+                current_value=s.task_runtime_canonical_owner,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="runtime_event_replay_enabled",
+                env_key="HOST_RUNTIME_EVENT_REPLAY_ENABLED",
+                default_value=False,
+                current_value=s.runtime_event_replay_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="nle_operator_views_enabled",
+                env_key="HOST_NLE_OPERATOR_VIEWS_ENABLED",
+                default_value=False,
+                current_value=s.nle_operator_views_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="nle_life_views_enabled",
+                env_key="HOST_NLE_LIFE_VIEWS_ENABLED",
+                default_value=False,
+                current_value=s.nle_life_views_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="nle_governance_views_enabled",
+                env_key="HOST_NLE_GOVERNANCE_VIEWS_ENABLED",
+                default_value=False,
+                current_value=s.nle_governance_views_enabled,
+                is_required=False,
             ),
             inspect_setting(
                 domain=domain, field_name="sys_mode",

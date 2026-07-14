@@ -7,14 +7,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    EdgeVoiceEventLedger,
     VOICE_LOW_CONFIDENCE,
     VOICE_OUT_OF_ORDER,
     VOICE_SCHEMA_INVALID,
     VOICE_THROTTLED,
+    normalize_emotion_tag,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 from edge_client.rpc.resource_gate import TASK_ASR_INGRESS, VoiceResourceGate
 
 
@@ -45,7 +46,8 @@ _TTS_LANGUAGE_ALIASES = {
 
 
 def _normalize_emotion_tag(value: Any) -> str:
-    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    if value is None or not str(value).strip():
+        return ""
     result = normalize_emotion_tag(value)
     return result
 
@@ -70,7 +72,7 @@ class VoiceRpcContract:
     def __init__(
         self,
         *,
-        ledger: SQLiteLedger | None = None,
+        ledger: EdgeVoiceEventLedger | None = None,
         resource_gate: VoiceResourceGate | None = None,
         asr_min_confidence: float = 0.60,
         asr_min_interval_ms: int = 120,

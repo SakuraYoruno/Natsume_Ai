@@ -70,17 +70,18 @@ function scrollToSection(sectionId) {
 
 function SecurityImmuneHeroStatus({
   mission,
-  runtime,
-  assets,
-  incidents,
-  minRisk,
+  gateCards,
   runningHunt,
 }) {
-  const riskCounts = incidents?.risk_counts || runtime?.risk_counts || {}
-  const criticalHighCount = Number(riskCounts.critical || 0) + Number(riskCounts.high || 0)
-  const assetCount = Number(assets?.asset_count ?? runtime?.asset_count ?? 0)
-  const incidentCount = Number(incidents?.incident_count ?? runtime?.incident_count ?? 0)
-  const runtimeReady = Boolean(runtime)
+  const signalIcons = {
+    runtime: Activity,
+    assets: DatabaseZap,
+    incidents: Crosshair,
+    hunt: Bug,
+  }
+  const signals = gateCards.map((card) => card.key === 'hunt' && runningHunt
+    ? { ...card, value: 'running', tone: 'blue' }
+    : card)
 
   return (
     <div role="region" aria-label="Security Immune hero status" className="w-full max-w-xl space-y-2">
@@ -89,34 +90,16 @@ function SecurityImmuneHeroStatus({
         <div className="mt-1 text-xs leading-5">{mission.detail}</div>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <HeroSignal
-          icon={Activity}
-          label="Runtime"
-          value={runtimeReady ? 'connected' : 'degraded'}
-          detail={runtimeReady ? '/obs/security/runtime 可读' : '等待 runtime 快照或降级回退'}
-          tone={runtimeReady ? 'green' : 'orange'}
-        />
-        <HeroSignal
-          icon={DatabaseZap}
-          label="Assets"
-          value={`${assetCount} assets`}
-          detail={assetCount > 0 ? 'endpoint asset 快照已接入' : '缺少资产样本，建议运行 hunt'}
-          tone={assetCount > 0 ? 'green' : 'orange'}
-        />
-        <HeroSignal
-          icon={Crosshair}
-          label="Incidents"
-          value={`${criticalHighCount} high+`}
-          detail={`${incidentCount} open；当前 min risk ${minRisk}`}
-          tone={criticalHighCount > 0 ? 'red' : incidentCount > 0 ? 'amber' : 'green'}
-        />
-        <HeroSignal
-          icon={Bug}
-          label="Manual Hunt"
-          value={runningHunt ? 'running' : 'gated'}
-          detail="internal gated route 可触发一次巡检。"
-          tone={runningHunt ? 'blue' : 'green'}
-        />
+        {signals.map((signal) => (
+          <HeroSignal
+            key={signal.key}
+            icon={signalIcons[signal.key] || ShieldCheck}
+            label={signal.label}
+            value={signal.value}
+            detail={signal.detail}
+            tone={signal.tone}
+          />
+        ))}
       </div>
     </div>
   )
@@ -429,10 +412,7 @@ export default function SecurityImmune() {
         aside={(
           <SecurityImmuneHeroStatus
             mission={mission}
-            runtime={runtime}
-            assets={assets}
-            incidents={incidents}
-            minRisk={minRisk}
+            gateCards={gateCards}
             runningHunt={runningHunt}
           />
         )}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt
-from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 
 

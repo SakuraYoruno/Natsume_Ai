@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace
 from host_brain.app.chat_routes import build_chat_bio_ops_preflight_trace
-from host_brain.app.agent_runtime_shared import _is_low_risk_short_chat_route_reason
+from host_brain.agent_runtime.fastpaths import _is_low_risk_short_chat_route_reason
 from host_brain.app.schemas import ChatRequest
 from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules, classify_task_intent_fastpath
 from tests.unit.test_owner_candidate_store import _queue_item, _write_json

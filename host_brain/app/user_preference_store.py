@@ -9,6 +9,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from host_brain.persistence.context_preference_repository import PreferenceRepository
+
 LIGHTNOVEL_DOMAIN = "lightnovel_recommendation"
 GENERAL_DOMAIN = "general"
 PROFILE_SCHEMA_VERSION = "Natsume.user_preference_profile.v1"
@@ -77,10 +79,6 @@ def _event_id() -> str:
     return f"prefevt_{uuid.uuid4().hex}"
 
 
-def _delivery_id() -> str:
-    return f"recodel_{uuid.uuid4().hex}"
-
-
 def _normalize_domain(domain: Any) -> str:
     value = str(domain or "").strip().lower()
     return value or GENERAL_DOMAIN
@@ -89,13 +87,9 @@ def _normalize_domain(domain: Any) -> str:
 def _get_ledger(ledger: Any | None = None) -> Any:
     if ledger is not None:
         return ledger
-    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
 
     return get_ledger()
-
-
-def _conn_and_lock(ledger: Any) -> tuple[Any | None, Any | None]:
-    return getattr(ledger, "_conn", None), getattr(ledger, "_write_lock", None)
 
 
 @dataclass(slots=True)
@@ -160,28 +154,16 @@ class UserPreferenceEvent:
 class UserPreferenceStore:
     def __init__(self, *, ledger: Any | None = None) -> None:
         self.ledger = _get_ledger(ledger)
-        self.conn, self.write_lock = _conn_and_lock(self.ledger)
-        self.ensure_schema()
+        self.repository = PreferenceRepository.from_ledger(self.ledger)
 
     @property
     def available(self) -> bool:
-        return self.conn is not None and self.write_lock is not None
+        return True
 
     def ensure_schema(self) -> None:
-        if self.conn is None:
-            return
-        self.conn.executescript(USER_PREFERENCE_SCHEMA_SQL)
-        columns = {
-            str(row[1])
-            for row in self.conn.execute("PRAGMA table_info(recommendation_delivery_log)").fetchall()
-        }
-        if "items_json" not in columns:
-            self.conn.execute("ALTER TABLE recommendation_delivery_log ADD COLUMN items_json TEXT NOT NULL DEFAULT '[]'")
-        if "message_payload_json" not in columns:
-            self.conn.execute("ALTER TABLE recommendation_delivery_log ADD COLUMN message_payload_json TEXT NOT NULL DEFAULT '{}'")
-        if "active" not in columns:
-            self.conn.execute("ALTER TABLE recommendation_delivery_log ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
-        self.conn.commit()
+        self.repository.assert_schema_ready(
+            require_catalog=self.repository.db_path != ":memory:"
+        )
 
     def append_events(self, events: Sequence[UserPreferenceEvent]) -> list[dict[str, Any]]:
         if not _enabled("HOST_USER_PREFERENCE_ENABLED", default=True) or not self.available:
@@ -189,26 +171,11 @@ class UserPreferenceStore:
         normalized = [event.normalized() for event in list(events or [])]
         if not normalized:
             return []
-        touched: set[tuple[str, str]] = set()
-        rows: list[dict[str, Any]] = []
-        with self.write_lock:
-            for event in normalized:
-                self.conn.execute(
-                    """
-                    INSERT OR IGNORE INTO user_preference_event (
-                        event_id, person_id, session_id, domain, source_kind, polarity,
-                        target_kind, target_id, target_label, attributes_json,
-                        evidence_refs_json, confidence, created_at_ms, active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    event.as_row(),
-                )
-                touched.add((event.person_id, event.domain))
-                rows.append(self._event_to_dict(event))
-            for person_id, domain in sorted(touched):
-                self._recompute_profile_locked(person_id=person_id, domain=domain)
-            self.conn.commit()
-        return rows
+        return self.repository.append_events(
+            [self._event_to_dict(event) for event in normalized],
+            profile_builder=build_profile_from_events,
+            updated_at_ms=_now_ms(),
+        )
 
     def append_event(self, event: UserPreferenceEvent) -> dict[str, Any] | None:
         rows = self.append_events([event])
@@ -217,25 +184,10 @@ class UserPreferenceStore:
     def get_profile(self, *, person_id: str, domain: str = LIGHTNOVEL_DOMAIN) -> dict[str, Any] | None:
         if not self.available:
             return None
-        row = self.conn.execute(
-            """
-            SELECT person_id, domain, version, profile_json, updated_at_ms
-            FROM user_preference_profile
-            WHERE person_id = ? AND domain = ?
-            LIMIT 1
-            """,
-            (_clean_text(person_id, limit=120) or "unknown", _normalize_domain(domain)),
-        ).fetchone()
-        if row is None:
-            return None
-        profile = _json_loads(row["profile_json"], {})
-        if not isinstance(profile, dict):
-            profile = {}
-        profile.setdefault("person_id", str(row["person_id"] or ""))
-        profile.setdefault("domain", str(row["domain"] or ""))
-        profile.setdefault("version", int(row["version"] or 1))
-        profile.setdefault("updated_at_ms", int(row["updated_at_ms"] or 0))
-        return profile
+        return self.repository.get_profile(
+            person_id=_clean_text(person_id, limit=120) or "unknown",
+            domain=_normalize_domain(domain),
+        )
 
     def get_latest_delivery(
         self,
@@ -248,39 +200,13 @@ class UserPreferenceStore:
     ) -> dict[str, Any] | None:
         if not self.available:
             return None
-        params: list[Any] = [_normalize_domain(domain)]
-        where = ["domain = ?", "active = 1"]
-        clean_person = _clean_text(person_id, limit=120)
-        clean_session = _clean_text(session_id, limit=180)
-        clean_conversation = _clean_text(conversation_id, limit=180)
-        identity_parts: list[str] = []
-        if clean_person:
-            identity_parts.append("person_id = ?")
-            params.append(clean_person)
-        if clean_session:
-            identity_parts.append("session_id = ?")
-            params.append(clean_session)
-        if clean_conversation:
-            identity_parts.append("conversation_id = ?")
-            params.append(clean_conversation)
-        if identity_parts:
-            where.append("(" + " OR ".join(identity_parts) + ")")
-        if created_before_ms is not None and int(created_before_ms or 0) > 0:
-            where.append("created_at_ms <= ?")
-            params.append(int(created_before_ms))
-        row = self.conn.execute(
-            """
-            SELECT *
-            FROM recommendation_delivery_log
-            WHERE """
-            + " AND ".join(where)
-            + """
-            ORDER BY created_at_ms DESC
-            LIMIT 1
-            """,
-            params,
-        ).fetchone()
-        return self._delivery_row_to_dict(row) if row is not None else None
+        return self.repository.get_latest_delivery(
+            domain=_normalize_domain(domain),
+            person_id=_clean_text(person_id, limit=120),
+            session_id=_clean_text(session_id, limit=180),
+            conversation_id=_clean_text(conversation_id, limit=180),
+            created_before_ms=created_before_ms,
+        )
 
     def record_delivery(
         self,
@@ -308,7 +234,15 @@ class UserPreferenceStore:
         if not normalized_items:
             return None
         delivery = {
-            "delivery_id": _delivery_id(),
+            "delivery_id": _stable_id(
+                "recodel",
+                person_id,
+                session_id,
+                conversation_id,
+                request_id,
+                job_id,
+                domain,
+            ),
             "person_id": _clean_text(person_id, limit=120) or "default",
             "session_id": _clean_text(session_id, limit=180),
             "domain": _normalize_domain(domain),
@@ -323,56 +257,7 @@ class UserPreferenceStore:
             "created_at_ms": int(created_at_ms or _now_ms()),
             "active": True,
         }
-        with self.write_lock:
-            columns = {
-                str(row[1])
-                for row in self.conn.execute("PRAGMA table_info(recommendation_delivery_log)").fetchall()
-            }
-            insert_columns = [
-                "delivery_id",
-                "person_id",
-                "session_id",
-                "domain",
-                "platform",
-                "conversation_id",
-                "request_id",
-                "job_id",
-                "recommendations_ref",
-                "ranked_recommendations_ref",
-                "items_json",
-                "message_payload_json",
-                "created_at_ms",
-                "active",
-            ]
-            values: list[Any] = [
-                delivery["delivery_id"],
-                delivery["person_id"],
-                delivery["session_id"],
-                delivery["domain"],
-                delivery["platform"],
-                delivery["conversation_id"],
-                delivery["request_id"],
-                delivery["job_id"],
-                delivery["recommendations_ref"],
-                delivery["ranked_recommendations_ref"],
-                _json_dumps(normalized_items),
-                _json_dumps(delivery["message_payload"]),
-                delivery["created_at_ms"],
-                1,
-            ]
-            if "visible_items_json" in columns and "visible_items_json" not in insert_columns:
-                insert_columns.insert(11, "visible_items_json")
-                values.insert(11, _json_dumps(normalized_items))
-            placeholders = ", ".join("?" for _ in insert_columns)
-            self.conn.execute(
-                f"""
-                INSERT INTO recommendation_delivery_log ({", ".join(insert_columns)})
-                VALUES ({placeholders})
-                """,
-                tuple(values),
-            )
-            self.conn.commit()
-        return delivery
+        return self.repository.append_delivery(delivery)
 
     def _event_to_dict(self, event: UserPreferenceEvent) -> dict[str, Any]:
         item = event.normalized()
@@ -392,78 +277,6 @@ class UserPreferenceStore:
             "created_at_ms": item.created_at_ms,
             "active": item.active,
         }
-
-    def _delivery_row_to_dict(self, row: Any) -> dict[str, Any]:
-        return {
-            "delivery_id": str(row["delivery_id"] or ""),
-            "person_id": str(row["person_id"] or ""),
-            "session_id": str(row["session_id"] or ""),
-            "domain": str(row["domain"] or ""),
-            "platform": str(row["platform"] or ""),
-            "conversation_id": str(row["conversation_id"] or ""),
-            "request_id": str(row["request_id"] or ""),
-            "job_id": str(row["job_id"] or ""),
-            "recommendations_ref": str(row["recommendations_ref"] or ""),
-            "ranked_recommendations_ref": str(row["ranked_recommendations_ref"] or ""),
-            "items": _json_loads(
-                row["items_json"] if "items_json" in row.keys() else row["visible_items_json"],
-                [],
-            ),
-            "message_payload": _json_loads(row["message_payload_json"], {}),
-            "created_at_ms": int(row["created_at_ms"] or 0),
-            "active": bool(row["active"]),
-        }
-
-    def _recompute_profile_locked(self, *, person_id: str, domain: str) -> None:
-        rows = self.conn.execute(
-            """
-            SELECT *
-            FROM user_preference_event
-            WHERE person_id = ? AND domain = ? AND active = 1
-            ORDER BY created_at_ms ASC
-            """,
-            (person_id, domain),
-        ).fetchall()
-        events = [self._row_to_event_dict(row) for row in list(rows or [])]
-        profile = build_profile_from_events(person_id=person_id, domain=domain, events=events)
-        current = self.conn.execute(
-            "SELECT version FROM user_preference_profile WHERE person_id = ? AND domain = ?",
-            (person_id, domain),
-        ).fetchone()
-        next_version = int(current["version"] or 0) + 1 if current is not None else 1
-        profile["version"] = next_version
-        updated_at_ms = _now_ms()
-        profile["updated_at_ms"] = updated_at_ms
-        self.conn.execute(
-            """
-            INSERT INTO user_preference_profile (person_id, domain, version, profile_json, updated_at_ms)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(person_id, domain) DO UPDATE SET
-                version = excluded.version,
-                profile_json = excluded.profile_json,
-                updated_at_ms = excluded.updated_at_ms
-            """,
-            (person_id, domain, next_version, _json_dumps(profile), updated_at_ms),
-        )
-
-    def _row_to_event_dict(self, row: Any) -> dict[str, Any]:
-        return {
-            "event_id": str(row["event_id"] or ""),
-            "person_id": str(row["person_id"] or ""),
-            "session_id": str(row["session_id"] or ""),
-            "domain": str(row["domain"] or ""),
-            "source_kind": str(row["source_kind"] or ""),
-            "polarity": str(row["polarity"] or ""),
-            "target_kind": str(row["target_kind"] or ""),
-            "target_id": str(row["target_id"] or ""),
-            "target_label": str(row["target_label"] or ""),
-            "attributes": _json_loads(row["attributes_json"], {}),
-            "evidence_refs": _json_loads(row["evidence_refs_json"], []),
-            "confidence": float(row["confidence"] or 0.0),
-            "created_at_ms": int(row["created_at_ms"] or 0),
-            "active": bool(row["active"]),
-        }
-
 
 def build_profile_from_events(*, person_id: str, domain: str, events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     likes: dict[str, dict[str, Any]] = {}
@@ -608,32 +421,27 @@ def _infer_recent_recommendation_reference_index(
     conversation_id: str,
     current_query: str,
 ) -> int | None:
-    conn = store.conn
-    if conn is None:
-        return None
     clean_session = _clean_text(session_id, limit=180)
     clean_conversation = _clean_text(conversation_id, limit=180) or clean_session
     if not clean_session and not clean_conversation:
         return None
-    try:
-        rows = conn.execute(
-            """
-            SELECT role, content, ts_ms, turn_index
-            FROM conversation_turn
-            WHERE session_id = ? OR session_id = ?
-            ORDER BY ts_ms DESC, turn_index DESC
-            LIMIT 16
-            """,
-            (clean_session, clean_conversation),
-        ).fetchall()
-    except Exception:
-        return None
+    rows: list[dict[str, Any]] = []
+    for identity in dict.fromkeys((clean_session, clean_conversation)):
+        if not identity:
+            continue
+        rows.extend(
+            store.repository.recent_turns(
+                session_id=identity,
+                limit=16,
+            )
+        )
+    rows.sort(
+        key=lambda row: (int(row.get("ts_ms") or 0), int(row.get("turn_index") or 0)),
+        reverse=True,
+    )
     current = _clean_text(current_query, limit=500)
     for row in list(rows or []):
-        try:
-            content = _clean_text(row["content"], limit=500)
-        except Exception:
-            content = _clean_text(row[1] if len(row) > 1 else "", limit=500)
+        content = _clean_text(row.get("content"), limit=500)
         if not content or content == current:
             continue
         index = _parse_recommendation_reference_index(content)
@@ -911,62 +719,6 @@ def build_lightnovel_dynamic_taste_profile(
         "dislikes_count": len(list(user_profile.get("dislikes") or [])),
     }
     return profile
-
-
-USER_PREFERENCE_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS user_preference_event (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id TEXT NOT NULL,
-    person_id TEXT NOT NULL,
-    session_id TEXT,
-    domain TEXT NOT NULL,
-    source_kind TEXT NOT NULL,
-    polarity TEXT NOT NULL,
-    target_kind TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    target_label TEXT,
-    attributes_json TEXT NOT NULL DEFAULT '{}',
-    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
-    confidence REAL NOT NULL DEFAULT 0.0,
-    created_at_ms INTEGER NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_preference_event_id ON user_preference_event(event_id);
-CREATE INDEX IF NOT EXISTS idx_user_preference_event_person_domain ON user_preference_event(person_id, domain, created_at_ms);
-CREATE INDEX IF NOT EXISTS idx_user_preference_event_target ON user_preference_event(domain, target_kind, target_id);
-
-CREATE TABLE IF NOT EXISTS user_preference_profile (
-    person_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1,
-    profile_json TEXT NOT NULL DEFAULT '{}',
-    updated_at_ms INTEGER NOT NULL,
-    PRIMARY KEY(person_id, domain)
-);
-CREATE INDEX IF NOT EXISTS idx_user_preference_profile_updated ON user_preference_profile(updated_at_ms);
-
-CREATE TABLE IF NOT EXISTS recommendation_delivery_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    delivery_id TEXT NOT NULL,
-    person_id TEXT NOT NULL,
-    session_id TEXT,
-    domain TEXT NOT NULL,
-    platform TEXT,
-    conversation_id TEXT,
-    request_id TEXT,
-    job_id TEXT,
-    recommendations_ref TEXT,
-    ranked_recommendations_ref TEXT,
-    items_json TEXT NOT NULL DEFAULT '[]',
-    message_payload_json TEXT NOT NULL DEFAULT '{}',
-    created_at_ms INTEGER NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_delivery_id ON recommendation_delivery_log(delivery_id);
-CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_person_domain ON recommendation_delivery_log(person_id, domain, created_at_ms);
-CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_session ON recommendation_delivery_log(session_id, created_at_ms);
-CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_conversation ON recommendation_delivery_log(conversation_id, created_at_ms);
-"""
 
 
 __all__ = [

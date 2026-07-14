@@ -23,6 +23,9 @@ import {
   buildSystemConfigViewModel,
 } from '../features/operations/systemConfigModel.js'
 import useAppStore from '../store/useAppStore.js'
+import { useGovernanceSnapshotQuery } from '../features/governance/governanceQueries.js'
+import { buildGovernanceViewModel } from '../features/governance/governanceModel.js'
+import GovernanceHealthSection from '../features/governance/components/GovernanceHealthSection.jsx'
 
 const SYSTEM_CONFIG_METRIC_ICONS = {
   cpu: Cpu,
@@ -56,6 +59,8 @@ export default function SystemConfig() {
     pollingTick,
     pollingInterval,
   })
+  const governanceQuery = useGovernanceSnapshotQuery({ pollingEnabled, pollingTick, pollingInterval })
+  const governance = useMemo(() => buildGovernanceViewModel(governanceQuery.data), [governanceQuery.data])
 
   const {
     runtimeSnapshot,
@@ -109,8 +114,8 @@ export default function SystemConfig() {
   ])
 
   const handleRefresh = useCallback(async () => {
-    await Promise.allSettled([refetch(), reloadRuntime()])
-  }, [refetch, reloadRuntime])
+    await Promise.allSettled([refetch(), reloadRuntime(), governanceQuery.refetch()])
+  }, [refetch, reloadRuntime, governanceQuery])
 
   return (
     <div className="space-y-6">
@@ -166,6 +171,8 @@ export default function SystemConfig() {
           />
         ))}
       </div>
+
+      <GovernanceHealthSection model={governance} queryError={governanceQuery.error} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-4">

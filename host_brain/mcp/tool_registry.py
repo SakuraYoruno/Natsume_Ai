@@ -1,25 +1,14 @@
-"""MCP ToolMeta registry: sync, grade, and change-log for provider tools.
-
-Tables:
-  mcp_tool_registry  - current tool metadata (upsert by provider_id+tool_id)
-  mcp_sync_log       - change log (before/after diff, append-only)
-"""
+"""MCP ToolMeta registry application boundary."""
 
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from host_brain.core.ids import now_ms
+from host_brain.persistence.tool_registry_repository import ToolRegistryRepository
 
-
-# ---------------------------------------------------------------------------
-# ToolMeta dataclass
-# ---------------------------------------------------------------------------
 
 VALID_ACCESS_LEVELS = frozenset({"PUBLIC", "INTERNAL", "RESTRICTED"})
 VALID_RISK_LEVELS = frozenset({"LOW", "MEDIUM", "HIGH"})
@@ -33,14 +22,12 @@ class ToolMeta:
     tool_id: str
     name: str
     description: str
-    access_level: str          # PUBLIC | INTERNAL | RESTRICTED
-    risk_level: str            # LOW | MEDIUM | HIGH
+    access_level: str
+    risk_level: str
     reversible: bool
     version: str = "1.0.0"
     schema_hash: str = ""
     domain_tags: list[str] = field(default_factory=list)
-    # M28-N（OPT-39）：情感适用性字段
-    # 标注工具适用的情感场景（如 ["HAPPY", "EXCITED"]），空列表表示无限制
     emotion_requirement: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -55,7 +42,6 @@ class ToolMeta:
             "version": self.version,
             "schema_hash": self.schema_hash,
             "domain_tags": list(self.domain_tags),
-            # M28-N（OPT-39）：情感适用性字段
             "emotion_requirement": list(self.emotion_requirement),
         }
 
@@ -82,18 +68,8 @@ class ToolMeta:
         )
 
 
-# ---------------------------------------------------------------------------
-# MCPToolRegistry
-# ---------------------------------------------------------------------------
-
 class MCPToolRegistry:
-    """SQLite-backed registry for MCP provider tool metadata.
-
-    Supports:
-    - register / upsert ToolMeta
-    - query by provider_id or tool_id
-    - change log (mcp_sync_log) with before/after diff
-    """
+    """Tool registry facade backed by an operation-scoped repository."""
 
     def __init__(
         self,
@@ -102,265 +78,57 @@ class MCPToolRegistry:
         check_same_thread: bool = True,
     ) -> None:
         self.db_path = str(db_path)
-        self._lock = threading.Lock()
-        if self.db_path != ":memory:":
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=check_same_thread)
-        self._conn.row_factory = sqlite3.Row
-        self._ensure_schema()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        # Kept only as an API-compatibility parameter; connection ownership is
+        # exclusively inside the persistence adapter.
+        _ = check_same_thread
+        self._repository = ToolRegistryRepository(self.db_path)
 
     def register(self, meta: ToolMeta) -> dict[str, Any]:
-        """Register or update a ToolMeta. Returns sync_log entry."""
+        """Register one immutable tool revision and update the current head."""
         self._validate(meta)
-        before = self.get(provider_id=meta.provider_id, tool_id=meta.tool_id)
-        before_dict = before.as_dict() if before else None
-
-        with self._lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    INSERT INTO mcp_tool_registry
-                        (provider_id, tool_id, name, description,
-                         access_level, risk_level, reversible,
-                         version, schema_hash, domain_tags, emotion_requirement, updated_ts_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(provider_id, tool_id) DO UPDATE SET
-                        name = excluded.name,
-                        description = excluded.description,
-                        access_level = excluded.access_level,
-                        risk_level = excluded.risk_level,
-                        reversible = excluded.reversible,
-                        version = excluded.version,
-                        schema_hash = excluded.schema_hash,
-                        domain_tags = excluded.domain_tags,
-                        emotion_requirement = excluded.emotion_requirement,
-                        updated_ts_ms = excluded.updated_ts_ms
-                    """,
-                    (
-                        meta.provider_id,
-                        meta.tool_id,
-                        meta.name,
-                        meta.description,
-                        meta.access_level,
-                        meta.risk_level,
-                        int(meta.reversible),
-                        meta.version,
-                        meta.schema_hash,
-                        json.dumps(meta.domain_tags, ensure_ascii=False),
-                        json.dumps(meta.emotion_requirement, ensure_ascii=False),
-                        now_ms(),
-                    ),
-                )
-
-        after_dict = meta.as_dict()
-        diff = _compute_diff(before_dict, after_dict)
-        sync_entry = self._log_sync(
-            provider_id=meta.provider_id,
-            tool_id=meta.tool_id,
-            change_kind="UPDATE" if before else "INSERT",
-            before=before_dict,
-            after=after_dict,
-            diff=diff,
-        )
-        return sync_entry
+        return self._repository.register(meta.as_dict())
 
     def get(self, *, provider_id: str, tool_id: str) -> ToolMeta | None:
-        """Fetch a single ToolMeta by provider_id + tool_id."""
-        row = self._conn.execute(
-            "SELECT * FROM mcp_tool_registry WHERE provider_id = ? AND tool_id = ?",
-            (provider_id, tool_id),
-        ).fetchone()
-        if row is None:
-            return None
-        return _row_to_meta(row)
+        """Fetch one tool by provider and tool identity."""
+        record = self._repository.get(provider_id=provider_id, tool_id=tool_id)
+        return ToolMeta.from_dict(record) if record is not None else None
 
     def list_by_provider(self, provider_id: str) -> list[ToolMeta]:
-        """List all tools for a given provider."""
-        rows = self._conn.execute(
-            "SELECT * FROM mcp_tool_registry WHERE provider_id = ? ORDER BY tool_id ASC",
-            (provider_id,),
-        ).fetchall()
-        return [_row_to_meta(r) for r in rows]
+        """List tools belonging to a provider."""
+        return [
+            ToolMeta.from_dict(record)
+            for record in self._repository.list_by_provider(provider_id)
+        ]
 
     def list_all(self) -> list[ToolMeta]:
-        """List all registered tools."""
-        rows = self._conn.execute(
-            "SELECT * FROM mcp_tool_registry ORDER BY provider_id ASC, tool_id ASC"
-        ).fetchall()
-        return [_row_to_meta(r) for r in rows]
+        """List all current tool heads."""
+        return [ToolMeta.from_dict(record) for record in self._repository.list_all()]
 
     def sync_log(self) -> list[dict[str, Any]]:
-        """Return all sync log entries (change history)."""
-        rows = self._conn.execute(
-            "SELECT * FROM mcp_sync_log ORDER BY id ASC"
-        ).fetchall()
-        return [_decode_sync_row(r) for r in rows]
+        """Return immutable tool revision history in commit order."""
+        return self._repository.sync_log()
 
     def close(self) -> None:
-        try:
-            self._conn.close()
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+        self._repository.close()
 
     def _validate(self, meta: ToolMeta) -> None:
         if not meta.provider_id or not meta.tool_id:
             raise ValueError("ToolMeta requires non-empty provider_id and tool_id")
         if meta.access_level not in VALID_ACCESS_LEVELS:
-            raise ValueError(f"Invalid access_level: {meta.access_level!r}; must be one of {sorted(VALID_ACCESS_LEVELS)}")
+            raise ValueError(
+                f"Invalid access_level: {meta.access_level!r}; "
+                f"must be one of {sorted(VALID_ACCESS_LEVELS)}"
+            )
         if meta.risk_level not in VALID_RISK_LEVELS:
-            raise ValueError(f"Invalid risk_level: {meta.risk_level!r}; must be one of {sorted(VALID_RISK_LEVELS)}")
-
-    def _log_sync(
-        self,
-        *,
-        provider_id: str,
-        tool_id: str,
-        change_kind: str,
-        before: dict[str, Any] | None,
-        after: dict[str, Any],
-        diff: dict[str, Any],
-    ) -> dict[str, Any]:
-        ts = now_ms()
-        with self._lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    INSERT INTO mcp_sync_log
-                        (provider_id, tool_id, change_kind, before_json, after_json, diff_json, ts_ms)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        provider_id,
-                        tool_id,
-                        change_kind,
-                        json.dumps(before, ensure_ascii=False) if before else None,
-                        json.dumps(after, ensure_ascii=False),
-                        json.dumps(diff, ensure_ascii=False),
-                        ts,
-                    ),
-                )
-        return {
-            "provider_id": provider_id,
-            "tool_id": tool_id,
-            "change_kind": change_kind,
-            "before": before,
-            "after": after,
-            "diff": diff,
-            "ts_ms": ts,
-        }
-
-    def _ensure_schema(self) -> None:
-        with self._conn:
-            self._conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_tool_registry (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_id TEXT NOT NULL,
-                    tool_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    access_level TEXT NOT NULL,
-                    risk_level TEXT NOT NULL,
-                    reversible INTEGER NOT NULL DEFAULT 0,
-                    version TEXT NOT NULL DEFAULT '1.0.0',
-                    schema_hash TEXT,
-                    domain_tags TEXT,
-                    emotion_requirement TEXT,
-                    updated_ts_ms INTEGER NOT NULL,
-                    UNIQUE(provider_id, tool_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS mcp_sync_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_id TEXT NOT NULL,
-                    tool_id TEXT NOT NULL,
-                    change_kind TEXT NOT NULL,
-                    before_json TEXT,
-                    after_json TEXT NOT NULL,
-                    diff_json TEXT,
-                    ts_ms INTEGER NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_mcp_registry_provider ON mcp_tool_registry(provider_id);
-                CREATE INDEX IF NOT EXISTS idx_mcp_registry_tool ON mcp_tool_registry(tool_id);
-                CREATE INDEX IF NOT EXISTS idx_mcp_sync_log_provider ON mcp_sync_log(provider_id, tool_id);
-                CREATE INDEX IF NOT EXISTS idx_mcp_sync_log_ts ON mcp_sync_log(ts_ms);
-                """
+            raise ValueError(
+                f"Invalid risk_level: {meta.risk_level!r}; "
+                f"must be one of {sorted(VALID_RISK_LEVELS)}"
             )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _row_to_meta(row: sqlite3.Row) -> ToolMeta:
-    data = dict(row)
-    tags_raw = data.get("domain_tags") or "[]"
-    if isinstance(tags_raw, str):
-        try:
-            tags = json.loads(tags_raw)
-        except Exception:
-            tags = []
-    else:
-        tags = list(tags_raw)
-    emotion_raw = data.get("emotion_requirement") or "[]"
-    if isinstance(emotion_raw, str):
-        try:
-            emotion_req = json.loads(emotion_raw)
-        except Exception:
-            emotion_req = []
-    else:
-        emotion_req = list(emotion_raw)
-    return ToolMeta(
-        provider_id=str(data["provider_id"]),
-        tool_id=str(data["tool_id"]),
-        name=str(data["name"]),
-        description=str(data.get("description") or ""),
-        access_level=str(data["access_level"]),
-        risk_level=str(data["risk_level"]),
-        reversible=bool(data.get("reversible", 0)),
-        version=str(data.get("version") or "1.0.0"),
-        schema_hash=str(data.get("schema_hash") or ""),
-        domain_tags=tags,
-        emotion_requirement=emotion_req,
-    )
-
-
-def _decode_sync_row(row: sqlite3.Row) -> dict[str, Any]:
-    data = dict(row)
-    for key in ("before_json", "after_json", "diff_json"):
-        raw = data.pop(key, None)
-        field_name = key.replace("_json", "")
-        if raw and isinstance(raw, str):
-            try:
-                data[field_name] = json.loads(raw)
-            except Exception:
-                data[field_name] = raw
-        else:
-            data[field_name] = None
-    data.pop("id", None)
-    return data
-
-
-def _compute_diff(
-    before: dict[str, Any] | None,
-    after: dict[str, Any],
-) -> dict[str, Any]:
-    """Compute field-level diff between before and after."""
-    if before is None:
-        return {"added": list(after.keys()), "changed": {}, "removed": []}
-    changed: dict[str, Any] = {}
-    for key, new_val in after.items():
-        old_val = before.get(key)
-        if old_val != new_val:
-            changed[key] = {"before": old_val, "after": new_val}
-    removed = [k for k in before if k not in after]
-    return {"added": [], "changed": changed, "removed": removed}
+__all__ = [
+    "MCPToolRegistry",
+    "ToolMeta",
+    "VALID_ACCESS_LEVELS",
+    "VALID_RISK_LEVELS",
+]

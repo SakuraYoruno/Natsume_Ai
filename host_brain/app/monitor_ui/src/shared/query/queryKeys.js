@@ -1,4 +1,5 @@
 export const OBS_QUERY_KEYS = Object.freeze({
+  governanceSnapshot: () => ['governance-snapshot'],
   lifeBody: (windowMinutes) => ['life-body', windowMinutes],
   lifeTimeline: (params) => ['life-timeline', params],
   pathologies: (params) => ['pathologies', params],
@@ -6,6 +7,7 @@ export const OBS_QUERY_KEYS = Object.freeze({
   avatarState: () => ['avatar-state'],
   digitalLifeOverview: (windowMinutes) => ['digital-life-overview', windowMinutes],
   digitalLifeWallClockSoak: () => ['digital-life-wall-clock-soak'],
+  lifeEvolution: (personId) => ['life-evolution', personId || 'default'],
   codexBioOpsObservability: (runId) => ['codex-bio-ops-observability', runId || 'latest'],
   memoryOverview: (windowMinutes) => ['memory-overview', windowMinutes],
   gatewayOverview: (windowMinutes) => ['gateway-overview', windowMinutes],
@@ -15,6 +17,13 @@ export const OBS_QUERY_KEYS = Object.freeze({
   insightsSummary: (windowMinutes) => ['insights-summary', windowMinutes],
   systemConfig: (windowMinutes) => ['system-config', windowMinutes],
   agentLoopConsole: () => ['agent-loop-console'],
+  taskRuntimeIndex: () => ['task-runtime-index'],
+  taskRuntimeExecution: (graphId, revision, afterCursor) => [
+    'task-runtime-execution',
+    graphId || 'none',
+    revision || 0,
+    afterCursor || 0,
+  ],
   bondOverview: () => ['bond-overview'],
   bondUserDetail: (userId) => ['bond-user-detail', userId || 'none'],
   toolsCatalog: (query) => ['tools-catalog', query || 'all'],

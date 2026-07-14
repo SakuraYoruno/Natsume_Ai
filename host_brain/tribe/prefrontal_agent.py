@@ -1,13 +1,23 @@
 ﻿from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.model_invocation import (
+    complete_tribe_compiled,
+    complete_tribe_compiled_sync,
+)
 from host_brain.core.ids import now_ms
+from host_brain.model_runtime import (
+    PREFRONTAL_PLAN_PROMPT_ID,
+    PREFRONTAL_SELF_REFLECTION_PROMPT_ID,
+)
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -90,6 +100,7 @@ def _resolve_prefrontal_bond_user_id(value: Any = None, *, session_id: str = "de
 
 @dataclass(slots=True)
 class PrefrontalAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="prefrontal_agent",
@@ -132,7 +143,6 @@ class PrefrontalAgent:
     ) -> dict[str, Any]:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
 
         persona_engine = PersonaEngine.get_instance()
         persona_user_id = _resolve_prefrontal_persona_id(persona_user_id)
@@ -152,6 +162,7 @@ class PrefrontalAgent:
         else:
             snapshot = {}
         llm_enabled = bool(use_llm)
+        model_attempts: list[dict[str, Any]] = []
         if llm_enabled and not _background_tasks_enabled():
             return {
                 "self_model_snapshot": snapshot,
@@ -160,17 +171,30 @@ class PrefrontalAgent:
             }
         if snapshot:
             llm_fn = None
-            try:
-                if llm_enabled:
-                    llm_fn = build_pool_prompt_llm_fn(
-                        request_id=f"self_reflection_context::{int(now_ms)}",
+            if llm_enabled:
+                def _complete_reflection(prompt: str) -> str:
+                    completion = complete_tribe_compiled_sync(
+                        attempt_service=self.application_ports.require("model_attempt_service")(),
+                        prompt_id=PREFRONTAL_SELF_REFLECTION_PROMPT_ID,
+                        messages=({"role": "user", "content": str(prompt or "")},),
+                        request_id=(
+                            f"self_reflection_context::{int(now_ms)}::"
+                            f"{len(model_attempts) + 1}"
+                        ),
                         scene_type="SELF_REFLECTION",
                         cognitive_tier="B",
-                        timeout_ms=4000,
-                        gen_params={"temperature": 0.55, "top_p": 0.9},
+                        deadline_ms=4_000,
+                        foreground=False,
+                        metadata={"caller": "prefrontal_self_reflection"},
                     )
-            except Exception:
-                llm_fn = None
+                    model_attempts.append(dict(completion.trace))
+                    if not completion.success:
+                        raise RuntimeError(
+                            completion.result.error_code or "SELF_REFLECTION_MODEL_ATTEMPT_FAILED"
+                        )
+                    return completion.content
+
+                llm_fn = _complete_reflection
             try:
                 pulse = dict(
                     build_self_reflection_pulse(
@@ -195,6 +219,7 @@ class PrefrontalAgent:
         return {
             "self_model_snapshot": snapshot,
             "self_reflection_pulse": pulse,
+            "model_attempts": model_attempts,
         }
 
     def resolve_style_evolution_summary(self) -> dict[str, Any]:
@@ -436,7 +461,7 @@ class PrefrontalAgent:
         )
         return dict(aligned or {})
 
-    def plan_response(
+    async def plan_response(
         self,
         *,
         user_message: str,
@@ -524,13 +549,13 @@ class PrefrontalAgent:
                 "latency_ms": int((_time.monotonic() - _t0) * 1000),
             }
 
-        # ── LLM 推理路径（小模型，<500ms）────────────────────────────────
+        # ── Canonical model-attempt path ─────────────────────────────────
+        _model_attempt_trace: dict[str, Any] = {}
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
             # 从 executive.yaml 加载 prefrontal_plan prompt 模板
-            _tpl = resolve_prompt_template_json("prefrontal_agent.plan_response.prompt") or {}
+            _tpl = resolve_prompt_contract_json("prefrontal_agent.plan_response.prompt") or {}
             _system_tpl = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
 
@@ -556,33 +581,28 @@ class PrefrontalAgent:
                 drift_alert=str(drift_alert_level or "NONE"),
             )
 
-            # 调用专用小模型（Flash，低延迟）
-            _pool_result = complete_llm_with_pool_sync(
+            _completion = await complete_tribe_compiled(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                prompt_id=PREFRONTAL_PLAN_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": _system_tpl},
+                    {"role": "user", "content": _user_prompt},
+                ),
                 request_id=str(request_id or f"prefrontal::{now_ms()}"),
                 scene_type="PREFRONTAL_PLAN",
                 cognitive_tier="B",
-                timeout_ms=int(timeout_ms),
-                messages=[
-                    {"role": "system", "content": _system_tpl},
-                    {"role": "user", "content": _user_prompt},
-                ],
-                gen_params={"temperature": 0.1, "max_tokens": 128},
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                response_format="json_object",
+                deadline_ms=int(timeout_ms),
+                foreground=True,
+                metadata={"caller": "prefrontal_plan_response"},
             )
-            if _pool_result.pool_exhausted:
-                raise RuntimeError("prefrontal llm pool exhausted")
-            _raw_text = str(_pool_result.content or "").strip()
+            _model_attempt_trace = dict(_completion.trace)
+            if not _completion.success:
+                raise RuntimeError(
+                    _completion.result.error_code or "PREFRONTAL_MODEL_ATTEMPT_FAILED"
+                )
+            _raw_text = _completion.content.strip()
 
-            # 解析 JSON 输出
-            import json as _json  # noqa: PLC0415
-            import re as _re  # noqa: PLC0415
-            _json_match = _re.search(r"\{.*\}", _raw_text, _re.DOTALL)
-            if _json_match:
-                _plan = _json.loads(_json_match.group())
-            else:
-                _plan = {}
+            _plan = json.loads(_raw_text)
 
             _action = str(_plan.get("action") or "speak").strip().lower()
             if _action not in {"speak", "skill", "delegate", "wait"}:
@@ -596,6 +616,7 @@ class PrefrontalAgent:
                 "urgency": max(0.0, min(1.0, float(_plan.get("urgency") or 0.5))),
                 "source": "prefrontal_llm",
                 "latency_ms": int((_time.monotonic() - _t0) * 1000),
+                "model_attempt": _model_attempt_trace,
             }
 
             # 写入 state_registry 供可观测性
@@ -632,12 +653,12 @@ class PrefrontalAgent:
                 "urgency": 0.5,
                 "source": "prefrontal_rule_fallback",
                 "latency_ms": int((_time.monotonic() - _t0) * 1000),
+                "model_attempt": _model_attempt_trace,
             }
 
     def run_evolution_cycle(self, *, system_intent: dict[str, Any], logger: Any | None = None) -> dict[str, Any]:
         runtime_logger = logger or _logger
         try:
-            from host_brain.app.emotion_context import _global_emotion_timeline  # noqa: PLC0415
             from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
 
             orchestrator = EvolutionOrchestrator()
@@ -648,8 +669,9 @@ class PrefrontalAgent:
             timeline_summary: dict[str, Any] = {}
             timeline_diary: dict[str, Any] = {}
             try:
-                timeline_summary = _global_emotion_timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
-                timeline_diary = _global_emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
+                timeline = self.application_ports.require("emotion_timeline")()
+                timeline_summary = timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
+                timeline_diary = timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
             except Exception:
                 pass
 
@@ -730,7 +752,6 @@ class PrefrontalAgent:
         llm_output_text: str,
         user_input_text: str,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
         from host_brain.persona.drift_detector import PersonaDriftDetector  # noqa: PLC0415
 
         if self._drift_detector is None:
@@ -749,7 +770,7 @@ class PrefrontalAgent:
         }
         if payload["alert_level"] in {"MODERATE", "SEVERE"}:
             try:
-                hard_state = get_hard_state()
+                hard_state = self.application_ports.require("hard_state")()
                 if hard_state is not None:
                     hard_state.set("drift_correction_hint", payload["correction_hint"])
             except Exception:
@@ -1076,7 +1097,7 @@ class PrefrontalAgent:
         关系阶段跃迁时触发 apply_stage_promotion_growth，将关系进展转化为人格成长动力。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
@@ -1155,9 +1176,9 @@ class PrefrontalAgent:
 
     def _resource_gate_defers_evolution(self, *, reason: str) -> bool:
         try:
-            from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
-
-            manager = get_resource_manager(create_if_missing=False)
+            manager = self.application_ports.require("resource_manager")(
+                create_if_missing=False,
+            )
         except Exception as exc:
             _logger.debug("PrefrontalAgent resource gate unavailable: %s", exc)
             return False

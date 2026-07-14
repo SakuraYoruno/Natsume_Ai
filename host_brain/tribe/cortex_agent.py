@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 from host_brain.tribe.cortex_context_collector import collect_tribe_context as _collect_tribe_context
@@ -14,6 +15,7 @@ from host_brain.tribe.cortex_route_decider import route_intent as _route_intent
 
 @dataclass(slots=True)
 class CortexAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="cortex_agent",
@@ -32,10 +34,8 @@ class CortexAgent:
         logger: Any | None = None,
         timeout_s: float = 3.0,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_update_queue  # noqa: PLC0415
-
         try:
-            queue = get_bond_update_queue()
+            queue = self.application_ports.require("bond_update_queue")()
             drained = bool(queue.drain(timeout_s=float(timeout_s)))
             queue.shutdown()
             if logger is not None and hasattr(logger, "info"):
@@ -55,7 +55,6 @@ class CortexAgent:
         emotion_context: dict[str, Any] | None,
         ts_ms: int,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_update_queue, get_ledger  # noqa: PLC0415
         from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
         from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
 
@@ -81,14 +80,14 @@ class CortexAgent:
             "ts_ms": int(ts_ms),
         }
 
-        queue = get_bond_update_queue()
+        queue = self.application_ports.require("bond_update_queue")()
         queue_result = dict(queue.enqueue(bond_payload) or {})
         if str(queue_result.get("status") or "") == "QUEUED":
             return {"status": "QUEUED", "update_kind": update_kind}
 
         stage_engine = get_social_brain_agent().resolve_stage_engine()
         writer = BondDynamicsWriter(
-            ledger=get_ledger(),
+            ledger=self.application_ports.require("ledger")(),
             stage_engine=stage_engine,
         )
         await asyncio.to_thread(writer.apply_update, **bond_payload)
@@ -239,7 +238,7 @@ class CortexAgent:
         将关系变化写入 cortex_agent 命名空间快照，供路由决策参考。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("SILENCE_WILLINGNESS_CHANGED", self._on_silence_willingness_changed)
@@ -710,7 +709,7 @@ class CortexAgent:
             # 从 Broca 获取 emotion_intensity（如果可用）
             emotion_intensity: float = 0.5
             try:
-                from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
+                from host_brain.tribe.speech import broca_to_tts_params  # noqa: PLC0415
                 _lang_agent = get_language_system_agent()
                 _last_broca = dict(
                     (_lang_agent.state_registry.get_state("language_system_agent") or {})

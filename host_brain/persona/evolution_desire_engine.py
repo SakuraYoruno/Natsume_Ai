@@ -22,13 +22,41 @@ import random
 import time
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 _logger = logging.getLogger("Natsume.evolution_desire_engine")
 
 
+class _EvolutionDesireModelPort:
+    canonical_model_attempt_port = True
+
+    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
+        self._request_id = str(request_id or "evolution-desire")
+        self._attempt_service = attempt_service
+        self.last_trace: dict[str, Any] = {}
+
+    def __call__(self, prompt: str) -> str:
+        from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+        from host_brain.model_runtime.live_prompts import EVOLUTION_DESIRE_PROMPT_ID  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
+
+        result = complete_compiled_prompt_sync(
+            attempt_service=self._attempt_service,
+            prompt_id=EVOLUTION_DESIRE_PROMPT_ID,
+            request_id=self._request_id,
+            scene_type="EVOLUTION_DESIRE",
+            cognitive_tier="B",
+            messages=({"role": "user", "content": str(prompt or "")},),
+            deadline_ms=4_000,
+            foreground=False,
+            metadata={"chain": "evolution_desire"},
+        )
+        self.last_trace = model_attempt_result_trace(result)
+        return str(result.content or "").strip() if result.success else ""
+
+
 def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+    raw = resolve_prompt_contract_json("persona.self_narrative_prompts")
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -101,11 +129,7 @@ def _default_desire_template_data() -> dict[str, Any]:
 
 
 def _load_desire_template_data() -> dict[str, Any]:
-    try:
-        raw = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
-    except Exception:
-        return _default_desire_template_data()
-    return dict(raw) if isinstance(raw, Mapping) else _default_desire_template_data()
+    return _default_desire_template_data()
 
 
 def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
@@ -191,6 +215,11 @@ class EvolutionDesireEngine:
         self._rng = random.Random(seed)
         # 记录每条意愿文本最后使用的时间戳（ms）
         self._used_ts: dict[str, int] = {}
+        self._last_model_attempt_trace: dict[str, Any] = {}
+
+    @property
+    def last_model_attempt_trace(self) -> dict[str, Any]:
+        return dict(self._last_model_attempt_trace)
 
     def generate_desire(
         self,
@@ -250,20 +279,7 @@ class EvolutionDesireEngine:
         if pref_text:
             return pref_text
 
-        resolved_llm_fn = llm_fn
-        if resolved_llm_fn is None:
-            try:
-                from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
-
-                resolved_llm_fn = build_pool_prompt_llm_fn(
-                    request_id=f"evolution_desire::{int(ts)}",
-                    scene_type="EVOLUTION_DESIRE",
-                    cognitive_tier="B",
-                    timeout_ms=4000,
-                    gen_params={"temperature": 0.65, "top_p": 0.9},
-                )
-            except Exception:
-                resolved_llm_fn = None
+        resolved_llm_fn = llm_fn if callable(llm_fn) else None
 
         if strict_llm and resolved_llm_fn is None:
             return ""
@@ -277,6 +293,9 @@ class EvolutionDesireEngine:
                 bond_stage=bond_stage,
                 event_count=event_count,
                 ts=ts,
+            )
+            self._last_model_attempt_trace = dict(
+                getattr(resolved_llm_fn, "last_trace", {}) or {}
             )
             if llm_desire:
                 self._used_ts[llm_desire] = ts
@@ -354,6 +373,8 @@ class EvolutionDesireEngine:
         失败时返回空字符串，由调用方降级到模板库。
         """
         try:
+            if not callable(llm_fn):
+                return ""
             # 构建特质描述
             trait_hints: list[str] = []
             if traits is not None:
@@ -639,7 +660,7 @@ class EvolutionDesireEngine:
         available: list[str] = []
         for text in candidates:
             last_used = self._used_ts.get(text, 0)
-            if ts - last_used >= _DESIRE_COOLDOWN_MS:
+            if last_used <= 0 or ts - last_used >= _DESIRE_COOLDOWN_MS:
                 available.append(text)
         return available
 

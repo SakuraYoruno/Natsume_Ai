@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from edge_client.app.schemas import EdgeRpcEnvelope
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
     EDGE_RPC_AUTH_EXPIRED,
     EDGE_RPC_AUTH_INVALID,
     REPLAY_DETECTED,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 
 
 S_EDGE_RPC_AUTH = "S_EDGE_RPC_AUTH"

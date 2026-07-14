@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from host_brain.tribe.default_mode_agent import DefaultModeAgent, mark_recent_foreground_interaction
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
@@ -30,7 +31,13 @@ def test_default_mode_agent_tick_and_export(monkeypatch) -> None:
         ),
     )
 
-    agent = DefaultModeAgent(state_registry=TribeStateRegistry())
+    agent = DefaultModeAgent(
+        state_registry=TribeStateRegistry(),
+        application_ports=TribeApplicationPorts(
+            model_attempt_service=lambda: object(),
+            prompt_registry=lambda: object(),
+        ),
+    )
     tick = agent.tick_idle_cycle(person_id="u-default", topic_phrase="测试", source="unit_test", now_ts_ms=123456)
     exported = agent.export_runtime_state()
 

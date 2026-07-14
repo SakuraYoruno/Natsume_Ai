@@ -51,6 +51,13 @@ from host_brain.bond.bond_narrative import (
     BondNarrativeResult,
     NarrativeItem,
 )
+from host_brain.bond.bond_projection import (
+    BOND_PROJECTION_DISABLED,
+    BOND_PROJECTION_SCHEMA_VERSION,
+    BOND_PROJECTION_STATE_UNAVAILABLE,
+    BondProjectionReadModel,
+    build_bond_projection,
+)
 
 __all__ = [
     "BOND_WRITER_ID",
@@ -91,4 +98,9 @@ __all__ = [
     "BondNarrativeLayer",
     "BondNarrativeResult",
     "NarrativeItem",
+    "BOND_PROJECTION_DISABLED",
+    "BOND_PROJECTION_SCHEMA_VERSION",
+    "BOND_PROJECTION_STATE_UNAVAILABLE",
+    "BondProjectionReadModel",
+    "build_bond_projection",
 ]

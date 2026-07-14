@@ -30,6 +30,10 @@ class _LedgerStub:
         _ = (args, kwargs)
 
 
+async def _noop_input_dispatcher(**_kwargs) -> None:  # noqa: ANN003
+    return None
+
+
 def test_edge_events_accepts_whitelisted_event_type() -> None:
     ledger = _LedgerStub()
     request_body = EdgeEventsRequest(
@@ -47,6 +51,7 @@ def test_edge_events_accepts_whitelisted_event_type() -> None:
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -72,6 +77,7 @@ def test_edge_events_rejects_unknown_event_type_with_400() -> None:
             request_body=request_body,
             get_ledger=lambda: ledger,
             logger=_LedgerStub(),
+            input_dispatcher=_noop_input_dispatcher,
         )
 
     assert exc_info.value.status_code == 400
@@ -97,6 +103,7 @@ def test_edge_events_rejects_unknown_event_source_with_400() -> None:
             request_body=request_body,
             get_ledger=lambda: ledger,
             logger=_LedgerStub(),
+            input_dispatcher=_noop_input_dispatcher,
         )
 
     assert exc_info.value.status_code == 400
@@ -112,7 +119,7 @@ def test_edge_events_final_asr_chunk_collects_bridge_candidate(monkeypatch: pyte
     monkeypatch.setattr(
         system_handler,
         "_schedule_edge_asr_bridge",
-        lambda *, candidate, logger: scheduled.append(dict(candidate)),
+        lambda *, candidate, logger, input_dispatcher: scheduled.append(dict(candidate)),
     )
 
     request_body = EdgeEventsRequest(
@@ -136,6 +143,7 @@ def test_edge_events_final_asr_chunk_collects_bridge_candidate(monkeypatch: pyte
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -183,6 +191,7 @@ def test_edge_events_non_final_asr_chunk_skips_bridge_candidate(monkeypatch: pyt
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -222,6 +231,7 @@ def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: py
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -264,6 +274,7 @@ def test_edge_events_low_confidence_asr_chunk_skips_bridge_candidate(
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -304,6 +315,7 @@ def test_edge_events_disallow_chunk_skips_bridge_candidate(monkeypatch: pytest.M
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=logger,
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1
@@ -335,6 +347,7 @@ def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
             "payload": {"text": "哥哥,现在测试真实采集", "seq": 1, "is_final": True},
         },
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
     system_handler._schedule_edge_asr_bridge(
         candidate={
@@ -345,6 +358,7 @@ def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
             "payload": {"text": "哥哥,现在测试真实采集", "seq": 2, "is_final": True},
         },
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert len(scheduled) == 2
@@ -373,10 +387,15 @@ def test_schedule_edge_asr_bridge_dedups_same_text_same_seq(
         "ts_ms": 1000,
         "payload": {"text": "哥哥,现在测试真实采集", "seq": 3, "is_final": True},
     }
-    system_handler._schedule_edge_asr_bridge(candidate=candidate, logger=_LedgerStub())
+    system_handler._schedule_edge_asr_bridge(
+        candidate=candidate,
+        logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
+    )
     system_handler._schedule_edge_asr_bridge(
         candidate={**candidate, "request_id": "req-same-2", "ts_ms": 1800},
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert len(scheduled) == 1
@@ -433,6 +452,7 @@ def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.Mon
         request_body=request_body,
         get_ledger=lambda: ledger,
         logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
     )
 
     assert response.accepted == 1

@@ -17,7 +17,7 @@ def _normalize_session_id(session_id: str) -> str:
 
 def _read_session_seq_from_ledger(session_id: str) -> int:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
 
         ledger = get_ledger()
         value = ledger.get_session_seq(session_id=session_id)

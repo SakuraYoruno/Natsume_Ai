@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from edge_client.rpc.resource_gate import TASK_FALLBACK_LLM, VoiceResourceGate
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import (
+from natsume_contracts.edge.v1 import (
+    EdgeVoiceEventLedger,
     VOICE_DECISION_FIELD_FORBIDDEN,
     VOICE_DRAFT_ONLY_REQUIRED,
     VOICE_EXECUTION_CLAIM_FORBIDDEN,
     VOICE_FALLBACK_UNAVAILABLE,
     VOICE_SCHEMA_INVALID,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
 
 
 STATUS_ACCEPTED = "ACCEPTED"
@@ -63,7 +63,7 @@ class EdgeFallbackRpcContract:
     def __init__(
         self,
         *,
-        ledger: SQLiteLedger | None = None,
+        ledger: EdgeVoiceEventLedger | None = None,
         resource_gate: VoiceResourceGate | None = None,
         available: bool = True,
         default_unloaded: bool = False,

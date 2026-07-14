@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 
-from host_brain.runtime import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
+from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
 from tools.run_digital_life_host_runtime import build_arg_parser, run_host_runtime
 from tools.run_digital_life_wall_clock_soak import (
     build_arg_parser as build_wall_clock_arg_parser,
@@ -37,10 +37,7 @@ def _foreground_runner(context: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_digital_life_supervisor_runs_foreground_and_idle_tick(tmp_path, monkeypatch) -> None:
-    import host_brain.persona.inner_world as inner_world
-
-    original_inner_world_dir = inner_world._DEFAULT_STATE_DIR
+def test_digital_life_supervisor_runs_foreground_and_rejects_direct_idle_tick(tmp_path) -> None:
     supervisor = DigitalLifeSupervisor(
         DigitalLifeRuntimeConfig(
             mode="fixture",
@@ -49,12 +46,6 @@ def test_digital_life_supervisor_runs_foreground_and_idle_tick(tmp_path, monkeyp
             foreground_runner=_foreground_runner,  # type: ignore[arg-type]
         )
     )
-    monkeypatch.setattr(
-        supervisor,
-        "_dispatch_scheduler_intent",
-        lambda system_intent: {"status": "OK", "skill_name": system_intent.get("skill_name")},
-    )
-
     with supervisor:
         start_snapshot = supervisor.snapshot()
         foreground = supervisor.run_foreground_turn("早啊")
@@ -64,17 +55,20 @@ def test_digital_life_supervisor_runs_foreground_and_idle_tick(tmp_path, monkeyp
     assert start_snapshot["alive"] is True
     assert foreground["turn"]["reply_text"] == "知道了，我先记着。"
     assert foreground["turn"]["mapped_organ_count"] == 23
-    assert idle["task_results"]["inner_world_numeric_tick"]["status"] == "OK"
+    assert idle["task_results"]["inner_world_numeric_tick"] == {
+        "status": "SKIPPED",
+        "reason_code": "GOVERNED_SCHEDULER_SERVICE_REQUIRED",
+    }
     assert final_snapshot["foreground_turn_count"] == 1
     assert final_snapshot["idle_tick_count"] == 1
     assert final_snapshot["organ_runtime"]["registered_organ_count"] >= 23
-    assert final_snapshot["background_runtime"]["core_ticks_registered"] is True
+    assert final_snapshot["background_runtime"]["core_ticks_registered"] is False
+    assert final_snapshot["scheduler"]["scheduler_status"] == "EXTERNAL_GOVERNED_RUNTIME"
     assert any(event["event_type"] == "foreground_turn" for event in supervisor.events)
     assert any(event["event_type"] == "idle_tick" for event in supervisor.events)
-    assert inner_world._DEFAULT_STATE_DIR == original_inner_world_dir
 
 
-def test_digital_life_supervisor_runs_proactive_talk_into_safe_outbox(tmp_path) -> None:
+def test_digital_life_supervisor_never_runs_proactive_task_directly(tmp_path) -> None:
     supervisor = DigitalLifeSupervisor(
         DigitalLifeRuntimeConfig(
             mode="fixture",
@@ -88,32 +82,18 @@ def test_digital_life_supervisor_runs_proactive_talk_into_safe_outbox(tmp_path) 
         final_snapshot = supervisor.snapshot()
 
     result = idle["task_results"]["proactive_talk_periodic"]
-    nested = result["result"]
-    push_result = nested["push_result"]
     outbox_path = tmp_path / "proactive_outbox.jsonl"
     episode_path = tmp_path / "proactive_episodes.jsonl"
-    rows = [json.loads(line) for line in outbox_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    episode_rows = [json.loads(line) for line in episode_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    assert result["status"] == "EXECUTED"
-    assert nested["message"]["type"] == "proactive_talk"
-    assert nested["message"]["proactive_episode"]["source"] == "emotional_impulse"
-    assert push_result["status"] == "QUEUED"
-    assert push_result["delivery_mode"] == "safe_outbox"
-    assert len(rows) == 1
-    assert len(episode_rows) == 1
-    assert episode_rows[0]["send_allowed"] is True
-    assert rows[0]["delivery_status"] == "QUEUED"
-    assert rows[0]["message"]["type"] == "proactive_talk"
-    assert rows[0]["message"]["proactive_episode"]["episode_id"] == episode_rows[0]["episode_id"]
-    assert final_snapshot["background_runtime"]["proactive_task"]["enabled"] is True
-    assert final_snapshot["background_runtime"]["proactive_task"]["status"] == "OK"
-    assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
-    assert final_snapshot["proactive_emotional_episode"]["last_send_allowed"] is True
-    assert final_snapshot["proactive_outbox"]["queued_count"] == 1
+    assert result == {
+        "status": "SKIPPED",
+        "reason_code": "GOVERNED_SCHEDULER_SERVICE_REQUIRED",
+    }
+    assert not outbox_path.exists()
+    assert not episode_path.exists()
+    assert final_snapshot["proactive_outbox"]["queued_count"] == 0
 
 
-def test_digital_life_supervisor_holds_emotional_proactive_when_recent_outbound(tmp_path) -> None:
+def test_digital_life_supervisor_has_no_direct_scheduler_dispatch_authority(tmp_path) -> None:
     supervisor = DigitalLifeSupervisor(
         DigitalLifeRuntimeConfig(
             mode="fixture",
@@ -123,22 +103,11 @@ def test_digital_life_supervisor_holds_emotional_proactive_when_recent_outbound(
     )
 
     with supervisor:
-        supervisor._last_proactive_outbox_ts_ms = int(time.time() * 1000)
-        result = supervisor._dispatch_scheduler_intent({"skill_name": "proactive_talk", "args": {}})
-        final_snapshot = supervisor.snapshot()
-
-    episode_path = tmp_path / "proactive_episodes.jsonl"
-    outbox_path = tmp_path / "proactive_outbox.jsonl"
-    episode_rows = [json.loads(line) for line in episode_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    assert result["status"] == "SKIPPED"
-    assert result["reason_code"] == "EMOTIONAL_PROACTIVE_HELD"
-    assert len(episode_rows) == 1
-    assert episode_rows[0]["send_allowed"] is False
-    assert not outbox_path.exists()
-    assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
-    assert final_snapshot["proactive_emotional_episode"]["last_send_allowed"] is False
-    assert final_snapshot["proactive_outbox"]["queued_count"] == 0
+        assert not hasattr(supervisor, "_dispatch_scheduler_intent")
+        result = supervisor.run_idle_tick(task_ids=("proactive_talk_periodic",))
+    assert result["task_results"]["proactive_talk_periodic"]["reason_code"] == (
+        "GOVERNED_SCHEDULER_SERVICE_REQUIRED"
+    )
 
 
 def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) -> None:
@@ -214,7 +183,8 @@ def test_run_digital_life_host_runtime_writes_artifacts(tmp_path) -> None:
     summary = result["summary"]
     assert summary["status"] == "PASS"
     assert summary["alive"] is True
-    assert summary["core_ticks_registered"] is True
+    assert summary["core_ticks_registered"] is False
+    assert summary["scheduler_status"] == "EXTERNAL_GOVERNED_RUNTIME"
     assert (tmp_path / "summary.json").exists()
     assert (tmp_path / "details.json").exists()
     assert (tmp_path / "snapshots.jsonl").exists()

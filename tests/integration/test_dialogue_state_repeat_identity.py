@@ -1,41 +1,45 @@
 from __future__ import annotations
 
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.soul_runtime import get_compiled_soul
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.conversation import ConversationHistory, TurnStore
+from host_brain.conversation import ConversationHistory
+from host_brain.composition.process_service_container import get_process_service_container
+from host_brain.persistence.context_repository import ContextRepository
 
 
 def test_dialogue_state_uses_real_conversation_window_for_repeat_identity(monkeypatch) -> None:
     display_name = get_compiled_soul().display_name
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = TurnStore(ledger)
+    store = ContextRepository.from_ledger(ledger)
     history = ConversationHistory(store)
 
-    store.append_generated(
-        session_id="sess-repeat",
-        person_id="p1",
-        request_id="req-1",
-        role="user",
-        content="你是",
-        ts_ms=1000,
-        lang="zh",
+    store.append_generated_turn(
+        {
+            "turn_id": "turn::req-1::user",
+            "session_id": "sess-repeat",
+            "person_id": "p1",
+            "request_id": "req-1",
+            "role": "user",
+            "content": "你是",
+            "ts_ms": 1000,
+            "lang": "zh",
+        }
     )
-    store.append_generated(
-        session_id="sess-repeat",
-        person_id="p1",
-        request_id="req-2",
-        role="assistant",
-        content=f"我是{display_name}。",
-        ts_ms=1001,
-        lang="zh",
+    store.append_generated_turn(
+        {
+            "turn_id": "turn::req-2::assistant",
+            "session_id": "sess-repeat",
+            "person_id": "p1",
+            "request_id": "req-2",
+            "role": "assistant",
+            "content": f"我是{display_name}。",
+            "ts_ms": 1001,
+            "lang": "zh",
+        }
     )
 
-    monkeypatch.setattr(
-        "host_brain.app.dependencies._conversation_history",
-        history,
-        raising=False,
-    )
+    monkeypatch.setattr(get_process_service_container(), "conversation_history", history)
 
     plane = assemble_prompt_context_plane(
         node_id="cortex_orchestrator",

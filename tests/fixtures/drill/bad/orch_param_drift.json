@@ -14,8 +14,7 @@
                                                                   "temperature":  0.55,
                                                                   "max_output_tokens":  360,
                                                                   "timeout_ms":  1200,
-                                                                  "expected_param_hash":  "mismatch-hash",
-                                                                  "provider_fn":  "__fixture_provider_fn__"
+                                                                  "expected_param_hash":  "mismatch-hash"
                                                               }
                                   },
                   "node_bindings":  [

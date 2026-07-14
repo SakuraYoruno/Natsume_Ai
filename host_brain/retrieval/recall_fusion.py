@@ -222,6 +222,7 @@ class RecallFusionServiceContract:
         self,
         *,
         ledger: SQLiteLedger | None = None,
+        life_memory_store: Any | None = None,
         chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
         world_store: Any | None = None,
@@ -235,6 +236,7 @@ class RecallFusionServiceContract:
         fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
+        self.life_memory_store = life_memory_store
         self.chroma = chroma_client or _build_optional_runtime_chroma_client()
         self.neo4j = neo4j_client
         self.world_store = world_store

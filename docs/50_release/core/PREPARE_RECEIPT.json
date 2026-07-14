@@ -1,0 +1,24 @@
+{
+  "acceptance_executed": false,
+  "artifacts": {
+    "manifest_ref": "docs/50_release/core/CORE_RELEASE_MANIFEST.json",
+    "rollback_matrix_ref": "docs/50_release/core/CORE_ROLLBACK_MATRIX.json",
+    "sbom_ref": "docs/50_release/core/SBOM.cdx.json"
+  },
+  "compatibility_registry": {
+    "active_count": 0,
+    "issues": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS",
+    "usage_count": 0
+  },
+  "generated_at": "2026-07-13T09:19:41.181132+00:00",
+  "retired_paths": {
+    "remaining_paths": [],
+    "schema_version": "natsume.compatibility-registry.v1",
+    "status": "PASS"
+  },
+  "run_id": "prepare-20260713T091941Z-296593755a09-454960b2",
+  "schema_version": "natsume.core-release-prepare-receipt.v1",
+  "status": "DRAFT"
+}

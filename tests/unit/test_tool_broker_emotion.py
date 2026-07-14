@@ -26,7 +26,7 @@ def _make_broker(capture_context: list) -> ToolBroker:
         domain_tags=["test"],
         version="1.0",
     ))
-    ledger = SQLiteLedger()
+    ledger = SQLiteLedger(":memory:")
     token_service = TokenService()
     broker = ToolBroker(catalog=catalog, token_service=token_service, ledger=ledger)
     broker.register_handler("test_tool", handler)

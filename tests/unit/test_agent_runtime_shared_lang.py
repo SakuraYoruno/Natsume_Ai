@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.agent_runtime_shared import _resolve_text_render_target_lang
+from host_brain.agent_runtime.runtime_texts import _resolve_text_render_target_lang
 from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput
-from host_brain.app.surface_main_chain_adapter import surface_main_chain_required
+from host_brain.surface_runtime.eligibility import surface_main_chain_required
 
 
 def test_resolve_text_render_target_lang_uses_text_form_not_gateway_source() -> None:

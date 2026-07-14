@@ -4,15 +4,13 @@ import json
 import hashlib
 import sqlite3
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.life_memory import (
     EVIDENCE_REFLECTION,
     EPISODE_ACTION,
     EPISODE_PERCEPTION,
     EPISODE_REFLECTION,
-    LifeMemoryConsolidator,
-    MemorySleepReplayTask,
-    LifeMemoryStore,
     RETENTION_COLD,
     RETENTION_GONE,
     RETENTION_WARM,
@@ -20,6 +18,9 @@ from host_brain.memory.life_memory import (
     TRUTH_NARRATIVE_ONLY,
     TRUTH_SUPPRESSED,
 )
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.sleep import MemorySleepReplayTask
+from host_brain.memory.life_memory.store import LifeMemoryStore
 
 
 def test_same_chat_request_creates_one_life_episode_with_many_evidence() -> None:
@@ -64,7 +65,13 @@ def test_same_chat_request_creates_one_life_episode_with_many_evidence() -> None
 
 def test_voice_gateway_anchor_binds_person_and_message_ref(monkeypatch) -> None:
     monkeypatch.setenv("HOST_DEFAULT_USER_ID", "owner")
-    ledger = SQLiteLedger(db_path=":memory:")
+    def _write_anchor(**anchor) -> None:
+        LifeMemoryStore(ledger=ledger).write_background_episode(**anchor)
+
+    ledger = SQLiteLedger(
+        db_path=":memory:",
+        life_audit_anchor_writer=_write_anchor,
+    )
     try:
         ledger.log_voice_event(
             {
@@ -3275,7 +3282,7 @@ def test_compaction_keeps_summary_episode_and_marks_sources_cold_or_gone() -> No
         ledger.close()
 
 
-def test_ledger_skill_exec_creates_action_anchor_without_legacy_memory() -> None:
+def test_ledger_skill_exec_is_audit_only_without_hidden_life_memory_write() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
         ledger.log_skill_exec(
@@ -3293,12 +3300,8 @@ def test_ledger_skill_exec_creates_action_anchor_without_legacy_memory() -> None
         )
 
         assert len(ledger.skill_exec_log) == 1
-        assert len(ledger.life_episode) == 1
-        episode = ledger.life_episode[0]
-        assert episode["episode_kind"] == EPISODE_ACTION
-        assert episode["action"] == "daily_recommendation"
-        assert episode["retention_state"] in {"HOT", "WARM", "COLD"}
-        assert any(row["source_ref"] == "skill://exec/exec-anchor-1" for row in ledger.life_evidence)
+        assert ledger.life_episode == []
+        assert ledger.life_evidence == []
     finally:
         ledger.close()
 
@@ -3334,7 +3337,11 @@ def test_existing_life_episode_table_migrates_retention_columns_before_index(tmp
     finally:
         conn.close()
 
-    ledger = SQLiteLedger(db_path=str(db_path))
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="life-memory-old-schema-fixture",
+    )
+    assert migrated.success, migrated.as_dict()
+    ledger = SQLiteLedger(db_path=str(db_path), initialize_schema=False)
     try:
         row = ledger._conn.execute(
             "SELECT memory_strength, retention_state FROM life_episode WHERE episode_id = 'ep_old'"

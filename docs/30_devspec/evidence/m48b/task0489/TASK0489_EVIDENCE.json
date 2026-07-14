@@ -1,0 +1,98 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0489",
+  "milestone": "M48-B",
+  "status": "IMPLEMENTED_AWAITING_PROTECTED_HANDOFF",
+  "baseline_commit": "93ca702f316dc88d7a050ad69b05b281c91e5c39",
+  "implementation_commit": "3bc7eb7309f757dc40a6bc15167eac67e3ea17d6",
+  "recorded_at": "2026-07-11",
+  "scope": {
+    "baseline_obs_mutation_routes_removed": 18,
+    "active_secure_command_families": 16,
+    "retired_commands": ["wechat.channel.reset"],
+    "internal_non_operator_actions": ["capability_forge.runtime-match"],
+    "obs_route_entries": 111,
+    "obs_unique_method_paths": 104,
+    "obs_mutation_entries": 0,
+    "pure_query_post_entries": 3,
+    "duplicate_query_get_entries": 7,
+    "default_relocation_mode": "LEGACY_AUDIT",
+    "execution_mode": "HOST_OBS_COMMAND_RELOCATION_MODE=QUERY_ONLY plus HOST_SECURE_INGRESS_MODE=ENFORCE"
+  },
+  "security_invariants": [
+    "unknown and retired command IDs are rejected before domain routing and cannot append to the command outcome journal",
+    "identity, credential, exact raw-body signature, manifest action, domain scopes, rate, nonce and idempotency are checked by SecureIngress",
+    "caller-supplied authority fields are recursively removed and replaced by the authenticated principal before the domain port runs",
+    "unauthenticated and rate-limited traffic is centrally audited but never appends attacker-controlled records to the durable outcome WAL",
+    "authenticated outcomes use a distinct digest domain, checksum chain and durable head anchor; raw bodies, proofs, secrets and identity values are not persisted",
+    "claim-to-receipt gaps are terminally recovered as UNCERTAIN and never replay a domain effect",
+    "terminal journal replay converges the central result receipt without re-executing the domain port",
+    "SHADOW never executes a domain port; authenticated payload rejection is durable and replayable in the authenticated lane",
+    "one composition holds the cross-process outcome owner for its full lifetime; shutdown closes admission and drains in-flight calls before releasing ownership",
+    "WAL corruption, history rollback, capacity overflow, fsync failure, missing secrets, invalid rollout state and partial construction fail closed"
+  ],
+  "validation": [
+    {
+      "kind": "broad_focused_unit_contract_wave_before_final_audit",
+      "result": "249 passed in 9.04s"
+    },
+    {
+      "kind": "final_security_journal_composition_boundary_wave",
+      "command": "python -m pytest -q --tb=short tests/security/test_obs_secure_command_ingress.py tests/security/test_obs_command_http.py tests/unit/test_obs_command_outcome_journal.py tests/unit/test_obs_command_composition.py tests/unit/test_obs_domain_command_ports.py tests/contract/test_obs_query_only_boundary.py",
+      "result": "113 passed in 3.78s"
+    },
+    {
+      "kind": "task_integration_wave",
+      "first_command": "python -m pytest -q --tb=short tests/integration/test_task0489_obs_command_relocation_integration.py",
+      "first_result": "1 failed in 2.29s: the test fixture signed principal:<id> while the hardened HTTP adapter correctly derived http-peer:testclient from the observed ASGI peer",
+      "correction": "Only the obsolete integration signing fixture was changed to http-peer:testclient; no product code or security policy was relaxed",
+      "correction_command": "python -m pytest -q --tb=short tests/integration/test_task0489_obs_command_relocation_integration.py::test_task0489_query_only_secure_command_restart_wave",
+      "correction_result": "1 passed in 2.70s",
+      "coverage": "Query-only route audit, HTTP raw-body HMAC, authority replacement, single domain invocation, duplicate replay, tamper rejection, restart replay, central receipt and secret-free durable outcome",
+      "external_or_physical_effects": false
+    },
+    {
+      "kind": "static_boundary",
+      "result": "affected modules py_compile passed; git diff --check passed; no runtime DB, WAL, head or lock artifact was staged"
+    }
+  ],
+  "protected_handoff": {
+    "status": "REQUIRED_BEFORE_DONE",
+    "owner": "MASTER / auto-jp-media-translation",
+    "protected_file": "host_brain/app/router_registry.py",
+    "protected_wip_to_preserve": "reader_auto_translate_router import and include_router changes in the original workspace",
+    "current_runtime_gap": "Production code has no call to build_obs_command_composition or create_obs_command_http_router, so /v1/host/obs-commands/{command_id} is intentionally not yet reachable",
+    "required_merge": [
+      "preserve the reader-auto-translate WIP and every current integration-branch route/provider wire",
+      "mount create_obs_command_http_router exactly once with an app-state provider for the single composition ingress",
+      "inside the Host post-fork lifespan and after base runtime startup, build one composition and publish it to app.state before accepting command traffic",
+      "on shutdown close command admission, await composition.aclose() to drain in-flight work, clear app.state, then let the base runtime exit",
+      "add a production construction test proving one route owner, one composition owner, disabled/default fail-closed behavior and drain-before-release"
+    ],
+    "stop_condition": "Do not mark TASK-0489 DONE and do not enable QUERY_ONLY+ENFORCE until the protected merge and production construction test land"
+  },
+  "deferred_debts": [
+    {
+      "debt": "Outcome JSONL performs lock-held full validation and has no segment rollover/archive; it fails closed at 128 MiB",
+      "severity": "P1 availability/performance, not an authorization bypass",
+      "remove_by": "TASK-0541,TASK-0551"
+    },
+    {
+      "debt": "Seven duplicate GET query route entries remain even though none is a writer",
+      "severity": "P2",
+      "remove_by": "TASK-0595,TASK-0608"
+    },
+    {
+      "debt": "Versioned projection purity and read-model freshness/source cursor are completed in M56",
+      "severity": "P2",
+      "remove_by": "TASK-0595,TASK-0596"
+    }
+  ],
+  "rollback": [
+    "Keep HOST_OBS_COMMAND_RELOCATION_MODE at LEGACY_AUDIT, or move an attempted cutover back to SHADOW while preserving query access.",
+    "Close command admission and drain in-flight work before releasing the outcome owner or closing the central store.",
+    "Retain outcome WAL, head, locks, central claims and audits for reconciliation; never delete an UNCERTAIN receipt to permit retry.",
+    "Do not restore any removed anonymous Obs mutation route, the phantom WeChat reset, or a legacy writer fallback."
+  ],
+  "live_prod_pentest_or_physical_effects_executed": false
+}

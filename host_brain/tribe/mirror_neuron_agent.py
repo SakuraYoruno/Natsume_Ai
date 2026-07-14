@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.model_invocation import complete_tribe_compiled_sync
 from host_brain.core.ids import now_ms
+from host_brain.model_runtime import MIRROR_EMPATHY_PROMPT_ID
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -34,6 +38,7 @@ def _emotion_anchor(tag: str) -> tuple[float, float]:
 
 @dataclass(slots=True)
 class MirrorNeuronAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="mirror_neuron_agent",
@@ -50,7 +55,7 @@ class MirrorNeuronAgent:
 
     def register_subscriptions(self) -> None:
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)
@@ -278,7 +283,7 @@ class MirrorNeuronAgent:
         """共情回应建议：共鸣强度高时调用 LLM 生成共情回应策略。
 
         触发条件：resonance_intensity > 0.6。
-        调用：Flash 小模型。
+        调用：服务端 RoutePolicy 选择模型。
         开关：MIRROR_EMPATHY_HINT_ENABLED（默认 false）。
         输出注入：PrefrontalAgent.plan_response() 的 tone_hint 字段。
 
@@ -290,11 +295,11 @@ class MirrorNeuronAgent:
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.mirror_neuron_agent")
+        _model_attempt_trace: dict[str, Any] = {}
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("mirror_neuron_agent.empathy_response_hint") or {}
+            _tpl = resolve_prompt_contract_json("mirror_neuron_agent.empathy_response_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -305,26 +310,26 @@ class MirrorNeuronAgent:
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
                 bond_stage=str(bond_stage or "friend"),
             )
-            _pool_result = complete_llm_with_pool_sync(
+            _completion = complete_tribe_compiled_sync(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                prompt_id=MIRROR_EMPATHY_PROMPT_ID,
+                messages=(
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ),
                 request_id=f"mirror-empathy::{int(time.time() * 1000)}",
                 scene_type="MIRROR_EMPATHY",
                 cognitive_tier="C",
-                timeout_ms=1500,
-                messages=[
-                    {"role": "system", "content": _system_prompt},
-                    {"role": "user", "content": _user_prompt},
-                ],
-                gen_params={"temperature": 0.2, "max_tokens": 64},
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                response_format="json_object",
+                deadline_ms=1_500,
+                foreground=True,
+                metadata={"caller": "mirror_empathy_hint"},
             )
-            if _pool_result.pool_exhausted:
-                raise RuntimeError("mirror empathy llm pool exhausted")
-            _raw = _pool_result.content
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
+            _model_attempt_trace = dict(_completion.trace)
+            if not _completion.success:
+                raise RuntimeError(
+                    _completion.result.error_code or "MIRROR_EMPATHY_MODEL_ATTEMPT_FAILED"
+                )
+            _parsed = json.loads(_completion.content)
             _hint = str(_parsed.get("empathy_hint") or "").strip()[:100]
             if _hint:
                 _log.debug("MirrorNeuronAgent.generate_empathy_response_hint: %s", _hint)
@@ -332,7 +337,10 @@ class MirrorNeuronAgent:
                 try:
                     self.state_registry.set_state(
                         "mirror_neuron_agent",
-                        {"last_empathy_hint": _hint},
+                        {
+                            "last_empathy_hint": _hint,
+                            "last_empathy_model_attempt": _model_attempt_trace,
+                        },
                         writer="mirror_neuron_agent",
                     )
                 except Exception:
@@ -347,12 +355,22 @@ class MirrorNeuronAgent:
                             "resonance_intensity": round(float(resonance_intensity), 3),
                             "user_emotion_tag": str(user_emotion_tag or "NEUTRAL").upper(),
                             "bond_stage": str(bond_stage or "friend"),
+                            "model_attempt": _model_attempt_trace,
                         },
                     )
                 except Exception:
                     pass
             return _hint or None
         except Exception as exc:
+            if _model_attempt_trace:
+                try:
+                    self.state_registry.set_state(
+                        "mirror_neuron_agent",
+                        {"last_empathy_model_attempt": _model_attempt_trace},
+                        writer="mirror_neuron_agent",
+                    )
+                except Exception:
+                    pass
             _log.debug("MirrorNeuronAgent.generate_empathy_response_hint 失败（降级）: %s", exc)
             return None
 

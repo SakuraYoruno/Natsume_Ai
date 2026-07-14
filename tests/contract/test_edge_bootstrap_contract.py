@@ -23,12 +23,13 @@ class TestEdgeBootstrapContract(unittest.TestCase):
                 exit_code = edge_main.main()
 
         self.assertEqual(0, exit_code)
-        self.assertEqual(2, mock_run.call_count)
+        # The process owns the canonical Edge RPC listener. Optional platform
+        # adapters are composed inside its lifespan.
+        self.assertEqual(1, mock_run.call_count)
         observed = {
             (call.kwargs["host"], call.kwargs["port"], call.kwargs["log_level"])
             for call in mock_run.call_args_list
         }
-        self.assertIn(("0.0.0.0", 19000, "info"), observed)
         self.assertIn(("127.0.0.1", 18888, "info"), observed)
 
     def test_t_edge_start_01_invalid_config_returns_nonzero(self) -> None:

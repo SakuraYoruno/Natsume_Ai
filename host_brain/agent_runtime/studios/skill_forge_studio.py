@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from host_brain.agent_runtime.work_order import build_work_order_id
+from host_brain.contracts.agent_runtime.work_order import build_work_order_id
 
 
 def build_skill_forge_work_order(args: dict[str, Any]) -> dict[str, Any]:

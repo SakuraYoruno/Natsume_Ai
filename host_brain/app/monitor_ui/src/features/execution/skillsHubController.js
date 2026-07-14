@@ -15,7 +15,6 @@ export function useSkillsHubController() {
     pollingTick,
     pollingInterval,
   })
-
   const view = useMemo(
     () => buildSkillsHubViewModel({
       data: query.hubData,
@@ -40,6 +39,9 @@ export function useSkillsHubController() {
   )
 
   return {
+    pollingEnabled,
+    pollingInterval,
+    pollingTick,
     filter,
     sourceFilter,
     loading: query.loading,

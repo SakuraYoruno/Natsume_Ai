@@ -10,9 +10,25 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.fakes.canon_runtime import compose_canon_test_runtime
+
+
+@pytest.fixture
+def canon_service(tmp_path):
+    import host_brain.app.canon_routes as cr
+
+    with compose_canon_test_runtime(
+        tmp_path,
+        request_id="canon-route-pagination",
+    ) as runtime:
+        cr.set_canon_service_provider(lambda: runtime.container.application)
+        try:
+            yield runtime.container.application
+        finally:
+            cr.set_canon_service_provider(None)
 
 
 # ---------------------------------------------------------------------------
@@ -176,43 +192,31 @@ class TestCursorEdgeCases:
 # ---------------------------------------------------------------------------
 
 class TestListProposalsEndpointCursorParam:
-    def test_endpoint_accepts_after_id_param(self):
-        """T-CURSOR-05：GET /canon/proposals?after_id=X 端点支持 cursor 分页参数。"""
+    def test_endpoint_accepts_retired_after_id_param(self, canon_service):
+        """The legacy integer cursor is accepted but cannot steer the stable projection."""
         import asyncio
         import host_brain.app.canon_routes as cr
 
-        mock_ledger = MagicMock()
-        mock_ledger.list_proposals.return_value = ([], 0)
-        cr._ledger_provider = lambda: mock_ledger
-
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(
-                cr.list_proposals(after_id=42)
-            )
+            response = loop.run_until_complete(cr.list_proposals(after_id=42))
         finally:
             loop.close()
 
-        # 验证 after_id 被传递给 ledger.list_proposals
-        call_kwargs = mock_ledger.list_proposals.call_args[1]
-        assert call_kwargs.get("after_id") == 42
+        assert response.total == 0
+        assert response.page == 1
+        assert response.items == []
 
-    def test_endpoint_after_id_none_by_default(self):
-        """T-CURSOR-05b：after_id 默认为 None（向后兼容）。"""
+    def test_endpoint_after_id_none_by_default(self, canon_service):
+        """Default pagination resolves through the same explicit application service."""
         import asyncio
         import host_brain.app.canon_routes as cr
 
-        mock_ledger = MagicMock()
-        mock_ledger.list_proposals.return_value = ([], 0)
-        cr._ledger_provider = lambda: mock_ledger
-
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(
-                cr.list_proposals()
-            )
+            response = loop.run_until_complete(cr.list_proposals())
         finally:
             loop.close()
 
-        call_kwargs = mock_ledger.list_proposals.call_args[1]
-        assert call_kwargs.get("after_id") is None
+        assert response.total == 0
+        assert response.page_size == 20

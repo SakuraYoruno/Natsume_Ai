@@ -7,7 +7,7 @@ from host_brain.audit.retention import MS_DAY, RetentionPolicy, build_retention_
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import TokenService
 from host_brain.lsp.vault import ArtifactVault
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory.store import LifeMemoryStore
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report
 
 

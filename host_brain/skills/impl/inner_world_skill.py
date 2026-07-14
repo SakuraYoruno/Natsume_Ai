@@ -83,6 +83,7 @@ def _persist_inner_world_stream_memory(
     skill_name: str,
     result: dict[str, Any],
     now_ms: int,
+    persist_background_event_memory: Any = None,
 ) -> None:
     note = str(result.get("last_spontaneous_note") or "").strip()
     event_ts = int(result.get("last_spontaneous_ts_ms") or 0)
@@ -92,8 +93,8 @@ def _persist_inner_world_stream_memory(
     if event_key in _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS:
         return
     try:
-        from host_brain.app.observability_persist import persist_background_event_memory  # noqa: PLC0415
-
+        if not callable(persist_background_event_memory):
+            return
         event_meta = dict(result.get("last_spontaneous_event") or {})
         persist_result = persist_background_event_memory(
             event_source="inner_world",
@@ -243,6 +244,9 @@ def _execute_inner_world_tick(
             skill_name=skill_name,
             result=result,
             now_ms=now_ms,
+            persist_background_event_memory=(context or {}).get(
+                "persist_background_event_memory"
+            ),
         )
     # Phase 1：向 TribeEventBus 发布 INNER_WORLD_TICKED 事件，供订阅方（LimbicAgent 等）消费
     try:

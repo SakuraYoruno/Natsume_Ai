@@ -30,7 +30,7 @@ from host_brain.app.vision.agent_loop import (
     DEFAULT_ROUND_TIMEOUT_SEC,
     DEFAULT_TOTAL_TIMEOUT_SEC,
 )
-from host_brain.app.dependencies import get_ledger
+from host_brain.composition.process_services import get_ledger
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.agent_routes")
@@ -183,7 +183,7 @@ async def _agent_loop_sse_generator(
             extra={"request_id": request_id},
         )
     elif use_edge_rpc:
-        from host_brain.channels.edge_rpc_client import resolve_host_edge_rpc_shared_key
+        from host_brain.channels.edge_transport import resolve_host_edge_rpc_shared_key
         from host_brain.app.vision.edge_rpc_client import EdgeRpcClient
         hmac_key = resolve_host_edge_rpc_shared_key()
         clawdbot_client = EdgeRpcClient(

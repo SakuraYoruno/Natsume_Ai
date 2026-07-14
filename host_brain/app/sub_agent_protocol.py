@@ -15,10 +15,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_context import (
+    ContextEnvelopeError,
     build_agent_context_envelope,
+    build_context_runtime_event_payload,
     project_legacy_context_for_sub_agent,
+)
+from host_brain.core.trace_redaction import (
+    content_ref,
+    public_decision_summary,
+    public_output_text,
+    read_decision_summary,
+    read_public_agent_output,
+    sanitize_public_payload,
 )
 
 _logger = logging.getLogger("Natsume.sub_agent")
@@ -60,10 +70,9 @@ AGENT_INTENT = "intent_agent"
 AGENT_VISION = "vision_agent"
 AGENT_REPAIR = "repair_agent"
 AGENT_PENTEST = "pentest_agent"
-AGENT_PENTEST_ATTACK = "pentest_attack_agent"
 
 ALL_AGENT_IDS: frozenset[str] = frozenset({
-    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST, AGENT_PENTEST_ATTACK,
+    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST,
 })
 
 # 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
@@ -72,6 +81,7 @@ AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_INTENT: "执行专家：理解用户的执行意图，调用工具完成实际操作（文件/网络/系统）",
     AGENT_VISION: "视觉分析：分析图片/截图内容，提取 UI 元素信息",
     AGENT_REPAIR: "环境修复专家：当缺少浏览器/依赖/运行环境时，尝试自动安装并恢复执行能力",
+    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
 }
 
 
@@ -80,7 +90,7 @@ AGENT_CAPABILITIES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_contract_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -105,8 +115,7 @@ _DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_INTENT: "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
     AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
     AGENT_REPAIR: "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
-    AGENT_PENTEST: "渗透测试专家：PTES 六阶段框架（被动侦察→主动侦察→漏洞评估→漏洞利用→后渗透→报告）",
-    AGENT_PENTEST_ATTACK: "渗透攻击专家：全链路自主攻击（侦察→打点→提权→横移→域控→持久化），执行完整攻击链不限于测试",
+    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
 }
 
 
@@ -126,6 +135,156 @@ def _runtime_text(key: str, **kwargs: Any) -> str:
 
 
 AGENT_CAPABILITIES = get_agent_capabilities()
+
+
+SUB_AGENT_REGISTRY_VIEW_SCHEMA_VERSION = "Natsume.agent.sub_agent_registry_view.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class SubAgentRegistryEntry:
+    """Read-only compatibility view over the app-level sub-agent registry."""
+
+    agent_id: str
+    capability: str
+    default_timeout_ms: int = 30_000
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "capability": self.capability,
+            "default_timeout_ms": self.default_timeout_ms,
+        }
+
+
+def get_sub_agent_registry_view() -> dict[str, Any]:
+    """Return a deterministic view; it does not load handlers or dispatch work."""
+
+    capabilities = get_agent_capabilities()
+    entries = [
+        SubAgentRegistryEntry(
+            agent_id=agent_id,
+            capability=str(capabilities.get(agent_id) or "").strip(),
+        )
+        for agent_id in sorted(ALL_AGENT_IDS)
+    ]
+    return {
+        "schema_version": SUB_AGENT_REGISTRY_VIEW_SCHEMA_VERSION,
+        "agents": [entry.to_dict() for entry in entries],
+    }
+
+
+def resolve_sub_agent_registry_entry(agent_id: str) -> SubAgentRegistryEntry:
+    """Resolve an app agent without exposing mutable dispatcher internals."""
+
+    normalized = str(agent_id or "").strip()
+    view = get_sub_agent_registry_view()
+    for payload in list(view.get("agents") or []):
+        if str(payload.get("agent_id") or "").strip() == normalized:
+            return SubAgentRegistryEntry(
+                agent_id=normalized,
+                capability=str(payload.get("capability") or "").strip(),
+                default_timeout_ms=int(payload.get("default_timeout_ms") or 30_000),
+            )
+    from host_brain.contracts.agent_runtime.contract_errors import (  # noqa: PLC0415
+        SUB_AGENT_ADAPTER_INVALID,
+        ContractViolation,
+    )
+
+    raise ContractViolation(
+        SUB_AGENT_ADAPTER_INVALID,
+        f"sub-agent is not present in registry view: {normalized}",
+    )
+
+
+def build_sub_agent_request_from_child_work_order(
+    *,
+    child_work_order: Any,
+    agent_id: str,
+    request_id: str,
+    session_id: str = "",
+    context_refs: tuple[str, ...] | list[str] = (),
+    timeout_ms: int | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> SubAgentRequest:
+    """Bridge a validated child WorkOrder into the legacy dispatcher shape.
+
+    This is the only constructor used by the canonical planner path.  Existing
+    direct ``SubAgentRequest`` construction remains available for legacy callers
+    until their parent WorkOrder lineage exists.
+    """
+
+    from host_brain.agent_runtime.sub_agent_contract import (  # noqa: PLC0415
+        SubAgentRequestAdapter,
+        SubAgentSpec,
+        validate_planner_target_binding,
+    )
+    from host_brain.contracts.agent_runtime.work_order import WorkOrderV3  # noqa: PLC0415
+
+    child = (
+        child_work_order
+        if isinstance(child_work_order, WorkOrderV3)
+        else WorkOrderV3.from_mapping(
+            child_work_order if isinstance(child_work_order, Mapping) else {}
+        )
+    )
+    entry = resolve_sub_agent_registry_entry(agent_id)
+    if not entry.capability:
+        from host_brain.contracts.agent_runtime.contract_errors import (  # noqa: PLC0415
+            SUB_AGENT_ADAPTER_INVALID,
+            ContractViolation,
+        )
+
+        raise ContractViolation(
+            SUB_AGENT_ADAPTER_INVALID,
+            f"sub-agent registry capability is empty: {entry.agent_id}",
+        )
+    validate_planner_target_binding(
+        child,
+        agent_id=entry.agent_id,
+        require_binding=True,
+    )
+    resolved_timeout_ms = int(
+        entry.default_timeout_ms if timeout_ms is None else timeout_ms
+    )
+    resolved_timeout_ms = max(1, resolved_timeout_ms)
+    spec = SubAgentSpec(
+        agent_id=entry.agent_id,
+        capability_requirements=tuple(child.capability_requirements),
+        allowed_actions=tuple(child.allowed_actions),
+        timeout_ms=resolved_timeout_ms,
+        max_attempts=1,
+        context_contract={
+            "task_source": "child_work_order",
+            "requires_lineage": True,
+        },
+    )
+    resolved_context_refs_list: list[str] = []
+    for item in (*tuple(child.input_refs), *tuple(context_refs or ())):
+        normalized = str(item or "").strip()
+        if normalized and normalized not in resolved_context_refs_list:
+            resolved_context_refs_list.append(normalized)
+    resolved_context_refs = tuple(resolved_context_refs_list)
+    contract = SubAgentRequestAdapter.adapt(
+        child_work_order=child,
+        spec=spec,
+        request_id=request_id,
+        session_id=session_id,
+        context_refs=resolved_context_refs,
+    )
+    legacy = contract.to_legacy_mapping()
+    protected_context = dict(legacy.get("context") or {})
+    merged_context = dict(context or {})
+    merged_context.update(protected_context)
+    merged_context["canonical_sub_agent_request"] = contract.to_dict()
+    return SubAgentRequest(
+        agent_id=str(legacy.get("agent_id") or "").strip(),
+        task=str(legacy.get("task") or "").strip(),
+        user_message=str(legacy.get("user_message") or "").strip(),
+        request_id=str(legacy.get("request_id") or "").strip(),
+        session_id=str(legacy.get("session_id") or "").strip(),
+        context=merged_context,
+        timeout_ms=int(legacy.get("timeout_ms") or resolved_timeout_ms),
+    )
 
 
 class SubAgentDispatcher:
@@ -166,8 +325,6 @@ class SubAgentDispatcher:
         try:
             from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler
             self._handler_map[AGENT_PENTEST] = pentest_agent_handler
-            from host_brain.app.handlers.pentest_attack_agent_handler import pentest_attack_agent_handler
-            self._handler_map[AGENT_PENTEST_ATTACK] = pentest_attack_agent_handler
         except ImportError:
             pass
 
@@ -205,16 +362,20 @@ class SubAgentDispatcher:
                 resolve_host_llm_runtime_async,
                 resolve_subagent_llm_runtime,
             )
-            from host_brain.app.agent_runtime_shared import (  # noqa: PLC0415
+            from host_brain.agent_runtime.subagent_gateway import (  # noqa: PLC0415
                 _build_subagent_gateway_from_runtime,
             )
+            from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
 
             base_runtime = await resolve_host_llm_runtime_async(
                 rollout_key=str(req.session_id or req.request_id or req.agent_id),
                 scene_type="EXEC_INTENT",
             )
             subagent_runtime = resolve_subagent_llm_runtime(base_runtime=dict(base_runtime or {}))
-            gateway = _build_subagent_gateway_from_runtime(subagent_runtime)
+            gateway = _build_subagent_gateway_from_runtime(
+                subagent_runtime,
+                application_ports=AGENT_RUNTIME_PORTS,
+            )
             if gateway is None:
                 return
             context["gateway"] = gateway
@@ -253,15 +414,34 @@ class SubAgentDispatcher:
         started_ms = int(time.time() * 1000)
 
         raw_context = dict(req.context or {})
-        agent_context_envelope = build_agent_context_envelope(
-            agent_id=req.agent_id,
-            task=req.task,
-            user_message=req.user_message,
-            request_id=req.request_id,
-            session_id=req.session_id,
-            context=raw_context,
-            timeout_ms=req.timeout_ms,
-        ).as_dict()
+        try:
+            agent_context_envelope = build_agent_context_envelope(
+                agent_id=req.agent_id,
+                task=req.task,
+                user_message=req.user_message,
+                request_id=req.request_id,
+                session_id=req.session_id,
+                context=raw_context,
+                timeout_ms=req.timeout_ms,
+            ).as_dict()
+        except ContextEnvelopeError as exc:
+            latency_ms = int(time.time() * 1000) - started_ms
+            resp = SubAgentResponse(
+                success=False,
+                agent_id=req.agent_id,
+                error=exc.reason_code,
+                audit_refs={
+                    "agent_id": req.agent_id,
+                    "agent_context": {
+                        "status": "REJECTED",
+                        "reason_code": exc.reason_code,
+                        "detail": public_decision_summary(exc.detail),
+                    },
+                },
+                latency_ms=latency_ms,
+            )
+            self._log_dispatch(req, resp)
+            return resp
         legacy_context = project_legacy_context_for_sub_agent(raw_context)
 
         # 构建 handler 入参（兼容现有 handler 的 payload/context 接口）。
@@ -297,17 +477,23 @@ class SubAgentDispatcher:
             agent_artifact = artifacts.get(req.agent_id) or {}
             summary = str(agent_artifact.get("summary") or "").strip()
 
-            # 也从 react_scratchpad 提取 final_answer
+            # The complete publishable result is independent from the trace.
+            # Legacy scratchpads remain readable, but are centrally sanitized.
+            output_envelope = result_payload.get("agent_output") or {}
+            final_answer = read_public_agent_output(output_envelope).strip()
             scratchpad = result_payload.get("react_scratchpad") or {}
-            final_answer = str(scratchpad.get("final_answer") or summary or "").strip()
+            if not final_answer:
+                final_answer = read_public_agent_output(scratchpad).strip()
+            if not final_answer:
+                final_answer = read_decision_summary(scratchpad, fallback=summary).strip()
 
             if not final_answer:
                 # 兜底：从 narrative 提取
                 narrative_raw = result_payload.get("narrative") or result_payload.get("output") or {}
                 if isinstance(narrative_raw, dict):
-                    final_answer = str(narrative_raw.get("text") or "").strip()
+                    final_answer = public_output_text(narrative_raw.get("text")).strip()
                 elif isinstance(narrative_raw, str):
-                    final_answer = narrative_raw.strip()
+                    final_answer = public_output_text(narrative_raw).strip()
 
             # repair_agent 的 success 语义特殊：
             # 不能用 final_answer 是否非空来判断（修复失败时也会有 summary 文本），
@@ -342,11 +528,15 @@ class SubAgentDispatcher:
                 "risk_flags": agent_artifact.get("risk_flags"),
                 "agent_context": {
                     "schema_version": agent_context_envelope.get("schema_version"),
+                    "runtime_event_summary": build_context_runtime_event_payload(agent_context_envelope),
                     "conversation_turns": len(
                         list(dict(agent_context_envelope.get("conversation_window") or {}).get("recent_turns") or [])
                     ),
                     "memory_fact_count": len(list(dict(agent_context_envelope.get("memory_packet") or {}).get("facts") or [])),
                     "evidence_item_count": len(list(dict(agent_context_envelope.get("evidence_pack") or {}).get("items") or [])),
+                    "token_budget": dict(agent_context_envelope.get("token_budget") or {}),
+                    "context_authorization": dict(agent_context_envelope.get("authorization") or {}),
+                    "pollution_report": dict(agent_context_envelope.get("pollution_report") or {}),
                     "trace": dict(agent_context_envelope.get("trace") or {}),
                 },
             }
@@ -361,7 +551,7 @@ class SubAgentDispatcher:
                 success=repair_success,
                 agent_id=req.agent_id,
                 result=final_answer,
-                audit_refs=audit_refs,
+                audit_refs=dict(sanitize_public_payload(audit_refs)),
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)
@@ -393,7 +583,7 @@ class SubAgentDispatcher:
             resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
-                error=str(exc)[:200],
+                error=public_output_text(str(exc))[:200],
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)
@@ -402,12 +592,15 @@ class SubAgentDispatcher:
     def _log_dispatch(self, req: SubAgentRequest, resp: SubAgentResponse) -> None:
         """将子 Agent 调度结果写入 skill_exec_log 供链路追踪。"""
         try:
-            from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+            from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
             ledger = get_ledger()
             result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
-            result_digest = str(resp.result or resp.error or "").strip()
-            if not result_digest:
-                result_digest = f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}"
+            raw_result = str(resp.result or resp.error or "").strip()
+            result_digest = public_decision_summary(
+                raw_result,
+                fallback=f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}",
+            )
+            result_ref = content_ref("sub-agent-output", raw_result or result_digest)
             ledger.log_skill_exec({
                 "request_id": req.request_id,
                 "intent_id": f"intent::{req.request_id}::{resp.agent_id}",
@@ -418,8 +611,8 @@ class SubAgentDispatcher:
                 "undo_token_ref": None,
                 "result_status": "OK" if resp.success else "FAILED",
                 "result_code": result_code,
-                "result_digest": result_digest[:4000],
-                "evidence_ref": f"sub_agent::{req.request_id}::{resp.agent_id}",
+                "result_digest": result_digest,
+                "evidence_ref": result_ref,
                 "manifest_ref": None,
                 "ts_ms": int(time.time() * 1000),
             })

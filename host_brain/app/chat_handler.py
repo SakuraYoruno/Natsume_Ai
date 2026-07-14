@@ -1,4 +1,4 @@
-﻿"""Chat 核心业务逻辑模块。
+"""Chat 核心业务逻辑模块。
 
 拆分后的主入口，仅保留：
   - handle_chat：POST /v1/chat 统一入口
@@ -16,16 +16,14 @@ Phase XV 收口架构：
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
-import os
 import time
 from typing import Any, AsyncGenerator, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
-from host_brain.app.dependencies import get_intent_engine
+from host_brain.composition.process_services import get_intent_engine
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.app.emotion_context import (
     build_chat_emotion_snapshot,
@@ -36,48 +34,33 @@ from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
 )
+from host_brain.governor.route_token import (
+    RouteTokenDisposition,
+    validate_governor_route_token,
+)
 from host_brain.tribe.thalamus_agent import (
     THALAMUS_SCENE_TYPE_SOURCE,
     get_thalamus_agent,
     resolve_scene_type_from_intent_decision,
 )
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.settings.chat import get_chat_settings
 from host_brain.core.ids import new_request_id
-
-from host_brain.app.dependencies import get_episodic_store  # noqa: F401
-from host_brain.app.observability_persist import (  # noqa: F401
-    persist_chat_episodic_memory,
-)
 
 _logger = logging.getLogger("Natsume.chat_handler")
 
 
-def _resolve_governor_executor_workers() -> int:
-    raw = str(os.environ.get("HOST_GOVERNOR_EXECUTOR_WORKERS") or "4").strip()
-    try:
-        value = int(raw)
-    except ValueError:
-        value = 4
-    return max(2, min(value, 12))
-
-
-_GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=_resolve_governor_executor_workers(),
-    thread_name_prefix="governor",
-)
+def _action_arbiter_enabled() -> bool:
+    """Dedicated cutover flag for the post-Governor execution precondition."""
+    return get_chat_settings().action_arbiter_enabled
 
 
 def _mateengine_chat_bubble_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    return get_chat_settings().mateengine_chat_bubble_enabled
 
 
 def _mateengine_bubble_text_limit() -> int:
-    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "220").strip()
-    try:
-        return max(24, int(raw))
-    except ValueError:
-        return 220
+    return get_chat_settings().mateengine_chat_bubble_max_chars
 
 
 def _clip_mateengine_bubble_text(text: str) -> str:
@@ -206,18 +189,21 @@ def _send_mateengine_chat_bubble(
     if not text or not _mateengine_chat_bubble_enabled():
         return
     try:
-        from host_brain.channels.mateengine import send_mateengine_action, send_mateengine_say  # noqa: PLC0415
+        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
 
-        result = send_mateengine_action(
-            action="speak",
-            state="speaking",
-            text=text,
+        queue_mateengine_command(
+            action="command",
+            payload={
+                "command": {
+                    "type": "say",
+                    "text": text,
+                    "emotion": str(emotion_tag or "NEUTRAL").strip().upper(),
+                    "intensity": emotion_intensity,
+                }
+            },
             request_id=request_id,
-            emotion_tag=emotion_tag,
-            intensity=emotion_intensity,
+            idempotency_key=f"{request_id}:mateengine:chat-bubble",
         )
-        if not result.ok:
-            send_mateengine_say(text=text)
     except Exception as exc:
         _logger.debug(
             "[%s] MateEngine chat bubble send failed: %s",
@@ -227,20 +213,15 @@ def _send_mateengine_chat_bubble(
 
 
 def _mateengine_state_cues_enabled() -> bool:
-    raw = os.getenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "1").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    return get_chat_settings().mateengine_state_cues_enabled
 
 
 def _mateengine_thinking_cue_delay_s() -> float:
-    raw = os.getenv("HOST_MATEENGINE_THINKING_CUE_DELAY_MS", "900").strip()
-    try:
-        return max(0.0, int(raw) / 1000.0)
-    except ValueError:
-        return 0.9
+    return get_chat_settings().mateengine_thinking_cue_delay_ms / 1000.0
 
 
 def _mateengine_thinking_cue_text() -> str:
-    return str(os.getenv("HOST_MATEENGINE_THINKING_CUE_TEXT") or "...").strip()
+    return get_chat_settings().mateengine_thinking_cue_text.strip()
 
 
 _MATEENGINE_STATE_CUE_DEFAULTS = {
@@ -266,12 +247,18 @@ def _mateengine_state_cue_text(state: str) -> str:
     key = str(state or "").strip().lower()
     if not key:
         return ""
-    env_key = f"HOST_MATEENGINE_{key.upper()}_CUE_TEXT"
-    if env_key in os.environ:
-        return str(os.getenv(env_key) or "").strip()
-    if key == "thinking":
-        return _mateengine_thinking_cue_text()
-    return str(_MATEENGINE_STATE_CUE_DEFAULTS.get(key) or "").strip()
+    settings = get_chat_settings()
+    configured_cues = {
+        "thinking": settings.mateengine_thinking_cue_text,
+        "approved": settings.mateengine_approved_cue_text,
+        "memory_recall": settings.mateengine_memory_recall_cue_text,
+        "tool_running": settings.mateengine_tool_running_cue_text,
+        "processing": settings.mateengine_processing_cue_text,
+        "speaking": settings.mateengine_speaking_cue_text,
+        "interrupted": settings.mateengine_interrupted_cue_text,
+        "error": settings.mateengine_error_cue_text,
+    }
+    return str(configured_cues.get(key, _MATEENGINE_STATE_CUE_DEFAULTS.get(key)) or "").strip()
 
 
 def _send_mateengine_state_cue(
@@ -296,13 +283,19 @@ def _send_mateengine_state_cue(
     lifecycle["state_cued"] = True
     lifecycle["last_state"] = clean_state
     try:
-        from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
 
-        send_mateengine_action(
-            action="state",
-            state=clean_state,
-            text=cue_text,
+        queue_mateengine_command(
+            action="command",
+            payload={
+                "command": {
+                    "type": "state",
+                    "state": clean_state,
+                    "text": cue_text,
+                }
+            },
             request_id=request_id,
+            idempotency_key=f"{request_id}:mateengine:state:{clean_state}",
         )
     except Exception as exc:
         _logger.debug(
@@ -458,11 +451,13 @@ async def _evaluate_governor_with_timing(
         finally:
             timing["executor_finished_ms"] = int(time.time() * 1000)
 
-    if inline:
-        result = _run()
-    else:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(_GOVERNOR_EXECUTOR, _run)
+    # IntentDecisionEngine persists intent/governor rows through the canonical
+    # SQLiteLedger connection, which is owned by the event-loop thread.  Moving
+    # this call to a generic worker thread silently drops the authoritative
+    # grant with sqlite3's thread-affinity error.  The local policy evaluation
+    # is bounded and therefore remains on its owning thread.
+    del inline
+    result = _run()
     finished_ms = int(time.time() * 1000)
     executor_started_ms = int(timing.get("executor_started_ms") or finished_ms)
     executor_finished_ms = int(timing.get("executor_finished_ms") or finished_ms)
@@ -482,7 +477,12 @@ def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") ->
     return "当前 host 处于维护状态，稍后再试。" if lang_key == "zh" else "現在 host はメンテナンス中です。"
 
 
-async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
+async def handle_chat(
+    request_body: ChatRequest,
+    request: Request,
+    metrics: Any,
+    governed_command_application: Any | None = None,
+) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
 Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+）：
@@ -510,7 +510,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     )
 
     # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
-    _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
+    _current_sys_mode = get_chat_settings().sys_mode.strip().lower()
     if _current_sys_mode == "locked":
         async def _locked_sse():
             yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
@@ -537,6 +537,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             request_started_ms=request_started_ms,
             intent_draft=None,
             metrics=metrics,
+            governed_command_application=governed_command_application,
         ),
         media_type="text/event-stream",
         headers={
@@ -555,6 +556,7 @@ async def _unified_chat_sse_generator(
     request_started_ms: int,
     intent_draft: Dict[str, Any] | None,
     metrics: Any,
+    governed_command_application: Any | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -703,6 +705,50 @@ async def _unified_chat_sse_generator(
             })
             return
 
+        # Route commitment is checked before publishing GOV_APPROVED and before
+        # Cortex can observe the request.  During cutover, a completely absent
+        # legacy token pair is tolerated only while the dedicated feature flag
+        # is disabled.  Any supplied-but-invalid pair remains fail closed, and
+        # AIRLOCK is always a paused review state rather than an approval.
+        route_validation = validate_governor_route_token(governor_result)
+        route_gate_enabled = _action_arbiter_enabled()
+        route_metadata_present = bool(
+            route_validation.token_ref or route_validation.detail_token
+        )
+        if route_validation.disposition == RouteTokenDisposition.PAUSE:
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "PAUSE",
+                "execution_state": "PAUSED_REVIEW",
+                "reason_code": "GOV_AIRLOCK_REVIEW",
+                "route_validation_reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token,
+                "request_id": request_id,
+            })
+            return
+        if (
+            route_validation.disposition == RouteTokenDisposition.BLOCK
+            and (route_gate_enabled or route_metadata_present)
+        ):
+            metrics.inc_rejection(route_validation.reason_code)
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "execution_state": "BLOCKED",
+                "reason_code": route_validation.reason_code,
+                "committed_route_token": route_validation.token or None,
+                "request_id": request_id,
+            })
+            return
+        if route_validation.disposition == RouteTokenDisposition.BLOCK:
+            _logger.warning(
+                "[%s] legacy Governor output has no route-token pair; "
+                "compatibility cutover remains active",
+                request_id,
+            )
+
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
         _send_mateengine_state_cue(
             "approved",
@@ -767,6 +813,8 @@ async def _unified_chat_sse_generator(
             governor_result=governor_result,
             intent_id=intent_id,
             metrics=metrics,
+            governed_command_application=governed_command_application,
+            command_authority={},
         ):
             yield event
             # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件

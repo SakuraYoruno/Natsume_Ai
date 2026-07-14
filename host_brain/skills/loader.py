@@ -10,7 +10,15 @@ from host_brain.core.errors import SKILL_TOKEN_MISSING, TOKEN_INVALID, UNDO_REQU
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.governor.tier_policy import AuditTier
 from host_brain.governor.tokens import TokenService
-from host_brain.skills.executor_registry import dispatch_executor_payload
+from host_brain.observability.degradation_state import (
+    evaluate_degradation_front_door,
+    infer_degradation_capability,
+)
+from host_brain.skills.executor_registry import (
+    BoundSkillExecutionAuthority,
+    bind_validated_skill_authority,
+    dispatch_executor_payload,
+)
 from host_brain.skills.registry import SkillRegistry
 
 
@@ -36,10 +44,12 @@ class SkillLoader:
         registry: SkillRegistry,
         token_service: TokenService,
         ledger: SQLiteLedger,
+        capability_broker: Any | None = None,
     ) -> None:
         self.registry = registry
         self.token_service = token_service
         self.ledger = ledger
+        self.capability_broker = capability_broker
 
     def execute(
         self,
@@ -107,6 +117,66 @@ class SkillLoader:
                 ts_ms=now_value,
             )
 
+        # Check degradation before validating/consuming one-time execution
+        # tokens.  A dependency failure must neither invoke the handler nor
+        # burn authority that was never exercised.
+        capability_id = infer_degradation_capability(
+            intent.get("capability_id"),
+            skill_name,
+            meta.scope,
+            meta.family,
+            meta.capability_tags,
+            default=(
+                "high_risk_execution"
+                if int(meta.risk_level) >= 3
+                else "general_execution"
+            ),
+        )
+        capability_policy_decision = governor_output.get(
+            "capability_policy_decision"
+        )
+        if not isinstance(capability_policy_decision, dict):
+            capability_policy_decision = intent.get("capability_policy_decision")
+        degradation_decision = evaluate_degradation_front_door(
+            capability_id=capability_id,
+            static_risk_level=int(meta.risk_level),
+            capability_policy_decision=(
+                capability_policy_decision
+                if isinstance(capability_policy_decision, dict)
+                else None
+            ),
+        )
+        if not bool(
+            degradation_decision.get(
+                "allowed",
+                degradation_decision.get("allowed_by_degradation", False),
+            )
+        ):
+            reason_code = str(
+                degradation_decision.get("reason_code")
+                or "DEGRADATION_STATE_UNAVAILABLE"
+            )
+            return self._log_and_return(
+                intent_id=intent_id,
+                skill_name=skill_name,
+                approval_token_ref=approval_token_ref,
+                confirm_token_ref=confirm_token_ref,
+                result_status="REJECTED",
+                result_code=reason_code,
+                result_digest=(
+                    f"degradation gate blocked {capability_id}: {reason_code}"
+                ),
+                evidence_ref=None,
+                manifest_ref=None,
+                undo_token_ref=None,
+                request_id=request_id,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                ts_ms=now_value,
+                governor_output=governor_output,
+                runtime_payload={"degradation_decision": degradation_decision},
+            )
+
         token_result = self.token_service.validate_execution_tokens(
             intent_id=intent_id,
             skill_name=skill_name,
@@ -163,7 +233,36 @@ class SkillLoader:
             # 第一步：归一化层，handler 返回标准化 payload
             payload = meta.handler(args, exec_context)
             # 第二步：执行层，将 payload 路由到对应的 impl executor
-            handler_result = _dispatch_executor(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("skill handler must return an executor payload object")
+            if not str(payload.get("tool") or "").strip():
+                handler_result = payload
+            else:
+                dispatch_authority = bind_validated_skill_authority(
+                    payload=payload,
+                    request_id=request_id or intent_id,
+                    skill_id=skill_name,
+                    principal_id=str(
+                        exec_context.get("principal_id")
+                        or exec_context.get("person_id")
+                        or session_id
+                    ),
+                    target_id=skill_name,
+                    intent_id=intent_id,
+                    session_id=session_id,
+                    seq=seq,
+                    approval_token_ref=approval_token_ref,
+                    # Loader context is caller-controlled. Only its token,
+                    # already checked above by TokenService, may authorize.
+                    governed_execution_context=None,
+                    durable_ledger=self.ledger,
+                    validated_by="skill_loader.token_service",
+                )
+                handler_result = _dispatch_executor(
+                    payload,
+                    authority=dispatch_authority,
+                    capability_broker=self.capability_broker,
+                )
         except Exception as exc:  # pragma: no cover - defensive guard
             return self._log_and_return(
                 intent_id=intent_id,
@@ -322,12 +421,23 @@ class SkillLoader:
 
 
 # ---------------------------------------------------------------------------
-def _dispatch_executor(payload: Any) -> Any:
+def _dispatch_executor(
+    payload: Any,
+    *,
+    authority: BoundSkillExecutionAuthority | None = None,
+    capability_broker: Any,
+) -> Any:
     """将 handler 返回的归一化 payload 路由到对应的 impl executor。
 
     若 payload 不是 dict 或 tool 字段未注册，则原样透传（向后兼容）。
     """
-    return dispatch_executor_payload(payload)
+    if capability_broker is None:
+        raise RuntimeError("SKILL_CAPABILITY_BROKER_NOT_COMPOSED")
+    return dispatch_executor_payload(
+        payload,
+        authority=authority,
+        capability_broker=capability_broker,
+    )
 
 
 def _extract_audit_tier(governor_output: dict[str, Any] | None) -> AuditTier:

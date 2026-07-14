@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.interaction_thread import (
+from host_brain.persona.context.interaction_thread import (
     detect_assistant_reply_followup_kind,
     resolve_interaction_thread,
 )

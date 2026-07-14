@@ -87,9 +87,9 @@ _DURATION_DEFAULT = "一起走过很久了"
 
 def _load_bond_narrative_llm_templates() -> dict[str, Any]:
     try:
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
 
-        raw = resolve_prompt_template_json_merged("bond_narrative.llm_rewrite.prompt")
+        raw = resolve_prompt_contract_json("bond_narrative.llm_rewrite.prompt")
         return dict(raw) if isinstance(raw, Mapping) else {}
     except Exception:
         return {}
@@ -241,6 +241,7 @@ class BondNarrativeResult:
     shared_memory_count: int = 0
     milestone_count: int = 0
     relationship_duration: str = ""  # v1.10 新增：关系时长描述（"认识一个月了" 等）
+    model_attempt_trace: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -252,6 +253,8 @@ class BondNarrativeResult:
         }
         if self.relationship_duration:
             result["relationship_duration"] = self.relationship_duration
+        if self.model_attempt_trace:
+            result["model_attempt"] = dict(self.model_attempt_trace)
         return result
 
     def to_prompt_slot(self) -> dict[str, Any]:
@@ -314,12 +317,14 @@ class BondNarrativeLayer:
         max_items: int = MAX_NARRATIVE_ITEMS,
         use_llm: bool = False,
         llm_timeout_ms: int = 2500,
+        model_attempt_service: Any = None,
     ) -> None:
         self._memory_index = memory_index
         self._milestone_tracker = milestone_tracker
         self._max_items = int(max_items)
         self._use_llm = bool(use_llm)
         self._llm_timeout_ms = max(800, int(llm_timeout_ms))
+        self._model_attempt_service = model_attempt_service
 
     def build_narrative(
         self,
@@ -411,7 +416,7 @@ class BondNarrativeLayer:
         # 按权重降序排序，取 top N
         items.sort(key=lambda x: x.weight, reverse=True)
         selected = items[:self._max_items]
-        selected = self._maybe_rewrite_narrative_items(
+        selected, model_attempt_trace = self._maybe_rewrite_narrative_items(
             selected,
             bond_stage=stage,
             relationship_duration=relationship_duration,
@@ -424,6 +429,7 @@ class BondNarrativeLayer:
             shared_memory_count=shared_count,
             milestone_count=milestone_count,
             relationship_duration=relationship_duration,
+            model_attempt_trace=model_attempt_trace,
         )
 
         _logger.debug(
@@ -439,17 +445,21 @@ class BondNarrativeLayer:
         *,
         bond_stage: str,
         relationship_duration: str,
-    ) -> list[NarrativeItem]:
+    ) -> tuple[list[NarrativeItem], dict[str, Any]]:
         if not self._use_llm or not selected:
-            return selected
+            return selected, {}
         try:
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+                BOND_NARRATIVE_REWRITE_PROMPT_ID,
+            )
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
             templates = _load_bond_narrative_llm_templates()
             system_prompt = str(templates.get("system_prompt") or "").strip()
             user_tpl = str(templates.get("user_prompt_template") or "").strip()
             if not system_prompt or not user_tpl:
-                return selected
+                return selected, {}
             payload = [
                 {
                     "index": index,
@@ -465,23 +475,26 @@ class BondNarrativeLayer:
                 relationship_duration=str(relationship_duration or ""),
                 items_json=json.dumps(payload, ensure_ascii=False),
             )
-            result = complete_llm_with_pool_sync(
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._model_attempt_service,
+                prompt_id=BOND_NARRATIVE_REWRITE_PROMPT_ID,
                 request_id=f"bond-narrative::{_now_ms()}",
                 scene_type="BOND_NARRATIVE",
                 cognitive_tier="B",
-                timeout_ms=self._llm_timeout_ms,
+                deadline_ms=self._llm_timeout_ms,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
-                response_format="json_object",
-                gen_params={"temperature": 0.25, "top_p": 0.9},
+                foreground=True,
+                metadata={"chain": "bond_narrative_rewrite"},
             )
-            if result.pool_exhausted or not str(result.content or "").strip():
-                return selected
+            attempt_trace = model_attempt_result_trace(result)
+            if not result.success or not str(result.content or "").strip():
+                return selected, attempt_trace
             parsed = json.loads(str(result.content or "{}"))
             if not isinstance(parsed, Mapping):
-                return selected
+                return selected, attempt_trace
             rewritten_items = list(parsed.get("items") or [])
             rewritten_map: dict[int, str] = {}
             for row in rewritten_items:
@@ -496,7 +509,7 @@ class BondNarrativeLayer:
                     continue
                 rewritten_map[idx] = text[:96]
             if not rewritten_map:
-                return selected
+                return selected, attempt_trace
             merged: list[NarrativeItem] = []
             for index, item in enumerate(selected):
                 merged.append(
@@ -508,10 +521,10 @@ class BondNarrativeLayer:
                         age_label=item.age_label,
                     )
                 )
-            return merged
+            return merged, attempt_trace
         except Exception as exc:
             _logger.debug("Bond narrative llm rewrite skipped: %s", exc)
-            return selected
+            return selected, {}
 
 
 # ---------------------------------------------------------------------------

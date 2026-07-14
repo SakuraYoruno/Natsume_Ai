@@ -7,11 +7,6 @@ fanning out a burst of requests against the obs sidecar.
 
 from __future__ import annotations
 
-import asyncio
-import copy
-import logging
-import os
-import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -33,24 +28,20 @@ from host_brain.app.obs_routes_stats_input_humanoid import (
 )
 from host_brain.app.obs_routes_stats_system import get_llm_call_stats, get_qa_stats, get_vts_stats
 from host_brain.app.obs_routes_health import get_services_health
-
-logger = logging.getLogger("Natsume.obs")
+from host_brain.app.observability_runtime.process_state_projection import (
+    DIGITAL_LIFE_MAX_AGE_MS,
+    DIGITAL_LIFE_OVERVIEW_KIND,
+    INSIGHTS_SUMMARY_KIND,
+    SUMMARY_MAX_AGE_MS,
+    read_process_projection,
+    window_key,
+)
 
 router = APIRouter(prefix="/obs", tags=["observability"])
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _env_float(name: str, default: float, *, minimum: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return max(default, minimum)
-    try:
-        return max(float(raw), minimum)
-    except (TypeError, ValueError):
-        return max(default, minimum)
 
 
 def _model_dump_compat(value: Any) -> Any:
@@ -61,10 +52,6 @@ def _model_dump_compat(value: Any) -> Any:
     if hasattr(value, "dict"):
         return value.dict()
     return value
-
-
-def _clone_payload(payload: Any) -> Any:
-    return copy.deepcopy(payload)
 
 
 def _interval_minutes(window_minutes: int) -> int:
@@ -88,6 +75,7 @@ class InsightsSummarySnapshotResponse(BaseModel):
     vtsData: Optional[Dict[str, Any]] = None
     qaData: Optional[Dict[str, Any]] = None
     llmCallData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DigitalLifeOverviewSnapshotResponse(BaseModel):
@@ -106,65 +94,11 @@ class DigitalLifeOverviewSnapshotResponse(BaseModel):
     humanoidLoopHotspotsData: Optional[Dict[str, Any]] = None
     humanoidLoopHotspotTrendData: Optional[Dict[str, Any]] = None
     humanoidLoopSourceCorrelationData: Optional[Dict[str, Any]] = None
+    projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-_INSIGHTS_SUMMARY_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_insights_summary_warm_enabled
-)
-_INSIGHTS_SUMMARY_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_INTERVAL_MS", 30000.0, minimum=1000.0)),
-    1000,
-)
-_INSIGHTS_SUMMARY_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_STALE_MS", 90000.0, minimum=1000.0)),
-    1000,
-)
-_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES", 60.0, minimum=1.0)),
-    1,
-)
-
-_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED = bool(
-    # OPT-4 首批迁移：从 settings.observability 读取
-    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
-    .get_observability_settings()
-    .obs_digital_life_overview_warm_enabled
-)
-_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS", 60000.0, minimum=1000.0)),
-    1000,
-)
-_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS", 180000.0, minimum=1000.0)),
-    1000,
-)
-_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES", 360.0, minimum=1.0)),
-    1,
-)
-
-_insights_summary_warm_thread: threading.Thread | None = None
-_insights_summary_warm_stop = threading.Event()
-_insights_summary_warm_lock = threading.Lock()
-_insights_summary_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
-
-_digital_life_overview_warm_thread: threading.Thread | None = None
-_digital_life_overview_warm_stop = threading.Event()
-_digital_life_overview_warm_lock = threading.Lock()
-_digital_life_overview_warm_state: dict[str, Any] = {
-    "value": None,
-    "updated_ts_ms": 0,
-    "last_duration_ms": 0,
-    "last_error": None,
-}
+INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES = 60
+DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES = 360
 
 
 def _build_insights_summary_snapshot_sync(window_minutes: int) -> dict[str, Any]:
@@ -264,241 +198,27 @@ async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> di
     return payload.model_dump()
 
 
-def _refresh_insights_summary_warm_once() -> dict[str, Any] | None:
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED:
-        return None
-    started = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="insights_summary")
-        if deferred:
-            with _insights_summary_warm_lock:
-                _insights_summary_warm_state["last_duration_ms"] = 0
-                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        acquired, reason = try_acquire_obs_warm_slot(task_name="insights_summary")
-        if not acquired:
-            with _insights_summary_warm_lock:
-                _insights_summary_warm_state["last_duration_ms"] = 0
-                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = _build_insights_summary_snapshot_sync(_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES)
-        with _insights_summary_warm_lock:
-            _insights_summary_warm_state["value"] = payload
-            _insights_summary_warm_state["updated_ts_ms"] = _now_ms()
-            _insights_summary_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _insights_summary_warm_state["last_error"] = None
-        return payload
-    except Exception as exc:
-        logger.warning("obs insights summary warm refresh failed: %s", exc)
-        with _insights_summary_warm_lock:
-            _insights_summary_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _insights_summary_warm_state["last_error"] = str(exc)
-        return None
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-
-def _refresh_digital_life_overview_warm_once() -> dict[str, Any] | None:
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
-        return None
-    started = _now_ms()
-    release_slot = None
-    try:
-        from host_brain.app.obs_resource_guard import (
-            release_obs_warm_slot,
-            should_defer_obs_warm_refresh,
-            try_acquire_obs_warm_slot,
-        )
-
-        deferred, reason = should_defer_obs_warm_refresh(task_name="digital_life_overview")
-        if deferred:
-            with _digital_life_overview_warm_lock:
-                _digital_life_overview_warm_state["last_duration_ms"] = 0
-                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        acquired, reason = try_acquire_obs_warm_slot(task_name="digital_life_overview")
-        if not acquired:
-            with _digital_life_overview_warm_lock:
-                _digital_life_overview_warm_state["last_duration_ms"] = 0
-                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
-            return None
-        release_slot = release_obs_warm_slot
-    except Exception:
-        release_slot = None
-    try:
-        payload = asyncio.run(_build_digital_life_overview_snapshot_async(_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES))
-        with _digital_life_overview_warm_lock:
-            _digital_life_overview_warm_state["value"] = payload
-            _digital_life_overview_warm_state["updated_ts_ms"] = _now_ms()
-            _digital_life_overview_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _digital_life_overview_warm_state["last_error"] = None
-        return payload
-    except Exception as exc:
-        logger.warning("obs digital life overview warm refresh failed: %s", exc)
-        with _digital_life_overview_warm_lock:
-            _digital_life_overview_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
-            _digital_life_overview_warm_state["last_error"] = str(exc)
-        return None
-    finally:
-        if release_slot is not None:
-            release_slot()
-
-
-def _insights_summary_warm_loop() -> None:
-    while not _insights_summary_warm_stop.is_set():
-        _refresh_insights_summary_warm_once()
-        if _insights_summary_warm_stop.wait(_INSIGHTS_SUMMARY_WARM_INTERVAL_MS / 1000.0):
-            break
-
-
-def _digital_life_overview_warm_loop() -> None:
-    while not _digital_life_overview_warm_stop.is_set():
-        _refresh_digital_life_overview_warm_once()
-        if _digital_life_overview_warm_stop.wait(_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS / 1000.0):
-            break
-
-
-def start_insights_summary_warm_cache() -> dict[str, Any]:
-    global _insights_summary_warm_thread
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED:
-        return get_insights_summary_warm_status()
-    with _insights_summary_warm_lock:
-        if _insights_summary_warm_thread and _insights_summary_warm_thread.is_alive():
-            return get_insights_summary_warm_status()
-        _insights_summary_warm_stop.clear()
-        _insights_summary_warm_thread = threading.Thread(
-            target=_insights_summary_warm_loop,
-            name="obs-insights-summary-warm",
-            daemon=True,
-        )
-        _insights_summary_warm_thread.start()
-    return get_insights_summary_warm_status()
-
-
-def stop_insights_summary_warm_cache() -> dict[str, Any]:
-    global _insights_summary_warm_thread
-    thread = _insights_summary_warm_thread
-    _insights_summary_warm_stop.set()
-    if thread and thread.is_alive():
-        thread.join(timeout=2.0)
-    _insights_summary_warm_thread = None
-    return get_insights_summary_warm_status()
-
-
-def start_digital_life_overview_warm_cache() -> dict[str, Any]:
-    global _digital_life_overview_warm_thread
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
-        return get_digital_life_overview_warm_status()
-    with _digital_life_overview_warm_lock:
-        if _digital_life_overview_warm_thread and _digital_life_overview_warm_thread.is_alive():
-            return get_digital_life_overview_warm_status()
-        _digital_life_overview_warm_stop.clear()
-        _digital_life_overview_warm_thread = threading.Thread(
-            target=_digital_life_overview_warm_loop,
-            name="obs-digital-life-overview-warm",
-            daemon=True,
-        )
-        _digital_life_overview_warm_thread.start()
-    return get_digital_life_overview_warm_status()
-
-
-def stop_digital_life_overview_warm_cache() -> dict[str, Any]:
-    global _digital_life_overview_warm_thread
-    thread = _digital_life_overview_warm_thread
-    _digital_life_overview_warm_stop.set()
-    if thread and thread.is_alive():
-        thread.join(timeout=2.0)
-    _digital_life_overview_warm_thread = None
-    return get_digital_life_overview_warm_status()
-
-
-def get_insights_summary_warm_status() -> dict[str, Any]:
-    with _insights_summary_warm_lock:
-        updated_ts_ms = int(_insights_summary_warm_state.get("updated_ts_ms") or 0)
-        return {
-            "enabled": _INSIGHTS_SUMMARY_WARM_ENABLED,
-            "running": bool(_insights_summary_warm_thread and _insights_summary_warm_thread.is_alive()),
-            "has_value": _insights_summary_warm_state.get("value") is not None,
-            "updated_ts_ms": updated_ts_ms or None,
-            "age_ms": max(0, _now_ms() - updated_ts_ms) if updated_ts_ms else None,
-            "last_duration_ms": int(_insights_summary_warm_state.get("last_duration_ms") or 0),
-            "last_error": _insights_summary_warm_state.get("last_error"),
-            "interval_ms": _INSIGHTS_SUMMARY_WARM_INTERVAL_MS,
-            "stale_after_ms": _INSIGHTS_SUMMARY_WARM_STALE_MS,
-            "window_minutes": _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES,
-        }
-
-
-def get_digital_life_overview_warm_status() -> dict[str, Any]:
-    with _digital_life_overview_warm_lock:
-        updated_ts_ms = int(_digital_life_overview_warm_state.get("updated_ts_ms") or 0)
-        return {
-            "enabled": _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED,
-            "running": bool(_digital_life_overview_warm_thread and _digital_life_overview_warm_thread.is_alive()),
-            "has_value": _digital_life_overview_warm_state.get("value") is not None,
-            "updated_ts_ms": updated_ts_ms or None,
-            "age_ms": max(0, _now_ms() - updated_ts_ms) if updated_ts_ms else None,
-            "last_duration_ms": int(_digital_life_overview_warm_state.get("last_duration_ms") or 0),
-            "last_error": _digital_life_overview_warm_state.get("last_error"),
-            "interval_ms": _DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS,
-            "stale_after_ms": _DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS,
-            "window_minutes": _DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES,
-        }
-
-
-def _get_warmed_insights_summary_snapshot(window_minutes: int) -> dict[str, Any] | None:
-    if not _INSIGHTS_SUMMARY_WARM_ENABLED or window_minutes != _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES:
-        return None
-    with _insights_summary_warm_lock:
-        payload = _insights_summary_warm_state.get("value")
-        updated_ts_ms = int(_insights_summary_warm_state.get("updated_ts_ms") or 0)
-        if payload is None or updated_ts_ms <= 0:
-            return None
-        if _now_ms() - updated_ts_ms > _INSIGHTS_SUMMARY_WARM_STALE_MS:
-            return None
-        return _clone_payload(payload)
-
-
-def _get_warmed_digital_life_overview_snapshot(window_minutes: int) -> dict[str, Any] | None:
-    if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED or window_minutes != _DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES:
-        return None
-    with _digital_life_overview_warm_lock:
-        payload = _digital_life_overview_warm_state.get("value")
-        updated_ts_ms = int(_digital_life_overview_warm_state.get("updated_ts_ms") or 0)
-        if payload is None or updated_ts_ms <= 0:
-            return None
-        if _now_ms() - updated_ts_ms > _DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS:
-            return None
-        return _clone_payload(payload)
-
-
 @router.get("/insights/summary-snapshot", response_model=InsightsSummarySnapshotResponse)
 def get_insights_summary_snapshot(
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
-    warmed = _get_warmed_insights_summary_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return _build_insights_summary_snapshot_sync(window_minutes)
+    payload, projection = read_process_projection(
+        INSIGHTS_SUMMARY_KIND,
+        window_key(window_minutes),
+        max_age_ms=SUMMARY_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return InsightsSummarySnapshotResponse(**response).model_dump()
 
 
 @router.get("/digital-life/overview-snapshot", response_model=DigitalLifeOverviewSnapshotResponse)
 async def get_digital_life_overview_snapshot(
     window_minutes: int = Query(360, ge=1, le=10080),
 ):
-    warmed = _get_warmed_digital_life_overview_snapshot(window_minutes)
-    if warmed is not None:
-        return warmed
-    return await _build_digital_life_overview_snapshot_async(window_minutes)
+    payload, projection = read_process_projection(
+        DIGITAL_LIFE_OVERVIEW_KIND,
+        window_key(window_minutes),
+        max_age_ms=DIGITAL_LIFE_MAX_AGE_MS,
+    )
+    response = {**(payload or {"window_minutes": window_minutes, "timestamp": _now_ms()}), "projection": projection}
+    return DigitalLifeOverviewSnapshotResponse(**response).model_dump()

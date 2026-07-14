@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 import re
 from typing import Any
 
-from host_brain.core.ids import now_ms
 from host_brain.persona.isolated_surface_continuity import (
     ThreeLayerContinuityContext,
     build_surface_input_from_three_layer_context,
@@ -28,9 +27,6 @@ SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
 SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
 SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
 SURFACE_MEMORY_RECALL_SKIPPED = "SURFACE_MEMORY_RECALL_SKIPPED"
-SURFACE_MEMORY_WRITE_FAILED = "SURFACE_MEMORY_WRITE_FAILED"
-SURFACE_MEMORY_EVIDENCE_REQUIRED = "SURFACE_MEMORY_EVIDENCE_REQUIRED"
-SURFACE_MEMORY_EMPTY_TURN = "SURFACE_MEMORY_EMPTY_TURN"
 RECALL_POLICY_MUST = "MUST_RECALL"
 RECALL_POLICY_MAY = "MAY_RECALL"
 RECALL_POLICY_NO = "NO_RECALL"
@@ -178,26 +174,6 @@ class SurfaceMemoryRecallPacket(MemoryRecallPacket):
             }
         )
         return payload
-
-
-@dataclass(frozen=True)
-class SurfaceMemoryWriteResult:
-    success: bool
-    reason_code: str | None
-    detail: str
-    memory_id: str | None = None
-    text: str = ""
-    evidence_refs: tuple[str, ...] = ()
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "success": bool(self.success),
-            "reason_code": self.reason_code,
-            "detail": self.detail,
-            "memory_id": self.memory_id,
-            "text": self.text,
-            "evidence_refs": list(self.evidence_refs),
-        }
 
 
 @dataclass(frozen=True)
@@ -2954,77 +2930,6 @@ def build_surface_turn_memory_text(
     return _truncate_text(text, limit=max_chars)
 
 
-def write_surface_turn_memory(
-    *,
-    episodic_store: Any,
-    request_id: str | None,
-    session_id: str | None,
-    person_id: str | None,
-    user_message: str,
-    assistant_reply: str,
-    ts_ms: int | None = None,
-    intent_id: str | None = None,
-    evidence_refs: Sequence[str] | None = None,
-    decay_profile_id: str = "SLOW",
-    visibility: str = "internal",
-    emotion_tag: str = "NEUTRAL",
-    emotion_valence: float = 0.0,
-    emotion_arousal: float = 0.3,
-) -> SurfaceMemoryWriteResult:
-    refs = _build_evidence_refs(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        evidence_refs=evidence_refs,
-    )
-    if not refs:
-        return SurfaceMemoryWriteResult(
-            success=False,
-            reason_code=SURFACE_MEMORY_EVIDENCE_REQUIRED,
-            detail="surface memory write requires at least one evidence ref",
-        )
-    text = build_surface_turn_memory_text(
-        user_message=user_message,
-        assistant_reply=assistant_reply,
-    )
-    if not text:
-        return SurfaceMemoryWriteResult(
-            success=False,
-            reason_code=SURFACE_MEMORY_EMPTY_TURN,
-            detail="surface memory write skipped: empty turn",
-            evidence_refs=tuple(refs),
-        )
-    try:
-        result = episodic_store.write_memory(
-            text=text,
-            evidence_refs=list(refs),
-            request_id=request_id,
-            intent_id=intent_id,
-            decay_profile_id=decay_profile_id,
-            visibility=visibility,
-            ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
-            emotion_tag=emotion_tag,
-            emotion_valence=emotion_valence,
-            emotion_arousal=emotion_arousal,
-        )
-    except Exception as exc:
-        return SurfaceMemoryWriteResult(
-            success=False,
-            reason_code=SURFACE_MEMORY_WRITE_FAILED,
-            detail=f"surface memory write failed: {_truncate_text(str(exc), limit=160)}",
-            text=text,
-            evidence_refs=tuple(refs),
-        )
-    return SurfaceMemoryWriteResult(
-        success=bool(getattr(result, "success", False)),
-        reason_code=getattr(result, "reason_code", None),
-        detail=_clean_text(getattr(result, "detail", "")) or "surface memory write completed",
-        memory_id=getattr(result, "memory_id", None),
-        text=text,
-        evidence_refs=tuple(refs),
-    )
-
-
 def _recall_output(recall_result: Any) -> dict[str, Any]:
     if isinstance(recall_result, Mapping):
         raw_output = recall_result.get("output", recall_result)
@@ -3869,23 +3774,6 @@ def _extract_route_ids(output: Mapping[str, Any], *, allowed_store_ids: Sequence
     return route_ids
 
 
-def _build_evidence_refs(
-    *,
-    request_id: str | None,
-    session_id: str | None,
-    person_id: str | None,
-    evidence_refs: Sequence[str] | None,
-) -> list[str]:
-    refs = _clean_list(evidence_refs)
-    if _clean_text(request_id):
-        refs.append(f"chat://request/{_clean_text(request_id)}")
-    if _clean_text(session_id):
-        refs.append(f"chat://session/{_clean_text(session_id)}")
-    if _clean_text(person_id):
-        refs.append(f"chat://person/{_clean_text(person_id)}")
-    return _unique(refs)
-
-
 def _looks_like_memory_acceptance_query(text: str) -> bool:
     normalized = _clean_text(text)
     if not normalized:
@@ -4511,20 +4399,16 @@ __all__ = [
     "RECALL_POLICY_MAY",
     "RECALL_POLICY_MUST",
     "RECALL_POLICY_NO",
-    "SURFACE_MEMORY_EMPTY_TURN",
-    "SURFACE_MEMORY_EVIDENCE_REQUIRED",
     "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
     "SURFACE_MEMORY_RECALL_FAILED",
     "SURFACE_MEMORY_RECALL_SKIPPED",
     "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",
-    "SURFACE_MEMORY_WRITE_FAILED",
     "SURFACE_BOND_STORES",
     "SURFACE_MAIN_CHAIN_RECALL_STORES",
     "SURFACE_USER_FACT_STORES",
     "SurfaceMemoryFactRow",
     "SurfaceMemoryRecallPlan",
     "SurfaceMemoryRecallPacket",
-    "SurfaceMemoryWriteResult",
     "apply_surface_memory_recall_packet",
     "build_surface_input_with_memory_recall",
     "build_surface_memory_recall_decision_trace",
@@ -4535,5 +4419,4 @@ __all__ = [
     "plan_surface_memory_recall",
     "recall_surface_memory_for_context",
     "recall_surface_memory_packet",
-    "write_surface_turn_memory",
 ]

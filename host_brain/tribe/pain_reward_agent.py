@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -68,6 +69,7 @@ _REWARD_FLOOR = 0.0
 
 @dataclass(slots=True)
 class PainRewardAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     """痛觉/奖励系统 Agent（T-13）。
 
     维护 hedonic_state：
@@ -296,7 +298,7 @@ class PainRewardAgent:
           - HUMOR_LANDED：幽默成功时记录 humor_landed 奖励（T-24）
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
@@ -716,10 +718,10 @@ class PainRewardAgent:
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.pain_reward_agent")
         try:
-            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json  # noqa: PLC0415
+            from host_brain.tribe.model_invocation import complete_tribe_json  # noqa: PLC0415
 
-            _tpl = resolve_prompt_template_json("pain_reward_agent.hedonic_reflection") or {}
+            _tpl = resolve_prompt_contract_json("pain_reward_agent.hedonic_reflection") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
             _user_tpl = str(_tpl.get("user_prompt_template") or "")
             if not _system_prompt or not _user_tpl:
@@ -731,21 +733,12 @@ class PainRewardAgent:
                 net_valence=float(net_valence),
                 bond_stage=str(bond_stage or "friend"),
             )
-            _provider = build_llm_provider(
-                provider_name="gemini",
-                model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="hedonic_reflector",
-            )
-            _raw = _provider.complete_sync(
+            _parsed = complete_tribe_json(
+                attempt_service=self.application_ports.require("model_attempt_service")(),
+                semantic_id="pain_reward_hedonic_reflection",
                 system_prompt=_system_prompt,
                 user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.3,
             )
-            import json as _json, re as _re  # noqa: PLC0415, E401
-            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
-            _parsed = _json.loads(_match.group()) if _match else {}
             _reflection = str(_parsed.get("hedonic_reflection") or "").strip()[:60]
             if _reflection:
                 _log.debug("PainRewardAgent.generate_hedonic_reflection: %s", _reflection)

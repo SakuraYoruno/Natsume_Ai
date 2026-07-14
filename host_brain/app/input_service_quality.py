@@ -8,14 +8,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json
 from host_brain.app.input_service_log import (
     build_reply_preview,
     get_request_skill_exec_rows,
     log_input_event,
-)
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-from host_brain.app.prompt_builder_utils import (
-    _resolve_template_payload_with_mirror,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,11 +47,11 @@ _ALIGNMENT_STOPWORDS: set[str] = {
 
 
 def _load_runtime_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_template_payload_with_mirror(
-        "input_service_quality.runtime_texts",
-        render_target_lang=render_target_lang,
-    )
-    return dict(raw) if isinstance(raw, dict) else {}
+    raw = resolve_prompt_spec_json("input_service_quality.runtime_texts")
+    if not isinstance(raw, dict):
+        return {}
+    localized = raw.get("ja" if str(render_target_lang).lower() == "ja" else "zh")
+    return dict(localized) if isinstance(localized, dict) else dict(raw)
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -312,7 +309,7 @@ async def maybe_send_gateway_realign_notice(
         return {"sent": False, "reason_code": "DEVIATION_NOTICE_TARGET_MISSING"}
 
     from host_brain.app.surface_reply_preprocessor import render_quick_gateway_realign_text  # noqa: PLC0415
-    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+    from host_brain.channels.edge_transport import submit_gateway_reply as post_gateway_reply  # noqa: PLC0415
 
     content = render_quick_gateway_realign_text(
         sender_name=str(payload.get("sender_name") or "").strip() or None,

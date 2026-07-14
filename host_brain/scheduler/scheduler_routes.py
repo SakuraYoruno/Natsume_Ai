@@ -1,520 +1,297 @@
-"""Scheduler REST API 路由——定时调度器任务管理与健康端点。
-
-DevSpec §21.6：
-  POST   /scheduler/tasks              注册新任务
-  GET    /scheduler/tasks              列出所有任务（含健康状态）
-  GET    /scheduler/tasks/{task_id}    获取单个任务详情
-  PATCH  /scheduler/tasks/{task_id}    更新任务配置
-  DELETE /scheduler/tasks/{task_id}    注销任务
-  POST   /scheduler/tasks/{task_id}/enable   启用任务
-  POST   /scheduler/tasks/{task_id}/disable  禁用任务
-  POST   /scheduler/tasks/{task_id}/trigger  立即触发任务
-  GET    /scheduler/health             所有任务健康快照
-"""
+"""HTTP adapters for the single governed scheduler command service."""
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict, List, Optional
+import inspect
+import time
+from typing import Any, Mapping
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, Request, status
 from pydantic import BaseModel, Field
-
-from host_brain.scheduler.task_registry import (
-    SchedulerTaskConfig,
-    SchedulerTaskRegistry,
-    TriggerMode,
-    TaskPriority,
-)
-from host_brain.scheduler.health import SchedulerHealthReporter
-from host_brain.core.errors import SCHED_TASK_NOT_FOUND, SCHED_TASK_DUPLICATE, SCHED_CONFIG_INVALID
-from host_brain.core.ids import now_ms
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/scheduler", tags=["scheduler"])
-
-# ── 全局注册表与健康报告器（由 app factory 注入） ──
-_registry: SchedulerTaskRegistry | None = None
-_health_reporter: SchedulerHealthReporter | None = None
-_scheduler: Any | None = None
-
-
-def set_scheduler_providers(
-    registry: SchedulerTaskRegistry,
-    health_reporter: SchedulerHealthReporter,
-    scheduler: Any | None = None,
-) -> None:
-    """由 app factory 在启动时注入调度器依赖。"""
-    global _registry, _health_reporter, _scheduler
-    _registry = registry
-    _health_reporter = health_reporter
-    _scheduler = scheduler
-
-
-def _get_registry() -> SchedulerTaskRegistry:
-    if _registry is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"reason_code": "SCHEDULER_NOT_INITIALIZED", "detail": "scheduler registry not initialized"},
-        )
-    return _registry
-
-
-def _get_health() -> SchedulerHealthReporter:
-    if _health_reporter is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"reason_code": "SCHEDULER_NOT_INITIALIZED", "detail": "scheduler health reporter not initialized"},
-        )
-    return _health_reporter
-
-
-def _get_scheduler() -> Any:
-    if _scheduler is None or not hasattr(_scheduler, "trigger_task_by_id_async"):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"reason_code": "SCHEDULER_NOT_INITIALIZED", "detail": "scheduler async runtime not initialized"},
-        )
-    return _scheduler
-
-
-def _build_immune_gate_state() -> Dict[str, Any]:
-    try:
-        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
-
-        raw = dict(get_immune_agent().export_runtime_state() or {})
-        counters = dict(raw.get("counters") or {})
-        last = dict(raw.get("last_inspection") or {})
-        return {
-            "status": "live",
-            "enabled": bool(raw.get("enabled", True)),
-            "blocking_enabled": bool(raw.get("blocking_enabled", False)),
-            "warn_threshold": raw.get("warn_threshold"),
-            "block_threshold": raw.get("block_threshold"),
-            "template_id": raw.get("template_id"),
-            "template_rule_count": int(raw.get("template_rule_count") or 0),
-            "total_rule_count": int(raw.get("total_rule_count") or 0),
-            "counters": {
-                "total": int(counters.get("total") or 0),
-                "allow": int(counters.get("allow") or 0),
-                "report": int(counters.get("report") or 0),
-                "block": int(counters.get("block") or 0),
-            },
-            "last_decision": str(last.get("decision") or "").strip().upper() or None,
-            "last_risk_level": str(last.get("risk_level") or "").strip().lower() or None,
-            "last_score": last.get("score"),
-            "last_reason_codes": list(last.get("reason_codes") or []),
-        }
-    except Exception as exc:
-        return {
-            "status": "degraded",
-            "enabled": None,
-            "blocking_enabled": None,
-            "detail": str(exc)[:160],
-        }
-
-
-def _attach_immune_gate_state(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(snapshot or {})
-    merged["immune_gate_state"] = _build_immune_gate_state()
-    return merged
-
-
-# ── Pydantic 模型 ──
-
-def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
-    registry = _registry
-    health = _health_reporter
-
-    if registry is None and health is None:
-        return _attach_immune_gate_state({
-            "scheduler_status": "UNAVAILABLE",
-            "total_tasks": 0,
-            "enabled_tasks": 0,
-            "suspended_tasks": 0,
-            "error_tasks": 0,
-            "tasks": [],
-            "ts_ms": now_ms(),
-        })
-
-    if registry is not None and health is None:
-        tasks = [
-            {
-                "task_id": task.task_id,
-                "trigger_mode": task.trigger_mode.value,
-                "trigger_config": dict(task.trigger_config or {}),
-                "priority": task.priority.value,
-                "enabled": task.enabled,
-                "status": "UNKNOWN",
-                "last_run_ts": None,
-                "next_run_ts": None,
-                "error_count": 0,
-                "suspended_reason": None,
-                "last_reason_code": None,
-                "last_gate_state": None,
-                "last_mood_state": None,
-                "last_endocrine_cortisol": None,
-                "last_endocrine_energy": None,
-                "last_immune_decision": None,
-                "last_immune_risk_level": None,
-                "last_immune_reason_codes": [],
-            }
-            for task in registry.all_tasks()
-        ]
-        return _attach_immune_gate_state({
-            "scheduler_status": "UNAVAILABLE",
-            "total_tasks": len(tasks),
-            "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
-            "suspended_tasks": 0,
-            "error_tasks": 0,
-            "tasks": tasks,
-            "ts_ms": now_ms(),
-        })
-
-    try:
-        snapshot = health.build_health_snapshot() if health is not None else {}
-    except Exception as exc:
-        logger.warning("Failed to build scheduler health snapshot", exc_info=True)
-        tasks = []
-        if registry is not None:
-            tasks = [
-                {
-                    "task_id": task.task_id,
-                    "trigger_mode": task.trigger_mode.value,
-                    "trigger_config": dict(task.trigger_config or {}),
-                    "priority": task.priority.value,
-                    "enabled": task.enabled,
-                    "status": "ERROR",
-                    "last_run_ts": None,
-                    "next_run_ts": None,
-                    "error_count": 0,
-                    "suspended_reason": None,
-                    "last_reason_code": str(exc)[:120],
-                    "last_gate_state": None,
-                    "last_mood_state": None,
-                    "last_endocrine_cortisol": None,
-                    "last_endocrine_energy": None,
-                    "last_immune_decision": None,
-                    "last_immune_risk_level": None,
-                    "last_immune_reason_codes": [],
-                }
-                for task in registry.all_tasks()
-            ]
-        return _attach_immune_gate_state({
-            "scheduler_status": "ERROR",
-            "total_tasks": len(tasks),
-            "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
-            "suspended_tasks": 0,
-            "error_tasks": len(tasks) if tasks else 1,
-            "tasks": tasks,
-            "ts_ms": now_ms(),
-        })
-
-    normalized = dict(snapshot or {})
-    task_items: list[dict[str, Any]] = []
-    for item in list(normalized.get("tasks") or []):
-        if not isinstance(item, dict):
-            continue
-        task_copy = dict(item)
-        task_id = str(task_copy.get("task_id") or "").strip()
-        if registry is not None and task_id:
-            task_config = registry.get(task_id)
-            if task_config is not None:
-                task_copy.setdefault("trigger_config", dict(task_config.trigger_config or {}))
-                task_copy.setdefault("enabled", task_config.enabled)
-                task_copy.setdefault("priority", task_config.priority.value)
-                task_copy.setdefault("trigger_mode", task_config.trigger_mode.value)
-        task_copy.setdefault("last_immune_decision", None)
-        task_copy.setdefault("last_immune_risk_level", None)
-        task_copy.setdefault("last_immune_reason_codes", [])
-        task_items.append(task_copy)
-    normalized["tasks"] = task_items
-    normalized.setdefault("ts_ms", now_ms())
-    normalized.setdefault("scheduler_status", "UNAVAILABLE")
-    normalized.setdefault("total_tasks", len(task_items))
-    normalized.setdefault("enabled_tasks", sum(1 for item in task_items if item.get("enabled")))
-    normalized.setdefault("suspended_tasks", 0)
-    normalized.setdefault("error_tasks", 0)
-    return _attach_immune_gate_state(normalized)
 
 
 class TaskCreateRequest(BaseModel):
-    task_id: str = Field(..., description="任务唯一 ID")
-    trigger_mode: str = Field(..., description="触发模式：cron / interval / once")
-    trigger_config: Dict[str, Any] = Field(..., description="触发配置")
-    intent_template: Dict[str, Any] = Field(..., description="Intent 模板")
-    priority: str = Field(default="MEDIUM", description="优先级：HIGH / MEDIUM / LOW")
-    mode_allowlist: Optional[List[str]] = Field(None, description="允许触发的 sys_mode 列表")
-    enabled: bool = Field(default=True, description="是否启用")
-    max_consecutive_failures: int = Field(default=3, description="最大连续失败次数")
-    description: str = Field(default="", description="任务描述")
-    resource_profile: Dict[str, Any] = Field(default_factory=dict, description="资源画像")
+    task_id: str = Field(min_length=1, max_length=255)
+    trigger_mode: str
+    trigger_config: dict[str, Any]
+    intent_template: dict[str, Any]
+    priority: str = "MEDIUM"
+    mode_allowlist: list[str] | None = None
+    enabled: bool = True
+    max_consecutive_failures: int = Field(default=3, ge=1)
+    description: str = ""
+    resource_profile: dict[str, Any] = Field(default_factory=dict)
+    worker_key: str | None = None
+    expected_head_version: int = Field(default=0, ge=0)
+    next_scheduled_at_ms: int | None = Field(default=None, ge=0)
 
 
 class TaskPatchRequest(BaseModel):
-    trigger_config: Optional[Dict[str, Any]] = None
-    intent_template: Optional[Dict[str, Any]] = None
-    priority: Optional[str] = None
-    mode_allowlist: Optional[List[str]] = None
-    enabled: Optional[bool] = None
-    max_consecutive_failures: Optional[int] = None
-    description: Optional[str] = None
-    resource_profile: Optional[Dict[str, Any]] = None
+    trigger_mode: str | None = None
+    trigger_config: dict[str, Any] | None = None
+    intent_template: dict[str, Any] | None = None
+    priority: str | None = None
+    mode_allowlist: list[str] | None = None
+    enabled: bool | None = None
+    max_consecutive_failures: int | None = Field(default=None, ge=1)
+    description: str | None = None
+    resource_profile: dict[str, Any] | None = None
+    worker_key: str | None = None
+    expected_head_version: int | None = Field(default=None, ge=1)
+    next_scheduled_at_ms: int | None = Field(default=None, ge=0)
 
 
-class TaskResponse(BaseModel):
-    task_id: str
-    trigger_mode: str
-    trigger_config: Dict[str, Any]
-    intent_template: Dict[str, Any]
-    priority: str
-    mode_allowlist: Optional[List[str]]
-    enabled: bool
-    max_consecutive_failures: int
-    description: str
-    resource_profile: Dict[str, Any]
+def build_scheduler_router(*, prefix: str) -> APIRouter:
+    router = APIRouter(prefix=prefix, tags=["scheduler"])
+
+    @router.post("/tasks", status_code=status.HTTP_201_CREATED)
+    async def create_task(request: Request, body: TaskCreateRequest) -> dict[str, Any]:
+        service, authority, received_at_ms = _request_context(request)
+        definition = body.model_dump(
+            exclude={"expected_head_version", "next_scheduled_at_ms"}
+        )
+        definition["worker_key"] = body.worker_key or "scheduler_production"
+        definition["retry_policy"] = {
+            "max_attempts": body.max_consecutive_failures,
+            "retry_backoff_ms": 0,
+        }
+        return _as_dict(
+            await _invoke(
+                service.publish_definition(
+                    task_id=body.task_id,
+                    definition=definition,
+                    authority=authority,
+                    expected_head_version=body.expected_head_version,
+                    next_scheduled_at_ms=body.next_scheduled_at_ms,
+                    received_at_ms=received_at_ms,
+                )
+            )
+        )
+
+    @router.get("/tasks")
+    async def list_tasks(request: Request) -> list[dict[str, Any]]:
+        service, _authority, _received_at_ms = _request_context(request)
+        value = await _invoke(service.list_definitions())
+        return [_as_dict(item) for item in list(value or ())]
+
+    @router.get("/tasks/{task_id}")
+    async def get_task(task_id: str, request: Request) -> dict[str, Any]:
+        service, _authority, _received_at_ms = _request_context(request)
+        value = await _invoke(service.get_definition(task_id))
+        if value is None:
+            raise HTTPException(status_code=404, detail="SCHEDULER_DEFINITION_NOT_FOUND")
+        return _as_dict(value)
+
+    @router.patch("/tasks/{task_id}")
+    async def update_task(
+        task_id: str,
+        request: Request,
+        body: TaskPatchRequest,
+    ) -> dict[str, Any]:
+        service, authority, received_at_ms = _request_context(request)
+        current_raw = await _invoke(service.get_definition(task_id))
+        if current_raw is None:
+            raise HTTPException(status_code=404, detail="SCHEDULER_DEFINITION_NOT_FOUND")
+        current = _as_dict(current_raw)
+        definition = dict(current.get("definition") or current)
+        patch = body.model_dump(
+            exclude_none=True,
+            exclude={"expected_head_version", "next_scheduled_at_ms"},
+        )
+        definition.update(patch)
+        if body.worker_key is not None:
+            definition["worker_key"] = body.worker_key
+        if body.max_consecutive_failures is not None:
+            retry_policy = dict(definition.get("retry_policy") or {})
+            retry_policy["max_attempts"] = body.max_consecutive_failures
+            retry_policy.setdefault("retry_backoff_ms", 0)
+            definition["retry_policy"] = retry_policy
+        expected = body.expected_head_version or int(current.get("head_version") or 0)
+        return _as_dict(
+            await _invoke(
+                service.publish_definition(
+                    task_id=task_id,
+                    definition=definition,
+                    authority=authority,
+                    expected_head_version=expected,
+                    next_scheduled_at_ms=(
+                        body.next_scheduled_at_ms
+                        if body.next_scheduled_at_ms is not None
+                        else current.get("next_scheduled_at_ms")
+                    ),
+                    received_at_ms=received_at_ms,
+                )
+            )
+        )
+
+    @router.delete("/tasks/{task_id}")
+    async def delete_task(
+        task_id: str,
+        request: Request,
+        expected_head_version: int | None = None,
+    ) -> dict[str, Any]:
+        service, authority, received_at_ms = _request_context(request)
+        expected = await _expected_head_version(
+            service,
+            task_id=task_id,
+            supplied=expected_head_version,
+        )
+        return _as_dict(
+            await _invoke(
+                service.delete_definition(
+                    task_id=task_id,
+                    authority=authority,
+                    expected_head_version=expected,
+                    received_at_ms=received_at_ms,
+                )
+            )
+        )
+
+    @router.post("/tasks/{task_id}/enable")
+    async def enable_task(
+        task_id: str,
+        request: Request,
+        expected_head_version: int | None = None,
+    ) -> dict[str, Any]:
+        return await _set_enabled(
+            request=request,
+            task_id=task_id,
+            enabled=True,
+            expected_head_version=expected_head_version,
+        )
+
+    @router.post("/tasks/{task_id}/disable")
+    async def disable_task(
+        task_id: str,
+        request: Request,
+        expected_head_version: int | None = None,
+    ) -> dict[str, Any]:
+        return await _set_enabled(
+            request=request,
+            task_id=task_id,
+            enabled=False,
+            expected_head_version=expected_head_version,
+        )
+
+    @router.post("/tasks/{task_id}/trigger")
+    async def trigger_task(
+        task_id: str,
+        request: Request,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> dict[str, Any]:
+        service, authority, received_at_ms = _request_context(request)
+        return _as_dict(
+            await _invoke(
+                service.trigger_manual(
+                    task_id=task_id,
+                    authority=authority,
+                    payload=dict(payload or {}),
+                    received_at_ms=received_at_ms,
+                )
+            )
+        )
+
+    @router.get("/health")
+    async def scheduler_health(request: Request) -> dict[str, Any]:
+        service, _authority, _received_at_ms = _request_context(request)
+        return _as_dict(await _invoke(service.health()))
+
+    return router
 
 
-class TaskWithHealthResponse(BaseModel):
-    task: TaskResponse
-    health: Dict[str, Any]
-
-
-# ── 辅助函数 ──
-
-def _task_to_response(task: SchedulerTaskConfig) -> TaskResponse:
-    return TaskResponse(
-        task_id=task.task_id,
-        trigger_mode=task.trigger_mode.value,
-        trigger_config=task.trigger_config,
-        intent_template=task.intent_template,
-        priority=task.priority.value,
-        mode_allowlist=task.mode_allowlist,
-        enabled=task.enabled,
-        max_consecutive_failures=task.max_consecutive_failures,
-        description=task.description,
-        resource_profile=dict(task.resource_profile or {}),
+async def _set_enabled(
+    *,
+    request: Request,
+    task_id: str,
+    enabled: bool,
+    expected_head_version: int | None,
+) -> dict[str, Any]:
+    service, authority, received_at_ms = _request_context(request)
+    expected = await _expected_head_version(
+        service,
+        task_id=task_id,
+        supplied=expected_head_version,
+    )
+    return _as_dict(
+        await _invoke(
+            service.set_enabled(
+                task_id=task_id,
+                enabled=enabled,
+                authority=authority,
+                expected_head_version=expected,
+                received_at_ms=received_at_ms,
+            )
+        )
     )
 
 
-def _parse_trigger_mode(mode_str: str) -> TriggerMode:
-    try:
-        return TriggerMode(mode_str.lower())
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"reason_code": SCHED_CONFIG_INVALID, "detail": f"invalid trigger_mode: {mode_str!r}"},
-        )
-
-
-def _parse_priority(priority_str: str) -> TaskPriority:
-    try:
-        return TaskPriority(priority_str.upper())
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"reason_code": SCHED_CONFIG_INVALID, "detail": f"invalid priority: {priority_str!r}"},
-        )
-
-
-# ── 端点 ──
-
-@router.post("/tasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
-async def create_task(req: TaskCreateRequest) -> TaskResponse:
-    """POST /scheduler/tasks — 注册新调度任务。"""
-    registry = _get_registry()
-
-    if registry.get(req.task_id) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"reason_code": SCHED_TASK_DUPLICATE, "detail": f"task already exists: {req.task_id!r}"},
-        )
-
-    trigger_mode = _parse_trigger_mode(req.trigger_mode)
-    priority = _parse_priority(req.priority)
-
-    task = SchedulerTaskConfig(
-        task_id=req.task_id,
-        trigger_mode=trigger_mode,
-        trigger_config=req.trigger_config,
-        intent_template=req.intent_template,
-        priority=priority,
-        mode_allowlist=req.mode_allowlist,
-        enabled=req.enabled,
-        max_consecutive_failures=req.max_consecutive_failures,
-        description=req.description,
-        resource_profile=dict(req.resource_profile or {}),
+def _request_context(request: Request) -> tuple[Any, Any, int]:
+    service = getattr(request.state, "scheduler_command_service", None)
+    authority = getattr(request.state, "scheduler_command_authority", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="SCHEDULER_COMMAND_SERVICE_UNAVAILABLE")
+    if authority is None:
+        raise HTTPException(status_code=403, detail="SCHEDULER_COMMAND_AUTHORITY_REQUIRED")
+    received_at_ms = int(
+        getattr(request.state, "request_started_ms", 0) or time.time() * 1000
     )
+    return service, authority, received_at_ms
 
+
+async def _invoke(value: Any) -> Any:
     try:
-        task.validate()
-        registry.register(task)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"reason_code": SCHED_CONFIG_INVALID, "detail": str(exc)},
-        )
-
-    return _task_to_response(task)
-
-
-@router.get("/tasks", response_model=List[TaskWithHealthResponse])
-async def list_tasks() -> List[TaskWithHealthResponse]:
-    """GET /scheduler/tasks — 列出所有任务（含健康状态）。"""
-    registry = _get_registry()
-    health = _get_health()
-    snapshot = health.build_health_snapshot()
-    health_by_id = {t["task_id"]: t for t in snapshot["tasks"]}
-
-    result = []
-    for task in registry.all_tasks():
-        result.append(TaskWithHealthResponse(
-            task=_task_to_response(task),
-            health=health_by_id.get(task.task_id, {}),
-        ))
-    return result
+        return await value if inspect.isawaitable(value) else value
+    except HTTPException:
+        raise
+    except Exception as exc:
+        reason = str(getattr(exc, "reason_code", "") or "SCHEDULER_COMMAND_FAILED")
+        detail: Any = {"reason_code": reason, "detail": str(getattr(exc, "detail", exc))[:500]}
+        if "NOT_FOUND" in reason:
+            code = 404
+        elif any(token in reason for token in ("CONFLICT", "VERSION", "REPLAY", "DUPLICATE")):
+            code = 409
+        elif any(token in reason for token in ("INVALID", "REQUIRED")):
+            code = 422
+        else:
+            code = 503
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
-@router.get("/tasks/{task_id}", response_model=TaskWithHealthResponse)
-async def get_task(task_id: str) -> TaskWithHealthResponse:
-    """GET /scheduler/tasks/{task_id} — 获取单个任务详情。"""
-    registry = _get_registry()
-    health = _get_health()
-
-    task = registry.get(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
-
-    snapshot = health.build_health_snapshot()
-    health_by_id = {t["task_id"]: t for t in snapshot["tasks"]}
-
-    return TaskWithHealthResponse(
-        task=_task_to_response(task),
-        health=health_by_id.get(task_id, {}),
-    )
+async def _expected_head_version(
+    service: Any,
+    *,
+    task_id: str,
+    supplied: int | None,
+) -> int:
+    if supplied is not None:
+        return int(supplied)
+    current = await _invoke(service.get_definition(task_id))
+    if current is None:
+        raise HTTPException(status_code=404, detail="SCHEDULER_DEFINITION_NOT_FOUND")
+    version = int(_as_dict(current).get("head_version") or 0)
+    if version < 1:
+        raise HTTPException(status_code=503, detail="SCHEDULER_HEAD_VERSION_INVALID")
+    return version
 
 
-@router.patch("/tasks/{task_id}", response_model=TaskResponse)
-async def update_task(task_id: str, req: TaskPatchRequest) -> TaskResponse:
-    """PATCH /scheduler/tasks/{task_id} — 更新任务配置。"""
-    registry = _get_registry()
-
-    task = registry.get(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
-
-    # 应用更新
-    if req.trigger_config is not None:
-        task.trigger_config = req.trigger_config
-    if req.intent_template is not None:
-        task.intent_template = req.intent_template
-    if req.priority is not None:
-        task.priority = _parse_priority(req.priority)
-    if req.mode_allowlist is not None:
-        task.mode_allowlist = req.mode_allowlist
-    if req.enabled is not None:
-        task.enabled = req.enabled
-    if req.max_consecutive_failures is not None:
-        task.max_consecutive_failures = req.max_consecutive_failures
-    if req.description is not None:
-        task.description = req.description
-    if req.resource_profile is not None:
-        task.resource_profile = dict(req.resource_profile or {})
-
-    return _task_to_response(task)
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    for method_name in ("to_dict", "as_dict", "model_dump"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            mapped = method()
+            if isinstance(mapped, Mapping):
+                return dict(mapped)
+    raise HTTPException(status_code=503, detail="SCHEDULER_SERVICE_RESULT_INVALID")
 
 
-@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: str) -> None:
-    """DELETE /scheduler/tasks/{task_id} — 注销任务。"""
-    registry = _get_registry()
-
-    removed = registry.unregister(task_id)
-    if removed is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
+router = build_scheduler_router(prefix="/scheduler")
 
 
-@router.post("/tasks/{task_id}/enable", response_model=TaskResponse)
-async def enable_task(task_id: str) -> TaskResponse:
-    """POST /scheduler/tasks/{task_id}/enable — 启用任务。"""
-    registry = _get_registry()
-
-    task = registry.get(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
-
-    task.enabled = True
-    return _task_to_response(task)
-
-
-@router.post("/tasks/{task_id}/disable", response_model=TaskResponse)
-async def disable_task(task_id: str) -> TaskResponse:
-    """POST /scheduler/tasks/{task_id}/disable — 禁用任务。"""
-    registry = _get_registry()
-
-    task = registry.get(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
-
-    task.enabled = False
-    return _task_to_response(task)
-
-
-@router.post("/tasks/{task_id}/trigger")
-async def trigger_task(task_id: str) -> Dict[str, Any]:
-    """POST /scheduler/tasks/{task_id}/trigger — 立即触发任务。"""
-    registry = _get_registry()
-    task = registry.get(task_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
-        )
-    if not task.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"reason_code": "SCHED_TASK_DISABLED", "detail": f"task disabled: {task_id!r}"},
-        )
-
-    scheduler = _get_scheduler()
-    result = dict(scheduler.trigger_task_by_id_async(task_id) or {})
-    status_token = str(result.get("status") or "").strip().upper()
-    if status_token == "SUSPENDED":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "reason_code": result.get("reason_code") or "SCHED_TASK_SUSPENDED",
-                "detail": f"task suspended: {task_id!r}",
-                "result": result,
-            },
-        )
-    return {
-        "task_id": task_id,
-        "triggered": status_token not in {"", "SKIPPED", "REJECTED", "DEFERRED", "ERROR", "FAILED"},
-        "queued": status_token == "QUEUED",
-        "status": status_token or "UNKNOWN",
-        "result": result,
-    }
-
-
-@router.get("/health")
-async def scheduler_health() -> Dict[str, Any]:
-    """GET /scheduler/health — 所有任务健康快照（T-SCHED-05）。"""
-    health = _get_health()
-    return _attach_immune_gate_state(dict(health.build_health_snapshot() or {}))
+__all__ = [
+    "TaskCreateRequest",
+    "TaskPatchRequest",
+    "build_scheduler_router",
+    "router",
+]

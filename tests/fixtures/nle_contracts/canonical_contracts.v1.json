@@ -1,0 +1,91 @@
+{
+  "snapshot_version": "Natsume.agent.canonical_contracts.snapshot.v1",
+  "contracts": {
+    "AcceptanceCriterionVerdict": {
+      "schema_version": null,
+      "fields": ["criterion_id", "criterion_text", "verdict", "evidence_refs", "deterministic", "reason_code", "critic_verdict"],
+      "required_fields": ["criterion_id", "criterion_text", "verdict", "evidence_refs", "deterministic"],
+      "enum_fields": {"verdict": ["PASS", "FAIL", "UNKNOWN"]}
+    },
+    "AcceptanceJudgement": {
+      "schema_version": "Natsume.agent.acceptance_judgement.v1",
+      "fields": ["judgement_id", "work_order_id", "decision", "criteria", "task_graph_id", "task_node_id", "attempt_id", "reason_code", "evidence_refs", "critic_candidate", "started_at_ms", "finished_at_ms", "schema_version"],
+      "required_fields": ["schema_version", "judgement_id", "work_order_id", "decision", "criteria", "evidence_refs"],
+      "enum_fields": {"decision": ["ACCEPT", "RETRY", "SPLIT", "REVIEW", "FAIL"]}
+    },
+    "BudgetAmount": {
+      "schema_version": null,
+      "fields": ["token_count", "tool_call_count", "time_ms", "concurrency", "retry_count", "model_cost_micros"],
+      "required_fields": [],
+      "enum_fields": {}
+    },
+    "BudgetPolicy": {
+      "schema_version": "Natsume.agent.budget_policy.v1",
+      "fields": ["scope", "limits", "on_exceeded", "schema_version", "metadata"],
+      "required_fields": ["schema_version", "scope", "limits", "on_exceeded"],
+      "enum_fields": {"on_exceeded": ["BLOCK", "DEGRADE", "REVIEW"]}
+    },
+    "BudgetReservation": {
+      "schema_version": "Natsume.agent.budget_reservation.v1",
+      "fields": ["budget_id", "scope", "limits", "reserved", "consumed", "status", "status_version", "schema_version"],
+      "required_fields": ["schema_version", "budget_id", "scope", "limits", "reserved", "consumed", "status", "status_version"],
+      "enum_fields": {"status": ["PENDING", "ACTIVE", "CONSUMED", "RELEASED", "EXCEEDED", "CANCELLED"]}
+    },
+    "ReviewItem": {
+      "schema_version": "Natsume.agent.review_item.v1",
+      "fields": ["review_id", "review_type", "subject_ref", "subject_version", "requester", "reason", "risk_level", "side_effects", "evidence_refs", "status", "expires_at", "resume_phase", "diff_ref", "checkpoint_id", "decision_actor", "token_ref", "resume_count", "resume_result_ref", "schema_version"],
+      "required_fields": ["schema_version", "review_id", "review_type", "subject_ref", "subject_version", "requester", "reason", "risk_level", "side_effects", "evidence_refs", "status", "expires_at", "resume_phase", "resume_count"],
+      "enum_fields": {
+        "resume_phase": ["PRE_EXECUTION", "POST_EXECUTION_ACCEPTANCE"],
+        "review_type": ["PRE_EXECUTION_APPROVAL", "POST_EXECUTION_ACCEPTANCE"],
+        "status": ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "CONSUMED", "CANCELLED"]
+      }
+    },
+    "SubAgentRequest": {
+      "schema_version": "Natsume.agent.sub_agent_request.v1",
+      "fields": ["request_id", "session_id", "agent_id", "child_work_order", "context_refs", "timeout_ms", "schema_version"],
+      "required_fields": ["schema_version", "request_id", "session_id", "agent_id", "child_work_order", "context_refs", "timeout_ms"],
+      "enum_fields": {}
+    },
+    "SubAgentSpec": {
+      "schema_version": "Natsume.agent.sub_agent_spec.v1",
+      "fields": ["agent_id", "capability_requirements", "allowed_actions", "timeout_ms", "max_attempts", "context_contract", "schema_version"],
+      "required_fields": ["schema_version", "agent_id", "capability_requirements", "allowed_actions", "timeout_ms", "max_attempts", "context_contract"],
+      "enum_fields": {}
+    },
+    "TaskEvent": {
+      "schema_version": "Natsume.agent.task_event.v1",
+      "fields": ["event_id", "event_type", "ts_ms", "trace_id", "actor_type", "actor_id", "sequence_no", "cursor", "span_id", "parent_span_id", "request_id", "work_order_id", "task_graph_id", "task_node_id", "attempt_id", "payload_ref", "evidence_refs", "redaction_level", "schema_version"],
+      "required_fields": ["schema_version", "event_id", "event_type", "ts_ms", "trace_id", "actor_type", "actor_id", "sequence_no", "cursor", "evidence_refs", "redaction_level"],
+      "enum_fields": {
+        "actor_type": ["SYSTEM", "USER", "AGENT", "WORKER", "GOVERNOR", "REVIEWER"],
+        "redaction_level": ["PUBLIC", "INTERNAL", "SENSITIVE"]
+      }
+    },
+    "TaskGraph": {
+      "schema_version": "Natsume.agent.task_graph.v1",
+      "fields": ["graph_id", "root_work_order_id", "revision", "planner_ref", "status", "created_at", "nodes", "schema_version"],
+      "required_fields": ["schema_version", "graph_id", "root_work_order_id", "revision", "planner_ref", "status", "created_at", "nodes"],
+      "enum_fields": {"status": ["CREATED", "ACTIVE", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED"]}
+    },
+    "TaskNode": {
+      "schema_version": "Natsume.agent.task_node.v1",
+      "fields": ["node_id", "dependencies", "route", "input_refs", "output_contract", "retry_policy", "risk_level", "acceptance_criteria", "status", "status_version", "schema_version"],
+      "required_fields": ["schema_version", "node_id", "dependencies", "route", "input_refs", "output_contract", "retry_policy", "risk_level", "acceptance_criteria", "status", "status_version"],
+      "enum_fields": {"status": ["CREATED", "BLOCKED", "READY", "WAITING_APPROVAL", "LEASED", "RUNNING", "EXECUTED", "VERIFYING", "VERIFIED", "VERIFICATION_FAILED", "WAITING_ACCEPTANCE_REVIEW", "ACCEPTED", "FAILED", "RETRY_PENDING", "CANCEL_REQUESTED", "CANCELLED"]}
+    },
+    "VerificationResult": {
+      "schema_version": "Natsume.agent.verification_result.v1",
+      "fields": ["verification_id", "work_order_id", "required", "status", "task_graph_id", "task_node_id", "attempt_id", "reason_code", "evidence_refs", "checks", "started_at_ms", "finished_at_ms", "schema_version"],
+      "required_fields": ["schema_version", "verification_id", "work_order_id", "required", "status", "evidence_refs", "checks"],
+      "enum_fields": {"status": ["PASS", "FAIL", "ERROR", "NOT_RUN"]}
+    },
+    "WorkOrderV3": {
+      "schema_version": "Natsume.agent.work_order.v3",
+      "fields": ["work_order_id", "domain", "run_mode", "objective", "workspace", "input_pack", "allowed_actions", "forbidden_actions", "acceptance_criteria", "verification_plan", "approval_policy", "review_policy", "metadata", "root_work_order_id", "parent_work_order_id", "task_graph_id", "task_node_id", "graph_revision", "attempt", "capability_requirements", "risk_level", "input_refs", "output_contract", "budget_policy", "business_idempotency_scope", "operation_fingerprint", "status_version", "approval_ref", "review_ref", "schema_version"],
+      "required_fields": ["work_order_id", "domain", "run_mode", "objective", "workspace", "input_pack", "allowed_actions", "forbidden_actions", "acceptance_criteria", "verification_plan", "approval_policy", "review_policy", "metadata", "root_work_order_id", "parent_work_order_id", "task_graph_id", "task_node_id", "graph_revision", "attempt", "capability_requirements", "risk_level", "input_refs", "output_contract", "budget_policy", "business_idempotency_scope", "operation_fingerprint", "status_version", "approval_ref", "review_ref", "schema_version"],
+      "enum_fields": {}
+    }
+  },
+  "reason_codes": ["ACCEPTANCE_JUDGEMENT_INVALID", "BUDGET_POLICY_INVALID", "BUDGET_RESERVATION_INVALID", "BUDGET_TRANSITION_INVALID", "CONTRACT_FIELD_INVALID", "CONTRACT_VERSION_REQUIRED", "CONTRACT_VERSION_UNSUPPORTED", "PLAN_CYCLE", "REVIEW_ITEM_INVALID", "REVIEW_TRANSITION_INVALID", "SUB_AGENT_ADAPTER_INVALID", "SUB_AGENT_LINEAGE_INVALID", "TASK_GRAPH_INVALID", "TASK_TRANSITION_INVALID", "VERIFICATION_RESULT_INVALID"]
+}

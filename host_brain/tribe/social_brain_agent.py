@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -17,8 +18,75 @@ def _resolve_social_bond_user_id(value: Any = None, *, session_id: str = "defaul
         return str(value or "").strip() or "default"
 
 
+def derive_social_bond_vector(
+    *,
+    bond_snapshot: Mapping[str, Any],
+    repair_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pure SocialBrain vector projection from an explicit Bond snapshot.
+
+    Supplying the snapshot prevents read-model callers from invoking the
+    legacy ``get_state()`` path, which creates an INIT state for unknown users.
+    ``CONFIDANT`` is the canonical BondStageEngine name for the historical
+    ``INTIMATE`` SocialBrain baseline; both remain accepted compatibility
+    inputs.
+    """
+    snapshot = dict(bond_snapshot or {})
+    stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
+    intimacy = max(0.0, min(1.0, float(snapshot.get("intimacy_score") or 0.0)))
+    stage_baseline = {
+        "FRIEND": {"trust": 0.58, "affinity": 0.60, "safety": 0.64, "novelty": 0.48, "dependency": 0.32},
+        "CLOSE_FRIEND": {"trust": 0.68, "affinity": 0.72, "safety": 0.74, "novelty": 0.42, "dependency": 0.44},
+        "CONFIDANT": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
+        "INTIMATE": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
+        "SOULMATE": {"trust": 0.92, "affinity": 0.94, "safety": 0.90, "novelty": 0.28, "dependency": 0.76},
+    }
+    base = dict(stage_baseline.get(stage, stage_baseline["FRIEND"]))
+    summary = snapshot.get("bond_summary")
+    summary_map = dict(summary) if isinstance(summary, Mapping) else {}
+    trend_hint = str(snapshot.get("bond_trend") or summary_map.get("trend") or "").strip().lower()
+    if trend_hint in {"up", "progress"}:
+        base["trust"] += 0.06
+        base["affinity"] += 0.06
+        base["safety"] += 0.04
+    elif trend_hint in {"down", "regress", "regress_risk"}:
+        base["trust"] -= 0.08
+        base["safety"] -= 0.06
+        base["novelty"] += 0.04
+
+    base["trust"] += (intimacy - 0.5) * 0.30
+    base["affinity"] += (intimacy - 0.5) * 0.28
+    base["dependency"] += (intimacy - 0.5) * 0.20
+    repair = dict(repair_state or {})
+    rupture_load = max(0.0, min(1.0, float(repair.get("rupture_load") or 0.0)))
+    repair_progress = max(0.0, min(1.0, float(repair.get("repair_progress") or 0.0)))
+    base["repair_confidence"] = max(
+        0.0,
+        min(
+            1.0,
+            0.55
+            + base["safety"] * 0.25
+            - max(0.0, 0.5 - base["trust"]) * 0.35
+            - rupture_load * 0.30
+            + repair_progress * 0.28,
+        ),
+    )
+    return {
+        "trust": round(max(0.0, min(1.0, base["trust"])), 4),
+        "affinity": round(max(0.0, min(1.0, base["affinity"])), 4),
+        "safety": round(max(0.0, min(1.0, base["safety"])), 4),
+        "novelty": round(max(0.0, min(1.0, base["novelty"])), 4),
+        "dependency": round(max(0.0, min(1.0, base["dependency"])), 4),
+        "repair_confidence": round(base["repair_confidence"], 4),
+        "rupture_load": round(rupture_load, 4),
+        "repair_progress": round(repair_progress, 4),
+        "bond_stage": stage.lower(),
+    }
+
+
 @dataclass(slots=True)
 class SocialBrainAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="social_brain_agent",
@@ -38,7 +106,6 @@ class SocialBrainAgent:
         person_id: str | None,
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
         resolved_person_id = _resolve_social_bond_user_id(person_id)
@@ -56,7 +123,7 @@ class SocialBrainAgent:
         last_event_ts_ms = 0
 
         try:
-            engine = get_bond_stage_engine()
+            engine = self.application_ports.require("bond_stage_engine")()
             if engine is not None:
                 if resolved_person_id and hasattr(engine, "get_state"):
                     state_obj = engine.get_state(resolved_person_id)
@@ -144,11 +211,9 @@ class SocialBrainAgent:
         session_id: str = "default",
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-
         summary: dict[str, Any] = {}
         try:
-            engine = get_bond_stage_engine()
+            engine = self.application_ports.require("bond_stage_engine")()
             if engine is None:
                 return {}
             state = None
@@ -187,10 +252,8 @@ class SocialBrainAgent:
         return {key: value for key, value in summary.items() if value}
 
     def resolve_stage_engine(self) -> Any:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-
         try:
-            return get_bond_stage_engine()
+            return self.application_ports.require("bond_stage_engine")()
         except Exception:
             return None
 
@@ -201,58 +264,42 @@ class SocialBrainAgent:
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         snapshot = self.resolve_bond_snapshot(person_id=person_id, bond_summary=bond_summary)
-        stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
-        intimacy = max(0.0, min(1.0, float(snapshot.get("intimacy_score") or 0.0)))
-
-        stage_baseline = {
-            "FRIEND": {"trust": 0.58, "affinity": 0.60, "safety": 0.64, "novelty": 0.48, "dependency": 0.32},
-            "CLOSE_FRIEND": {"trust": 0.68, "affinity": 0.72, "safety": 0.74, "novelty": 0.42, "dependency": 0.44},
-            "INTIMATE": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
-            "SOULMATE": {"trust": 0.92, "affinity": 0.94, "safety": 0.90, "novelty": 0.28, "dependency": 0.76},
-        }
-        base = dict(stage_baseline.get(stage, stage_baseline["FRIEND"]))
-        trend_hint = str((snapshot.get("bond_trend") or snapshot.get("bond_summary", {}).get("trend") or "")).strip().lower()
-        if trend_hint in {"up", "progress"}:
-            base["trust"] += 0.06
-            base["affinity"] += 0.06
-            base["safety"] += 0.04
-        elif trend_hint in {"down", "regress", "regress_risk"}:
-            base["trust"] -= 0.08
-            base["safety"] -= 0.06
-            base["novelty"] += 0.04
-
-        # intimacy_score 作为连续校准项，防止只靠 stage 离散跳变
-        base["trust"] += (intimacy - 0.5) * 0.30
-        base["affinity"] += (intimacy - 0.5) * 0.28
-        base["dependency"] += (intimacy - 0.5) * 0.20
-        # P2-3: repair_confidence 动态闭环（受损负载 + 修复进度）
         repair_state = self.resolve_relationship_repair_state(person_id=person_id)
-        rupture_load = float(repair_state.get("rupture_load") or 0.0)
-        repair_progress = float(repair_state.get("repair_progress") or 0.0)
-        base["repair_confidence"] = max(
-            0.0,
-            min(
-                1.0,
-                0.55
-                + base["safety"] * 0.25
-                - max(0.0, 0.5 - base["trust"]) * 0.35
-                - rupture_load * 0.30
-                + repair_progress * 0.28,
-            ),
+        return self.resolve_bond_vector_from_snapshot(
+            bond_snapshot=snapshot,
+            repair_state=repair_state,
         )
 
-        vector = {
-            "trust": round(max(0.0, min(1.0, base["trust"])), 4),
-            "affinity": round(max(0.0, min(1.0, base["affinity"])), 4),
-            "safety": round(max(0.0, min(1.0, base["safety"])), 4),
-            "novelty": round(max(0.0, min(1.0, base["novelty"])), 4),
-            "dependency": round(max(0.0, min(1.0, base["dependency"])), 4),
-            "repair_confidence": round(max(0.0, min(1.0, base["repair_confidence"])), 4),
-            "rupture_load": round(max(0.0, min(1.0, rupture_load)), 4),
-            "repair_progress": round(max(0.0, min(1.0, repair_progress)), 4),
-            "bond_stage": stage.lower(),
-        }
-        return vector
+    def resolve_bond_vector_from_snapshot(
+        self,
+        *,
+        bond_snapshot: Mapping[str, Any],
+        repair_state: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Project a vector from caller-owned read data; never initializes Bond."""
+        return derive_social_bond_vector(
+            bond_snapshot=bond_snapshot,
+            repair_state=repair_state,
+        )
+
+    def resolve_bond_projection(
+        self,
+        *,
+        person_id: str,
+        stage_engine: Any = None,
+        appraisal_records: Any = None,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Build the canonical read-only Bond projection facade."""
+        from host_brain.bond.bond_projection import build_bond_projection  # noqa: PLC0415
+
+        return build_bond_projection(
+            user_id=person_id,
+            stage_engine=stage_engine,
+            social_brain=self,
+            appraisal_records=appraisal_records,
+            now_ms=now_ms,
+        )
 
     def get_bond_context(
         self,
@@ -289,7 +336,7 @@ class SocialBrainAgent:
         将关系变化写入 TribeStateRegistry 快照，供 aggregate_vital_signs() 读取。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
@@ -847,19 +894,17 @@ class SocialBrainAgent:
         """
         try:
             from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
-            from host_brain.app.dependencies import (  # noqa: PLC0415
-                get_shared_memory_index,
-                get_milestone_tracker,
-            )
-
             resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
             resolved_user_id = _resolve_social_bond_user_id(user_id)
-            memory_index = get_shared_memory_index()
-            milestone_tracker = get_milestone_tracker()
+            memory_index = self.application_ports.require("shared_memory_index")()
+            milestone_tracker = self.application_ports.require("milestone_tracker")()
             layer = BondNarrativeLayer(
                 memory_index=memory_index,
                 milestone_tracker=milestone_tracker,
                 use_llm=True,
+                model_attempt_service=self.application_ports.require(
+                    "model_attempt_service"
+                )(),
             )
             result = layer.build_narrative(
                 user_id=resolved_user_id,
@@ -927,9 +972,7 @@ class SocialBrainAgent:
             SharedMemoryResult.to_prompt_slot() 字典，或空字典（降级）。
         """
         try:
-            from host_brain.app.dependencies import get_shared_memory_index  # noqa: PLC0415
-
-            memory_index = get_shared_memory_index()
+            memory_index = self.application_ports.require("shared_memory_index")()
             if memory_index is None:
                 return {"status": "NO_INDEX", "entries": []}
 
@@ -990,7 +1033,7 @@ class SocialBrainAgent:
         try:
             from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
 
-            tracker = get_milestone_tracker()
+            tracker = self.application_ports.require("milestone_tracker")()
             if tracker is None:
                 return {"status": "NO_TRACKER", "new_milestones": [], "achieved_count": 0}
 
@@ -1112,5 +1155,3 @@ from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E4
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
-from host_brain.app.dependencies import get_milestone_tracker  # noqa: E402, F401
-

@@ -35,7 +35,7 @@ def test_prompt_context_uses_hippocampus_projection(monkeypatch) -> None:
             "allowed_emotion_tags": ["NEUTRAL"],
         },
     )
-    monkeypatch.setattr("host_brain.app.dependencies.get_bond_stage_engine", lambda: None)
+    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: None)
     monkeypatch.setattr(cgp, "validate_prompt_context", lambda _pack: pc.PromptContextValidationResult())
 
     prompt_context, _ = cgp.build_prompt_context(

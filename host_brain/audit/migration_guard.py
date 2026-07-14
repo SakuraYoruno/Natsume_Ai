@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from host_brain.audit.migration_compat import (
+    evaluate_catalog_compatibility,
+    transaction_policy_issues,
+)
 from host_brain.core.errors import MIGRATION_ASSET_MISSING, MIGRATION_SCHEMA_DRIFT
 from host_brain.core.ids import now_ms
 
@@ -99,25 +103,10 @@ class SQLiteMigrationVersionGuard:
             - assets: 按版本号排序的资产列表（重复版本只保留第一个）
             - duplicate_versions: 重复的版本号列表
         """
-        if not self.migrations_dir.exists():
-            return [], []
-
-        # 收集所有 SQL 文件
+        physical_assets = self._discover_physical_assets()
         raw: dict[int, list[SQLiteMigrationAsset]] = {}
-        for path in sorted(self.migrations_dir.glob("*.sql")):
-            match = _SQL_FILE_PATTERN.match(path.name)
-            if not match:
-                continue
-            migration_id = int(match.group(1))
-            name = match.group(2)
-            text = path.read_text(encoding="utf-8-sig")
-            asset = SQLiteMigrationAsset(
-                migration_id=migration_id,
-                name=name,
-                path=path,
-                checksum=_sha256(text),
-            )
-            raw.setdefault(migration_id, []).append(asset)
+        for asset in physical_assets:
+            raw.setdefault(asset.migration_id, []).append(asset)
 
         # 检测重复版本号
         duplicate_versions = sorted(
@@ -131,8 +120,31 @@ class SQLiteMigrationVersionGuard:
 
         return assets, duplicate_versions
 
+    def _discover_physical_assets(self) -> list[SQLiteMigrationAsset]:
+        if not self.migrations_dir.exists():
+            return []
+        assets: list[SQLiteMigrationAsset] = []
+        for path in sorted(self.migrations_dir.glob("*.sql")):
+            match = _SQL_FILE_PATTERN.match(path.name)
+            if not match:
+                continue
+            text = path.read_text(encoding="utf-8-sig")
+            assets.append(
+                SQLiteMigrationAsset(
+                    migration_id=int(match.group(1)),
+                    name=match.group(2),
+                    path=path,
+                    checksum=_sha256(text),
+                )
+            )
+        assets.sort(key=lambda item: (item.migration_id, item.path.name))
+        return assets
+
     def check_version_continuity(
-        self, assets: list[SQLiteMigrationAsset]
+        self,
+        assets: list[SQLiteMigrationAsset],
+        *,
+        accepted_gaps: frozenset[int] = frozenset(),
     ) -> list[int]:
         """检查版本连续性，返回缺失的版本号列表（排除已知跳跃）。
 
@@ -147,7 +159,7 @@ class SQLiteMigrationVersionGuard:
         versions = [asset.migration_id for asset in assets]
         expected = set(range(1, max(versions) + 1))
         actual = set(versions)
-        missing = sorted(expected - actual - self._known_gaps)
+        missing = sorted(expected - actual - self._known_gaps - accepted_gaps)
         return missing
 
     def build_guard_report(
@@ -182,18 +194,31 @@ class SQLiteMigrationVersionGuard:
                 ts_ms=now_value,
             )
 
+        physical_assets = self._discover_physical_assets()
         assets, duplicate_versions = self.discover_assets()
+        compatibility = evaluate_catalog_compatibility(physical_assets)
+        transaction_issues = transaction_policy_issues(physical_assets)
+        unexpected_duplicates = sorted(
+            set(duplicate_versions).difference(
+                compatibility.accepted_duplicate_versions
+            )
+        )
 
-        # 存在重复版本号 → FAILED
-        if duplicate_versions:
+        # 只有 checksum-bound 的历史 0009 alias 可被接受。
+        if compatibility.issues or unexpected_duplicates or transaction_issues:
+            details = [*compatibility.issues, *transaction_issues]
+            if unexpected_duplicates:
+                details.append(
+                    f"duplicate migration version(s) detected: {unexpected_duplicates}"
+                )
             return SQLiteMigrationGuardReport(
                 request_id=request_id,
                 status=STATUS_FAILED,
                 reason_code=MIGRATION_SCHEMA_DRIFT,
-                detail=f"duplicate migration version(s) detected: {duplicate_versions}",
+                detail="; ".join(details),
                 stage=S_MIGRATION_SQLITE,
-                asset_count=len(assets),
-                duplicate_versions=duplicate_versions,
+                asset_count=len(physical_assets),
+                duplicate_versions=unexpected_duplicates,
                 missing_versions=[],
                 latest_version=assets[-1].migration_id if assets else 0,
                 ts_ms=now_value,
@@ -214,7 +239,10 @@ class SQLiteMigrationVersionGuard:
                 ts_ms=now_value,
             )
 
-        missing_versions = self.check_version_continuity(assets)
+        missing_versions = self.check_version_continuity(
+            assets,
+            accepted_gaps=compatibility.accepted_gap_versions,
+        )
         latest_version = assets[-1].migration_id
 
         # 存在版本跳跃 → DEGRADED（不阻断启动，但需要关注）
@@ -225,7 +253,7 @@ class SQLiteMigrationVersionGuard:
                 reason_code=MIGRATION_ASSET_MISSING,
                 detail=f"migration version gap(s) detected: missing {missing_versions}",
                 stage=S_MIGRATION_SQLITE,
-                asset_count=len(assets),
+                asset_count=len(physical_assets),
                 duplicate_versions=[],
                 missing_versions=missing_versions,
                 latest_version=latest_version,
@@ -237,9 +265,12 @@ class SQLiteMigrationVersionGuard:
             request_id=request_id,
             status=STATUS_READY,
             reason_code=None,
-            detail=f"all {len(assets)} migration assets verified, latest version: {latest_version}",
+            detail=(
+                f"all {len(physical_assets)} physical migration assets verified, "
+                f"latest version: {latest_version}"
+            ),
             stage=S_MIGRATION_SQLITE,
-            asset_count=len(assets),
+            asset_count=len(physical_assets),
             duplicate_versions=[],
             missing_versions=[],
             latest_version=latest_version,

@@ -3,15 +3,18 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 
 from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_response
+from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
+from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 
 
 @asynccontextmanager
@@ -41,9 +44,11 @@ def build_host_test_app(
     root_endpoint: Callable[[], Awaitable[Response]] = default_root_endpoint,
     metrics: RuntimeMetrics | None = None,
     logger: logging.Logger | None = None,
+    canon_service_provider: Callable[[], Any | None] | None = None,
 ) -> FastAPI:
     runtime_metrics = metrics or RuntimeMetrics()
     runtime_logger = logger or logging.getLogger("tests.host_app")
+    input_runtime_ports = build_input_runtime_application_ports()
 
     if edge_events_endpoint is None:
         async def edge_events_endpoint(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
@@ -51,6 +56,10 @@ def build_host_test_app(
                 request_body=request_body,
                 get_ledger=get_ledger,
                 logger=runtime_logger,
+                input_dispatcher=partial(
+                    _dispatch_to_graph,
+                    ports=input_runtime_ports,
+                ),
             )
 
     return create_host_fastapi_app(
@@ -64,4 +73,6 @@ def build_host_test_app(
         chat_endpoint=chat_endpoint,
         edge_events_endpoint=edge_events_endpoint,
         root_endpoint=root_endpoint,
+        canon_service_provider=canon_service_provider or (lambda: None),
+        input_runtime_ports=input_runtime_ports,
     )

@@ -20,16 +20,48 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.observability.api_models import (
+    GraphSchemaEdge,
+    GraphSchemaNode,
+    GraphSchemaResponse,
+    LiveTraceFeedItem,
+    LlmNodeItem,
+    LlmNodesResponse,
+    MetricsTimeseriesResponse,
+    ServiceHealthItem,
+    ServicesHealthResponse,
+    SessionItem,
+    SessionsResponse,
+    StreamEventItem,
+    TimeseriesPoint,
+    TraceEdge,
+    TraceLiveFeedDelta,
+    TraceLiveFeedDeltaItem,
+    TraceLiveFeedNodeDelta,
+    TraceLiveFeedSnapshot,
+    TraceNode,
+    TraceResponse,
+    TraceStreamEventsResponse,
+    TribeEventItem,
+    TribeEventsResponse,
+)
 from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
-from host_brain.observability.session_query import SessionQueryService
+from host_brain.app.observability_runtime.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
+from host_brain.app.observability_runtime.process_state_projection import (
+    RESOURCE_MANAGER_KEY,
+    RESOURCE_MANAGER_KIND,
+    RESOURCE_MANAGER_MAX_AGE_MS,
+    read_process_projection,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
@@ -94,8 +126,16 @@ def _get_ledger() -> SQLiteLedger:
     if _ledger_provider is not None:
         return _ledger_provider()
     # Fallback to shared dependency factory to avoid import-order/cycle issues.
-    from host_brain.app.dependencies import get_ledger as _deps_get_ledger
+    from host_brain.composition.process_services import get_ledger as _deps_get_ledger
     return _deps_get_ledger()
+
+
+def _get_graph_evidence_repository():
+    from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
+        GraphEvidenceRepository,
+    )
+
+    return GraphEvidenceRepository.from_ledger(_get_ledger())
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -380,9 +420,9 @@ def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
 
 def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_subgraph_summary(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_subgraph_summaries(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_subgraphs degraded: %s", exc)
         return []
@@ -623,9 +663,9 @@ def _merge_trace_subgraphs(
 
 def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-
-        rows = get_evidence_plane().query_stream_events(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_stream_events(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("_build_trace_stream_events degraded: %s", exc)
         return []
@@ -1769,32 +1809,6 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         "call_count": total,
     }
 
-# ---------------------------------------------------------------------------
-# Pydantic 响应模型
-# ---------------------------------------------------------------------------
-class ServiceHealthItem(BaseModel):
-    service_id: str
-    service_type: str  # "edge" | "llm_node"
-    display_name: str
-    role: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    success_rate: Optional[float] = None
-    p95_ms: Optional[int] = None
-    last_call_ts: Optional[int] = None
-    call_count: Optional[int] = None
-
-class ServicesHealthResponse(BaseModel):
-    total: int
-    up: int
-    degraded: int
-    down: int
-    unknown: int
-    services: List[ServiceHealthItem]
-    timestamp: int
-
-
 _LEGACY_INPUT_DISPATCH_EVENTS: frozenset[str] = frozenset(
     {
         "ACCEPTED",
@@ -1843,147 +1857,6 @@ def _extract_input_dispatch_latency_ms(row: dict[str, Any], payload: dict[str, A
             continue
     return None
 
-class SessionItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    ts_ms: int
-    status: str
-    decision: Optional[str] = None
-    reason_code: Optional[str] = None
-    node_count: Optional[int] = None
-    total_latency_ms: Optional[int] = None
-    input_preview: Optional[str] = None
-
-class SessionsResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[SessionItem]
-    timestamp: int
-
-
-class TribeEventItem(BaseModel):
-    event_id: str
-    event_type: str
-    source_agent: str
-    target_agent: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    schema_version: str
-    ts_ms: int
-
-
-class TribeEventsResponse(BaseModel):
-    total: int
-    items: List[TribeEventItem]
-    timestamp: int
-
-
-class TraceNode(BaseModel):
-    node_id: str
-    node_type: str  # "edge" | "llm_node" | "system"
-    display_name: str
-    side: Optional[str] = None
-    provider: Optional[str] = None
-    model_id: Optional[str] = None
-    status: str
-    reason_code: Optional[str] = None
-    latency_ms: Optional[int] = None
-    input_data: Optional[Any] = None
-    output_data: Optional[Any] = None
-    ts_ms: Optional[int] = None
-    error: Optional[str] = None
-    group_id: Optional[str] = None
-    owner_node_id: Optional[str] = None
-    subgraph_id: Optional[str] = None
-    parent_node_id: Optional[str] = None
-
-class TraceEdge(BaseModel):
-    source: str
-    target: str
-
-class TraceResponse(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    status: str
-    total_latency_ms: Optional[int] = None
-    node_count: int
-    nodes: List[TraceNode]
-    edges: List[TraceEdge]
-    summary: Optional[Dict[str, Any]] = None
-    subgraphs: List[Dict[str, Any]] = Field(default_factory=list)
-    stream_events: List[Dict[str, Any]] = Field(default_factory=list)
-    ts_ms: int
-    timestamp: int
-
-
-class LiveTraceFeedItem(BaseModel):
-    session: SessionItem
-    trace: Optional[TraceResponse] = None
-    error: Optional[str] = None
-
-
-class TraceLiveFeedSnapshot(BaseModel):
-    type: Literal["snapshot"] = "snapshot"
-    items: List[LiveTraceFeedItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-
-class TraceLiveFeedNodeDelta(BaseModel):
-    change_type: Literal["added", "updated"]
-    node: TraceNode
-    previous_status: Optional[str] = None
-
-
-class TraceLiveFeedDeltaItem(BaseModel):
-    request_id: str
-    session_id: Optional[str] = None
-    session: Optional[SessionItem] = None
-    trace_status: Optional[str] = None
-    total_latency_ms: Optional[int] = None
-    latest_node: Optional[TraceNode] = None
-    changes: List[TraceLiveFeedNodeDelta] = Field(default_factory=list)
-    change_count: int = 0
-
-
-class TraceLiveFeedDelta(BaseModel):
-    type: Literal["delta"] = "delta"
-    items: List[TraceLiveFeedDeltaItem] = Field(default_factory=list)
-    count: int
-    timestamp: int
-
-class TimeseriesPoint(BaseModel):
-    ts_ms: int
-    requests: int
-    rejections: int
-    errors: int
-    avg_latency_ms: Optional[float] = None
-
-class MetricsTimeseriesResponse(BaseModel):
-    range_ms: int
-    interval_ms: int
-    points: List[TimeseriesPoint]
-    total_requests: int
-    total_rejections: int
-    rejection_rate: float
-    timestamp: int
-
-class LlmNodeItem(BaseModel):
-    node_id: str
-    role: str
-    provider: str
-    model_id: str
-    status: str
-    success_rate: Optional[float] = None
-    p95_ms: Optional[int] = None
-    last_call_ts: Optional[int] = None
-    call_count: int
-
-class LlmNodesResponse(BaseModel):
-    nodes: List[LlmNodeItem]
-    timestamp: int
-
-
 def _model_dump_compat(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
@@ -2005,7 +1878,7 @@ def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional
 
 
 def _build_sessions_response(
-    ledger: SQLiteLedger,
+    ledger: SQLiteLedger | None,
     *,
     page: int,
     page_size: int,
@@ -2013,7 +1886,12 @@ def _build_sessions_response(
     window_minutes: int,
     keyword: Optional[str],
 ) -> SessionsResponse:
-    svc = SessionQueryService(ledger)
+    if ledger is None:
+        from host_brain.composition.process_services import get_query_projection_store
+
+        svc = SessionQueryService(None, projection_store=get_query_projection_store())
+    else:
+        svc = SessionQueryService(ledger)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -2044,6 +1922,7 @@ def _build_sessions_response(
         page_size=result["page_size"],
         items=items,
         timestamp=_now_ms(),
+        projection=result.get("projection"),
     )
 
 
@@ -2766,7 +2645,6 @@ def _build_trace_live_feed_delta(
 # ---------------------------------------------------------------------------
 # GET /obs/services/health
 # ---------------------------------------------------------------------------
-@router.get("/services/health", response_model=ServicesHealthResponse)
 async def get_services_health(
     window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
     side: Optional[str] = Query(None, description="过滤端：host|edge"),
@@ -2775,7 +2653,7 @@ async def get_services_health(
     ledger = _get_ledger()
     since_ms = _now_ms() - window_minutes * 60 * 1000
     try:
-        from host_brain.observability import service_health_heartbeat as heartbeat
+        from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
         if not heartbeat.has_fresh_core_service_cache():
             await heartbeat.prime_core_service_cache_once()
@@ -2823,7 +2701,7 @@ def _build_probe_registry(ledger, since_ms: int):
     优先使用心跳缓存（service_health_heartbeat）：若某服务在 TTL 内有心跳结果，则直接返回，不再依赖 ledger。
     """
     from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
-    from host_brain.observability import service_health_heartbeat as heartbeat
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     now_ms = _now_ms()
     host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
@@ -3008,7 +2886,7 @@ def get_sessions(
         },
         ttl_ms=_OBS_SESSIONS_CACHE_TTL_MS,
         builder=lambda: _build_sessions_response(
-            _get_ledger(),
+            None,
             page=page,
             page_size=page_size,
             status=status,
@@ -3018,7 +2896,6 @@ def get_sessions(
     )
 
 
-@router.get("/tribe/events", response_model=TribeEventsResponse)
 def get_tribe_events(
     limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤"),
@@ -3074,11 +2951,8 @@ def export_sessions_csv(
     import io
     from fastapi.responses import StreamingResponse
 
-    ledger = _get_ledger()
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-
     sessions_response = _build_sessions_response(
-        ledger,
+        None,
         page=1,
         page_size=max_rows,
         status=status,
@@ -3127,52 +3001,17 @@ def export_sessions_csv(
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
-@router.get("/trace/{request_id}", response_model=TraceResponse)
 async def get_trace(request_id: str):
-    """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    ledger = _get_ledger()
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_build_trace_response, ledger, request_id),
-            timeout=_TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "trace full build timeout: request_id=%s timeout_sec=%.2f, degrade to lightweight",
-            request_id,
-            _TRACE_BUILD_TIMEOUT_SEC,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("trace full build failed: request_id=%s err=%s, degrade to lightweight", request_id, exc)
+    """Compatibility route delegated to the durable projection-only reader."""
 
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _build_trace_response_lightweight,
-                ledger,
-                request_id,
-                reason="TRACE_DETAIL_DEGRADED",
-                message="trace detail built in lightweight mode due to timeout or downstream pressure",
-            ),
-            timeout=_TRACE_BUILD_FALLBACK_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail={
-                "error": "trace_timeout",
-                "request_id": request_id,
-                "message": "trace detail build timed out in both full and lightweight modes",
-            },
-        ) from exc
+    from host_brain.app.obs_routes_trace import get_trace as get_projected_trace
+
+    return await get_projected_trace(request_id)
 
 
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
 # ---------------------------------------------------------------------------
-@router.get("/trace-feed/live")
 async def stream_trace_live_feed(
     request: Request,
     limit: int = Query(6, ge=1, le=12),
@@ -3253,30 +3092,12 @@ async def stream_trace_live_feed(
     )
 
 
-class StreamEventItem(BaseModel):
-    request_id: str
-    graph_id: str
-    phase: str
-    event_type: str
-    node_id: Optional[str] = None
-    chunk: Optional[str] = None
-    ts_ms: int
-
-
-class TraceStreamEventsResponse(BaseModel):
-    request_id: str
-    events: List[StreamEventItem]
-    count: int
-    timestamp: int
-
-
-@router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
 def get_trace_stream_events(request_id: str):
     """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
     try:
-        from host_brain.integrations.graph_evidence import get_evidence_plane
-        ep = get_evidence_plane()
-        rows = ep.query_stream_events(request_id=request_id)
+        rows = _get_graph_evidence_repository().list_stream_events(
+            request_id=request_id
+        )
     except Exception as exc:
         logger.debug("get_trace_stream_events: %s", exc)
         rows = []
@@ -3300,31 +3121,6 @@ def get_trace_stream_events(request_id: str):
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /obs/graph/schema — 图的编排（当前 Host 图定义：节点与边）
-# ---------------------------------------------------------------------------
-class GraphSchemaNode(BaseModel):
-    node_id: str
-    display_name: Optional[str] = None
-
-
-class GraphSchemaEdge(BaseModel):
-    source: str
-    target: str
-
-
-class GraphSchemaResponse(BaseModel):
-    graph_id: str
-    version: str
-    entry_node: Optional[str] = None
-    active_nodes: List[str] = Field(default_factory=list)
-    nodes: List[GraphSchemaNode] = Field(default_factory=list)
-    edges: List[GraphSchemaEdge] = Field(default_factory=list)
-    graph_meta: Optional[Dict[str, Any]] = None
-    timestamp: int
-
-
-@router.get("/graph/schema", response_model=GraphSchemaResponse)
 def get_graph_schema():
     """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
     try:
@@ -3383,8 +3179,8 @@ def get_metrics_timeseries(
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
 ):
     """WARN-BE-003: 调用 MetricsTimeseriesService.query() 而非内联聚合逻辑。"""
-    ledger = _get_ledger()
-    svc = MetricsTimeseriesService(ledger)
+    projection_view = get_projection_ledger_view()
+    svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000
     interval_map = {1: "1m", 5: "5m", 60: "1h"}
@@ -3434,12 +3230,11 @@ def get_metrics_timeseries(
 # ---------------------------------------------------------------------------
 # GET /obs/llm/nodes
 # ---------------------------------------------------------------------------
-@router.get("/llm/nodes", response_model=LlmNodesResponse)
 def get_llm_nodes(
     window_minutes: int = Query(60, ge=1, le=1440),
 ):
     """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""
-    ledger = _get_ledger()
+    ledger = get_projection_ledger_view()
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:
@@ -3484,6 +3279,7 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
     last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
     last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
     last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+    degradation_state = payload.get("degradation_state") if isinstance(payload.get("degradation_state"), dict) else {}
     return {
         "running": bool(payload.get("running")),
         "interval_s": payload.get("interval_s"),
@@ -3501,6 +3297,7 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
         "last_decision": last_decision,
         "last_actions": last_actions[:12],
         "last_gate_decisions": last_gate_decisions[:20],
+        "degradation_state": degradation_state,
         "status_path": payload.get("status_path"),
     }
 
@@ -3508,42 +3305,21 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
 @router.get("/resource-manager/status")
 def get_resource_manager_status():
     """Whole-system resource manager status for scheduler explainability."""
-    if not _env_bool("HOST_RESOURCE_MANAGER_ENABLED", False):
-        return {
-            "status": "DISABLED",
-            "source": "disabled",
+    payload, projection = read_process_projection(
+        RESOURCE_MANAGER_KIND,
+        RESOURCE_MANAGER_KEY,
+        max_age_ms=RESOURCE_MANAGER_MAX_AGE_MS,
+    )
+    if payload is None:
+        payload = {
+            "status": "UNAVAILABLE",
+            "source": "projection",
             "timestamp": _now_ms(),
             "running": False,
             "registered": False,
-            "detail": "SystemResourceManager is disabled.",
-            "status_path": str(Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"),
+            "status_ref": "resource-manager://status/current",
         }
-
-    source = "unavailable"
-    raw_status: dict[str, Any] = {}
-    try:
-        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
-
-        manager = get_resource_manager(create_if_missing=False)
-        if manager is not None:
-            status = manager.get_status()
-            raw_status = status if isinstance(status, dict) else {}
-            source = "live_manager"
-    except Exception as exc:
-        logger.debug("resource manager live status unavailable: %s", exc)
-
-    if not raw_status:
-        raw_status = _load_resource_manager_status_file()
-        if raw_status:
-            source = "status_file"
-
-    status = "OK" if raw_status else "UNAVAILABLE"
-    return {
-        "status": status,
-        "source": source,
-        "timestamp": _now_ms(),
-        **_compact_resource_manager_status(raw_status),
-    }
+    return {**payload, "projection": projection}
 
 
 # ---------------------------------------------------------------------------

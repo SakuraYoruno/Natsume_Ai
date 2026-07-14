@@ -1,0 +1,129 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0492",
+  "milestone": "M48-B",
+  "status": "IMPLEMENTED_AWAITING_PROTECTED_HANDOFF",
+  "baseline_commit": "6b84908e8a8dfe43f6485e8d01a0f923839b3bcf",
+  "implementation_commit": "388010974a3043b1b0a0598eb77c5777e8e5b36a",
+  "recorded_at": "2026-07-12",
+  "scope": {
+    "feature_flag": "HOST_SERVICE_CATALOG_MODE",
+    "modes": ["AUDIT", "PREFLIGHT", "ENFORCE"],
+    "default_mode": "AUDIT",
+    "invalid_mode_behavior": "terminal SERVICE_CATALOG_MODE_INVALID rejection",
+    "catalog_schema": "natsume.service-catalog.v1",
+    "fixed_endpoint_count": 17,
+    "production_startup_wired": false,
+    "production_enforce_reservation_provider_available": false,
+    "migration_0062_created": false,
+    "live_services_or_sockets_changed": false
+  },
+  "catalog_invariants": [
+    "every endpoint has a unique endpoint_id plus explicit listener, owner, transport, bind, protocol version, health identity, exposure, auth policy, enabled state and source references",
+    "Catalog and Composition import no Host, Edge, Desktop or Bridge runtime owner implementation",
+    "disabled endpoints, dependencies and dynamic templates never claim or reserve a fixed listener",
+    "TCP and UDP are distinct; wildcard, IPv4, IPv6 and IPv4-mapped overlap are evaluated conservatively",
+    "public or non-loopback listeners reject NONE and PUBLIC_LIVENESS; only explicit authenticated policy kinds with a policy reference pass",
+    "typed CatalogSnapshot content digest is recomputed and is the only startup authority input",
+    "static conflicts are checked across the full catalog while machine probes and reservations are limited to the exact candidate owner endpoints",
+    "AUDIT never grants start authority; PREFLIGHT blocks before callbacks; ENFORCE additionally requires a short-lived snapshot-bound one-shot reservation",
+    "a check-then-close socket observation is never promoted to a reservation and no path kills, adopts or automatically reassigns an incumbent port",
+    "health acceptance binds endpoint, owner, protocol and version; arbitrary 2xx status is insufficient"
+  ],
+  "catalog_profiles": [
+    {
+      "profile": "actual repository defaults",
+      "digest": "sha256:65698556c9a1490552b19860c5d7a8090599a5ea61ad079ea933d10c8bf032aa",
+      "issues": [
+        {
+          "reason_code": "SERVICE_CATALOG_PUBLIC_BIND_AUTH_REQUIRED",
+          "endpoint_ids": ["host.mateengine.bridge.udp"],
+          "fact": "tools/mateengine_bridge_server.py currently defaults MATEENGINE_BRIDGE_UDP_HOST to 0.0.0.0 without authentication"
+        }
+      ]
+    },
+    {
+      "profile": "safe VTS with explicit Mate UDP loopback",
+      "digest": "sha256:c014c640d54904c2ce596c4da8030197f42d83637d11b504ea2c48d423350242",
+      "issues": []
+    },
+    {
+      "profile": "VRM plus Mate HTTP with explicit Mate UDP loopback",
+      "digest": "sha256:7a3ff87fafab2e264d492a1b47fc4cfc32a208c6cd83d835253beb08b9d28341",
+      "issues": [
+        {
+          "reason_code": "SERVICE_CATALOG_BIND_CONFLICT",
+          "endpoint_ids": [
+            "edge.unity.avatar.bridge.http",
+            "host.mateengine.bridge.http"
+          ],
+          "socket": "127.0.0.1:18770/tcp"
+        }
+      ]
+    }
+  ],
+  "migration": {
+    "asset": null,
+    "decision": "0062_service_catalog.sql not created",
+    "reason": "ownership is deterministic versioned code; bind observations and reservations are transient, so no durable state is required"
+  },
+  "validation": [
+    {
+      "kind": "focused_unit_contract_wave",
+      "command": "python -m pytest -q --tb=short tests/unit/test_task0492_service_catalog_models.py tests/unit/test_task0492_service_catalog_preflight.py tests/unit/test_task0492_service_catalog_composition.py tests/contract/test_task0492_service_catalog_contract.py",
+      "result": "43 passed in 1.72s",
+      "coverage": "typed models, actual endpoint inventory, 18770 conflict, public auth, address overlap, modes, reservation, HMAC/tamper/TTL/replay, candidate-only probes, exact health and repository boundaries"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest -q --tb=short tests/integration/test_task0492_service_catalog_integration.py",
+      "result": "1 passed in 0.75s",
+      "execution_count": 1,
+      "first_attempt_passed": true,
+      "coverage": "safe VTS single owner, VRM 18770 pre-callback rejection, ENFORCE exact reservation consumption, one candidate start, exact health and replay with zero additional callback",
+      "real_socket_process_network_or_physical_effects": false
+    },
+    {
+      "kind": "independent_read_only_audit",
+      "result": "P0/P1 cleared for TASK-0492-owned implementation; production startup wiring and ENFORCE provider are protected handoff and prohibit DONE status"
+    },
+    {
+      "kind": "static_validation",
+      "result": "compileall, git diff --check and forbidden runtime-owner import contract passed"
+    }
+  ],
+  "protected_handoff": {
+    "status": "REQUIRED_BEFORE_DONE",
+    "owner_surfaces": [
+      "host_brain/__main__.py",
+      "host_brain/obs_main.py",
+      "edge_client/__main__.py",
+      "edge_client/gateway/bootstrap.py",
+      "scripts/runtime/start_host_side.ps1",
+      "scripts/runtime/start_monitor_proxy.ps1",
+      "tools/mateengine_bridge_server.py",
+      "tools/unity_avatar_runtime/Assets/NatsumeAvatarRuntime/Scripts/NatsumeAvatarBridgeServer.cs"
+    ],
+    "current_runtime_gaps": [
+      "real startup entrypoints do not yet construct or call ServiceCatalogStartupCoordinator before listener callbacks",
+      "ReadOnlySocketBindProbe intentionally cannot issue or consume a reservation, so production ENFORCE remains unavailable and fail closed",
+      "Mate UDP currently defaults to unauthenticated 0.0.0.0 and must be cut over by TASK-0494",
+      "Host bare CLI still falls back to 0.0.0.0:8000 and Gateway bootstrap hard-binds 0.0.0.0 until their owners wire the catalog"
+    ],
+    "required_merge": [
+      "construct one catalog snapshot from one frozen environment in each approved composition root and pass exact candidate endpoint ids before any listener callback",
+      "preserve incumbent processes and reject conflicts without kill, adoption or automatic port reassignment",
+      "provide an approved atomic reservation/handoff adapter before allowing ENFORCE; never treat ReadOnlySocketBindProbe as one",
+      "bind post-start health to endpoint, owner, protocol and version and stop only the failed candidate",
+      "complete Mate UDP loopback plus remote scope, rate, auth and audit in TASK-0494 and add production construction/cutover tests"
+    ],
+    "stop_condition": "Do not mark TASK-0492 DONE and do not claim production PREFLIGHT or ENFORCE until owner startup handoff and construction tests land"
+  },
+  "rollback": [
+    "Keep HOST_SERVICE_CATALOG_MODE=AUDIT; AUDIT reports evidence but grants no startup authority.",
+    "Stop only the candidate and restore only the approved loopback owner; never auto-steal or auto-reassign 18770.",
+    "Retain catalog and conflict evidence; do not delete declarations or falsify enabled/auth state to obtain a green result.",
+    "On uncertain reservation or identity, reject new startup and preserve the incumbent without kill or adoption."
+  ],
+  "production_cutover_claimed": false
+}

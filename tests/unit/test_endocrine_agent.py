@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app import dependencies
+from host_brain.composition import process_services as dependencies
 from host_brain.tribe.endocrine_agent import EndocrineAgent
 
 
@@ -30,7 +30,7 @@ def test_dependencies_get_endocrine_state_delegates_to_tribe_agent(monkeypatch) 
 
     monkeypatch.setattr("host_brain.tribe.endocrine_agent.get_endocrine_agent", lambda: _FakeAgent())
     monkeypatch.setattr(
-        "host_brain.app.dependencies.get_hard_state",
+        "host_brain.composition.process_services.get_hard_state",
         lambda: {"energy_level": 60, "mood_state": "steady", "sys_mode": "normal"},
     )
 

@@ -1,6 +1,5 @@
 import React from 'react'
 import { Activity, Database, RefreshCw } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../../../life/components/DigitalLifeRuntimeCard.jsx'
 import BarChart from '../../../../shared/ui/charts/BarChart.jsx'
 import LineChart from '../../../../shared/ui/charts/LineChart.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
@@ -180,6 +179,7 @@ function MetricsDiagnosticsSection({ pollingEnabled, pollingInterval }) {
 }
 
 export default function MetricsOverviewSurface({
+  DigitalLifeRuntimeCard,
   timeRange,
   timeRanges,
   rangeConfig,
@@ -263,7 +263,9 @@ export default function MetricsOverviewSurface({
       {!loading && !error ? <MetricsSummaryCards cards={summaryCards} /> : null}
       {error ? <NoticeBanner variant="error">加载失败：{error}</NoticeBanner> : null}
 
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      {DigitalLifeRuntimeCard ? (
+        <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      ) : null}
 
       {isInitialState ? (
         <div className="card p-4 text-sm text-gray-500">

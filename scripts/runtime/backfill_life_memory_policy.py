@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger  # noqa: E402
-from host_brain.memory.life_memory import LifeMemoryStore  # noqa: E402
+from host_brain.memory.life_memory.store import LifeMemoryStore  # noqa: E402
 
 
 DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"

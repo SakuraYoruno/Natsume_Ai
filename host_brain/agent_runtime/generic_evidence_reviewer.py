@@ -76,6 +76,7 @@ def review_generic_evidence_from_memory_packet(
     session_id: str | None = None,
     ts_ms: int | None = None,
     timeout_s: int | None = None,
+    persist_life_action_event_memory: Any = None,
 ) -> dict[str, Any]:
     targets = _extract_targets(packet)
     max_targets = _review_target_limit()
@@ -95,6 +96,7 @@ def review_generic_evidence_from_memory_packet(
                 person_id=person_id,
                 session_id=session_id,
                 ts_ms=ts_ms,
+                persist_life_action_event_memory=persist_life_action_event_memory,
             ),
         )
         return result
@@ -121,6 +123,7 @@ def review_generic_evidence_from_memory_packet(
                 person_id=person_id,
                 session_id=session_id,
                 ts_ms=ts_ms,
+                persist_life_action_event_memory=persist_life_action_event_memory,
             ),
         )
         return result
@@ -139,6 +142,7 @@ def review_generic_evidence_from_memory_packet(
             person_id=person_id,
             session_id=session_id,
             ts_ms=ts_ms,
+            persist_life_action_event_memory=persist_life_action_event_memory,
         ),
     )
     return result
@@ -457,14 +461,13 @@ def _persist_review_memory(
     person_id: str | None,
     session_id: str | None,
     ts_ms: int | None,
+    persist_life_action_event_memory: Any = None,
 ) -> dict[str, Any]:
     raw_enabled = str(os.environ.get("HOST_GENERIC_EVIDENCE_REVIEW_PERSIST_ENABLED") or "true").strip().lower()
     if raw_enabled in {"0", "false", "no", "off"}:
         return {"status": "SKIPPED", "reason_code": "PERSIST_DISABLED"}
-    try:
-        from host_brain.app.observability_persist import persist_life_action_event_memory  # noqa: PLC0415
-    except Exception:
-        return {"status": "SKIPPED", "reason_code": "PERSIST_IMPORT_FAILED"}
+    if not callable(persist_life_action_event_memory):
+        return {"status": "SKIPPED", "reason_code": "PERSIST_PORT_NOT_COMPOSED"}
     owner = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(person_id or session_id or "global").strip())[:80] or "global"
     signature = _stable_result_signature(result)
     action_id = f"{owner}:generic_evidence_review:{signature}"

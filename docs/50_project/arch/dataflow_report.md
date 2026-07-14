@@ -1,8 +1,8 @@
 受众：MASTER
 标题：当前数据流报告
 
-版本：v4.0
-日期：2026-06-30
+版本：v4.2
+日期：2026-07-11
 定位：基于当前仓库代码，全面描述所有主流量路径。若历史方案文档与本文冲突，以本文与代码为准。
 
 ## 0. 代码证据入口
@@ -50,7 +50,14 @@ Chat / Surface 主链：
 - `host_brain/audit/sqlite_ledger.py`
 - `host_brain/audit/ledger_schema.py`
 - `host_brain/core/prompt_context.py`
+- `host_brain/app/canon_routes.py`
+- `host_brain/memory/canon_apply_service.py`
 - `host_brain/memory/canon_world_store.py`
+- `host_brain/governor/tokens.py`
+- `host_brain/audit/migrations/0053_canon_apply.sql`
+- `host_brain/agent_runtime/task_store.py`
+- `host_brain/agent_runtime/task_scheduler.py`
+- `host_brain/agent_runtime/planner_adapter.py`
 
 Input / Edge / 外显面：
 - `host_brain/app/input_routes.py`
@@ -241,7 +248,7 @@ SurfaceMainChain input build
 |---|---|
 | 意图 / 治理 / skill 审计 | `intent_log`、`governor_log`、`skill_exec_log` |
 | 记忆操作与生命记忆 | `memory_ops_log`、`life_episode`、`life_evidence`、`life_episode_link`、`life_memory_collection*` |
-| Canon / world canon 审计 | `canon_proposal_log`、`canon_change_log`、`world_canon_doc` 等 `canon_*` 表 |
+| Canon / world canon 审计 | `canon_proposal_log`、`canon_apply_token`、`canon_apply_journal`、`canon_change_log`、`world_canon_doc` 等 `canon_*` 表 |
 | 语义记忆 | `semantic_memory` |
 | 召回观测 | `retrieval_event_log` |
 
@@ -253,7 +260,34 @@ SurfaceMainChain input build
 
 ## 6. WorldCanon 边界
 
-WorldCanon 的 SSOT 是 `host_brain/memory/canon_world_store.py:WorldCanonStore`，默认文件根为 `host_brain/canon/world`，并通过 ledger 同步 `world_canon_doc`。
+WorldCanon 的内容 SSOT 是 `host_brain/canon/world` 下的版本化文件，并通过 ledger 同步 `world_canon_doc`。`WorldCanonStore` 负责读取、扫描和 proposal；生产 mutation authority 已收敛到 `host_brain/memory/canon_apply_service.py:CanonApplyService`。Store 的旧 `upsert*`、`approve_proposal*`、`rollback_proposal` 写入口无条件 fail-closed，只有 Apply Service 的两个 identity-permit primitive 能替换或删除文件。
+
+受治理写入路径：
+
+```text
+offline MASTER/GOVERNOR review
+  -> CanonApprovalTokenIssuer 使用离线 Ed25519 私钥签署完整 binding
+  -> canon_apply_token 只持 bearer digest + attestation/signature
+
+POST canon approve / rollback / promotion route
+  -> content-free CanonApplyCommand + SecretStr bearer
+  -> CanonApplyService 先验签，再检查 expiry/replay/command binding
+  -> 从同一 SQLite 中读取 proposal 或 promotion candidate 的已审 payload
+  -> 单事务：subject CAS + once-only token burn + journal PREPARED
+  -> 重验 canonical before/target snapshot 与 signed subject
+  -> per-document lock + same-directory temp + file fsync + atomic replace/delete
+  -> 重验 journal/token/source/file disposition
+  -> 单事务：subject final CAS + world_canon_doc/canon_change_log + journal APPLIED
+  -> 触发可重建的 vector projection sync
+```
+
+运行时只持受信 Ed25519 公钥；issuer 私钥不由 FastAPI composition 或 route 暴露。0053 必须先由中央 migration 流程落地，并具有精确 migration id/name/checksum；service/issuer 构造只读核对 schema manifest，不 inline 建表。额外列、约束/index 漂移以及引用 apply 表的 persistent/temp trigger/view 均 fail-closed。
+
+SQLite 与 Canon 文件不是单一原子资源，因此 `canon_apply_journal` 显式保存 before/target canonical snapshot、owner lease、recovery-not-before 与递增 fence。PREPARE 或 replace 后崩溃由 `recover_pending()` 接管；恢复、写入和 finalize 每一段都重算完整 payload hash，并把磁盘原始 9 字段 JSON、journal 坐标、proposal `canon_kind=world` 或 promotion current-entry lineage 重新绑定到 burned token 与 signed command。任何 extra/missing/type/doc-id/source 不一致都进入 `RECOVERY_REQUIRED` 或 `FAILED`，不得把未批准正文写入 Canon，也不得标记 `APPLIED`。rollback-to-zero 使用授权 delete 和同样的 journal/recovery 协议。
+
+Apply 使用独立 strict raw reader；普通 WorldCanon reader 暂保留旧兼容语义。仓库现有 Persona Canon 含本任务范围外的扩展顶层字段，因此 Apply 在消费 token 前冻结这类目标并保持原文件字节不变，不会以标准 9 字段重写导致扩展数据丢失；其 schema-aware 迁移由后续 Persona/Canon 架构任务处理。
+
+Pentest 领域运行数据只进入 Pentest domain store；promotion 先形成同库 candidate，经上述审批路径才能进入 WorldCanon，旧脚本不再直接写 Canon。
 
 WorldCanon 进入 prompt 的主要路径是：
 
@@ -274,6 +308,20 @@ host_brain/core/prompt_context.py:build_world_canon_slot(...)
 - WorldCanon 不应被写成 surface recall route，也不应和不存在的 StyleCanon 一起写入 StateArbiter 优先级。
 
 当前源码没有 `canon_style_store.py`，也没有 `host_brain/canon/style/`。StyleCanon 不是当前 recall route。
+
+### 6.1 Canonical Task Runtime shadow
+
+Planner Adapter 生成同一 `graph_id/revision` 的 TaskGraph 与 dependency artifact refs，DurableTaskStore 保存 graph/node/attempt/lease。`CanonicalShadowScheduler.evaluate_durable()` 在一个 SQLite 读事务内取得 snapshot，再以纯函数计算 READY、BLOCKED、RETRY_WAIT、RECOVER、CANCEL、BUDGET_BLOCKED 与 HOLD。`HOST_TASK_RUNTIME_MODE=legacy` 时 executor adapter 不读取 shadow；`shadow` 模式还必须匹配 `HOST_TASK_RUNTIME_SHADOW_OWNER`。当前输出只用于 decision digest 与 legacy diff，不调用 Worker，也不改变 AgentJobRegistry 的 authority。
+
+```mermaid
+flowchart LR
+    P["Planner Adapter / same revision"] --> S["DurableTaskStore snapshot"]
+    S --> D["CanonicalShadowScheduler pure decision"]
+    A["Artifact refs + budget decision"] --> D
+    L["Legacy decisions"] --> X["Shadow diff"]
+    D --> X
+    X --> O["Read-only report / zero external effects"]
+```
 
 ## 7. SurfaceMainChain -> ReplyEnvelope -> 后效
 
@@ -412,10 +460,11 @@ Monitor UI 可展示 sessions、trace、metrics、memory、bond、gateway、skil
 2. 当前记忆 SSOT 是 `LifeMemoryStore` + SQLiteLedger；vector / semantic / episodic_vector 是衍生层。
 3. 当前 surface recall routes 是 `life_memory_collection`、`life_episode`、`semantic_memory`、`episodic_vector`、`sqlite_ledger`、`neo4j_bond`。
 4. WorldCanon 是 `WorldCanonStore` 的 authoritative slot 输入，不是当前 surface recall route；`unsafe_as_fact=True`、`reference_mode="citation_only"`。
-5. 不存在 StyleCanon 召回 route 或 `canon_style_store.py` 事实源。
-6. ReplyEnvelope COMMIT 完成后，memory 写入、emotion/bond flow、life aftereffect、TTS/外显执行再异步落地。
-7. Edge 外显面只承载遥测、状态和执行结果，不是事实裁决源。
-8. SSE 三阶段 `PRESENCE -> COMMIT -> POST` 不可颠倒。
+5. WorldCanon 生产写入只经 `CanonApplyService`；必须具备已签完整 binding、一次性 durable token、journal、target fence 与可重验 recovery，不得恢复 direct Store/file writer。
+6. 不存在 StyleCanon 召回 route 或 `canon_style_store.py` 事实源。
+7. ReplyEnvelope COMMIT 完成后，memory 写入、emotion/bond flow、life aftereffect、TTS/外显执行再异步落地。
+8. Edge 外显面只承载遥测、状态和执行结果，不是事实裁决源。
+9. SSE 三阶段 `PRESENCE -> COMMIT -> POST` 不可颠倒。
 
 ## 14. Pentest Agent Cognitive Loop
 

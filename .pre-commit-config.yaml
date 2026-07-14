@@ -3,7 +3,8 @@ repos:
     hooks:
       - id: doc-audience-lint
         name: 文档受众门禁（防混写）
-        entry: python tools/doc_audience_lint.py .
+        entry: >-
+          python -c "import subprocess,sys; raise SystemExit(subprocess.call([sys.executable,'tools/doc_lint/doc_audience_lint.py','--root','.',*[item for path in sys.argv[1:] for item in ('--path',path)]]))"
         language: system
-        pass_filenames: false
+        pass_filenames: true
         files: \.md$

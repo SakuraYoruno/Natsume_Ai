@@ -11,91 +11,28 @@
 from __future__ import annotations
 
 import abc
-import os
-import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from host_brain.core.errors import (
     RATE_LIMIT_BACKEND_DEGRADED,
     RATE_LIMIT_BACKEND_UNAVAILABLE,
 )
-
-# ── 后端类型常量 ──
-BACKEND_MEMORY = "memory"
-BACKEND_SQLITE = "sqlite"
-BACKEND_REDIS = "redis"
-ALLOWED_BACKENDS = frozenset({BACKEND_MEMORY, BACKEND_SQLITE, BACKEND_REDIS})
-
-# ── 默认配置 ──
-DEFAULT_WINDOW_MS = 60_000  # 60秒滑动窗口
-DEFAULT_MAX_REQUESTS = 30   # 窗口内最大请求数
-
-
-@dataclass(frozen=True)
-class RateLimitConfig:
-    """Rate Limit 配置。"""
-    backend: str = BACKEND_MEMORY
-    window_ms: int = DEFAULT_WINDOW_MS
-    max_requests: int = DEFAULT_MAX_REQUESTS
-    # SQLite 配置
-    sqlite_db_path: str = ":memory:"
-    # Redis 配置
-    redis_url: str = "redis://localhost:6379/0"
-    redis_key_prefix: str = "Natsume:ratelimit:"
-    redis_timeout_ms: int = 1_000
-
-
-def load_rate_limit_config(
-    *,
-    env: Mapping[str, Any] | None = None,
-    local_overrides: Mapping[str, Any] | None = None,
-) -> RateLimitConfig:
-    merged: dict[str, Any] = dict(env or os.environ)
-    if local_overrides:
-        merged.update(dict(local_overrides))
-
-    backend = str(merged.get("HOST_RATE_LIMIT_BACKEND") or BACKEND_MEMORY).strip().lower()
-    if backend not in ALLOWED_BACKENDS:
-        backend = BACKEND_MEMORY
-
-    sqlite_db_path = (
-        str(merged.get("HOST_RATE_LIMIT_SQLITE_DB_PATH") or "").strip()
-        or str(merged.get("Natsume_AUDIT_DB") or "").strip()
-        or ":memory:"
-    )
-
-    return RateLimitConfig(
-        backend=backend,
-        window_ms=_parse_int(
-            merged.get("HOST_RATE_LIMIT_WINDOW_MS"),
-            default=DEFAULT_WINDOW_MS,
-            min_value=1000,
-            max_value=3_600_000,
-        ),
-        max_requests=_parse_int(
-            merged.get("HOST_RATE_LIMIT_MAX_REQUESTS"),
-            default=DEFAULT_MAX_REQUESTS,
-            min_value=1,
-            max_value=1_000_000,
-        ),
-        sqlite_db_path=sqlite_db_path,
-        redis_url=str(merged.get("HOST_RATE_LIMIT_REDIS_URL") or "redis://localhost:6379/0").strip()
-        or "redis://localhost:6379/0",
-        redis_key_prefix=str(
-            merged.get("HOST_RATE_LIMIT_REDIS_KEY_PREFIX")
-            or "Natsume:ratelimit:"
-        ).strip()
-        or "Natsume:ratelimit:",
-        redis_timeout_ms=_parse_int(
-            merged.get("HOST_RATE_LIMIT_REDIS_TIMEOUT_MS"),
-            default=1_000,
-            min_value=50,
-            max_value=60_000,
-        ),
-    )
+from host_brain.governor.rate_limit_settings import (
+    BACKEND_MEMORY,
+    BACKEND_REDIS,
+    BACKEND_SQLITE,
+    DEFAULT_MAX_REQUESTS,
+    DEFAULT_WINDOW_MS,
+    RateLimitConfig,
+    load_rate_limit_config,
+)
+from host_brain.persistence.rate_limit_repository import RateLimitRepository
+from host_brain.persistence.redis_rate_limit_repository import (
+    RedisRateLimitRepository,
+)
 
 
 @dataclass
@@ -218,86 +155,32 @@ class SQLiteRateLimitStore(RateLimitStore):
         db_path: str = ":memory:",
     ) -> None:
         self._window_ms = int(window_ms)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._lock = threading.Lock()
-        self._init_db()
-
-    def _init_db(self) -> None:
-        with self._lock:
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA busy_timeout=3000")
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS rate_limit_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    key TEXT NOT NULL,
-                    ts_ms INTEGER NOT NULL
-                )
-            """)
-            self._conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_rate_limit_key_ts
-                ON rate_limit_events (key, ts_ms)
-            """)
-            self._conn.commit()
+        self._repository = RateLimitRepository(db_path)
 
     def incr(self, key: str, *, now_ms: int | None = None) -> int:
         ts = now_ms if now_ms is not None else _now_ms()
         cutoff = ts - self._window_ms
-        with self._lock:
-            # 清理过期记录
-            self._conn.execute(
-                "DELETE FROM rate_limit_events WHERE key = ? AND ts_ms <= ?",
-                (key, cutoff),
-            )
-            # 插入新记录
-            self._conn.execute(
-                "INSERT INTO rate_limit_events (key, ts_ms) VALUES (?, ?)",
-                (key, ts),
-            )
-            self._conn.commit()
-            # 返回当前计数
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM rate_limit_events WHERE key = ? AND ts_ms > ?",
-                (key, cutoff),
-            ).fetchone()
-            return int(row[0]) if row else 1
+        return self._repository.increment(key, ts_ms=ts, cutoff_ms=cutoff)
 
     def get_count(self, key: str, *, now_ms: int | None = None) -> int:
         ts = now_ms if now_ms is not None else _now_ms()
         cutoff = ts - self._window_ms
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM rate_limit_events WHERE key = ? AND ts_ms > ?",
-                (key, cutoff),
-            ).fetchone()
-            return int(row[0]) if row else 0
+        return self._repository.count(key, cutoff_ms=cutoff)
 
     def reset(self, key: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "DELETE FROM rate_limit_events WHERE key = ?",
-                (key,),
-            )
-            self._conn.commit()
+        self._repository.reset(key)
 
     def ttl(self, key: str, *, now_ms: int | None = None) -> int:
         ts = now_ms if now_ms is not None else _now_ms()
         cutoff = ts - self._window_ms
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT MIN(ts_ms) FROM rate_limit_events WHERE key = ? AND ts_ms > ?",
-                (key, cutoff),
-            ).fetchone()
-            if not row or row[0] is None:
-                return 0
-            oldest = int(row[0])
-            return max(0, oldest + self._window_ms - ts)
+        oldest = self._repository.oldest_after(key, cutoff_ms=cutoff)
+        return 0 if oldest is None else max(0, oldest + self._window_ms - ts)
 
     def backend_name(self) -> str:
         return BACKEND_SQLITE
 
     def close(self) -> None:
-        with self._lock:
-            self._conn.close()
+        self._repository.close()
 
 
 # ── Redis 实现 ──
@@ -317,86 +200,33 @@ class RedisRateLimitStore(RateLimitStore):
         key_prefix: str = "Natsume:ratelimit:",
         timeout_ms: int = 1_000,
     ) -> None:
-        self._window_ms = int(window_ms)
-        self._key_prefix = str(key_prefix)
-        self._timeout_ms = int(timeout_ms)
-        self._redis_url = str(redis_url)
-        self._client: Any = None
-        self._connect()
-
-    def _connect(self) -> None:
-        """尝试连接 Redis。失败时 self._client 保持 None。"""
-        try:
-            import redis  # type: ignore[import-untyped]
-            self._client = redis.from_url(
-                self._redis_url,
-                socket_timeout=self._timeout_ms / 1000.0,
-                socket_connect_timeout=self._timeout_ms / 1000.0,
-            )
-            # 验证连接
-            self._client.ping()
-        except Exception:
-            self._client = None
-            raise
-
-    def _full_key(self, key: str) -> str:
-        return f"{self._key_prefix}{key}"
+        self._repository = RedisRateLimitRepository(
+            window_ms=window_ms,
+            redis_url=redis_url,
+            key_prefix=key_prefix,
+            timeout_ms=timeout_ms,
+        )
 
     def incr(self, key: str, *, now_ms: int | None = None) -> int:
-        if self._client is None:
-            raise ConnectionError("Redis client not connected")
         ts = now_ms if now_ms is not None else _now_ms()
-        cutoff = ts - self._window_ms
-        fk = self._full_key(key)
-        pipe = self._client.pipeline()
-        # 清理过期
-        pipe.zremrangebyscore(fk, 0, cutoff)
-        # 添加新事件（member 用 ts+随机后缀防重复）
-        pipe.zadd(fk, {f"{ts}:{id(pipe)}:{_now_ms()}": ts})
-        # 计数
-        pipe.zcard(fk)
-        # 设置过期（窗口大小的 2 倍作为 TTL）
-        pipe.pexpire(fk, self._window_ms * 2)
-        results = pipe.execute()
-        return int(results[2])
+        return self._repository.increment(key, ts_ms=ts)
 
     def get_count(self, key: str, *, now_ms: int | None = None) -> int:
-        if self._client is None:
-            raise ConnectionError("Redis client not connected")
         ts = now_ms if now_ms is not None else _now_ms()
-        cutoff = ts - self._window_ms
-        fk = self._full_key(key)
-        # 先清理再计数
-        self._client.zremrangebyscore(fk, 0, cutoff)
-        return int(self._client.zcard(fk))
+        return self._repository.count(key, ts_ms=ts)
 
     def reset(self, key: str) -> None:
-        if self._client is None:
-            raise ConnectionError("Redis client not connected")
-        self._client.delete(self._full_key(key))
+        self._repository.reset(key)
 
     def ttl(self, key: str, *, now_ms: int | None = None) -> int:
-        if self._client is None:
-            raise ConnectionError("Redis client not connected")
         ts = now_ms if now_ms is not None else _now_ms()
-        cutoff = ts - self._window_ms
-        fk = self._full_key(key)
-        # 获取最早的有效事件
-        results = self._client.zrangebyscore(fk, cutoff + 1, "+inf", start=0, num=1, withscores=True)
-        if not results:
-            return 0
-        oldest_ts = int(results[0][1])
-        return max(0, oldest_ts + self._window_ms - ts)
+        return self._repository.ttl(key, ts_ms=ts)
 
     def backend_name(self) -> str:
         return BACKEND_REDIS
 
     def close(self) -> None:
-        if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
+        self._repository.close()
 
 
 # ── 降级包装器 ──
@@ -645,16 +475,6 @@ def create_rate_limit_checker(config: RateLimitConfig | None = None) -> RateLimi
         max_requests=cfg.max_requests,
         window_ms=cfg.window_ms,
     )
-
-
-def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
-    if value is None or str(value).strip() == "":
-        return int(default)
-    try:
-        parsed = int(str(value).strip())
-    except ValueError:
-        return int(default)
-    return min(max(parsed, min_value), max_value)
 
 
 def _now_ms() -> int:

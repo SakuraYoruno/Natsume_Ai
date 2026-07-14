@@ -8,19 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from host_brain.core.config_snapshot import (
+from natsume_contracts.edge.v1 import (
     build_config_snapshot,
     collect_redacted_keys,
     redact_secret,
     resolve_override_sources,
     S_CONFIG_SNAPSHOT,
-)
-from host_brain.core.errors import (
     CONFIG_ENV_INVALID,
     CONFIG_REQUIRED_MISSING,
     CONFIG_VALUE_INVALID,
+    resolve_secret_from_profiles,
 )
-from host_brain.core.key_profiles import resolve_secret_from_profiles
 
 
 ENV_DEV = "dev"

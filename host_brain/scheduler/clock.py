@@ -1,0 +1,490 @@
+"""Async clock producer for governed scheduler occurrences.
+
+The clock has exactly two effects: atomically admit a durable occurrence and
+invoke ``SchedulerCommandService`` with composition-injected SERVICE authority.
+It never calls a task handler and never creates a thread or ``Timer``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable, Mapping
+from contextlib import suppress
+from datetime import datetime, timedelta, timezone
+import inspect
+from typing import Any, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from host_brain.core.ids import now_ms as default_now_ms
+from host_brain.scheduler.command_ingress import SchedulerCommandIngress
+from host_brain.scheduler.contracts import (
+    SchedulerDefinitionSnapshot,
+    SchedulerOccurrence,
+    SchedulerOccurrenceSource,
+)
+from host_brain.scheduler.governed_runtime import SchedulerCommandService
+
+
+SCHEDULER_CLOCK_DEFINITION_INVALID = "SCHEDULER_CLOCK_DEFINITION_INVALID"
+SCHEDULER_CLOCK_OCCURRENCE_FAILED = "SCHEDULER_CLOCK_OCCURRENCE_FAILED"
+
+
+class SchedulerClockError(RuntimeError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = str(reason_code or SCHEDULER_CLOCK_OCCURRENCE_FAILED)
+        self.detail = str(detail or "scheduler clock failed")
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+class SchedulerClockRepositoryPort(Protocol):
+    def list_pending_occurrences(self, *, limit: int = 100) -> list[Mapping[str, Any]]: ...
+
+    def list_due(
+        self,
+        *,
+        due_at_ms: int,
+        limit: int = 100,
+    ) -> list[Mapping[str, Any]]: ...
+
+    def get_revision(
+        self,
+        task_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def admit_due_occurrence(
+        self,
+        *,
+        task_id: str,
+        definition_revision: int,
+        expected_head_version: int,
+        scheduled_at_ms: int,
+        next_scheduled_at_ms: int | None,
+        payload: Mapping[str, Any],
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+
+class SchedulerClock:
+    """Lifecycle-owned polling producer with durable crash recovery."""
+
+    def __init__(
+        self,
+        *,
+        definition_repository: SchedulerClockRepositoryPort,
+        command_ingress: SchedulerCommandIngress,
+        command_service: SchedulerCommandService,
+        now_ms: Callable[[], int] = default_now_ms,
+        poll_interval_s: float = 1.0,
+        limit: int = 100,
+        failure_backoff_initial_s: float = 5.0,
+        failure_backoff_max_s: float = 300.0,
+        shutdown_timeout_s: float = 5.0,
+    ) -> None:
+        if not callable(now_ms):
+            raise TypeError("now_ms must be callable")
+        self._definitions = definition_repository
+        self._ingress = command_ingress
+        self._commands = command_service
+        self._now_ms = now_ms
+        self._poll_interval_s = max(0.05, float(poll_interval_s))
+        self._limit = max(1, min(1_000, int(limit)))
+        self._failure_backoff_initial_ms = max(
+            1_000,
+            int(float(failure_backoff_initial_s) * 1_000),
+        )
+        self._failure_backoff_max_ms = max(
+            self._failure_backoff_initial_ms,
+            int(float(failure_backoff_max_s) * 1_000),
+        )
+        self._shutdown_timeout_s = max(0.05, float(shutdown_timeout_s))
+        self._run_lock = asyncio.Lock()
+        self._stop_event = asyncio.Event()
+        self._loop_task: asyncio.Task[None] | None = None
+        self._active = False
+        self._last_tick_ms: int | None = None
+        self._last_error: str | None = None
+        self._retry_state: dict[str, tuple[int, int]] = {}
+        self._dispatch_tasks: set[asyncio.Future[Any]] = set()
+
+    async def activate(self) -> None:
+        if self._active:
+            return
+        self._active = True
+        self._stop_event.clear()
+        self._loop_task = asyncio.create_task(
+            self._run_loop(),
+            name="governed-scheduler-clock",
+        )
+
+    async def start(self) -> None:
+        await self.activate()
+
+    async def aclose(self) -> None:
+        if not self._active and self._loop_task is None:
+            return
+        self._active = False
+        self._stop_event.set()
+        task = self._loop_task
+        self._loop_task = None
+        if task is not None:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=self._shutdown_timeout_s,
+                )
+            except TimeoutError:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+    async def stop(self) -> None:
+        await self.aclose()
+
+    async def run_once(self) -> dict[str, Any]:
+        """Recover pending clock work, then admit and execute newly-due work."""
+
+        async with self._run_lock:
+            received_at_ms = _non_negative_now(self._now_ms)
+            self._last_tick_ms = received_at_ms
+            recovered = 0
+            admitted_count = 0
+            executed = 0
+            deferred = 0
+            failures: list[dict[str, str]] = []
+            seen: set[str] = set()
+
+            pending_rows = self._definitions.list_pending_occurrences(limit=self._limit)
+            for raw in pending_rows:
+                try:
+                    occurrence = SchedulerOccurrence.from_mapping(raw)
+                    if occurrence.source is not SchedulerOccurrenceSource.CLOCK:
+                        continue
+                    seen.add(occurrence.occurrence_id)
+                    if not self._retry_ready(
+                        occurrence.occurrence_id,
+                        at_ms=received_at_ms,
+                    ):
+                        deferred += 1
+                        continue
+                    recovered += 1
+                    await self._execute_occurrence(
+                        occurrence,
+                        received_at_ms=received_at_ms,
+                        authority=occurrence.authority_dict(),
+                    )
+                    self._retry_state.pop(occurrence.occurrence_id, None)
+                    executed += 1
+                except Exception as exc:
+                    occurrence_id = str(dict(raw).get("occurrence_id") or "")
+                    if occurrence_id:
+                        self._record_retry(occurrence_id, at_ms=received_at_ms)
+                    failures.append(_failure(raw, exc))
+
+            remaining = max(0, self._limit - len(seen))
+            if remaining:
+                due_rows = self._definitions.list_due(
+                    due_at_ms=received_at_ms,
+                    limit=remaining,
+                )
+                for raw in due_rows:
+                    due_key = _due_retry_key(raw)
+                    if not self._retry_ready(due_key, at_ms=received_at_ms):
+                        deferred += 1
+                        continue
+                    occurrence: SchedulerOccurrence | None = None
+                    try:
+                        definition = SchedulerDefinitionSnapshot.from_mapping(raw)
+                        self._commands.preflight_definition(definition)
+                        scheduled_at_ms = definition.next_scheduled_at_ms
+                        if scheduled_at_ms is None:
+                            raise SchedulerClockError(
+                                SCHEDULER_CLOCK_DEFINITION_INVALID,
+                                "due definition has no scheduled timestamp",
+                            )
+                        payload = _occurrence_payload(definition)
+                        authority = self._ingress.evaluate_clock_occurrence(
+                            task_id=definition.task_id,
+                            definition_revision=definition.definition_revision,
+                            scheduled_at_epoch_ms=scheduled_at_ms,
+                            payload=payload,
+                            received_at_ms=received_at_ms,
+                        )
+                        occurrence_raw = self._definitions.admit_due_occurrence(
+                            task_id=definition.task_id,
+                            definition_revision=definition.definition_revision,
+                            expected_head_version=definition.head_version,
+                            scheduled_at_ms=scheduled_at_ms,
+                            next_scheduled_at_ms=_next_scheduled_at_ms(
+                                definition,
+                                scheduled_at_ms=scheduled_at_ms,
+                            ),
+                            payload=payload,
+                            authority=authority.to_dict(),
+                        )
+                        occurrence = SchedulerOccurrence.from_mapping(occurrence_raw)
+                        self._retry_state.pop(due_key, None)
+                        if occurrence.occurrence_id in seen:
+                            continue
+                        seen.add(occurrence.occurrence_id)
+                        admitted_count += 1
+                        await self._execute_occurrence(
+                            occurrence,
+                            received_at_ms=received_at_ms,
+                            authority=authority,
+                        )
+                        self._retry_state.pop(occurrence.occurrence_id, None)
+                        executed += 1
+                    except Exception as exc:
+                        failure_raw: object = occurrence.to_dict() if occurrence else raw
+                        retry_key = occurrence.occurrence_id if occurrence else due_key
+                        self._record_retry(retry_key, at_ms=received_at_ms)
+                        failures.append(_failure(failure_raw, exc))
+
+            self._last_error = failures[-1]["reason_code"] if failures else None
+            return {
+                "received_at_ms": received_at_ms,
+                "recovered": recovered,
+                "admitted": admitted_count,
+                "executed": executed,
+                "deferred": deferred,
+                "failed": len(failures),
+                "failures": failures,
+            }
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "active": self._active,
+            "last_tick_ms": self._last_tick_ms,
+            "last_error": self._last_error,
+            "poll_interval_s": self._poll_interval_s,
+            "backoff_count": len(self._retry_state),
+            "next_retry_at_ms": min(
+                (next_at for _attempts, next_at in self._retry_state.values()),
+                default=None,
+            ),
+            "dispatch_in_flight": len(self._dispatch_tasks),
+        }
+
+    def _retry_ready(self, key: str, *, at_ms: int) -> bool:
+        state = self._retry_state.get(str(key or ""))
+        return state is None or at_ms >= state[1]
+
+    def _record_retry(self, key: str, *, at_ms: int) -> None:
+        retry_key = str(key or "").strip()
+        if not retry_key:
+            return
+        attempts = self._retry_state.get(retry_key, (0, 0))[0] + 1
+        delay = min(
+            self._failure_backoff_max_ms,
+            self._failure_backoff_initial_ms * (2 ** min(attempts - 1, 20)),
+        )
+        self._retry_state[retry_key] = (attempts, at_ms + delay)
+
+    async def _execute_occurrence(
+        self,
+        occurrence: SchedulerOccurrence,
+        *,
+        received_at_ms: int,
+        authority: Any,
+    ) -> None:
+        authority_request_id = (
+            str(authority.get("request_id") or "")
+            if isinstance(authority, Mapping)
+            else str(getattr(authority, "request_id", None) or "")
+        )
+        if authority_request_id != occurrence.request_id:
+            raise SchedulerClockError(
+                SCHEDULER_CLOCK_OCCURRENCE_FAILED,
+                "clock authority request differs from the durable occurrence",
+            )
+        result = self._commands.execute_occurrence(
+            occurrence=occurrence,
+            authority=authority,
+            received_at_ms=received_at_ms,
+        )
+        if inspect.isawaitable(result):
+            dispatch = asyncio.ensure_future(result)
+            self._dispatch_tasks.add(dispatch)
+            dispatch.add_done_callback(self._finish_dispatch)
+            await asyncio.shield(dispatch)
+
+    def _finish_dispatch(self, task: asyncio.Future[Any]) -> None:
+        self._dispatch_tasks.discard(task)
+        with suppress(asyncio.CancelledError):
+            task.exception()
+
+    async def _run_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                await self.run_once()
+            except Exception as exc:
+                self._last_error = str(
+                    getattr(exc, "reason_code", None)
+                    or SCHEDULER_CLOCK_OCCURRENCE_FAILED
+                )
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(),
+                    timeout=self._poll_interval_s,
+                )
+            except TimeoutError:
+                continue
+
+
+def _occurrence_payload(definition: SchedulerDefinitionSnapshot) -> dict[str, Any]:
+    raw = definition.definition.get("occurrence_payload")
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            "definition.occurrence_payload must be an object",
+        )
+    # Contract construction already recursively checked the definition for
+    # finite JSON and forbidden secret-like fields.
+    return dict(raw)
+
+
+def _next_scheduled_at_ms(
+    definition: SchedulerDefinitionSnapshot,
+    *,
+    scheduled_at_ms: int,
+) -> int | None:
+    trigger_mode = str(definition.definition.get("trigger_mode") or "").strip().lower()
+    trigger_config = definition.definition.get("trigger_config")
+    config = dict(trigger_config) if isinstance(trigger_config, Mapping) else {}
+    if trigger_mode == "once":
+        return None
+    if trigger_mode == "interval":
+        if "milliseconds" in config:
+            interval_ms = _positive_int(config["milliseconds"], "milliseconds")
+        else:
+            seconds = config.get("seconds", 900)
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+                raise SchedulerClockError(
+                    SCHEDULER_CLOCK_DEFINITION_INVALID,
+                    "interval seconds must be numeric",
+                )
+            interval_ms = int(float(seconds) * 1_000)
+            if interval_ms < 1:
+                raise SchedulerClockError(
+                    SCHEDULER_CLOCK_DEFINITION_INVALID,
+                    "interval must be at least one millisecond",
+                )
+        return scheduled_at_ms + interval_ms
+    if trigger_mode == "cron":
+        return _next_daily_cron(config, scheduled_at_ms=scheduled_at_ms)
+    raise SchedulerClockError(
+        SCHEDULER_CLOCK_DEFINITION_INVALID,
+        f"unsupported trigger mode: {trigger_mode or '<empty>'}",
+    )
+
+
+def _next_daily_cron(config: Mapping[str, Any], *, scheduled_at_ms: int) -> int:
+    hour = _bounded_int(config.get("hour", 0), "hour", maximum=23)
+    minute = _bounded_int(config.get("minute", 0), "minute", maximum=59)
+    second = _bounded_int(config.get("second", 0), "second", maximum=59)
+    zone_name = str(config.get("timezone") or "UTC").strip()
+    try:
+        zone = ZoneInfo(zone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            f"unknown cron timezone: {zone_name}",
+        ) from exc
+    current = datetime.fromtimestamp(scheduled_at_ms / 1_000.0, tz=timezone.utc).astimezone(zone)
+    weekdays = _cron_weekdays(config.get("day_of_week"))
+    for days_ahead in range(0, 8):
+        day = current + timedelta(days=days_ahead)
+        if weekdays is not None and day.weekday() not in weekdays:
+            continue
+        candidate = day.replace(hour=hour, minute=minute, second=second, microsecond=0)
+        if candidate > current:
+            return int(candidate.astimezone(timezone.utc).timestamp() * 1_000)
+    raise SchedulerClockError(
+        SCHEDULER_CLOCK_DEFINITION_INVALID,
+        "cron weekday set produced no next occurrence",
+    )
+
+
+def _cron_weekdays(value: object) -> frozenset[int] | None:
+    if value is None:
+        return None
+    raw_values = value if isinstance(value, (list, tuple, set, frozenset)) else (value,)
+    if not raw_values:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            "day_of_week must not be empty",
+        )
+    weekdays: set[int] = set()
+    for raw in raw_values:
+        if type(raw) is not int or raw < 0 or raw > 6:
+            raise SchedulerClockError(
+                SCHEDULER_CLOCK_DEFINITION_INVALID,
+                "day_of_week must contain integers from 0 (Monday) to 6 (Sunday)",
+            )
+        weekdays.add(raw)
+    return frozenset(weekdays)
+
+
+def _failure(raw: object, exc: Exception) -> dict[str, str]:
+    task_id = str(dict(raw).get("task_id") or "") if isinstance(raw, Mapping) else ""
+    occurrence_id = (
+        str(dict(raw).get("occurrence_id") or "") if isinstance(raw, Mapping) else ""
+    )
+    return {
+        "task_id": task_id,
+        "occurrence_id": occurrence_id,
+        "reason_code": str(
+            getattr(exc, "reason_code", None) or SCHEDULER_CLOCK_OCCURRENCE_FAILED
+        ),
+    }
+
+
+def _due_retry_key(raw: object) -> str:
+    if not isinstance(raw, Mapping):
+        return "due:invalid"
+    data = dict(raw)
+    return (
+        "due:"
+        f"{str(data.get('task_id') or '')}:"
+        f"{str(data.get('definition_revision') or '')}:"
+        f"{str(data.get('next_scheduled_at_ms') or '')}"
+    )
+
+
+def _non_negative_now(clock: Callable[[], int]) -> int:
+    value = clock()
+    if type(value) is not int or value < 0:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            "clock must return a non-negative integer epoch millisecond",
+        )
+    return value
+
+
+def _positive_int(value: object, field_name: str) -> int:
+    if type(value) is not int or value < 1:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            f"{field_name} must be an integer >= 1",
+        )
+    return value
+
+
+def _bounded_int(value: object, field_name: str, *, maximum: int) -> int:
+    if type(value) is not int or value < 0 or value > maximum:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_DEFINITION_INVALID,
+            f"{field_name} must be an integer between 0 and {maximum}",
+        )
+    return value
+
+
+__all__ = [
+    "SCHEDULER_CLOCK_DEFINITION_INVALID",
+    "SCHEDULER_CLOCK_OCCURRENCE_FAILED",
+    "SchedulerClock",
+    "SchedulerClockError",
+]

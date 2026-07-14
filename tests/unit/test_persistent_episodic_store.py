@@ -7,7 +7,7 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.episodic import EpisodicStore
 
-import host_brain.app.dependencies as dependencies
+import host_brain.composition.process_services as dependencies
 from host_brain.memory.chroma_client import (
     ChromaRuntimeConfig,
     build_runtime_chroma_client,
@@ -61,7 +61,7 @@ def test_get_episodic_store_uses_persistent_chroma(monkeypatch) -> None:
             captured["embedding_model_id_hint"] = embedding_model_id_hint
             captured["embedding_provider_hint"] = embedding_provider_hint
 
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)
     monkeypatch.setattr(dependencies, "get_ledger", lambda: "LEDGER")
     monkeypatch.setattr(
         "host_brain.memory.chroma_client.load_chroma_runtime_config",
@@ -79,7 +79,7 @@ def test_get_episodic_store_uses_persistent_chroma(monkeypatch) -> None:
     assert captured["ledger"] == "LEDGER"
     assert captured["chroma_client"] == "PERSISTENT::http://127.0.0.1:8000"
 
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)
 
 
 def test_episodic_store_uses_chroma_collection_dim_for_embeddings(tmp_path, monkeypatch) -> None:
@@ -226,7 +226,7 @@ def test_get_episodic_store_injects_embedding_callable(monkeypatch) -> None:
             captured["embedding_model_id_hint"] = embedding_model_id_hint
             captured["embedding_provider_hint"] = embedding_provider_hint
 
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)
     monkeypatch.setattr(dependencies, "get_ledger", lambda: "LEDGER")
     monkeypatch.setattr(
         "host_brain.memory.chroma_client.load_chroma_runtime_config",
@@ -251,7 +251,7 @@ def test_get_episodic_store_injects_embedding_callable(monkeypatch) -> None:
     assert model_id == "models/Qwen3-Embedding-0.6B"
     assert vector == [0.1, 0.2]
 
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)
 
 
 
@@ -278,7 +278,7 @@ def test_get_episodic_store_sets_embedding_hints(monkeypatch) -> None:
             self.embedding_model_id_hint = embedding_model_id_hint
             self.embedding_provider_hint = embedding_provider_hint
 
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)
     monkeypatch.setattr(dependencies, "get_ledger", lambda: "LEDGER")
     monkeypatch.setattr("host_brain.memory.chroma_client.load_chroma_runtime_config", lambda env=None: _CfgResult(success=True, config=config))
     monkeypatch.setattr("host_brain.memory.chroma_client.PersistentChromaClient.from_runtime_config", lambda cfg: f"PERSISTENT::{cfg.endpoint}")
@@ -289,4 +289,4 @@ def test_get_episodic_store_sets_embedding_hints(monkeypatch) -> None:
 
     assert store.embedding_model_id_hint == "models/Qwen3-Embedding-0.6B"
     assert store.embedding_provider_hint == "sentence_transformers"
-    monkeypatch.setattr(dependencies, "_episodic_store", None)
+    monkeypatch.setattr(dependencies.get_process_service_container(), "episodic_store", None)

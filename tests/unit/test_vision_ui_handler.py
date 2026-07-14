@@ -22,8 +22,6 @@ from host_brain.app.chat_handler_vision import (
     _vision_ui_sse_generator,
     VISION_UI_NODE_SEQUENCE,
 )
-from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from tests.text_quality_assertions import assert_natsume_style
 
 
@@ -84,6 +82,14 @@ def _parse_sse_events(events: list[str]) -> list[dict]:
     return result
 
 
+def _fake_memory_service(payload: dict | None = None) -> MagicMock:
+    service = MagicMock()
+    receipt = MagicMock()
+    receipt.as_dict.return_value = dict(payload or {"status": "COMMITTED", "episode_id": "life-1"})
+    service.admit_chat.return_value = receipt
+    return service
+
+
 # ---------------------------------------------------------------------------
 # 测试：辅助函数
 # ---------------------------------------------------------------------------
@@ -135,6 +141,9 @@ class TestVisionUiSseGenerator:
             "status": "OK",
             "reason_code": None,
         }
+        memory_service = _fake_memory_service(
+            {"status": "COMMITTED", "episode_id": "life-001"}
+        )
 
         with patch(
             "host_brain.app.chat_handler_vision._call_vision_llm",
@@ -147,11 +156,8 @@ class TestVisionUiSseGenerator:
                           "cloud_llm_api_key": "test-key", "cloud_timeout_ms": 15000,
                           "cloud_available": True, "cloud_provider_fn": MagicMock()},
         ), patch(
-            "host_brain.app.chat_handler_vision.persist_chat_episodic_memory",
-            return_value={"status": "OK", "memory_id": "mem-001"},
-        ), patch(
-            "host_brain.app.chat_handler_vision.get_episodic_store",
-            return_value=MagicMock(),
+            "host_brain.app.chat_handler_vision.get_life_memory_service",
+            return_value=memory_service,
         ):
             collected = []
             async for event in _vision_ui_sse_generator(
@@ -170,6 +176,11 @@ class TestVisionUiSseGenerator:
                 metrics=metrics,
             ):
                 collected.append(event)
+
+        memory_service.admit_chat.assert_called_once()
+        candidate = memory_service.admit_chat.call_args.args[0]
+        assert candidate.request_id == "req-vision-001"
+        assert candidate.metadata["source"] == "vision_ui"
 
         parsed = _parse_sse_events(collected)
         phases = [e.get("phase") for e in parsed]
@@ -218,11 +229,8 @@ class TestVisionUiSseGenerator:
                           "cloud_llm_api_key": "test-key", "cloud_timeout_ms": 15000,
                           "cloud_available": True, "cloud_provider_fn": MagicMock()},
         ), patch(
-            "host_brain.app.chat_handler_vision.persist_chat_episodic_memory",
-            return_value={"status": "OK", "memory_id": "mem-002"},
-        ), patch(
-            "host_brain.app.chat_handler_vision.get_episodic_store",
-            return_value=MagicMock(),
+            "host_brain.app.chat_handler_vision.get_life_memory_service",
+            return_value=_fake_memory_service({"status": "COMMITTED", "episode_id": "life-002"}),
         ):
             collected = []
             async for event in _vision_ui_sse_generator(
@@ -285,11 +293,8 @@ class TestVisionUiSseGenerator:
                           "cloud_llm_api_key": "test-key", "cloud_timeout_ms": 15000,
                           "cloud_available": True, "cloud_provider_fn": MagicMock()},
         ), patch(
-            "host_brain.app.chat_handler_vision.persist_chat_episodic_memory",
-            return_value={"status": "OK", "memory_id": "mem-003"},
-        ), patch(
-            "host_brain.app.chat_handler_vision.get_episodic_store",
-            return_value=MagicMock(),
+            "host_brain.app.chat_handler_vision.get_life_memory_service",
+            return_value=_fake_memory_service({"status": "COMMITTED", "episode_id": "life-003"}),
         ):
             async for _ in _vision_ui_sse_generator(
                 request_body=request_body,
@@ -335,11 +340,8 @@ class TestVisionUiSseGenerator:
                           "cloud_llm_api_key": "", "cloud_timeout_ms": 15000,
                           "cloud_available": False, "cloud_provider_fn": MagicMock()},
         ), patch(
-            "host_brain.app.chat_handler_vision.persist_chat_episodic_memory",
-            return_value={"status": "SKIPPED"},
-        ), patch(
-            "host_brain.app.chat_handler_vision.get_episodic_store",
-            return_value=MagicMock(),
+            "host_brain.app.chat_handler_vision.get_life_memory_service",
+            return_value=_fake_memory_service({"status": "SKIPPED"}),
         ):
             collected = []
             async for event in _vision_ui_sse_generator(

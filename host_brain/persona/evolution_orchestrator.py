@@ -24,7 +24,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.evolution_orchestrator")
 
@@ -65,11 +64,7 @@ def _format_template_text(template: str, **kwargs: Any) -> str:
 
 
 def _load_awareness_template_data() -> dict[str, Any]:
-    try:
-        raw = resolve_prompt_template_json_merged("evolution_orchestrator.awareness_templates")
-    except Exception:
-        return dict(_EMPTY_AWARENESS_TEMPLATE_DATA)
-    return dict(raw) if isinstance(raw, Mapping) else dict(_EMPTY_AWARENESS_TEMPLATE_DATA)
+    return dict(_EMPTY_AWARENESS_TEMPLATE_DATA)
 
 
 # ---------------------------------------------------------------------------

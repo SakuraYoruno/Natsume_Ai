@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.context.emotional_act import EmotionalAct, resolve_emotional_act
+from host_brain.persona.context.emotional_act import EmotionalAct, resolve_emotional_act
 
 
 def test_boundary_question_becomes_wounded_relationship_act() -> None:

@@ -3,8 +3,8 @@
 
 # CURRENT_CODE_ARCHITECTURE
 
-版本：v4.2 Living
-最后同步：2026-06-30
+版本：v4.3 Living
+最后同步：2026-07-10
 
 本文件记录当前工作区代码事实。若本文与代码冲突，以代码为准；若历史文档与本文冲突，以本文和代码为准。
 
@@ -32,6 +32,7 @@
 | `host_brain/memory/` | 24 `.py` | LifeMemoryStore、召回、Canon、上下文压缩 |
 | `host_brain/tribe/` | 34 `.py` | HostTribeRegistry、事件总线、agent 实现 |
 | `host_brain/governor/` | 10 `.py` | 决策治理、规则、rate limit、token budget |
+| `host_brain/agent_runtime/` | 28 `.py` | Agent v2 执行适配、canonical v3 contracts、durable TaskStore shadow |
 | `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；不包含 Pentest 执行器 |
 | `edge_client/` | 80 `.py` | Edge RPC、Gateway、平台适配器 |
 | `host_brain/app/monitor_ui/src/` | 458 源文件 | React Monitor UI 源码 |
@@ -128,6 +129,32 @@ sequenceDiagram
 | `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |
 | `host_brain/persona/surface_memory_recall.py` | Surface 记忆召回计划与 evidence 组织 |
 | `host_brain/persona/surface_packet_compiler.py` | ReplyControlPacket 编译 |
+
+### 5.1 Canonical Task Runtime（当前为 legacy-authoritative shadow）
+
+```text
+AgentJobRegistry (LEGACY read authority)
+  -> optional redacted mirror/reconcile
+  -> DurableTaskStore (0052 base + 0054 recovery)
+       -> TaskGraph / TaskNode CAS
+       -> Attempt -> active Lease(owner, fencing_token, expiry) -> Heartbeat
+       -> IdempotencyReservation -> RECOVERY_REQUIRED
+              -> Ed25519 SIDE_EFFECT_CONFIRMED + receipt -> COMMITTED
+              \-> Ed25519 NO_SIDE_EFFECT -> RELEASED / lease-fenced REACQUIRE
+       -> BudgetReservation
+       -> transactional Outbox(event/aggregate/attempt/payload/time/evidence bound)
+```
+
+- `host_brain/agent_runtime/task_store.py` 不创建 schema；0052/0054 未应用、缺 recovery 字段或缺 `RECOVERY_REQUIRED` 状态时拒绝启动。0052 不可变；0054 是 forward-only upgrade。
+- 所有公开 mutation 只读构造时注入的可信 clock，不接受 caller `now`。reservation 与正常 commit/renew 绑定 active attempt lease、owner 和 fencing token；lease 接管后旧 worker 无法提交，expiry 只能先进入 `RECOVERY_REQUIRED`。
+- reconciliation action 全部验证 Ed25519 公钥 attestation。COMMIT/RELEASE 不要求原 lease 仍活跃；REACQUIRE 必须绑定新 active lease/fence。签名绑定 action、outcome、reservation/fingerprint、recovery version、actor、attestation ref，并在 COMMIT 时额外绑定 receipt；RELEASE 与 REACQUIRE 签名不可互换。
+- node cancel 同事务把 attempt 置为 `CANCEL_REQUESTED`、active lease 置为 `CANCELLED`、RESERVED operation 置为 `RECOVERY_REQUIRED`。未澄清 operation 存在时 node 保持 `CANCEL_REQUESTED`；signed COMMIT/RELEASE 后才可由 startup recovery 收敛 `CANCELLED`。
+- attempt 进入 SUCCEEDED/FAILED/CANCELLED 时同事务关闭 lease；startup 会独立清理 terminal attempt 的 orphan active lease。direct cancel 清理 node 下所有 active lease，不以 attempt live 状态为前提。
+- Outbox 事件精确绑定 aggregate/version/event/attempt 与 canonical `taskstore://event/...` payload；availability 来自可信 clock，evidence 仅接受有界 durable refs。任何不匹配都回滚状态。
+- Graph/Node/Budget/Outbox/legacy snapshot 的 durable JSON 会重验 schema、结构和 SQL/JSON identity，并递归拒绝 duplicate keys 与 NaN/±Infinity；损坏时返回稳定错误，不降级为空对象，也不覆盖原行。
+- 0052 legacy receipt 的完整原值仅保存在 0054 audit raw 列；普通 Store read 对 COMMITTED 行返回安全 `legacy-receipt://` ref、digest 与 null marker，不返回 raw/control/oversize 内容。
+- legacy shadow 拒绝旧 `updated_at_ms`；相同时间相同 digest 幂等，相同时间不同 digest CAS 冲突，防止乱序状态回滚。
+- 当前没有 canonical scheduler/worker 主链切流；`AgentJobRegistry` 仍是唯一读权威，shadow 故障不改变旧 API 返回。
 
 ## 6. Persona / Surface
 
@@ -228,9 +255,11 @@ Pentest 不属于普通 skill executor。它有独立 API、handler、ToolSpec�
 | 信念/目标 | `belief_model.py`、`goal_model.py` | 394 + 416 | 贝叶斯信念系统（时间衰减）、显式目标声明（shell/root/domain_admin 等） |
 | 演化 | `evolution_core.py` | 693 | Observe→Reflect→Adapt→Evolve 统一循环 |
 | 攻击 | `attack_planner.py`、`exploit_engine.py`、`payload_factory.py`、`attack_chain.py`、`vuln_chain.py` | 333 + 323 + 290 + 213 + 189 | 攻击规划、利用引擎、payload 工厂 |
-| 知识 | `knowledge.py`、`threat_intel.py`、`online_research.py` | 316 + 319 + 534 | 运行时知识库 + WorldCanon 持久化、在线研究聚合 |
+| 知识 | `knowledge_store.py`、`knowledge.py`、`threat_intel.py`、`online_research.py` | 领域 SQLite Store + runtime adapters | Pentest 自有持久化、promotion candidate、在线研究聚合；active 路径不直接读写 WorldCanon |
 | 约束 | `opsec.py`、`budget.py`、`reward.py` | 433 + 75 + 102 | OPSEC 规则与规避、多维预算、奖励画像（4 种 profile） |
 | 策略 | `strategy_escalator.py`、`playbook.py`、`biz_logic_probe.py` | 256 + 225 + 215 | 策略升级、可复用攻击模板、业务逻辑探测 |
+
+Pentest 知识只有一个运行时权威：`PentestKnowledgeAccess` 直接访问 Pentest 领域 SQLite Store，DB 默认路径按模块绝对锚定。成功链、反思、pitfall、command 与 technique 进入 `pentest-domain-*` namespace；需要进入通用 Canon 的内容只生成 `PENDING_REVIEW` promotion candidate。运行时不再提供 mode 开关、WorldCanon 目录读取、shadow 对账或回退分支。历史数据转换与 cutover receipt 仅属于显式离线迁移 API，不参与 production 读路径。
 
 ### 7.3 报告模块
 

@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -41,6 +42,15 @@ def _canonical_limbic_persona_id() -> str:
     return _resolve_limbic_persona_id(None)
 
 
+def _read_canonical_inner_world(person_id: str, *, reader: Any) -> dict[str, Any]:
+    from host_brain.digital_life.application_boundary import (  # noqa: PLC0415
+        project_inner_world_state,
+        read_life_snapshot,
+    )
+
+    return project_inner_world_state(read_life_snapshot(person_id, reader=reader))
+
+
 def _is_trusted_runtime_emotion_source(
     *,
     emotion_source: str,
@@ -61,6 +71,7 @@ def _is_trusted_runtime_emotion_source(
 
 @dataclass(slots=True)
 class LimbicAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="limbic_agent",
@@ -75,9 +86,12 @@ class LimbicAgent:
         return self.descriptor.to_dict()
 
     def get_emotion_context(self, *, request_body: Any) -> dict[str, Any]:
-        from host_brain.app.emotion_context import resolve_chat_emotion_context  # noqa: PLC0415
-
-        context = dict(resolve_chat_emotion_context(request_body=request_body) or {})
+        context = dict(
+            self.application_ports.require("resolve_chat_emotion_context")(
+                request_body=request_body,
+            )
+            or {}
+        )
         self._touch_state(
             key="last_emotion_context",
             value={
@@ -94,10 +108,8 @@ class LimbicAgent:
         source: str,
         ts_ms: int,
     ) -> dict[str, Any]:
-        from host_brain.app.emotion_context import build_chat_emotion_snapshot  # noqa: PLC0415
-
         snapshot = dict(
-            build_chat_emotion_snapshot(
+            self.application_ports.require("build_chat_emotion_snapshot")(
                 emotion_context=emotion_context,
                 source=source,
                 ts_ms=ts_ms,
@@ -126,9 +138,7 @@ class LimbicAgent:
         summary_window_ms: int | None = None,
         diary_window_ms: int | None = None,
     ) -> dict[str, Any]:
-        from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
-
-        timeline = get_emotion_timeline()
+        timeline = self.application_ports.require("emotion_timeline")()
         if timeline is None:
             return {
                 "summary": {},
@@ -268,7 +278,7 @@ class LimbicAgent:
     ) -> dict[str, Any]:
         from host_brain.persona.emotion_reactivity import (  # noqa: PLC0415
             EmotionReactivityProfile,
-            render_reactivity_hint_with_pool,
+            render_reactivity_hint,
         )
 
         modifiers = EmotionReactivityProfile.compute_modifiers(
@@ -284,17 +294,21 @@ class LimbicAgent:
             "effective_echo_weight": float(effective_echo_weight),
             "persona_modifiers": dict(modifiers.as_dict() if hasattr(modifiers, "as_dict") else {}),
         }
+        model_attempt_trace: dict[str, Any] = {}
         try:
-            reactivity_hint = render_reactivity_hint_with_pool(
+            reactivity_hint = render_reactivity_hint(
                 user_emotion_tag=str(user_emotion_tag or ""),
                 bond_stage=str(bond_stage or ""),
                 modifiers=modifiers,
                 render_target_lang=render_target_lang,
+                model_attempt_sink=model_attempt_trace,
             )
         except Exception:
             reactivity_hint = ""
         if reactivity_hint:
             payload["reactivity_hint"] = reactivity_hint
+        if model_attempt_trace:
+            payload["reactivity_model_attempt"] = model_attempt_trace
         self._touch_state(
             key="last_emotion_reactivity_profile",
             value={
@@ -306,9 +320,8 @@ class LimbicAgent:
         return payload
 
     def resolve_silence_state(self, *, current_topic: str = "") -> dict[str, Any]:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
-        state = get_silence_engine().get_silence_state(current_topic=str(current_topic or ""))
+        engine = self.application_ports.require("silence_engine")()
+        state = engine.get_silence_state(current_topic=str(current_topic or ""))
         payload = dict(state.as_dict() if hasattr(state, "as_dict") else {})
         self._touch_state(
             key="last_silence_state",
@@ -320,9 +333,7 @@ class LimbicAgent:
         return payload
 
     def apply_body_sense_penalty(self, *, penalty: float) -> None:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
-        get_silence_engine().apply_body_sense_penalty(float(penalty))
+        self.application_ports.require("silence_engine")().apply_body_sense_penalty(float(penalty))
 
     def resolve_body_sense_state(self) -> dict[str, Any]:
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
@@ -472,10 +483,11 @@ class LimbicAgent:
         }
 
     def resolve_inner_world_state(self, *, person_id: str | None) -> dict[str, Any]:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
         user_id = _resolve_limbic_persona_id(person_id)
-        payload = dict(get_inner_world().get_state(user_id) or {})
+        payload = _read_canonical_inner_world(
+            user_id,
+            reader=self.application_ports.require("life_snapshot_reader")(),
+        )
         self._touch_state(
             key="last_inner_world_state",
             value={
@@ -529,12 +541,17 @@ class LimbicAgent:
         return payload
 
     def tick_inner_world(self, *, person_id: str | None, emit_inner_stream: bool = True) -> dict[str, Any]:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
         user_id = _resolve_limbic_persona_id(person_id)
-        payload = dict(get_inner_world().tick(user_id=user_id, emit_inner_stream=emit_inner_stream) or {})
+        # SchedulerClock is the sole Life activation authority.  Tribe ticks
+        # consume its durable snapshot instead of advancing a private JSON loop.
+        payload = _read_canonical_inner_world(
+            user_id,
+            reader=self.application_ports.require("life_snapshot_reader")(),
+        )
         payload.setdefault("status", "OK")
         payload.setdefault("user_id", user_id)
+        payload["activation_authority"] = "scheduler_clock"
+        payload["emit_inner_stream"] = bool(emit_inner_stream)
         self._touch_state(
             key="last_inner_world_tick",
             value={
@@ -547,11 +564,19 @@ class LimbicAgent:
         return payload
 
     def on_user_awaken(self, *, person_id: str | None) -> dict[str, Any]:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
 
         user_id = _resolve_limbic_persona_id(person_id)
-        snapshot = get_inner_world().on_user_awaken(user_id=user_id)
-        payload = dict(snapshot.as_dict() if hasattr(snapshot, "as_dict") else {})
+        payload = dict(
+            build_offline_state_from_inner_state(
+                _read_canonical_inner_world(
+                    user_id,
+                    reader=self.application_ports.require("life_snapshot_reader")(),
+                )
+            )
+            or {}
+        )
+        payload["activation_authority"] = "canonical_life_snapshot"
         self._touch_state(
             key="last_awaken_snapshot",
             value={
@@ -571,15 +596,16 @@ class LimbicAgent:
         bond_summary: Mapping[str, Any] | None = None,
         emotion_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
-        engine = get_silence_engine()
+        engine = self.application_ports.require("silence_engine")()
         result = dict(
             engine.tick(
                 user_id=_resolve_limbic_persona_id(user_id),
                 current_topic=str(current_topic or ""),
                 bond_summary=dict(bond_summary or {}) or None,
                 emotion_context=dict(emotion_context or {}) or None,
+                life_snapshot_reader=self.application_ports.require(
+                    "life_snapshot_reader"
+                )(),
             )
             or {}
         )
@@ -596,9 +622,7 @@ class LimbicAgent:
         emotion_arousal: float,
         current_topic: str = "",
     ) -> dict[str, Any]:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
-        engine = get_silence_engine()
+        engine = self.application_ports.require("silence_engine")()
         willingness = engine.update_emotion(
             emotion_tag=str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
             emotion_valence=float(emotion_valence),
@@ -617,8 +641,6 @@ class LimbicAgent:
         topic_label: str,
         strength: float = 0.7,
     ) -> dict[str, Any]:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
         resolved_topic = str(topic_label or "").strip()
         if not resolved_topic:
             return {
@@ -626,7 +648,7 @@ class LimbicAgent:
                 "reason_code": "SILENCE_TOPIC_REQUIRED",
             }
         bounded_strength = max(0.0, min(1.0, float(strength)))
-        engine = get_silence_engine()
+        engine = self.application_ports.require("silence_engine")()
         engine.add_topic_resistance(resolved_topic, strength=bounded_strength)
         return {
             "status": "OK",
@@ -644,16 +666,10 @@ class LimbicAgent:
         pending_topics: list[str] | None = None,
         mood_baseline: float | None = None,
     ) -> dict[str, Any]:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-
         user_id = _resolve_limbic_persona_id(person_id)
-        get_inner_world().on_session_end(
-            user_id,
-            valence=float(valence),
-            arousal=float(arousal),
-            pending_topics=list(pending_topics or []),
-            mood_baseline=float(mood_baseline) if mood_baseline is not None else None,
-        )
+        # The foreground command already committed this turn's affect and
+        # continuity.  Session-end hooks are observers and must not append a
+        # second Life command for the same foreground occurrence.
         payload = self.resolve_inner_world_state(person_id=user_id)
         try:
             self.handle_signal(
@@ -1005,10 +1021,9 @@ class LimbicAgent:
             {"status": "OK", "emotion_tag": str, "ts_ms": int}
         """
         try:
-            from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
             from host_brain.core.ids import now_ms  # noqa: PLC0415
 
-            timeline = get_emotion_timeline()
+            timeline = self.application_ports.require("emotion_timeline")()
             if timeline is None:
                 return {"status": "NO_TIMELINE", "emotion_tag": str(emotion_tag or "")}
 
@@ -1062,7 +1077,7 @@ class LimbicAgent:
         关系变化影响情绪效价（valence）和沉默意愿（silence_willingness）。
         """
         try:
-            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+            from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("BODY_SENSE_UPDATED", self._on_body_sense_updated)
@@ -1307,8 +1322,7 @@ class LimbicAgent:
                 and float(emotion_intensity) >= 0.6
             ):
                 try:
-                    from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
-                    hard_state = get_hard_state()
+                    hard_state = self.application_ports.require("hard_state")()
                     if hasattr(hard_state, "emotion_tag"):
                         hard_state.emotion_tag = emotion_tag
                     if hasattr(hard_state, "emotion_intensity"):
@@ -1411,8 +1425,7 @@ class LimbicAgent:
             # 降低沉默意愿（通过 silence_engine 的 update_emotion 间接影响）
             if silence_relief > 0.01:
                 try:
-                    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-                    _engine = get_silence_engine()
+                    _engine = self.application_ports.require("silence_engine")()
                     # 以正向情绪更新沉默引擎，降低沉默意愿
                     _engine.update_emotion(
                         emotion_tag="JOY",

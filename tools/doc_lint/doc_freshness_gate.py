@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ def build_report(
         changed_files=changed_files,
         changed_files_list=changed_files_list,
     )
+    dirty_paths = _collect_git_dirty_paths(repo_root)
 
     failures: list[dict[str, Any]] = []
     checked_rules = 0
@@ -111,7 +113,11 @@ def build_report(
             continue
 
         checked_rules += 1
-        doc_ts = _best_effort_timestamp(doc_path, repo_root)
+        doc_ts = _best_effort_timestamp(
+            doc_path,
+            repo_root,
+            dirty_paths=dirty_paths,
+        )
         if doc_ts is None:
             failures.append(
                 _failure(
@@ -122,9 +128,23 @@ def build_report(
             )
             continue
 
+        # PR/task-scoped runs only need to compare the documentation with the
+        # source files that triggered this rule.  Walking every historical
+        # source and spawning one ``git log`` per file made a focused gate take
+        # minutes on this repository.  Scheduled ``--check-all`` runs retain
+        # the complete baseline scan.
+        timestamp_sources = (
+            list(touched_sources.values())
+            if touched_sources and not check_all
+            else sources
+        )
         source_timestamps = {}
-        for source_path in sources:
-            source_ts = _best_effort_timestamp(source_path, repo_root)
+        for source_path in timestamp_sources:
+            source_ts = _best_effort_timestamp(
+                source_path,
+                repo_root,
+                dirty_paths=dirty_paths,
+            )
             if source_ts is not None:
                 source_timestamps[_to_rel_lower(source_path, repo_root)] = source_ts
 
@@ -166,7 +186,7 @@ def build_report(
                     "doc_ts": int(doc_ts),
                     "rule_id": str(rule.get("id") or doc_rel),
                     "note": str(rule.get("note") or ""),
-                    "checked_source_count": len(sources),
+                    "checked_source_count": len(timestamp_sources),
                     "changed_source_count": len(touched_sources),
                     "sample_changed_or_recent_sources": [str(p) for p in stale_paths[:5]],
                     "max_age_days": max_age_days,
@@ -353,10 +373,65 @@ def _should_skip_path(path: Path) -> bool:
     return False
 
 
-def _best_effort_timestamp(path: Path, root: Path) -> float | None:
+def _collect_git_dirty_paths(root: Path) -> set[str]:
+    """Return modified, staged, untracked, and renamed paths in one Git call."""
+    proc = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        cwd=str(root),
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return set()
+
+    records = proc.stdout.split(b"\0")
+    dirty_paths: set[str] = set()
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record or len(record) < 4 or record[2:3] != b" ":
+            continue
+
+        status = record[:2].decode("ascii", errors="replace")
+        dirty_paths.add(_normalize_git_status_path(os.fsdecode(record[3:]), root))
+
+        # In porcelain v1 -z output, rename/copy entries carry the second
+        # pathname in the following NUL-delimited record. Track both names so
+        # either side of a rename is treated as working-tree state.
+        if "R" in status or "C" in status:
+            if index < len(records) and records[index]:
+                dirty_paths.add(
+                    _normalize_git_status_path(os.fsdecode(records[index]), root)
+                )
+                index += 1
+
+    return dirty_paths
+
+
+def _normalize_git_status_path(path: str, root: Path) -> str:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return _to_rel_lower(candidate, root)
+    return path.replace("\\", "/").lower()
+
+
+def _best_effort_timestamp(
+    path: Path,
+    root: Path,
+    *,
+    dirty_paths: set[str],
+) -> float | None:
+    if _to_rel_lower(path, root) in dirty_paths:
+        return _filesystem_timestamp(path)
+
     git_ts = _git_timestamp(path, root)
     if git_ts is not None:
         return git_ts
+    return _filesystem_timestamp(path)
+
+
+def _filesystem_timestamp(path: Path) -> float | None:
     try:
         return float(path.stat().st_mtime)
     except OSError:

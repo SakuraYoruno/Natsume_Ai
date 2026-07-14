@@ -1,0 +1,72 @@
+{
+  "checked_artifacts": [
+    "m48-evidence",
+    "m48-rollback-matrix"
+  ],
+  "issues": [
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: final_python_wave",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: external_dependency_classification",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: identity_previous_release_continuity",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: redis_live_integration",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: live_service_probe",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "evidence blocked: production_cutover_and_rollback",
+      "reason_code": "M48_SEAL_EVIDENCE_BLOCKED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "rollback rehearsal did not pass: identity_snapshot",
+      "reason_code": "M48_SEAL_ROLLBACK_NOT_REHEARSED"
+    },
+    {
+      "artifact_id": null,
+      "detail": "rollback rehearsal did not pass: production_migration",
+      "reason_code": "M48_SEAL_ROLLBACK_NOT_REHEARSED"
+    }
+  ],
+  "master_approval_required": true,
+  "milestone": "M48-A",
+  "release_id": "release://natsume-ai/m48-a/2026-07-11",
+  "schema_version": "Natsume.release.m48_seal_result.v1",
+  "status": "BLOCKED",
+  "verified_evidence_ids": [
+    "migration_restart_replay_faults",
+    "monitor_build_and_node",
+    "monitor_e2e_targeted_closure",
+    "offline_release_integration",
+    "release_seal_contract",
+    "static_and_doc_gate",
+    "targeted_failure_closure"
+  ],
+  "verified_rollback_ids": [
+    "action_arbiter",
+    "capability_maturity",
+    "degradation_state",
+    "life_projection",
+    "operator_life_governance_ui",
+    "pentest_lab_gate",
+    "runtime_event_replay",
+    "runtime_mode_canary"
+  ]
+}

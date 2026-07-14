@@ -249,11 +249,14 @@ function SkillsHubFilters({
 }
 
 export default function SkillsHubSurface({
+  CapabilityGovernanceSection,
   filter,
   sourceFilter,
   loading,
   refreshing,
   view,
+  governance,
+  governanceError,
   onFilterChange,
   onSourceFilterChange,
   onRefresh,
@@ -282,6 +285,9 @@ export default function SkillsHubSurface({
       ) : null}
 
       <SummaryStrip items={summaryItems} />
+      {CapabilityGovernanceSection ? (
+        <CapabilityGovernanceSection model={governance} queryError={governanceError} />
+      ) : null}
       <ExternalDirsPanel externalDirsView={externalDirsView} />
 
       <SkillsHubFilters

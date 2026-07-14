@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 
 from host_brain.persona.runtime_labels import (
     BOND_GROWTH_CLOSER,
@@ -44,11 +45,63 @@ from host_brain.persona.self_model import (
 _logger = logging.getLogger("Natsume.self_reflection")
 
 
+class _SelfReflectionModelPort:
+    """Typed text port backed only by the canonical model-attempt service."""
+
+    canonical_model_attempt_port = True
+
+    def __init__(
+        self, *, request_id: str, attempt_service: Any, deadline_ms: int = 4_000
+    ) -> None:
+        self._request_id = str(request_id or "self-reflection")
+        self._deadline_ms = max(800, int(deadline_ms))
+        self._attempt_service = attempt_service
+        self._traces: list[dict[str, Any]] = []
+
+    @property
+    def traces(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self._traces]
+
+    def bind(self, prompt_id: str) -> Any:
+        def _complete(prompt: str) -> str:
+            from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
+            from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
+
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._attempt_service,
+                prompt_id=prompt_id,
+                request_id=f"{self._request_id}:{prompt_id}",
+                scene_type="SELF_REFLECTION",
+                cognitive_tier="B",
+                messages=({"role": "user", "content": str(prompt or "")},),
+                deadline_ms=self._deadline_ms,
+                foreground=False,
+                metadata={"chain": prompt_id},
+            )
+            self._traces.append(model_attempt_result_trace(result))
+            return str(result.content or "").strip() if result.success else ""
+
+        setattr(_complete, "canonical_model_attempt_port", True)
+        return _complete
+
+
+def _canonical_self_reflection_port(
+    candidate: Any,
+    *,
+    request_id: str,
+    enabled: bool,
+) -> _SelfReflectionModelPort | None:
+    if isinstance(candidate, _SelfReflectionModelPort):
+        return candidate
+    del request_id, enabled
+    return None
+
+
 def _normalize_template_lang(render_target_lang: str | None) -> str:
     return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
 
-def _resolve_prompt_template_json_localized(
+def _resolve_prompt_contract_json_localized(
     template_id: str,
     *,
     render_target_lang: str = "zh",
@@ -56,7 +109,7 @@ def _resolve_prompt_template_json_localized(
     lang_key = _normalize_template_lang(render_target_lang)
     for candidate_id in (f"{template_id}.{lang_key}", template_id):
         try:
-            raw = resolve_prompt_template_json_merged(candidate_id)
+            raw = resolve_prompt_contract_json(candidate_id)
         except Exception:
             continue
         if isinstance(raw, Mapping):
@@ -69,7 +122,7 @@ def _resolve_prompt_template_json_localized(
 
 
 def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
-    raw = _resolve_prompt_template_json_localized(
+    raw = _resolve_prompt_contract_json_localized(
         "persona.self_narrative_prompts",
         render_target_lang=render_target_lang,
     )
@@ -136,7 +189,7 @@ _DEFAULT_TRIGGER_REASON_TEMPLATES: dict[str, Any] = {
 
 def _load_trigger_reason_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.trigger_reason_templates",
             render_target_lang=render_target_lang,
         )
@@ -338,20 +391,11 @@ class SelfReflection:
             time_context=time_context,
             render_target_lang=render_target_lang,
         )
-        resolved_llm_fn = llm_fn
-        if resolved_llm_fn is None:
-            try:
-                from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
-
-                resolved_llm_fn = build_pool_prompt_llm_fn(
-                    request_id=f"self_reflection::{int(current_ts_ms or turn_count)}",
-                    scene_type="SELF_REFLECTION",
-                    cognitive_tier="B",
-                    timeout_ms=4000,
-                    gen_params={"temperature": 0.55, "top_p": 0.9},
-                )
-            except Exception:
-                resolved_llm_fn = None
+        resolved_llm_fn = _canonical_self_reflection_port(
+            llm_fn,
+            request_id=f"self_reflection::{int(current_ts_ms or turn_count)}",
+            enabled=True,
+        )
 
         try:
             snapshot = self._model.build_snapshot(
@@ -529,7 +573,7 @@ _DEFAULT_NARRATIVE_GUARDRAIL_TEXTS: dict[str, Any] = {
 
 def _load_narrative_guardrail_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.narrative_guardrail_texts",
             render_target_lang=render_target_lang,
         )
@@ -779,12 +823,28 @@ def build_self_reflection_pulse(
         包含 self_awareness、mood_awareness、growth_note、trigger_reason、
         growth_awareness、style_trend_note（可选）的字典
     """
+    from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+        SELF_REFLECTION_AWARENESS_PROMPT_ID,
+        SELF_REFLECTION_GROWTH_NOTE_PROMPT_ID,
+        SELF_REFLECTION_MOOD_PROMPT_ID,
+        SELF_REFLECTION_STYLE_TREND_PROMPT_ID,
+    )
+
+    model_port = _canonical_self_reflection_port(
+        llm_fn,
+        request_id=f"self_reflection_pulse::{int(time.time() * 1000)}",
+        enabled=bool(strict_llm),
+    )
+    awareness_fn = model_port.bind(SELF_REFLECTION_AWARENESS_PROMPT_ID) if model_port else None
+    mood_fn = model_port.bind(SELF_REFLECTION_MOOD_PROMPT_ID) if model_port else None
+    growth_fn = model_port.bind(SELF_REFLECTION_GROWTH_NOTE_PROMPT_ID) if model_port else None
+    style_fn = model_port.bind(SELF_REFLECTION_STYLE_TREND_PROMPT_ID) if model_port else None
     self_awareness = _call_with_optional_render_target_lang(
         build_self_awareness_text,
         snapshot,
         render_target_lang=render_target_lang,
         time_context=time_context,
-        llm_fn=llm_fn,
+        llm_fn=awareness_fn,
         strict_llm=strict_llm,
         style_evolution=style_evolution,
     )
@@ -792,14 +852,14 @@ def build_self_reflection_pulse(
         build_mood_awareness_text,
         snapshot,
         render_target_lang=render_target_lang,
-        llm_fn=llm_fn,
+        llm_fn=mood_fn,
         strict_llm=strict_llm,
     )
     growth_note = _call_with_optional_render_target_lang(
         build_growth_note_text,
         snapshot,
         render_target_lang=render_target_lang,
-        llm_fn=llm_fn,
+        llm_fn=growth_fn,
         strict_llm=strict_llm,
         style_evolution=style_evolution,
     )
@@ -862,7 +922,7 @@ def build_self_reflection_pulse(
         if history_count >= 20 and trend:
             style_trend_note = _build_style_trend_note(
                 trend,
-                llm_fn=llm_fn,
+                llm_fn=style_fn,
                 strict_llm=strict_llm,
                 render_target_lang=render_target_lang,
             )
@@ -879,6 +939,9 @@ def build_self_reflection_pulse(
     )
     if narrative_guardrails:
         pulse["narrative_guardrails"] = narrative_guardrails
+
+    if model_port and model_port.traces:
+        pulse["model_attempts"] = model_port.traces
 
     return pulse
 
@@ -958,7 +1021,7 @@ _DEFAULT_STYLE_TREND_TEMPLATES: dict[str, Any] = {
 
 def _load_style_trend_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = _resolve_prompt_template_json_localized(
+        raw = _resolve_prompt_contract_json_localized(
             "self_reflection.style_trend_templates",
             render_target_lang=render_target_lang,
         )
@@ -1002,7 +1065,7 @@ def _build_style_trend_note(
         return ""
 
     # ── LLM 动态生成路径 ────────────────────────────────────────────────
-    if llm_fn is not None:
+    if llm_fn is not None and bool(getattr(llm_fn, "canonical_model_attempt_port", False)):
         try:
             rising_cn = [str(trait_cn.get(k, k)) for k in rising[:2]]
             falling_cn = [str(trait_cn.get(k, k)) for k in falling[:2]]

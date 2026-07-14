@@ -313,8 +313,8 @@ export default function TribeConsole() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <Link to="/execution/agent-loop" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-primary-200 hover:bg-primary-50">
-                    Agent Loop
+                  <Link to="/execution/task-runtime" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-primary-200 hover:bg-primary-50">
+                    执行审查
                   </Link>
                   <Link to="/observability/trace" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-primary-200 hover:bg-primary-50">
                     Trace

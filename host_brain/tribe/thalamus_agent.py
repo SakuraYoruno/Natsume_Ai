@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -6,18 +6,20 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from host_brain.app.prompt_builder import (
+from host_brain.model_runtime.prompt_builder_utils import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.app.relational_chat_detector import (
+from host_brain.model_runtime.json_parser import extract_json_object
+from host_brain.persona.relational_chat import (
     build_relational_chat_reason_code,
     detect_relational_chat_topic,
 )
 from host_brain.core.ids import now_ms
+from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -1035,7 +1037,7 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     if _PHATIC_SOCIAL_FOLLOWUP_RE.search(cleaned):
         return "THALAMUS_RULE_PHATIC_SOCIAL_FOLLOWUP"
     try:
-        from host_brain.app.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
+        from host_brain.persona.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
 
         if detect_assistant_reply_followup_kind(cleaned):
             return "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
@@ -2063,33 +2065,34 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     if not has_scope_hint:
         return None
 
-    goal_type, strategy = _classify_pentest_intent(normalized)
+    goal_type = _classify_pentest_requested_goal(normalized)
 
     args: dict[str, Any] = {
         "text": normalized,
         "user_message": normalized,
         "scope_hint_present": has_scope_hint,
-        "allow_exploit": False,
+        "requested_execution": True,
+        "secure_run_required": True,
+        "domain_pack_capability_id": "pentest_autonomous",
+        "secure_run_surface": "pentest.secure-run",
     }
 
     if goal_type is not None:
-        args["strategy"] = strategy
-        args["goal"] = {"goal_type": goal_type}
-        # allow_exploit 仍为 False，由 handler 的安全门（显式授权语 + lab 模式 +
-        # 合法 manifest）二次判定后才放行。
+        # Goal is untrusted request material for Domain Pack planning.  It is
+        # never an execution strategy or an authority grant.
+        args["requested_goal"] = {"goal_type": goal_type}
     else:
-        # ── 正则未命中 → LLM 意图分类 fallback ──
+        # Regex miss -> optional planning-only goal classification.
         llm_goal, llm_confidence = _classify_pentest_intent_by_llm(normalized)
         if llm_goal is not None:
-            args["strategy"] = "autonomous_redteam"
-            args["goal"] = {"goal_type": llm_goal}
+            args["requested_goal"] = {"goal_type": llm_goal}
             args["_classified_by"] = "llm"
             args["_llm_confidence"] = llm_confidence
         elif llm_confidence is not None and llm_confidence >= 0.0:
-            # LLM 响应了但无法确定 → 主动追问
+            # The goal is unclear; stop at clarification without producing an
+            # execution-shaped strategy.
             args["action"] = "clarify_intent"
             args["_needs_clarification"] = True
-        # else: LLM 不可用 → 不设 strategy/goal，handler 走只读扫描（现有行为）
 
     return {
         "route": "delegate",
@@ -2102,13 +2105,8 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     }
 
 
-def _classify_pentest_intent(normalized: str) -> tuple[str | None, str | None]:
-    """根据用户输入文本分类渗透意图 → (goal_type, strategy)。
-
-    Returns:
-        (goal_type, strategy) — 若未匹配任何自治意图则返回 (None, None)，
-        此时 handler 走只读扫描路径。
-    """
+def _classify_pentest_requested_goal(normalized: str) -> str | None:
+    """Classify an untrusted requested goal for planning only."""
     # 细粒度意图优先（避免"拿下"/"打"等宽泛词抢跑）
     _FINE_GRAINED: list[tuple[str, str]] = [
         ("_PENTEST_INTENT_DOMAIN_ADMIN_RE", "domain_admin"),
@@ -2121,14 +2119,14 @@ def _classify_pentest_intent(normalized: str) -> tuple[str | None, str | None]:
     for ref_name, goal_type in _FINE_GRAINED:
         regex = globals().get(ref_name)
         if regex is not None and regex.search(normalized):
-            return (goal_type, "autonomous_redteam")
+            return goal_type
     # 清场/全域拿下 — 必须在 shell 之前检查，因为"全部 getshell"是 takeover
     if _PENTEST_TAKEOVER_RE.search(normalized):
-        return ("domain_takeover", "autonomous_redteam")
+        return "domain_takeover"
     # Shell 最后：纯 getshell 不带清场语义
     if _PENTEST_INTENT_SHELL_RE.search(normalized):
-        return ("shell", "autonomous_redteam")
-    return (None, None)
+        return "shell"
+    return None
 
 
 def _classify_pentest_intent_by_llm(normalized: str) -> tuple[str | None, float | None]:
@@ -2189,11 +2187,7 @@ def _classify_pentest_intent_by_llm(normalized: str) -> tuple[str | None, float 
 
 
 def _build_pentest_progress_seed(text: str) -> dict[str, Any] | None:
-    """检测"打到哪了/战况/进度"类查询，路由到 pentest_agent 做进度快照。
-
-    与 _build_pentest_route_seed 不同，此 seed 不触发扫描或自治——
-    仅查询当前活动 run 的事件总线快照并以自然语言汇报。
-    """
+    """Route progress language to the owner-bound canonical read handoff."""
     normalized = _normalize_text(text)
     if not normalized:
         return None
@@ -2213,6 +2207,7 @@ def _build_pentest_progress_seed(text: str) -> dict[str, Any] | None:
             "text": normalized,
             "user_message": normalized,
             "action": "task_progress",
+            "secure_principal_required": True,
         },
     }
 
@@ -3195,6 +3190,7 @@ async def classify_task_intent_by_llm(
     session_id: str,
     text: str,
     tribe_context: Mapping[str, Any] | None = None,
+    application_ports: TribeApplicationPorts | None = None,
 ) -> dict[str, Any] | None:
     try:
         import os  # noqa: PLC0415
@@ -3202,10 +3198,8 @@ async def classify_task_intent_by_llm(
         if str(os.environ.get("HOST_CORTEX_INTENT_LLM_ENABLED", "true")).strip().lower() in {"0", "false", "no", "off"}:
             return None
 
-        from collections.abc import Mapping as _Mapping  # noqa: PLC0415
-
-        from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        from host_brain.model_runtime.contracts import ModelAttemptRequest, PromptRef  # noqa: PLC0415
+        from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         ctx = dict(tribe_context or {})
         vital_signs = dict(ctx.get("vital_signs") or {})
@@ -3213,47 +3207,45 @@ async def classify_task_intent_by_llm(
         emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
         tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
 
-        raw_templates = _resolve_intent_classification_prompt_templates()
-        templates = dict(raw_templates) if isinstance(raw_templates, _Mapping) else {}
-        system_prompt = str(templates.get("system_prompt") or "").strip()
-        user_prompt_template = str(templates.get("user_prompt_template") or "").strip()
-        if not system_prompt or not user_prompt_template:
-            return None
-        user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
-
         thalamus_scene = str(os.environ.get("HOST_THALAMUS_INTENT_LLM_SCENE") or "THALAMUS_INTENT").strip().upper()
         timeout_ms = int(
             os.environ.get("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS")
             or os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS")
             or "3000"
         )
-        agent_gen_params = {"temperature": 0.1, "top_p": 0.8}
 
-        result = await acomplete_llm_with_pool(
-            request_id=request_id,
-            scene_type=thalamus_scene,
-            cognitive_tier="C",
-            provider_name=None,
-            model_id=None,
-            api_key=None,
-            timeout_ms=timeout_ms,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            gen_params=agent_gen_params,
-            response_format="json_object",
-            base_url_override=None,
+        result = await application_ports.require("model_attempt_service")().complete(
+            ModelAttemptRequest(
+                request_id=request_id or "thalamus-intent",
+                scene_type=thalamus_scene,
+                cognitive_tier="C",
+                prompt=PromptRef(
+                    "thalamus_agent.intent_classification_prompts",
+                    {
+                        "text": str(text or "").strip(),
+                        "tribe_summary": tribe_summary,
+                    },
+                ),
+                deadline_ms=max(500, min(timeout_ms, 30_000)),
+                foreground=True,
+                metadata={"chain": "thalamus_intent", "session_id": session_id},
+            )
         )
-        if result.pool_exhausted:
+        if not result.success:
             return None
         raw_text = str(result.content or "").strip()
-        parsed = extract_first_json_object(raw_text)
+        try:
+            parsed = extract_json_object(raw_text)
+        except ValueError:
+            parsed = None
         if not isinstance(parsed, dict):
             _logger.warning("[%s] thalamus_intent_llm_parse_failed output=%.180s", request_id, raw_text)
             return None
 
-        return _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
+        normalized = _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
+        if normalized is not None:
+            normalized["model_attempt_trace"] = model_attempt_result_trace(result)
+        return normalized
     except Exception as exc:
         _logger.warning("thalamus_intent_llm_failed request_id=%s error=%s", request_id, exc)
         return None
@@ -3267,6 +3259,7 @@ async def classify_task_intent(
     tribe_context: Mapping[str, Any] | None = None,
     attachments: Sequence[Mapping[str, Any]] | None = None,
     multimodal_observations: Mapping[str, Any] | None = None,
+    application_ports: TribeApplicationPorts | None = None,
 ) -> dict[str, Any]:
     import os as _os  # noqa: PLC0415
 
@@ -3327,6 +3320,7 @@ async def classify_task_intent(
         session_id=session_id,
         text=normalized,
         tribe_context=tribe_context,
+        application_ports=application_ports,
     )
     llm_result = _normalize_llm_intent_route_candidate(raw_llm_result, fallback_text=normalized)
     if llm_result is not None:
@@ -3564,7 +3558,12 @@ def _backfill_canonical_args(
     }
 
 
-def _allocate_seq(*, session_id: str, existing_seq: Any) -> int:
+def _allocate_seq(
+    *,
+    session_id: str,
+    existing_seq: Any,
+    application_ports: TribeApplicationPorts | None,
+) -> int:
     try:
         seq = int(existing_seq)
         if seq >= 0:
@@ -3573,9 +3572,11 @@ def _allocate_seq(*, session_id: str, existing_seq: Any) -> int:
         pass
 
     try:
-        from host_brain.app.intent_seq import allocate_intent_seq  # noqa: PLC0415
-
-        return int(allocate_intent_seq(session_id=session_id))
+        return int(
+            application_ports.require("allocate_intent_seq")(
+                session_id=session_id,
+            )
+        )
     except Exception:
         return 0
 
@@ -3603,7 +3604,7 @@ def _deep_merge_json(base_value: Any, overlay_value: Any) -> Any:
 
 def _load_template_json_parts(template_id: str) -> dict[str, Any] | None:
     try:
-        from host_brain.app.prompt_specs import resolve_prompt_spec_json  # noqa: PLC0415
+        from host_brain.model_runtime.prompt_specs import resolve_prompt_spec_json  # noqa: PLC0415
 
         default_value = resolve_prompt_spec_json(template_id)
     except Exception:
@@ -3628,6 +3629,7 @@ def _resolve_intent_classification_prompt_templates() -> Any:
 
 @dataclass(slots=True)
 class ThalamusAgent:
+    application_ports: TribeApplicationPorts | None = field(default=None, repr=False)
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="thalamus_agent",
@@ -3673,6 +3675,7 @@ class ThalamusAgent:
                     tribe_context=tribe_context,
                     attachments=attachments,
                     multimodal_observations=multimodal_observations,
+                    application_ports=self.application_ports,
                 )
                 or {}
             )
@@ -3733,10 +3736,8 @@ class ThalamusAgent:
         )
         preference_pack: dict[str, Any] = {}
         try:
-            from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-
             preference_pack = dict(
-                build_user_preference_pack(
+                self.application_ports.require("build_user_preference_pack")(
                     person_id=_normalize_text(person_id) or None,
                     query_text=task or user_message,
                     session_id=_normalize_text(session_id) or None,
@@ -3792,14 +3793,9 @@ class ThalamusAgent:
             args_payload["pragmatic_frame"] = pragmatic_frame
         conversation_understanding = {}
         try:
-            from host_brain.app.context.conversation_belief_tracker import (  # noqa: PLC0415
-                build_conversation_understanding_pack,
-            )
-            from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
-                get_conversation_experience_store,
-            )
-
-            experience_store = get_conversation_experience_store()
+            experience_store = self.application_ports.require(
+                "conversation_experience_store"
+            )()
             outcome_feedback = experience_store.record_outcome_feedback(
                 session_id=_normalize_text(session_id),
                 person_id=_normalize_text(person_id) or None,
@@ -3812,10 +3808,8 @@ class ThalamusAgent:
             )
             if not preference_pack:
                 try:
-                    from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-
                     preference_pack = dict(
-                        build_user_preference_pack(
+                        self.application_ports.require("build_user_preference_pack")(
                             person_id=_normalize_text(person_id) or None,
                             query_text=task or user_message,
                             session_id=_normalize_text(session_id) or None,
@@ -3832,7 +3826,9 @@ class ThalamusAgent:
                 query_text=task or user_message,
                 limit=5,
             )
-            conversation_understanding = build_conversation_understanding_pack(
+            conversation_understanding = self.application_ports.require(
+                "build_conversation_understanding_pack"
+            )(
                 text=task or user_message,
                 semantic_intent=semantic_intent,
                 pragmatic_frame=pragmatic_frame,
@@ -3861,7 +3857,11 @@ class ThalamusAgent:
                 "id": _normalize_text(draft.get("id")) or f"intent::{request_id}",
                 "ts_ms": int(draft.get("ts_ms") or ts_ms or now_ms()),
                 "session_id": _normalize_text(draft.get("session_id")) or _normalize_text(session_id),
-                "seq": _allocate_seq(session_id=_normalize_text(session_id), existing_seq=draft.get("seq")),
+                "seq": _allocate_seq(
+                    session_id=_normalize_text(session_id),
+                    existing_seq=draft.get("seq"),
+                    application_ports=self.application_ports,
+                ),
                 "person_id": _normalize_text(draft.get("person_id")) or _normalize_text(person_id) or None,
                 "type": _normalize_text(draft.get("type")) or "query",
                 "action": action,
@@ -4010,5 +4010,3 @@ __all__ = [
     "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]
-
-

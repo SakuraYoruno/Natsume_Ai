@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import inspect
 import json
 import os
+from pathlib import Path
 import threading
 from typing import Any, Callable
 import urllib.error
@@ -34,7 +35,12 @@ from edge_client.runtime import (
     startup as runtime_startup,
 )
 from edge_client.actuators.vts_driver import VtsState
-from host_brain.core.errors import (
+from edge_client.gateway.embodiment_runtime import (
+    DurableEmbodimentRuntime,
+    EdgeEmbodimentTransportError,
+    SQLiteEdgeEmbodimentStore,
+)
+from natsume_contracts.edge.v1 import (
     CONFIG_VALUE_INVALID,
     EDGE_RPC_SCHEMA_INVALID,
     SERVICE_UNAVAILABLE_DEPENDENCY,
@@ -42,8 +48,19 @@ from host_brain.core.errors import (
     SERVICE_UNAVAILABLE_GENERIC,
     VTS_EXPRESSION_TIMEOUT,
     VOICE_SCHEMA_INVALID,
+    now_ms,
 )
-from host_brain.core.ids import now_ms
+from natsume_contracts.edge.embodiment_v1 import (
+    EMBODIMENT_COMMAND_INVALID,
+    EMBODIMENT_KIND_AVATAR,
+    EMBODIMENT_KIND_DESKTOP,
+    EMBODIMENT_KIND_MATEENGINE,
+    EMBODIMENT_KIND_VOICE,
+    parse_embodiment_command,
+)
+from natsume_contracts.edge.transport_v1 import (
+    EDGE_SESSION_RECONNECT_INVALID,
+)
 
 
 STATUS_ACCEPTED = "ACCEPTED"
@@ -69,6 +86,19 @@ LifecycleHook = Callable[[EdgeRuntime], Any]
 HealthCollector = Callable[[EdgeRuntime], dict[str, Any]]
 
 
+def _resolve_embodiment_transport_db_path() -> Path:
+    configured = str(os.environ.get("EDGE_EMBODIMENT_TRANSPORT_DB") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    data_root = str(os.environ.get("NATSUME_DATA_DIR") or "").strip()
+    if data_root:
+        root = Path(data_root).expanduser()
+    else:
+        local_app_data = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        root = Path(local_app_data).expanduser() / "NatsumeAI" if local_app_data else Path.home() / ".natsume-ai"
+    return (root / "edge" / "embodiment_transport.sqlite3").resolve()
+
+
 def create_edge_fastapi_app(
     *,
     config: EdgeConfig | None = None,
@@ -78,6 +108,7 @@ def create_edge_fastapi_app(
     startup_hook: LifecycleHook | None = None,
     shutdown_hook: LifecycleHook | None = None,
     health_collector: HealthCollector | None = None,
+    embodiment_store: SQLiteEdgeEmbodimentStore | None = None,
 ) -> FastAPI:
     runtime_config = config
     if runtime_config is None:
@@ -96,6 +127,15 @@ def create_edge_fastapi_app(
     startup_runner = startup_hook or runtime_startup
     shutdown_runner = shutdown_hook or runtime_shutdown
     health_runner = health_collector or collect_health
+    if embodiment_store is None:
+        from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
+
+        embodiment_db_path = _resolve_embodiment_transport_db_path()
+        apply_edge_gateway_migrations(embodiment_db_path)
+        embodiment_store_value = SQLiteEdgeEmbodimentStore(embodiment_db_path, clock=clock)
+    else:
+        embodiment_store_value = embodiment_store
+    embodiment_runtime = DurableEmbodimentRuntime(embodiment_store_value)
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
@@ -116,6 +156,8 @@ def create_edge_fastapi_app(
     app.state.edge_runtime = runtime_value
     app.state.edge_replay_cache = replay_value
     app.state.now_fn = clock
+    app.state.embodiment_store = embodiment_store_value
+    app.state.embodiment_runtime = embodiment_runtime
 
     @app.get("/v1/edge/health")
     async def edge_health() -> dict[str, Any]:
@@ -205,6 +247,39 @@ def create_edge_fastapi_app(
             handler=_handle_vts,
         )
 
+    @app.post("/v1/edge/embodiment")
+    async def edge_embodiment(request: Request) -> JSONResponse:
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge embodiment command gateway disabled by config",
+            handler=lambda active_runtime, envelope: _handle_embodiment_command(
+                active_runtime,
+                envelope,
+                transport_runtime=embodiment_runtime,
+            ),
+        )
+
+    @app.post("/v1/edge/embodiment/session")
+    async def edge_embodiment_session(request: Request) -> JSONResponse:
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge embodiment session gateway disabled by config",
+            handler=lambda _active_runtime, envelope: _handle_embodiment_session(
+                envelope,
+                store=embodiment_store_value,
+            ),
+        )
+
     @app.post("/v1/edge/desktop_pet")
     async def edge_desktop_pet(request: Request) -> JSONResponse:
         return await _handle_envelope_request(
@@ -281,36 +356,6 @@ def create_edge_fastapi_app(
             disabled_detail="edge fallback llm disabled by config",
             handler=_handle_fallback_context_compress,
         )
-
-    @app.post("/v1/edge/wechat/callback")
-    async def edge_wechat_callback(request: Request) -> JSONResponse:
-        """接收微信 Hook 工具（wcf 等）推送的消息，转发给 Host Brain。
-
-        此接口不需要 HMAC 鉴权（本地 Hook 工具调用），但只监听 127.0.0.1。
-        """
-        ts = int(clock())
-        _ = request
-        return JSONResponse(_response(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=CONFIG_VALUE_INVALID,
-            detail="legacy /v1/edge/wechat/callback disabled; use /v1/gateway/{platform}/webhook",
-            event={"stage": "S_EDGE_WECHAT_CALLBACK", "deprecated": True},
-            ts_ms=ts,
-        ))
-
-    @app.post("/v1/edge/wechat/command")
-    async def edge_wechat_command(request: Request) -> JSONResponse:
-        ts = int(clock())
-        _ = request
-        return JSONResponse(_response(
-            success=False,
-            status=STATUS_REJECTED,
-            reason_code=CONFIG_VALUE_INVALID,
-            detail="legacy /v1/edge/wechat/command disabled; use /v1/gateway/reply on EDGE_GATEWAY_PORT",
-            event={"stage": "S_EDGE_WECHAT_COMMAND", "deprecated": True},
-            ts_ms=ts,
-        ))
 
     @app.post("/v1/edge/screenshot")
     async def edge_screenshot(request: Request) -> JSONResponse:
@@ -609,60 +654,32 @@ def create_edge_fastapi_app(
 
         # ── T-169：通过 EdgeTribeBridge.receive_command() 统一分发 ──────────
         try:
-            from edge_client.tribe.registry import get_edge_tribe_registry  # noqa: PLC0415
-            from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge  # noqa: PLC0415
-
-            registry = get_edge_tribe_registry()
-
-            # 优先使用 registry 中已初始化的 bridge；否则降级为直接分发
-            bridge: EdgeTribeBridge | None = registry.bridge if registry.initialized else None
-
-            if bridge is not None:
-                # T-169：通过 EdgeTribeBridge.receive_command() 统一路由
-                result = bridge.receive_command(
-                    command_type=command_type,
-                    source_agent=source_agent,
-                    target_agent=target_agent or None,
-                    payload=payload,
-                    command_id=str(body.get("command_id") or "").strip() or None,
-                    schema_version=str(body.get("schema_version") or "tribe.command.v1"),
-                    somatic_agent=registry.somatic if registry.initialized else None,
-                    peripheral_agent=registry.peripheral if registry.initialized else None,
-                    channel_agent=registry.channel if registry.initialized else None,
+            registry = getattr(runtime_value, "tribe_registry", None)
+            if registry is None:
+                return JSONResponse(
+                    {
+                        "accepted": False,
+                        "reason": "EDGE_TRIBE_COMPOSITION_UNAVAILABLE",
+                        "ts_ms": ts,
+                    },
+                    status_code=503,
                 )
-                dispatched = bool(result.get("dispatched", False))
-                _log.debug(
-                    "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
-                    command_type, result.get("routed_to"), result.get("ok"),
-                )
-            else:
-                # 降级：registry 未初始化时直接分发（向后兼容）
-                dispatched = False
-                if command_type in {"EMOTION_STATE_CHANGED", "EMOTION_STATE_COMMAND"} and (
-                    not target_agent or target_agent in ("edge.somatic", "somatic_agent")
-                ):
-                    if registry.initialized and hasattr(registry, "somatic"):
-                        registry.somatic.on_emotion_state_command(payload=payload)
-                        dispatched = True
-                elif command_type in {"GATE_CONTROL", "GATE_CONTROL_COMMAND"} and (
-                    not target_agent or target_agent in ("edge.channel", "channel_agent")
-                ):
-                    if registry.initialized and hasattr(registry, "channel"):
-                        gate_open = bool(payload.get("gate_open", True))
-                        if "gate" in payload:
-                            gate_open = str(payload.get("gate") or "").strip().lower() != "closed"
-                        registry.channel.on_gate_control_command(
-                            gate_open=gate_open,
-                            reason=payload.get("reason"),
-                            platform=payload.get("platform"),
-                            ts_ms=int(payload.get("ts_ms") or 0),
-                        )
-                        dispatched = True
-                else:
-                    _log.info(
-                        "tribe_command: unhandled command_type=%s target=%s (ignored)",
-                        command_type, target_agent,
-                    )
+            result = registry.bridge.receive_command(
+                command_type=command_type,
+                source_agent=source_agent,
+                target_agent=target_agent or None,
+                payload=payload,
+                command_id=str(body.get("command_id") or "").strip() or None,
+                schema_version=str(body.get("schema_version") or "tribe.command.v1"),
+                somatic_agent=registry.somatic,
+                peripheral_agent=registry.peripheral,
+                channel_agent=registry.channel,
+            )
+            dispatched = bool(result.get("dispatched", False))
+            _log.debug(
+                "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
+                command_type, result.get("routed_to"), result.get("ok"),
+            )
 
             return JSONResponse({
                 "accepted": True,
@@ -802,6 +819,184 @@ async def _load_json_body(request: Request) -> dict[str, Any] | JSONResponse:
             )
         )
     return dict(raw)
+
+
+def _handle_embodiment_command(
+    runtime: EdgeRuntime,
+    envelope: EdgeRpcEnvelope,
+    *,
+    transport_runtime: DurableEmbodimentRuntime,
+) -> EdgeGatewayResult:
+    """Validate, durably claim, execute once, and persist the exact receipt."""
+    try:
+        command = parse_embodiment_command(envelope.payload)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EMBODIMENT_COMMAND_INVALID,
+            stage="S_EDGE_EMBODIMENT_SCHEMA",
+            detail=f"invalid embodiment command: {exc}",
+            event={},
+        )
+    try:
+        receipt = transport_runtime.execute(
+            command,
+            lambda active_command: _execute_embodiment_effect(
+                runtime,
+                envelope,
+                active_command,
+            ),
+        )
+    except EdgeEmbodimentTransportError as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=exc.reason_code,
+            stage="S_EDGE_EMBODIMENT_AUTHORITY",
+            detail=f"edge embodiment transport rejected command: {exc.reason_code}",
+            event={},
+        )
+    return EdgeGatewayResult(
+        success=receipt.success,
+        status=receipt.status,
+        reason_code=receipt.reason_code,
+        stage="S_EDGE_EMBODIMENT_RECEIPT",
+        detail=receipt.detail,
+        event={"receipt": receipt.as_dict(), "effect": dict(receipt.event or {})},
+    )
+
+
+def _execute_embodiment_effect(
+    runtime: EdgeRuntime,
+    envelope: EdgeRpcEnvelope,
+    command: Any,
+) -> EdgeGatewayResult:
+    effect_envelope = EdgeRpcEnvelope(
+        request_id=command.request_id,
+        ts_ms=command.issued_at_ms,
+        nonce=envelope.nonce,
+        signature=envelope.signature,
+        payload={"action": command.action, **dict(command.payload)},
+    )
+    if command.kind == EMBODIMENT_KIND_VOICE:
+        if command.action == "barge_in":
+            effect = _handle_barge_in(runtime, effect_envelope)
+        elif command.action == "asr_control":
+            effect = _handle_asr(runtime, effect_envelope)
+        else:
+            effect = _handle_speak(runtime, effect_envelope)
+    elif command.kind == EMBODIMENT_KIND_AVATAR:
+        if command.action == "desktop_pet":
+            pet_payload = dict(command.payload)
+            pet_payload["action"] = str(
+                pet_payload.pop("desktop_pet_action", "status") or "status"
+            ).strip().lower()
+            effect = _handle_desktop_pet(
+                runtime,
+                EdgeRpcEnvelope(
+                    request_id=effect_envelope.request_id,
+                    ts_ms=effect_envelope.ts_ms,
+                    nonce=effect_envelope.nonce,
+                    signature=effect_envelope.signature,
+                    payload=pet_payload,
+                ),
+            )
+        else:
+            effect = _handle_vts(runtime, effect_envelope)
+    elif command.kind == EMBODIMENT_KIND_DESKTOP:
+        if command.action == "screenshot":
+            effect = _handle_screenshot(runtime, effect_envelope)
+        elif command.action in {"clipboard_read", "clipboard_write"}:
+            from edge_client.actuators.desktop_clipboard import (
+                execute_desktop_clipboard_effect,
+            )
+
+            outcome = execute_desktop_clipboard_effect(
+                action=command.action,
+                payload=command.payload,
+            )
+            effect = EdgeGatewayResult(
+                success=bool(outcome.success),
+                status=str(outcome.status),
+                reason_code=outcome.reason_code,
+                stage="S_EDGE_CLIPBOARD",
+                detail=str(outcome.detail),
+                event=dict(outcome.event),
+            )
+        elif command.action == "visual_locate":
+            effect = _handle_visual_locate(runtime, effect_envelope)
+        else:
+            effect = _handle_automate(runtime, effect_envelope)
+    elif command.kind == EMBODIMENT_KIND_MATEENGINE:
+        from edge_client.actuators.mateengine_driver import execute_mateengine_effect
+
+        outcome = execute_mateengine_effect(action=command.action, payload=command.payload)
+        effect = EdgeGatewayResult(
+            success=bool(outcome.get("success")),
+            status=str(outcome.get("status") or STATUS_REJECTED),
+            reason_code=(str(outcome.get("reason_code") or "").strip() or None),
+            stage="S_EDGE_MATEENGINE",
+            detail=str(outcome.get("detail") or "MateEngine command completed"),
+            event=dict(outcome),
+        )
+    else:  # pragma: no cover - parser owns kind validation
+        raise AssertionError(command.kind)
+    return EdgeGatewayResult(
+        success=effect.success,
+        status=effect.status,
+        reason_code=effect.reason_code,
+        stage=effect.stage,
+        detail=effect.detail,
+        event={
+            **dict(effect.event),
+            "kind": command.kind,
+            "action": command.action,
+            "authority_ref": command.authority_ref,
+            "grant_ref": command.grant_ref,
+            "effect": dict(effect.event),
+        },
+    )
+
+
+def _handle_embodiment_session(
+    envelope: EdgeRpcEnvelope,
+    *,
+    store: SQLiteEdgeEmbodimentStore,
+) -> EdgeGatewayResult:
+    payload = dict(envelope.payload or {})
+    try:
+        ttl_ms = max(1_000, min(300_000, int(payload.get("ttl_ms") or 30_000)))
+        reconnect_fence = payload.get("reconnect_fencing_token")
+        lease = store.open_session(
+            session_id=str(payload.get("session_id") or ""),
+            owner_id=str(payload.get("owner_id") or ""),
+            ttl_ms=ttl_ms,
+            reconnect_lease_id=(
+                str(payload.get("reconnect_lease_id") or "").strip() or None
+            ),
+            reconnect_fencing_token=(
+                int(reconnect_fence) if reconnect_fence is not None else None
+            ),
+        )
+    except (TypeError, ValueError, EdgeEmbodimentTransportError) as exc:
+        reason_code = getattr(exc, "reason_code", EDGE_SESSION_RECONNECT_INVALID)
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=str(reason_code),
+            stage="S_EDGE_EMBODIMENT_SESSION",
+            detail=f"edge embodiment session rejected: {reason_code}",
+            event={},
+        )
+    return EdgeGatewayResult(
+        success=True,
+        status=STATUS_ACCEPTED,
+        reason_code=None,
+        stage="S_EDGE_EMBODIMENT_SESSION",
+        detail="edge embodiment transport lease active",
+        event={"lease": lease.as_dict()},
+    )
 
 
 def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:

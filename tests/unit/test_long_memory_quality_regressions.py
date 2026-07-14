@@ -1,10 +1,14 @@
 from types import SimpleNamespace
 
-from host_brain.app.agent_runtime_shared import _memory_recall_plan_should_bypass_direct_status_fastlane
-from host_brain.app.executive_runtime_core import _message_requests_memory_recall
-from host_brain.app.surface_main_chain_adapter import _surface_memory_acceptance_must_include
+from host_brain.agent_runtime.contextual_answers import _memory_recall_plan_should_bypass_direct_status_fastlane
+from host_brain.executive_runtime._shared import _message_requests_memory_recall
+from host_brain.surface_runtime.life_context import _surface_memory_acceptance_must_include
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+from host_brain.composition.memory import build_process_memory_container
+from host_brain.memory.life_memory.consolidator import LifeMemoryConsolidator
+from host_brain.memory.life_memory.store import LifeMemoryStore
+from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import (
     RECALL_POLICY_MUST,
@@ -14,6 +18,21 @@ from host_brain.persona.surface_memory_recall import (
 from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules
+
+
+class _AlwaysWriteMemoryWorth:
+    def evaluate(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
+        return SimpleNamespace(
+            decision="write",
+            worth_score=0.8,
+            tags=["new_info"],
+            reason="long-memory-regression-fixture",
+        )
+
+
+class _AllowMemoryGuard:
+    def validate(self, _candidate, *, tags) -> None:  # noqa: ANN001
+        del tags
 
 
 def test_project_fact_seed_does_not_route_to_open_app() -> None:
@@ -101,33 +120,51 @@ def test_text_quality_gate_blocks_runtime_leak_outputs() -> None:
 
 
 def test_semantic_memory_recall_prefers_same_person_distilled_correction(tmp_path) -> None:
-    ledger = SQLiteLedger(db_path=str(tmp_path / "semantic_person_scope.sqlite3"))
+    db_path = tmp_path / "semantic_person_scope.sqlite3"
+    migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="long-memory-person-scope",
+        ts_ms=1_800_000_399_000,
+    )
+    assert migration.success is True, migration.as_dict()
+    ledger = SQLiteLedger(
+        db_path=db_path,
+        check_same_thread=False,
+    )
     try:
+        memory = build_process_memory_container(
+            ledger=ledger,
+            canonical_db_path=db_path,
+            worth_evaluator=_AlwaysWriteMemoryWorth(),
+            memory_guard=_AllowMemoryGuard(),
+        )
         store = LifeMemoryStore(ledger=ledger)
-        store.write_chat_episode(
-            request_id="req-old-code",
-            session_id="sess-old",
-            person_id="person-old",
-            user_message="纠正测试代号：蓝莲-0531-R1 改成蓝莲-0531-R2。",
-            assistant_reply="记住了。",
-            ts_ms=1_800_000_400_000,
-        )
-        store.write_chat_episode(
-            request_id="req-old-acceptance-noise",
-            session_id="sess-old",
-            person_id="person-old",
-            user_message="最终同会话验收：请列出当前测试代号、海边灯塔到底指什么、app-server预热指标、轻小说推荐格式。",
-            assistant_reply="测试代号蓝莲-0531-R2。",
-            ts_ms=1_800_000_400_050,
-        )
-        store.write_chat_episode(
-            request_id="req-new-code",
-            session_id="sess-new",
-            person_id="person-new",
-            user_message="纠正测试代号：蓝莲-0531-D1 改成蓝莲-0531-D2。",
-            assistant_reply="记住了。",
-            ts_ms=1_800_000_400_100,
-        )
+        for candidate in (
+            ChatMemoryCandidate(
+                request_id="req-old-code",
+                session_id="sess-old",
+                person_id="person-old",
+                user_message="纠正测试代号：蓝莲-0531-R1 改成蓝莲-0531-R2。",
+                assistant_reply="记住了。",
+                ts_ms=1_800_000_400_000,
+            ),
+            ChatMemoryCandidate(
+                request_id="req-old-acceptance-noise",
+                session_id="sess-old",
+                person_id="person-old",
+                user_message="最终同会话验收：请列出当前测试代号、海边灯塔到底指什么、app-server预热指标、轻小说推荐格式。",
+                assistant_reply="测试代号蓝莲-0531-R2。",
+                ts_ms=1_800_000_400_050,
+            ),
+            ChatMemoryCandidate(
+                request_id="req-new-code",
+                session_id="sess-new",
+                person_id="person-new",
+                user_message="纠正测试代号：蓝莲-0531-D1 改成蓝莲-0531-D2。",
+                assistant_reply="记住了。",
+                ts_ms=1_800_000_400_100,
+            ),
+        ):
+            assert memory.service.admit_chat(candidate).status == "COMMITTED"
         LifeMemoryConsolidator(store=store).distill_semantic_memories(
             limit=20,
             max_records=20,
@@ -150,7 +187,9 @@ def test_semantic_memory_recall_prefers_same_person_distilled_correction(tmp_pat
         ledger.close()
 
 
-def test_memory_acceptance_must_include_uses_latest_distilled_test_code() -> None:
+def test_memory_acceptance_must_include_uses_latest_distilled_test_code(
+    surface_runtime_ports_factory,
+) -> None:
     agent_input = SimpleNamespace(
         user_message="跨会话蒸馏最终验收：请列出当前测试代号、海边灯塔含义、app-server预热指标、轻小说推荐格式。",
         trace_stage_meta={
@@ -166,7 +205,10 @@ def test_memory_acceptance_must_include_uses_latest_distilled_test_code() -> Non
         },
     )
 
-    required = _surface_memory_acceptance_must_include(agent_input)
+    required = _surface_memory_acceptance_must_include(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+    )
 
     assert "蓝莲-0531-D4" in required
     assert "蓝莲-0531-D3" not in required

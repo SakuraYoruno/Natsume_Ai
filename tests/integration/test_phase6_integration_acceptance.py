@@ -97,7 +97,7 @@ def test_p6_3_timeout_integration_local_loop_timeout(monkeypatch, intent_graph_c
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
+    from host_brain.composition.process_services import get_graph_runtime
 
     runtime = get_graph_runtime()
     request_id = "p6-3-timeout-001"
@@ -160,7 +160,7 @@ def test_p6_3_retry_exhausted_integration_local_loop_internal_error(monkeypatch,
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
+    from host_brain.composition.process_services import get_graph_runtime
 
     runtime = get_graph_runtime()
     request_id = "p6-3-retry-001"
@@ -209,7 +209,7 @@ def test_p6_3_success_path_integration_subgraph_commit_and_step_trace(monkeypatc
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.app.dependencies import get_graph_runtime
+    from host_brain.composition.process_services import get_graph_runtime
 
     runtime = get_graph_runtime()
     request_id = "p6-3-success-001"
