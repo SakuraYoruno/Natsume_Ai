@@ -12,7 +12,8 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.agent_execution_repository import (
     AGENT_EXECUTION_MIGRATION_ASSET_KEY,
@@ -45,15 +46,32 @@ def _admitted_db(tmp_path: Path) -> tuple[Path, str, str]:
         ts_ms=NOW,
     )
     assert migrated.success is True, migrated.as_dict()
-    work_order = AgentWorkOrder(
+    work_order = WorkOrderV3(
         work_order_id="work-order-agent-result",
         domain="code",
         run_mode="inspect",
         objective="inspect the governed repository",
         input_pack={"input_ref": "input://agent-result/1"},
-        allowed_actions=[],
-        forbidden_actions=["write_files"],
-        acceptance_criteria=["result persisted"],
+        allowed_actions=(),
+        forbidden_actions=("write_files",),
+        acceptance_criteria=("result persisted",),
+        root_work_order_id="work-order-agent-result",
+        task_graph_id="graph-agent-result",
+        task_node_id="node-agent-result",
+        graph_revision=1,
+        budget_policy=BudgetPolicy(
+            scope="work-order:work-order-agent-result",
+            limits=BudgetAmount(
+                token_count=10_000,
+                tool_call_count=10,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=3,
+                model_cost_micros=1_000_000,
+            ),
+        ),
+        business_idempotency_scope="internal-agent:code",
+        operation_fingerprint=_sha256("agent-result-operation"),
     )
     node = TaskNode(
         node_id="node-agent-result",

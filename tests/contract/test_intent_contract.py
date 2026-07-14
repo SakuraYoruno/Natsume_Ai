@@ -131,3 +131,18 @@ class TestIntentContract(unittest.TestCase):
 
         self.assertEqual("APPROVE", result["decision"])
         self.assertIsNone(result["reason_code"])
+
+    def test_t25_exec_intent_accepts_thalamus_semantic_projection(self) -> None:
+        payload = self._fresh_intent(seq=1, intent_id="intent_t25_001", nonce="nonce_t25_001")
+        payload["action"] = "exec_intent"
+        payload["args"] = {
+            "text": "analyze the request",
+            "semantic_intent": {"domain": "general", "intent": "analyze"},
+            "pragmatic_frame": {"response_move": "execute"},
+            "conversation_understanding": {"topic": "runtime acceptance"},
+        }
+
+        result = self.engine.evaluate_intent(payload, current_ms=self.now_ms)
+
+        self.assertEqual("APPROVE", result["decision"])
+        self.assertIsNone(result["reason_code"])

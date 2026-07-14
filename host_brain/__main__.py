@@ -152,6 +152,19 @@ def _resolve_uvicorn_access_log_enabled() -> bool:
     return bool(get_core_settings().uvicorn_access_log_enabled)
 
 
+def _bind_cli_persistence_path(db_path: str) -> None:
+    """Make ``--db-path`` authoritative for startup checks and the ASGI app."""
+
+    resolved = str(db_path or "").strip()
+    if not resolved:
+        raise ValueError("db_path must not be empty")
+    # Uvicorn imports ``host_brain.app.asgi`` after the CLI startup check.  The
+    # ASGI factory rebuilds its application ports from typed settings, so the
+    # CLI choice must be reflected there as well as in the preflight runner.
+    os.environ["NATSUME_AUDIT_DB"] = resolved
+    get_persistence_settings.cache_clear()
+
+
 def run_startup_check(db_path: str) -> bool:
     """运行启动健康检查"""
     logger = logging.getLogger("Natsume.startup")
@@ -216,6 +229,7 @@ def main() -> int:
     """主函数入口"""
     _configure_windows_event_loop_policy()
     args = parse_args()
+    _bind_cli_persistence_path(args.db_path)
 
     # 配置日志
     setup_logging(args.log_level)

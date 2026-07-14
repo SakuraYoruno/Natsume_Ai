@@ -13,7 +13,8 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.host_command_repository import (
     HOST_COMMAND_INGRESS_CONFLICT,
@@ -194,15 +195,32 @@ def _admit_command(
     ingress_claim_ref: str | None = None,
     ingress_audit_ref: str | None = None,
 ) -> tuple[str, str]:
-    work_order = AgentWorkOrder(
+    work_order = WorkOrderV3(
         work_order_id="work-order-scheduler-result",
         domain="organ_ops",
         run_mode="worker",
         objective="execute one governed scheduler occurrence",
         input_pack={"input_ref": occurrence_id},
-        allowed_actions=[],
-        forbidden_actions=["bypass_task_runtime"],
-        acceptance_criteria=["result persisted before commit"],
+        allowed_actions=(),
+        forbidden_actions=("bypass_task_runtime",),
+        acceptance_criteria=("result persisted before commit",),
+        root_work_order_id="work-order-scheduler-result",
+        task_graph_id="graph-scheduler-result",
+        task_node_id="node-scheduler-result",
+        graph_revision=1,
+        budget_policy=BudgetPolicy(
+            scope="work-order:work-order-scheduler-result",
+            limits=BudgetAmount(
+                token_count=10_000,
+                tool_call_count=10,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=3,
+                model_cost_micros=1_000_000,
+            ),
+        ),
+        business_idempotency_scope="scheduler:production",
+        operation_fingerprint=_sha256("scheduler-result-operation"),
     )
     node = TaskNode(
         node_id="node-scheduler-result",

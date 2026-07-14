@@ -90,6 +90,7 @@ class SurfaceReplyInput:
     response_form: str = ""
     suppress_edge_tts: Optional[bool] = None
     suppress_edge_vts: Optional[bool] = None
+    defer_effects_to_task_runtime: bool = False
     reply_depth_policy: str = "normal"  # legacy metadata only; transport source must not alter text generation
     thread_id: Optional[str] = None
     ts_ms: int = 0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import sqlite3
 from pathlib import Path
 
@@ -13,7 +14,12 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetExceededAction,
+    BudgetPolicy,
+)
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.host_command_repository import (
     HOST_COMMAND_CONFLICT,
@@ -59,16 +65,33 @@ def _admission(
     input_sha256: str | None = None,
     ingress_claim_ref: str | None = None,
     ingress_audit_ref: str | None = None,
-) -> tuple[HostCommand, AgentWorkOrder, ExecutorAssignment, TaskGraph]:
-    work_order = AgentWorkOrder(
+) -> tuple[HostCommand, WorkOrderV3, ExecutorAssignment, TaskGraph]:
+    work_order = WorkOrderV3(
         work_order_id="work-order-aw03-1",
         domain="code",
         run_mode="inspect",
         objective="execute the admitted host command",
         input_pack={"input_ref": "host-input://request-aw03-1"},
-        allowed_actions=[],
-        forbidden_actions=["write_files"],
-        acceptance_criteria=["reply produced"],
+        allowed_actions=(),
+        forbidden_actions=("write_files",),
+        acceptance_criteria=("reply produced",),
+        root_work_order_id="work-order-aw03-1",
+        task_graph_id="graph-aw03-1",
+        task_node_id="node-aw03-1",
+        graph_revision=1,
+        budget_policy=BudgetPolicy(
+            scope="work-order:work-order-aw03-1",
+            limits=BudgetAmount(
+                token_count=10_000,
+                tool_call_count=10,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=3,
+                model_cost_micros=1_000_000,
+            ),
+        ),
+        business_idempotency_scope="host-command-aw03",
+        operation_fingerprint=_sha256("aw03-operation"),
     )
     node = TaskNode(
         node_id="node-aw03-1",
@@ -238,7 +261,8 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
     assert created["created"] is True and created["replayed"] is False
     assert replayed["created"] is False and replayed["replayed"] is True
     assert isinstance(replayed["command"], HostCommand)
-    assert isinstance(replayed["work_order"], AgentWorkOrder)
+    assert isinstance(replayed["work_order"], WorkOrderV3)
+    assert replayed["work_order"].root_work_order_id == work_order.work_order_id
     assert isinstance(replayed["assignment"], ExecutorAssignment)
     assert isinstance(replayed["graph"], TaskGraph)
     assert replayed["assignment_id"] == assignment.assignment_id
@@ -252,10 +276,81 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
         events = conn.execute(
             "SELECT aggregate_type, event_type FROM task_runtime_outbox ORDER BY aggregate_type"
         ).fetchall()
+        durable_work_order = json.loads(
+            conn.execute(
+                "SELECT work_order_json FROM host_command_journal WHERE command_id = ?",
+                (command.command_id,),
+            ).fetchone()[0]
+        )
     assert events == [
         ("HOST_COMMAND", "HOST_COMMAND_ADMITTED"),
         ("TASK_GRAPH", "TASK_GRAPH_CREATED"),
     ]
+    assert durable_work_order["schema_version"] == "Natsume.agent.work_order.v3"
+
+
+def test_aw03_work_order_v3_budget_graph_node_and_review_lineage_survives_restart(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    command, legacy, assignment, graph = _admission()
+    work_order = WorkOrderV3(
+        work_order_id=legacy.work_order_id,
+        domain=legacy.domain,
+        run_mode=legacy.run_mode,
+        objective=legacy.objective,
+        workspace=dict(legacy.workspace),
+        input_pack=dict(legacy.input_pack),
+        allowed_actions=tuple(legacy.allowed_actions),
+        forbidden_actions=tuple(legacy.forbidden_actions),
+        acceptance_criteria=tuple(legacy.acceptance_criteria),
+        verification_plan=dict(legacy.verification_plan),
+        approval_policy=dict(legacy.approval_policy),
+        review_policy={"review_required": True, "mode": "governed"},
+        metadata={"lineage": "gr-03a"},
+        root_work_order_id=legacy.work_order_id,
+        task_graph_id=graph.graph_id,
+        task_node_id=graph.nodes[0].node_id,
+        graph_revision=graph.revision,
+        attempt=2,
+        capability_requirements=("host_chat", "artifact_write"),
+        risk_level=3,
+        input_refs=("host-input://request-aw03-1",),
+        output_contract={"type": "host_reply", "version": 3},
+        budget_policy=BudgetPolicy(
+            scope="work-order-aw03-1",
+            limits=BudgetAmount(token_count=4_000, tool_call_count=8, time_ms=60_000),
+            on_exceeded=BudgetExceededAction.REVIEW,
+            metadata={"owner": "host-command"},
+        ),
+        business_idempotency_scope=command.business_scope,
+        operation_fingerprint=command.operation_fingerprint,
+        status_version=7,
+        approval_ref="approval://aw03/1",
+        review_ref="review://aw03/1",
+    )
+    work_order.validate()
+
+    admitted = repository.admit(command, work_order, assignment, graph)
+    restarted = HostCommandRepository(db_path, clock=lambda: NOW).get(command.command_id)
+
+    assert restarted is not None
+    assert isinstance(admitted["work_order"], WorkOrderV3)
+    assert isinstance(restarted["work_order"], WorkOrderV3)
+    assert restarted["work_order"].to_dict() == work_order.to_dict()
+    with sqlite3.connect(str(db_path)) as conn:
+        durable = json.loads(
+            conn.execute(
+                "SELECT work_order_json FROM host_command_journal WHERE command_id = ?",
+                (command.command_id,),
+            ).fetchone()[0]
+        )
+    assert durable["schema_version"] == "Natsume.agent.work_order.v3"
+    assert durable["budget_policy"] == work_order.budget_policy.to_dict()
+    assert durable["task_graph_id"] == graph.graph_id
+    assert durable["task_node_id"] == graph.nodes[0].node_id
+    assert durable["review_ref"] == "review://aw03/1"
 
 
 def test_aw03_replay_payload_drift_fails_without_mutation(tmp_path: Path) -> None:

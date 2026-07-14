@@ -9,6 +9,28 @@ from host_brain.app.handlers.intent_agent_handler import (
 )
 
 
+class _Gateway:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def complete(self, messages):  # noqa: ANN001, ANN201
+        self.messages.append(messages)
+        return {
+            "content": "2+2 等于 4。",
+            "model_attempt": {
+                "request_id": "delegate-parent:subagent-model:1",
+                "success": True,
+                "budget_measurement": {
+                    "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                    "measurement_ref": "model-budget://delegate-parent",
+                    "attempt_count": 1,
+                    "retry_count": 0,
+                    "token_count": 12,
+                },
+            },
+        }
+
+
 def _planned_payload(*, tool_id: str) -> dict[str, object]:
     return {
         "request_id": "intent-001",
@@ -65,3 +87,23 @@ def test_high_safety_risk_is_preserved_for_governed_execution() -> None:
     assert "SAFETY_RISK:HIGH" in artifact["risk_flags"]
     assert artifact["confidence"] == 0.2
     assert result["intent_execution_handoff"]["request_material"]["trusted_authority"] is False
+
+
+def test_governed_direct_delegate_uses_bound_model_gateway() -> None:
+    gateway = _Gateway()
+
+    result = intent_agent_handler(
+        {"request_id": "delegate-parent", "user_input": "2+2 等于多少？"},
+        {
+            "request_id": "delegate-parent",
+            "source": "executive_router_dispatch",
+            "gateway": gateway,
+        },
+    )
+
+    assert gateway.messages[0][-1]["content"] == "2+2 等于多少？"
+    assert result["agent_output"]["text"] == "2+2 等于 4。"
+    assert result["intent_agent_trace"]["mode"] == "model_backed_governed_execution_handoff"
+    assert result["intent_agent_trace"]["model_attempt"]["request_id"].startswith(
+        "delegate-parent:"
+    )

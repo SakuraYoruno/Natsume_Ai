@@ -79,6 +79,12 @@ async def _executive_runtime_core_impl(
 ) -> AsyncGenerator[str, None]:
     del metrics
 
+    declared_route = _normalize_text(dict(intent_draft or {}).get("route"), lower=True)
+    if declared_route in {"chat", "skill", "delegate", "plan"}:
+        raise PermissionError(
+            "CANONICAL_ROUTE_REQUIRES_GOVERNED_TASK_RUNTIME"
+        )
+
     skill_registry = ports.get_skill_registry()
     llm_route_used = bool(
         dict(intent_draft or {}).get("llm_route_used")
@@ -312,15 +318,18 @@ async def _executive_runtime_core_impl(
             "reason_code": "BIO_OPS_RUNTIME_TRACE_FAILED",
             "detail": str(_bio_ops_exc)[:200],
         }
-    runtime_task_registry = ports.get_runtime_task_registry()
-    runtime_task = runtime_task_registry.create_task(
+    # This registry is intentionally confined to the legacy Executive
+    # compatibility runtime. Canonical routes are admitted by Cortex directly
+    # into the durable Governed Task Runtime and cannot reach this function.
+    legacy_task_registry = ports.get_legacy_runtime_task_registry()
+    runtime_task = legacy_task_registry.create_task(
         task_kind=route.route_type,
         target_id=route.target_id,
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
         user_message=sanitized_message,
-        source="executive_runtime",
+        source="legacy_executive_runtime",
         detail=route.reason_code,
         progress_message=f"route={route.route_type}",
         meta={
@@ -362,7 +371,7 @@ async def _executive_runtime_core_impl(
                 target_id=_normalize_text(runtime_capability_payload.get("executor_target")) or "intent_agent",
                 reason_code="capability_gap:runtime_synthesized",
             )
-            runtime_task_registry.update_task(
+            legacy_task_registry.update_task(
                 runtime_task.task_id,
                 task_kind=route.route_type,
                 target_id=route.target_id,
@@ -433,7 +442,7 @@ async def _executive_runtime_core_impl(
             governor_result=governor_result,
         ):
             yield event
-        runtime_task_registry.mark_completed(
+        legacy_task_registry.mark_completed(
             runtime_task.task_id,
             detail="chat route completed",
             result_text="chat stream completed",
@@ -442,7 +451,7 @@ async def _executive_runtime_core_impl(
         return
 
     if plan is not None:
-        runtime_task_registry.update_task(
+        legacy_task_registry.update_task(
             runtime_task.task_id,
             progress_message=f"executing plan {plan.plan_id}",
             meta={
@@ -494,14 +503,14 @@ async def _executive_runtime_core_impl(
             "bio_ops_runtime_trace": _bio_ops_runtime_trace,
         }
         if plan_outcome.success:
-            runtime_task_registry.mark_completed(
+            legacy_task_registry.mark_completed(
                 runtime_task.task_id,
                 detail="plan completed",
                 result_text=plan_outcome.result_text,
                 result_code="PLAN_COMPLETED",
             )
         else:
-            runtime_task_registry.mark_failed(
+            legacy_task_registry.mark_failed(
                 runtime_task.task_id,
                 detail="plan failed",
                 error=plan_outcome.error_text,
@@ -611,7 +620,7 @@ async def _executive_runtime_core_impl(
             payload=outcome.payload,
         )
         if recovery_plan:
-            runtime_task_registry.mark_recovering(
+            legacy_task_registry.mark_recovering(
                 runtime_task.task_id,
                 detail=recovery_plan["reason_code"],
                 recovery_plan=recovery_plan,
@@ -630,7 +639,7 @@ async def _executive_runtime_core_impl(
                         "route_reason": recovery_plan["reason_code"],
                     },
                 )
-                runtime_task_registry.attach_recovery_result(
+                legacy_task_registry.attach_recovery_result(
                     runtime_task.task_id,
                     recovery_status="SUCCESS" if recovered.success else "FAILED",
                     recovery_result_text=recovered.result_text,
@@ -640,14 +649,14 @@ async def _executive_runtime_core_impl(
                     outcome = recovered
 
     if outcome.success:
-        runtime_task_registry.mark_completed(
+        legacy_task_registry.mark_completed(
             runtime_task.task_id,
             detail=f"{route.route_type} completed",
             result_text=outcome.result_text,
             result_code="EXECUTED",
         )
     else:
-        runtime_task_registry.mark_failed(
+        legacy_task_registry.mark_failed(
             runtime_task.task_id,
             detail=f"{route.route_type} failed",
             error=outcome.error_text,

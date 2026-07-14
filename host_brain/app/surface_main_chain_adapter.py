@@ -418,6 +418,7 @@ async def surface_main_chain_sse_generator(
             "emotion_confidence": float(result.runtime.emotion_confidence or 0.0),
         },
     )
+    acceptance_effect_intents: list[dict[str, Any]] = []
     if envelope.persistable:
         try:
             foreground_receipt = await asyncio.to_thread(
@@ -479,6 +480,13 @@ async def surface_main_chain_sse_generator(
             "outbox_count": foreground_receipt.get("outbox_count"),
             "replayed": bool(foreground_receipt.get("replayed")),
         }
+        raw_effect_intents = foreground_receipt.get("effect_intents")
+        if isinstance(raw_effect_intents, list):
+            acceptance_effect_intents = [
+                dict(item)
+                for item in raw_effect_intents
+                if isinstance(item, Mapping)
+            ]
     else:
         trace["life_causality"] = {
             "status": "SKIPPED",
@@ -496,6 +504,7 @@ async def surface_main_chain_sse_generator(
             "narrative": narrative if envelope.sendable else "",
             "request_id": request_id,
             "reply_envelope": envelope.as_dict(),
+            "acceptance_effect_intents": acceptance_effect_intents,
             "audit_refs": {
                 "request_id": request_id,
                 "path": "surface_reply:surface_main_chain",

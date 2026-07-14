@@ -1,3 +1,10 @@
+"""Process-local task snapshots for pre-Governed compatibility routes only.
+
+This module is deliberately not a task authority and must not be used by the
+canonical chat/skill/delegate/plan path. Canonical lifecycle and progress are
+owned by DurableTaskStore and DurableTaskStatusProjection.
+"""
+
 from __future__ import annotations
 
 import threading
@@ -23,7 +30,7 @@ class RuntimeTaskSnapshot:
     session_id: str
     person_id: str
     user_message: str
-    source: str = "executive_runtime"
+    source: str = "legacy_executive_runtime"
     status: str = STATUS_PENDING
     detail: str = ""
     progress_message: str = ""
@@ -68,7 +75,9 @@ class RuntimeTaskSnapshot:
         }
 
 
-class RuntimeTaskRegistry:
+class LegacyRuntimeTaskRegistry:
+    """Non-durable compatibility projection owned by legacy Executive only."""
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._tasks: dict[str, RuntimeTaskSnapshot] = {}
@@ -83,7 +92,7 @@ class RuntimeTaskRegistry:
         session_id: str,
         person_id: str,
         user_message: str,
-        source: str = "executive_runtime",
+        source: str = "legacy_executive_runtime",
         detail: str = "",
         progress_message: str = "",
         meta: dict[str, Any] | None = None,
@@ -97,7 +106,10 @@ class RuntimeTaskRegistry:
             session_id=str(session_id or "").strip(),
             person_id=str(person_id or "").strip(),
             user_message=str(user_message or "").strip(),
-            source=str(source or "executive_runtime").strip() or "executive_runtime",
+            source=(
+                str(source or "legacy_executive_runtime").strip()
+                or "legacy_executive_runtime"
+            ),
             detail=str(detail or "").strip(),
             progress_message=str(progress_message or detail or "").strip(),
             meta=dict(meta or {}),
@@ -274,3 +286,8 @@ class RuntimeTaskRegistry:
             "recovery_result_text": task.recovery_result_text,
             "child_tasks": [child.as_dict() for child in child_tasks],
         }
+
+
+# Import compatibility for old extensions and focused unit tests. New
+# production composition uses the explicit legacy name above.
+RuntimeTaskRegistry = LegacyRuntimeTaskRegistry

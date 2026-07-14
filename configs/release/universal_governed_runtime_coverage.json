@@ -1,0 +1,146 @@
+{
+  "schema_version": "natsume.universal-governed-runtime-coverage.v1",
+  "baseline_commit": "31114f7ba9985e99fc82187aeb99b939bbf426ab",
+  "declared_program_status": "INCOMPLETE",
+  "routes": {
+    "chat": {
+      "status": "COMPLETE",
+      "evidence_refs": [
+        "host_brain/agent_runtime/cortex_runtime.py",
+        "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_route_executors.py",
+        "tests/integration/test_gr05_universal_host_runtime.py",
+        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PASS",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PASS"
+      }
+    },
+    "skill": {
+      "status": "COMPLETE",
+      "evidence_refs": [
+        "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_skill_execution_ports.py",
+        "tests/integration/test_aw0203_governed_host_cutover.py",
+        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PASS",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PASS"
+      }
+    },
+    "delegate": {
+      "status": "COMPLETE",
+      "evidence_refs": [
+        "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_route_executors.py",
+        "tests/integration/test_gr05_universal_host_runtime.py",
+        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PASS",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PASS"
+      }
+    },
+    "plan": {
+      "status": "COMPLETE",
+      "evidence_refs": [
+        "host_brain/orchestration/planning_execution.py",
+        "host_brain/orchestration/planning_recovery.py",
+        "host_brain/app/governed_task_adapter.py",
+        "tests/integration/test_gr04_planning_replan_sqlite.py",
+        "tests/integration/test_gr05_universal_host_runtime.py",
+        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PASS",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PASS"
+      }
+    }
+  },
+  "architecture_controls": {
+    "generic_three_layer_planning_search": {
+      "status": "PASS",
+      "evidence_refs": [
+        "host_brain/planning_search/service.py",
+        "host_brain/pentest/agent/virtual_planning_world.py",
+        "host_brain/pentest/agent/planning_search_adapter.py",
+        "docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json"
+      ]
+    },
+    "native_multi_node_task_graph": {
+      "status": "PASS",
+      "evidence_refs": [
+        "host_brain/orchestration/governed_command.py",
+        "host_brain/task_runtime/coordinator.py",
+        "tests/integration/test_gr03a_governed_durable_dag.py"
+      ]
+    },
+    "revision_plus_one_replan": {
+      "status": "PASS",
+      "evidence_refs": [
+        "host_brain/orchestration/failure_replan_intent.py",
+        "host_brain/orchestration/planning_recovery.py",
+        "host_brain/app/governed_task_adapter.py",
+        "tests/integration/test_gr04_planning_replan_sqlite.py"
+      ]
+    },
+    "single_durable_task_truth": {
+      "status": "PASS",
+      "evidence_refs": [
+        "host_brain/persistence/durable_task_status_projection.py",
+        "host_brain/input_runtime/progress.py",
+        "tests/contract/test_gr05_runtime_task_truth_boundary.py"
+      ]
+    },
+    "conversation_acceptance_outbox": {
+      "status": "PASS",
+      "evidence_refs": [
+        "host_brain/task_runtime/acceptance_effects.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "host_brain/app/acceptance_effect_handlers.py",
+        "tests/integration/test_gr06_acceptance_effect_dispatcher.py"
+      ]
+    },
+    "composition_without_global_service_locator": {
+      "status": "MISSING",
+      "evidence_refs": [
+        "host_brain/composition/process_service_container.py",
+        "host_brain/composition/process_services.py"
+      ]
+    }
+  }
+}

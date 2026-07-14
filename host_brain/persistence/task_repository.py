@@ -23,7 +23,7 @@ import math
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable, Iterator, Mapping, Protocol
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 import uuid
 
 try:
@@ -110,10 +110,52 @@ _TASK_RUNTIME_REQUIRED_COLUMNS = {
         }
     ),
 }
+_BUDGET_USAGE_REQUIRED_COLUMNS = frozenset(
+    {
+        "budget_id", "usage_id", "graph_id", "graph_revision", "node_id",
+        "attempt_id", "charge_kind", "delta_json", "delta_digest", "accepted",
+        "reason_code", "exceeded_dimensions_json", "reservation_version_before",
+        "reservation_version_after", "outbox_id", "created_ts_ms",
+    }
+)
+_ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS = frozenset(
+    {
+        "effect_id",
+        "graph_id",
+        "graph_revision",
+        "node_id",
+        "attempt_id",
+        "commit_scope",
+        "effect_type",
+        "payload_ref",
+        "payload_json",
+        "payload_sha256",
+        "idempotency_key",
+        "status",
+        "available_ts_ms",
+        "lease_owner",
+        "lease_expires_ts_ms",
+        "fencing_token",
+        "attempt_count",
+        "status_version",
+        "receipt_ref",
+        "reason_code",
+        "last_error",
+        "created_ts_ms",
+        "updated_ts_ms",
+        "committed_ts_ms",
+        "failed_ts_ms",
+    }
+)
 _DURABLE_REFERENCE_PATTERN = re.compile(
     r"^[a-z][a-z0-9+.-]{1,31}://"
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
 )
+_SHA256_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+_ACCEPTANCE_EFFECT_TYPE_PATTERN = re.compile(
+    r"^[a-z][a-z0-9_]{0,62}(?:\.[a-z][a-z0-9_]{0,62})+$"
+)
+_MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES = 262_144
 _MAX_OUTBOX_EVIDENCE_REFS = 32
 _LEGACY_RECEIPT_REF_PATTERN = re.compile(r"^legacy-receipt://0052/rowid--?[0-9]+$")
 
@@ -138,6 +180,24 @@ def build_outbox_payload_ref(
             "outbox aggregate identity and non-negative version are required",
         )
     return f"taskstore://event/{aggregate_kind}/{aggregate_ref}/{version}"
+
+
+def build_acceptance_effect_payload_digest(payload: Mapping[str, Any]) -> str:
+    """Return the digest TaskStore expects for a canonical JSON effect payload."""
+
+    if not isinstance(payload, Mapping):
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "acceptance effect payload must be a JSON object",
+        )
+    canonical = _dumps(dict(payload))
+    payload_size = len(canonical.encode("utf-8"))
+    if payload_size < 2 or payload_size > _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "acceptance effect payload exceeds the canonical size limit",
+        )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class TaskStoreError(RuntimeError):
@@ -182,6 +242,60 @@ class IdempotencyRecoveryAction(StrEnum):
     COMMIT = "COMMIT"
     RELEASE = "RELEASE"
     REACQUIRE = "REACQUIRE"
+
+
+class AcceptanceEffectCommitScope(StrEnum):
+    NODE = "NODE"
+    GRAPH = "GRAPH"
+
+
+class AcceptanceEffectStatus(StrEnum):
+    PENDING = "PENDING"
+    CLAIMED = "CLAIMED"
+    COMMITTED = "COMMITTED"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceEffectIntentSpec:
+    """Immutable input contract for one acceptance-bound side effect.
+
+    The payload itself remains outside TaskStore.  This record freezes only its
+    durable identity, digest, execution binding, and dispatch idempotency key.
+    """
+
+    effect_id: str
+    graph_id: str
+    graph_revision: int
+    node_id: str
+    attempt_id: str
+    commit_scope: AcceptanceEffectCommitScope | str
+    effect_type: str
+    payload_ref: str
+    payload: Mapping[str, Any]
+    payload_sha256: str
+    idempotency_key: str
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AcceptanceEffectIntentSpec":
+        if not isinstance(value, Mapping):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "acceptance effect intent must be a mapping or AcceptanceEffectIntentSpec",
+            )
+        return cls(
+            effect_id=value.get("effect_id"),
+            graph_id=value.get("graph_id"),
+            graph_revision=value.get("graph_revision"),
+            node_id=value.get("node_id"),
+            attempt_id=value.get("attempt_id"),
+            commit_scope=value.get("commit_scope"),
+            effect_type=value.get("effect_type"),
+            payload_ref=value.get("payload_ref"),
+            payload=value.get("payload"),
+            payload_sha256=value.get("payload_sha256"),
+            idempotency_key=value.get("idempotency_key"),
+        )
 
 
 class ReconciliationProofVerifier(Protocol):
@@ -385,6 +499,9 @@ class BudgetConsumptionResult:
     reason_code: str | None
     reservation: dict[str, Any]
     exceeded_dimensions: tuple[str, ...]
+    usage_id: str | None = None
+    replayed: bool = False
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,6 +722,46 @@ class DurableTaskStore:
                 "task runtime recovery migration 0054 is not applied",
             )
 
+    def assert_budget_usage_ready(self) -> None:
+        """Require the forward budget-usage journal before governed execution."""
+        conn = self._connect()
+        try:
+            columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_budget_usage)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        missing = sorted(_BUDGET_USAGE_REQUIRED_COLUMNS - columns)
+        if missing:
+            raise TaskStoreError(
+                TASK_STORE_SCHEMA_NOT_READY,
+                f"task runtime budget usage migration 0085 is not applied: {missing}",
+            )
+
+    def assert_acceptance_effect_intent_ready(self) -> None:
+        """Require the GR-06 Acceptance Effect Intent queue schema."""
+
+        conn = self._connect()
+        try:
+            columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_acceptance_effect_intent)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        missing = sorted(_ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS - columns)
+        if missing:
+            raise TaskStoreError(
+                TASK_STORE_SCHEMA_NOT_READY,
+                "task runtime acceptance effect migration 0087 is not applied: "
+                f"{missing}",
+            )
+
     # -- Graph and node persistence -------------------------------------------------
 
     def create_graph(
@@ -823,11 +980,28 @@ class DurableTaskStore:
                    ORDER BY node_id, budget_id""",
                 (str(graph_id), int(revision)),
             ).fetchall()
+            usage_ready = conn.execute(
+                """SELECT 1 FROM sqlite_master
+                   WHERE type = 'table' AND name = 'task_runtime_budget_usage'"""
+            ).fetchone()
+            budget_usage_rows = (
+                conn.execute(
+                    """SELECT usage.* FROM task_runtime_budget_usage AS usage
+                       JOIN task_runtime_budget_reservation AS budget
+                         ON budget.budget_id = usage.budget_id
+                       WHERE budget.graph_id = ? AND budget.graph_revision = ?
+                       ORDER BY usage.created_ts_ms, usage.budget_id, usage.usage_id""",
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+                if usage_ready is not None
+                else []
+            )
             snapshot = {
                 "graph_record": _graph_record(graph_row, node_rows),
                 "attempts": [dict(row) for row in attempt_rows],
                 "active_leases": [dict(row) for row in lease_rows],
                 "budgets": [self._budget_record(row) for row in budget_rows],
+                "budget_usage": [_budget_usage_record(row) for row in budget_usage_rows],
             }
             conn.commit()
             return snapshot
@@ -848,45 +1022,15 @@ class DurableTaskStore:
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
-            row = self._require_graph(conn, graph_id, revision)
-            self._require_version(row, expected_version, subject=f"TaskGraph {graph_id}@{revision}")
-            target = validate_task_graph_transition(str(row["status"]), target_status)
-            node_rows = conn.execute(
-                """
-                SELECT * FROM task_runtime_node
-                WHERE graph_id = ? AND graph_revision = ?
-                ORDER BY node_id
-                """,
-                (str(graph_id), int(revision)),
-            ).fetchall()
-            graph_payload = _graph_record(row, node_rows)["graph"]
-            graph_payload["status"] = target.value
-            cursor = conn.execute(
-                """
-                UPDATE task_runtime_graph
-                SET status = ?, status_version = status_version + 1,
-                    graph_json = ?, updated_ts_ms = ?
-                WHERE graph_id = ? AND revision = ? AND status_version = ?
-                """,
-                (
-                    target.value,
-                    _dumps(graph_payload),
-                    ts_ms,
-                    str(graph_id),
-                    int(revision),
-                    int(expected_version),
-                ),
-            )
-            self._require_cas(cursor, subject=f"TaskGraph {graph_id}@{revision}")
-            self._insert_outbox(
+            return self._transition_graph_in_transaction(
                 conn,
-                outbox,
+                graph_id=graph_id,
+                revision=revision,
+                expected_version=expected_version,
+                target_status=target_status,
+                outbox=outbox,
                 ts_ms=ts_ms,
-                expected_aggregate=("TASK_GRAPH", str(graph_id), int(expected_version) + 1),
-                expected_event_type=f"TASK_GRAPH_{target.value}",
-                expected_attempt_id=None,
             )
-        return self.get_graph(graph_id, revision)
 
     def transition_node(
         self,
@@ -902,78 +1046,173 @@ class DurableTaskStore:
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
-            row = self._require_node(conn, graph_id, graph_revision, node_id)
-            self._require_version(row, expected_version, subject=f"TaskNode {node_id}")
-            target = validate_task_node_transition(str(row["status"]), target_status)
-            if target in {TaskNodeStatus.CANCEL_REQUESTED, TaskNodeStatus.CANCELLED}:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "node cancellation must use request_cancel_node for atomic fencing",
-                )
-            node_payload = _validated_node_payload(row)
-            if target in {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}:
-                graph_row = self._require_graph(conn, graph_id, graph_revision)
-                try:
-                    VerificationGate.validate_node_transition(
-                        verification_result,
-                        target_status=target.value,
-                        graph_id=str(graph_id),
-                        node_id=str(node_id),
-                        root_work_order_id=str(graph_row["root_work_order_id"]),
-                        outbox_evidence_refs=outbox.evidence_refs,
-                    )
-                except ContractViolation as exc:
-                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
-            if target is TaskNodeStatus.ACCEPTED:
-                graph_row = self._require_graph(conn, graph_id, graph_revision)
-                try:
-                    AcceptanceGate.validate_node_transition(
-                        acceptance_judgement,
-                        target_status=target.value,
-                        graph_id=str(graph_id),
-                        node_id=str(node_id),
-                        root_work_order_id=str(graph_row["root_work_order_id"]),
-                        node_acceptance_criteria=tuple(node_payload.get("acceptance_criteria") or ()),
-                        outbox_evidence_refs=outbox.evidence_refs,
-                    )
-                except ContractViolation as exc:
-                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
-            node_payload["status"] = target.value
-            node_payload["status_version"] = int(expected_version) + 1
-            cancel_ts = ts_ms if target is TaskNodeStatus.CANCEL_REQUESTED else row["cancellation_requested_ts_ms"]
-            cursor = conn.execute(
-                """
-                UPDATE task_runtime_node
-                SET status = ?, status_version = status_version + 1, node_json = ?,
-                    cancellation_requested_ts_ms = ?, updated_ts_ms = ?
-                WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
-                  AND status_version = ?
-                """,
-                (
-                    target.value,
-                    _dumps(node_payload),
-                    cancel_ts,
-                    ts_ms,
-                    str(graph_id),
-                    int(graph_revision),
-                    str(node_id),
-                    int(expected_version),
-                ),
-            )
-            self._require_cas(cursor, subject=f"TaskNode {node_id}")
-            self._insert_outbox(
+            return self._transition_node_in_transaction(
                 conn,
-                outbox,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+                node_id=node_id,
+                expected_version=expected_version,
+                target_status=target_status,
+                outbox=outbox,
+                verification_result=verification_result,
+                acceptance_judgement=acceptance_judgement,
                 ts_ms=ts_ms,
-                expected_aggregate=(
-                    "TASK_NODE",
-                    f"{graph_id}@{int(graph_revision)}/{node_id}",
-                    int(expected_version) + 1,
-                ),
-                expected_event_type=f"TASK_NODE_{target.value}",
-                expected_attempt_id=None,
             )
-        return self.get_node(graph_id, graph_revision, node_id)
+
+    def _transition_graph_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        revision: int,
+        expected_version: int,
+        target_status: TaskGraphStatus | str,
+        outbox: OutboxMessage,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        row = self._require_graph(conn, graph_id, revision)
+        self._require_version(
+            row,
+            expected_version,
+            subject=f"TaskGraph {graph_id}@{revision}",
+        )
+        target = validate_task_graph_transition(str(row["status"]), target_status)
+        node_rows = conn.execute(
+            """
+            SELECT * FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY node_id
+            """,
+            (str(graph_id), int(revision)),
+        ).fetchall()
+        graph_payload = _graph_record(row, node_rows)["graph"]
+        graph_payload["status"] = target.value
+        cursor = conn.execute(
+            """
+            UPDATE task_runtime_graph
+            SET status = ?, status_version = status_version + 1,
+                graph_json = ?, updated_ts_ms = ?
+            WHERE graph_id = ? AND revision = ? AND status_version = ?
+            """,
+            (
+                target.value,
+                _dumps(graph_payload),
+                int(ts_ms),
+                str(graph_id),
+                int(revision),
+                int(expected_version),
+            ),
+        )
+        self._require_cas(cursor, subject=f"TaskGraph {graph_id}@{revision}")
+        self._insert_outbox(
+            conn,
+            outbox,
+            ts_ms=int(ts_ms),
+            expected_aggregate=(
+                "TASK_GRAPH",
+                str(graph_id),
+                int(expected_version) + 1,
+            ),
+            expected_event_type=f"TASK_GRAPH_{target.value}",
+            expected_attempt_id=None,
+        )
+        updated_graph = self._require_graph(conn, graph_id, revision)
+        return _graph_record(updated_graph, node_rows)
+
+    def _transition_node_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        expected_version: int,
+        target_status: TaskNodeStatus | str,
+        outbox: OutboxMessage,
+        verification_result: VerificationResult | Mapping[str, Any] | None,
+        acceptance_judgement: AcceptanceJudgement | Mapping[str, Any] | None,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        row = self._require_node(conn, graph_id, graph_revision, node_id)
+        self._require_version(row, expected_version, subject=f"TaskNode {node_id}")
+        target = validate_task_node_transition(str(row["status"]), target_status)
+        if target in {TaskNodeStatus.CANCEL_REQUESTED, TaskNodeStatus.CANCELLED}:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "node cancellation must use request_cancel_node for atomic fencing",
+            )
+        node_payload = _validated_node_payload(row)
+        if target in {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}:
+            graph_row = self._require_graph(conn, graph_id, graph_revision)
+            try:
+                VerificationGate.validate_node_transition(
+                    verification_result,
+                    target_status=target.value,
+                    graph_id=str(graph_id),
+                    node_id=str(node_id),
+                    root_work_order_id=str(graph_row["root_work_order_id"]),
+                    outbox_evidence_refs=outbox.evidence_refs,
+                )
+            except ContractViolation as exc:
+                raise TaskStoreError(exc.reason_code, exc.detail) from exc
+        if target is TaskNodeStatus.ACCEPTED:
+            graph_row = self._require_graph(conn, graph_id, graph_revision)
+            try:
+                AcceptanceGate.validate_node_transition(
+                    acceptance_judgement,
+                    target_status=target.value,
+                    graph_id=str(graph_id),
+                    node_id=str(node_id),
+                    root_work_order_id=str(graph_row["root_work_order_id"]),
+                    node_acceptance_criteria=tuple(
+                        node_payload.get("acceptance_criteria") or ()
+                    ),
+                    outbox_evidence_refs=outbox.evidence_refs,
+                )
+            except ContractViolation as exc:
+                raise TaskStoreError(exc.reason_code, exc.detail) from exc
+        node_payload["status"] = target.value
+        node_payload["status_version"] = int(expected_version) + 1
+        cancel_ts = (
+            int(ts_ms)
+            if target is TaskNodeStatus.CANCEL_REQUESTED
+            else row["cancellation_requested_ts_ms"]
+        )
+        cursor = conn.execute(
+            """
+            UPDATE task_runtime_node
+            SET status = ?, status_version = status_version + 1, node_json = ?,
+                cancellation_requested_ts_ms = ?, updated_ts_ms = ?
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+              AND status_version = ?
+            """,
+            (
+                target.value,
+                _dumps(node_payload),
+                cancel_ts,
+                int(ts_ms),
+                str(graph_id),
+                int(graph_revision),
+                str(node_id),
+                int(expected_version),
+            ),
+        )
+        self._require_cas(cursor, subject=f"TaskNode {node_id}")
+        self._insert_outbox(
+            conn,
+            outbox,
+            ts_ms=int(ts_ms),
+            expected_aggregate=(
+                "TASK_NODE",
+                f"{graph_id}@{int(graph_revision)}/{node_id}",
+                int(expected_version) + 1,
+            ),
+            expected_event_type=f"TASK_NODE_{target.value}",
+            expected_attempt_id=None,
+        )
+        return _node_record(
+            self._require_node(conn, graph_id, graph_revision, node_id)
+        )
 
     def request_cancel_node(
         self,
@@ -1268,6 +1507,37 @@ class DurableTaskStore:
                     TASK_STORE_INVALID,
                     f"attempt requires READY node, got {node['status']}",
                 )
+            node_payload = _validated_node_payload(node)
+            dependencies = tuple(str(item) for item in node_payload.get("dependencies") or ())
+            if dependencies:
+                dependency_rows = conn.execute(
+                    """
+                    SELECT node_id, status
+                    FROM task_runtime_node
+                    WHERE graph_id = ? AND graph_revision = ?
+                    """,
+                    (str(graph_id), int(graph_revision)),
+                ).fetchall()
+                dependency_statuses = {
+                    str(row["node_id"]): str(row["status"])
+                    for row in dependency_rows
+                }
+                missing = sorted(set(dependencies) - set(dependency_statuses))
+                if missing:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "attempt dependency rows are missing: " + ",".join(missing),
+                    )
+                unaccepted = sorted(
+                    dependency
+                    for dependency in dependencies
+                    if dependency_statuses[dependency] != TaskNodeStatus.ACCEPTED.value
+                )
+                if unaccepted:
+                    raise TaskStoreError(
+                        TASK_STORE_INVALID,
+                        "attempt dependencies are not ACCEPTED: " + ",".join(unaccepted),
+                    )
             try:
                 conn.execute(
                     """
@@ -2920,6 +3190,236 @@ class DurableTaskStore:
                 exceeded_dimensions=exceeded_dimensions,
             )
 
+    def consume_budget_once(
+        self,
+        budget_id: str,
+        *,
+        usage_id: str,
+        charge_kind: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        delta: BudgetAmount,
+        expected_version: int,
+        outbox: OutboxMessage,
+    ) -> BudgetConsumptionResult:
+        """Atomically journal and apply one stable budget usage charge.
+
+        An exact ``(budget_id, usage_id)`` replay returns the original outcome
+        without changing the reservation or inserting another outbox row.  Any
+        reuse with different binding material fails closed.
+        """
+
+        budget_ref = str(budget_id or "").strip()
+        usage_ref = str(usage_id or "").strip()
+        kind = str(charge_kind or "").strip().upper()
+        graph_ref = str(graph_id or "").strip()
+        node_ref = str(node_id or "").strip()
+        attempt_ref = str(attempt_id or "").strip()
+        if (
+            not budget_ref
+            or not _DURABLE_REFERENCE_PATTERN.fullmatch(usage_ref)
+            or not kind
+            or len(kind) > 64
+            or not graph_ref
+            or not node_ref
+            or not attempt_ref
+            or isinstance(graph_revision, bool)
+            or not isinstance(graph_revision, int)
+            or graph_revision < 1
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "budget usage requires a durable usage_id and complete graph/attempt binding",
+            )
+        if not isinstance(delta, BudgetAmount):
+            raise TaskStoreError(TASK_STORE_INVALID, "delta must be a BudgetAmount")
+        normalized_delta = BudgetAmount.from_mapping(delta.to_dict())
+        delta_json = _dumps(normalized_delta.to_dict())
+        delta_digest = "sha256:" + hashlib.sha256(delta_json.encode("utf-8")).hexdigest()
+        ts_ms = self._now()
+
+        with self._transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT * FROM task_runtime_budget_usage
+                WHERE budget_id = ? AND usage_id = ?
+                """,
+                (budget_ref, usage_ref),
+            ).fetchone()
+            if existing is not None:
+                drift = (
+                    str(existing["charge_kind"]) != kind
+                    or str(existing["graph_id"]) != graph_ref
+                    or int(existing["graph_revision"]) != graph_revision
+                    or str(existing["node_id"]) != node_ref
+                    or str(existing["attempt_id"]) != attempt_ref
+                    or str(existing["delta_digest"]) != delta_digest
+                    or str(existing["delta_json"]) != delta_json
+                )
+                if drift:
+                    raise TaskStoreError(
+                        TASK_STORE_OUTBOX_CONFLICT,
+                        f"budget usage replay drift: {usage_ref}",
+                    )
+                reservation = self._budget_record(self._require_budget(conn, budget_ref))
+                dimensions = tuple(
+                    str(item)
+                    for item in _loads_list(
+                        existing["exceeded_dimensions_json"],
+                        field_name="budget_usage.exceeded_dimensions_json",
+                    )
+                )
+                usage = _budget_usage_record(existing)
+                return BudgetConsumptionResult(
+                    accepted=bool(existing["accepted"]),
+                    reason_code=(str(existing["reason_code"]) if existing["reason_code"] else None),
+                    reservation=reservation,
+                    exceeded_dimensions=dimensions,
+                    usage_id=usage_ref,
+                    replayed=True,
+                    usage=usage,
+                )
+
+            row = self._require_budget(conn, budget_ref)
+            self._require_version(row, expected_version, subject=f"BudgetReservation {budget_ref}")
+            if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    f"budget {budget_ref} must be ACTIVE before consumption",
+                )
+            if (
+                str(row["graph_id"] or "") != graph_ref
+                or int(row["graph_revision"] or 0) != graph_revision
+                or row["node_id"] is not None
+                or row["attempt_id"] is not None
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "shared budget reservation graph binding drifted",
+                )
+            attempt = self._require_attempt(conn, attempt_ref)
+            if (
+                str(attempt["graph_id"]) != graph_ref
+                or int(attempt["graph_revision"]) != graph_revision
+                or str(attempt["node_id"]) != node_ref
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "budget usage attempt is outside the reservation graph revision",
+                )
+
+            consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
+            reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
+            attempted = _add_amounts(consumed, normalized_delta)
+            exceeded_dimensions = tuple(
+                key
+                for key, value in attempted.to_dict().items()
+                if value > reserved.to_dict()[key]
+            )
+            accepted = not exceeded_dimensions
+            target_status = (
+                BudgetReservationStatus.ACTIVE.value
+                if accepted
+                else BudgetReservationStatus.EXCEEDED.value
+            )
+            next_consumed = attempted if accepted else consumed
+            next_version = int(expected_version) + 1
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_budget_reservation
+                SET consumed_json = ?, attempted_consumed_json = ?,
+                    exceeded_dimensions_json = ?, status = ?,
+                    status_version = status_version + 1, updated_ts_ms = ?
+                WHERE budget_id = ? AND status_version = ? AND status = 'ACTIVE'
+                """,
+                (
+                    _dumps(next_consumed.to_dict()),
+                    _dumps(attempted.to_dict()),
+                    _dumps(list(exceeded_dimensions)),
+                    target_status,
+                    ts_ms,
+                    budget_ref,
+                    int(expected_version),
+                ),
+            )
+            self._require_cas(cursor, subject=f"BudgetReservation {budget_ref}")
+            reason_code = TASK_STORE_BUDGET_EXCEEDED if exceeded_dimensions else None
+            conn.execute(
+                """
+                INSERT INTO task_runtime_budget_usage(
+                    budget_id, usage_id, graph_id, graph_revision, node_id,
+                    attempt_id, charge_kind, delta_json, delta_digest, accepted,
+                    reason_code, exceeded_dimensions_json,
+                    reservation_version_before, reservation_version_after,
+                    outbox_id, created_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    budget_ref,
+                    usage_ref,
+                    graph_ref,
+                    graph_revision,
+                    node_ref,
+                    attempt_ref,
+                    kind,
+                    delta_json,
+                    delta_digest,
+                    1 if accepted else 0,
+                    reason_code,
+                    _dumps(list(exceeded_dimensions)),
+                    int(expected_version),
+                    next_version,
+                    outbox.outbox_id,
+                    ts_ms,
+                ),
+            )
+            self._insert_outbox(
+                conn,
+                outbox,
+                ts_ms=ts_ms,
+                expected_aggregate=("BUDGET_RESERVATION", budget_ref, next_version),
+                expected_event_type=("BUDGET_CONSUMED" if accepted else "BUDGET_EXCEEDED"),
+                expected_attempt_id=attempt_ref,
+            )
+            updated = self._budget_record(self._require_budget(conn, budget_ref))
+            usage_row = conn.execute(
+                """
+                SELECT * FROM task_runtime_budget_usage
+                WHERE budget_id = ? AND usage_id = ?
+                """,
+                (budget_ref, usage_ref),
+            ).fetchone()
+            return BudgetConsumptionResult(
+                accepted=accepted,
+                reason_code=reason_code,
+                reservation=updated,
+                exceeded_dimensions=exceeded_dimensions,
+                usage_id=usage_ref,
+                replayed=False,
+                usage=_budget_usage_record(usage_row),
+            )
+
+    def get_budget_usage(self, budget_id: str, usage_id: str) -> dict[str, Any]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_budget_usage
+                WHERE budget_id = ? AND usage_id = ?
+                """,
+                (str(budget_id), str(usage_id)),
+            ).fetchone()
+            if row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"BudgetUsage not found: {usage_id}",
+                )
+            return _budget_usage_record(row)
+        finally:
+            conn.close()
+
     def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
         conn = self._connect()
         try:
@@ -2938,6 +3438,949 @@ class DurableTaskStore:
             "balanced": not consumed.exceeds(reserved),
             "denied_usage_preserved": bool(record["exceeded_dimensions"]),
         }
+
+    # -- Acceptance-bound effect intents ------------------------------------------
+
+    def stage_acceptance_effect_intent(
+        self,
+        *,
+        effect_id: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        commit_scope: AcceptanceEffectCommitScope | str,
+        effect_type: str,
+        payload_ref: str,
+        payload: Mapping[str, Any],
+        payload_sha256: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Stage one immutable effect intent with exact replay semantics.
+
+        Staging does not authorize dispatch.  ``claim_acceptance_effect_intent``
+        independently verifies the durable attempt and acceptance scope.
+        """
+
+        self.assert_acceptance_effect_intent_ready()
+        spec = self._normalize_acceptance_effect_intent_spec(
+            AcceptanceEffectIntentSpec(
+                effect_id=effect_id,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                commit_scope=commit_scope,
+                effect_type=effect_type,
+                payload_ref=payload_ref,
+                payload=payload,
+                payload_sha256=payload_sha256,
+                idempotency_key=idempotency_key,
+            )
+        )
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            return self._stage_acceptance_effect_intent_in_transaction(
+                conn,
+                spec,
+                ts_ms=ts_ms,
+            )
+
+    def transition_node_and_stage_acceptance_effects(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: OutboxMessage,
+        acceptance_judgement: AcceptanceJudgement | Mapping[str, Any],
+        effect_intents: Sequence[AcceptanceEffectIntentSpec | Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Commit ``TaskNode.ACCEPTED`` and NODE effects in one transaction.
+
+        Every intent must bind the exact node and a successful attempt of that
+        node.  Any acceptance, CAS, identity, idempotency, or payload-drift
+        failure rolls back both the state transition and every staged effect.
+        """
+
+        self.assert_acceptance_effect_intent_ready()
+        specs = self._normalize_acceptance_effect_intent_specs(effect_intents)
+        graph_ref = str(graph_id or "").strip()
+        node_ref = str(node_id or "").strip()
+        revision = int(graph_revision)
+        for spec in specs:
+            if (
+                spec.graph_id != graph_ref
+                or spec.graph_revision != revision
+                or spec.node_id != node_ref
+                or spec.commit_scope is not AcceptanceEffectCommitScope.NODE
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "atomic node acceptance effects must bind the exact node with NODE scope",
+                )
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            current_node = self._require_node(
+                conn,
+                graph_ref,
+                revision,
+                node_ref,
+            )
+            if (
+                int(current_node["status_version"]) == int(expected_version) + 1
+                and str(current_node["status"]) == TaskNodeStatus.ACCEPTED.value
+            ):
+                graph_row = self._require_graph(conn, graph_ref, revision)
+                node_payload = _validated_node_payload(current_node)
+                try:
+                    AcceptanceGate.validate_node_transition(
+                        acceptance_judgement,
+                        target_status=TaskNodeStatus.ACCEPTED.value,
+                        graph_id=graph_ref,
+                        node_id=node_ref,
+                        root_work_order_id=str(graph_row["root_work_order_id"]),
+                        node_acceptance_criteria=tuple(
+                            node_payload.get("acceptance_criteria") or ()
+                        ),
+                        outbox_evidence_refs=outbox.evidence_refs,
+                    )
+                except ContractViolation as exc:
+                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
+                self._assert_mutation_outbox_replay(
+                    conn,
+                    outbox,
+                    expected_aggregate=(
+                        "TASK_NODE",
+                        f"{graph_ref}@{revision}/{node_ref}",
+                        int(expected_version) + 1,
+                    ),
+                    expected_event_type="TASK_NODE_ACCEPTED",
+                    expected_attempt_id=None,
+                )
+                staged = tuple(
+                    self._stage_acceptance_effect_intent_in_transaction(
+                        conn,
+                        spec,
+                        ts_ms=ts_ms,
+                        require_succeeded_attempt=True,
+                        allow_insert=False,
+                    )
+                    for spec in specs
+                )
+                return {
+                    "node": _node_record(current_node),
+                    "effect_intents": staged,
+                    "replayed": True,
+                }
+            node_record = self._transition_node_in_transaction(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=revision,
+                node_id=node_ref,
+                expected_version=expected_version,
+                target_status=TaskNodeStatus.ACCEPTED,
+                outbox=outbox,
+                verification_result=None,
+                acceptance_judgement=acceptance_judgement,
+                ts_ms=ts_ms,
+            )
+            staged = tuple(
+                self._stage_acceptance_effect_intent_in_transaction(
+                    conn,
+                    spec,
+                    ts_ms=ts_ms,
+                    require_succeeded_attempt=True,
+                )
+                for spec in specs
+            )
+            return {
+                "node": node_record,
+                "effect_intents": staged,
+                "replayed": False,
+            }
+
+    def transition_graph_and_stage_acceptance_effects(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        expected_version: int,
+        outbox: OutboxMessage,
+        effect_intents: Sequence[AcceptanceEffectIntentSpec | Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Commit ``TaskGraph.COMPLETED`` and GRAPH effects atomically.
+
+        Completion is acceptance-gated here: the graph must contain at least
+        one node and every durable node must already be ACCEPTED.  Each effect
+        must bind a successful attempt of one of those accepted nodes.
+        """
+
+        self.assert_acceptance_effect_intent_ready()
+        specs = self._normalize_acceptance_effect_intent_specs(effect_intents)
+        graph_ref = str(graph_id or "").strip()
+        graph_revision = int(revision)
+        for spec in specs:
+            if (
+                spec.graph_id != graph_ref
+                or spec.graph_revision != graph_revision
+                or spec.commit_scope is not AcceptanceEffectCommitScope.GRAPH
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "atomic graph acceptance effects must bind the exact graph with GRAPH scope",
+                )
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            node_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_node
+                WHERE graph_id = ? AND graph_revision = ?
+                ORDER BY node_id
+                """,
+                (graph_ref, graph_revision),
+            ).fetchall()
+            if not node_rows or any(
+                str(row["status"]) != TaskNodeStatus.ACCEPTED.value
+                for row in node_rows
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "TaskGraph COMPLETED with acceptance effects requires all nodes ACCEPTED",
+                )
+            current_graph = self._require_graph(conn, graph_ref, graph_revision)
+            if (
+                int(current_graph["status_version"]) == int(expected_version) + 1
+                and str(current_graph["status"]) == TaskGraphStatus.COMPLETED.value
+            ):
+                self._assert_mutation_outbox_replay(
+                    conn,
+                    outbox,
+                    expected_aggregate=(
+                        "TASK_GRAPH",
+                        graph_ref,
+                        int(expected_version) + 1,
+                    ),
+                    expected_event_type="TASK_GRAPH_COMPLETED",
+                    expected_attempt_id=None,
+                )
+                staged = tuple(
+                    self._stage_acceptance_effect_intent_in_transaction(
+                        conn,
+                        spec,
+                        ts_ms=ts_ms,
+                        require_succeeded_attempt=True,
+                        allow_insert=False,
+                    )
+                    for spec in specs
+                )
+                return {
+                    "graph": _graph_record(current_graph, node_rows),
+                    "effect_intents": staged,
+                    "replayed": True,
+                }
+            graph_record = self._transition_graph_in_transaction(
+                conn,
+                graph_id=graph_ref,
+                revision=graph_revision,
+                expected_version=expected_version,
+                target_status=TaskGraphStatus.COMPLETED,
+                outbox=outbox,
+                ts_ms=ts_ms,
+            )
+            staged = tuple(
+                self._stage_acceptance_effect_intent_in_transaction(
+                    conn,
+                    spec,
+                    ts_ms=ts_ms,
+                    require_succeeded_attempt=True,
+                )
+                for spec in specs
+            )
+            return {
+                "graph": graph_record,
+                "effect_intents": staged,
+                "replayed": False,
+            }
+
+    def _normalize_acceptance_effect_intent_specs(
+        self,
+        values: Sequence[AcceptanceEffectIntentSpec | Mapping[str, Any]],
+    ) -> tuple[AcceptanceEffectIntentSpec, ...]:
+        if isinstance(values, (str, bytes, bytearray, Mapping)):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect_intents must be a non-empty sequence",
+            )
+        try:
+            normalized = tuple(
+                self._normalize_acceptance_effect_intent_spec(value)
+                for value in values
+            )
+        except TypeError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect_intents must be a non-empty sequence",
+            ) from exc
+        if not normalized:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "atomic acceptance commit requires at least one effect intent",
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_acceptance_effect_intent_spec(
+        value: AcceptanceEffectIntentSpec | Mapping[str, Any],
+    ) -> AcceptanceEffectIntentSpec:
+        raw = (
+            value
+            if isinstance(value, AcceptanceEffectIntentSpec)
+            else AcceptanceEffectIntentSpec.from_mapping(value)
+        )
+        effect_ref = _acceptance_effect_text(
+            raw.effect_id,
+            field_name="effect_id",
+            maximum=512,
+        )
+        if not _DURABLE_REFERENCE_PATTERN.fullmatch(effect_ref):
+            raise TaskStoreError(TASK_STORE_INVALID, "effect_id must be a durable reference")
+        graph_ref = _acceptance_effect_text(
+            raw.graph_id,
+            field_name="graph_id",
+            maximum=255,
+        )
+        node_ref = _acceptance_effect_text(
+            raw.node_id,
+            field_name="node_id",
+            maximum=255,
+        )
+        attempt_ref = _acceptance_effect_text(
+            raw.attempt_id,
+            field_name="attempt_id",
+            maximum=255,
+        )
+        effect_type = str(raw.effect_type or "").strip()
+        if (
+            len(effect_type) > 128
+            or not _ACCEPTANCE_EFFECT_TYPE_PATTERN.fullmatch(effect_type)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect_type must be a lowercase dotted namespace of at most 128 characters",
+            )
+        payload_ref = _acceptance_effect_text(
+            raw.payload_ref,
+            field_name="payload_ref",
+            maximum=512,
+        )
+        if not _DURABLE_REFERENCE_PATTERN.fullmatch(payload_ref):
+            raise TaskStoreError(TASK_STORE_INVALID, "payload_ref must be a durable reference")
+        if not isinstance(raw.payload, Mapping):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "acceptance effect payload must be a JSON object",
+            )
+        payload_json = _dumps(dict(raw.payload))
+        payload_size = len(payload_json.encode("utf-8"))
+        if payload_size < 2 or payload_size > _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "acceptance effect payload exceeds the canonical size limit",
+            )
+        canonical_payload = _loads_object(
+            payload_json,
+            field_name="acceptance_effect.payload",
+        )
+        digest = str(raw.payload_sha256 or "").strip()
+        if not _SHA256_DIGEST_PATTERN.fullmatch(digest):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "payload_sha256 must be a canonical lowercase sha256 digest",
+            )
+        computed_digest = build_acceptance_effect_payload_digest(canonical_payload)
+        if digest != computed_digest:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "payload_sha256 does not match the canonical acceptance effect payload",
+            )
+        idempotency_key = _acceptance_effect_text(
+            raw.idempotency_key,
+            field_name="idempotency_key",
+            maximum=512,
+        )
+        if (
+            isinstance(raw.graph_revision, bool)
+            or not isinstance(raw.graph_revision, int)
+            or raw.graph_revision < 1
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "graph_revision must be a positive integer",
+            )
+        try:
+            scope = AcceptanceEffectCommitScope(
+                str(raw.commit_scope or "").strip().upper()
+            )
+        except ValueError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "commit_scope must be NODE or GRAPH",
+            ) from exc
+        return AcceptanceEffectIntentSpec(
+            effect_id=effect_ref,
+            graph_id=graph_ref,
+            graph_revision=raw.graph_revision,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            commit_scope=scope,
+            effect_type=effect_type,
+            payload_ref=payload_ref,
+            payload=canonical_payload,
+            payload_sha256=digest,
+            idempotency_key=idempotency_key,
+        )
+
+    def _stage_acceptance_effect_intent_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        spec: AcceptanceEffectIntentSpec,
+        *,
+        ts_ms: int,
+        require_succeeded_attempt: bool = False,
+        allow_insert: bool = True,
+    ) -> dict[str, Any]:
+        payload_json = _dumps(dict(spec.payload))
+        self._require_graph(conn, spec.graph_id, spec.graph_revision)
+        node = self._require_node(
+            conn,
+            spec.graph_id,
+            spec.graph_revision,
+            spec.node_id,
+        )
+        attempt = self._require_attempt(conn, spec.attempt_id)
+        if (
+            str(attempt["graph_id"]) != spec.graph_id
+            or int(attempt["graph_revision"]) != spec.graph_revision
+            or str(attempt["node_id"]) != spec.node_id
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect intent attempt is outside its graph/node binding",
+            )
+        if require_succeeded_attempt and str(attempt["status"]) != AttemptStatus.SUCCEEDED.value:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "atomic acceptance effect requires a SUCCEEDED bound attempt",
+            )
+        if (
+            require_succeeded_attempt
+            and spec.commit_scope is AcceptanceEffectCommitScope.GRAPH
+            and str(node["status"]) != TaskNodeStatus.ACCEPTED.value
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "graph acceptance effect must bind an ACCEPTED node",
+            )
+
+        by_effect = conn.execute(
+            "SELECT * FROM task_runtime_acceptance_effect_intent WHERE effect_id = ?",
+            (spec.effect_id,),
+        ).fetchone()
+        by_key = conn.execute(
+            "SELECT * FROM task_runtime_acceptance_effect_intent WHERE idempotency_key = ?",
+            (spec.idempotency_key,),
+        ).fetchone()
+        if (
+            by_effect is not None
+            and by_key is not None
+            and str(by_effect["effect_id"]) != str(by_key["effect_id"])
+        ):
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                "effect_id and idempotency_key identify different durable intents",
+            )
+        existing = by_effect if by_effect is not None else by_key
+        if existing is not None:
+            drift = (
+                str(existing["effect_id"]) != spec.effect_id
+                or str(existing["graph_id"]) != spec.graph_id
+                or int(existing["graph_revision"]) != spec.graph_revision
+                or str(existing["node_id"]) != spec.node_id
+                or str(existing["attempt_id"]) != spec.attempt_id
+                or str(existing["commit_scope"]) != spec.commit_scope.value
+                or str(existing["effect_type"]) != spec.effect_type
+                or str(existing["payload_ref"]) != spec.payload_ref
+                or str(existing["payload_json"]) != payload_json
+                or str(existing["payload_sha256"]) != spec.payload_sha256
+                or str(existing["idempotency_key"]) != spec.idempotency_key
+            )
+            if drift:
+                raise TaskStoreError(
+                    TASK_STORE_OUTBOX_CONFLICT,
+                    f"acceptance effect replay drift: {spec.effect_id}",
+                )
+            replay = _acceptance_effect_record(existing)
+            replay["replayed"] = True
+            return replay
+
+        if not allow_insert:
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                f"atomic acceptance replay is missing effect intent: {spec.effect_id}",
+            )
+
+        conn.execute(
+            """
+            INSERT INTO task_runtime_acceptance_effect_intent(
+                effect_id, graph_id, graph_revision, node_id, attempt_id,
+                commit_scope, effect_type, payload_ref, payload_json,
+                payload_sha256, idempotency_key,
+                status, available_ts_ms, fencing_token, attempt_count,
+                status_version, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, 0, 0, ?, ?)
+            """,
+            (
+                spec.effect_id,
+                spec.graph_id,
+                spec.graph_revision,
+                spec.node_id,
+                spec.attempt_id,
+                spec.commit_scope.value,
+                spec.effect_type,
+                spec.payload_ref,
+                payload_json,
+                spec.payload_sha256,
+                spec.idempotency_key,
+                int(ts_ms),
+                int(ts_ms),
+                int(ts_ms),
+            ),
+        )
+        created = _acceptance_effect_record(
+            self._require_acceptance_effect_intent(conn, spec.effect_id)
+        )
+        created["replayed"] = False
+        return created
+
+    def get_acceptance_effect_intent(self, effect_id: str) -> dict[str, Any]:
+        self.assert_acceptance_effect_intent_ready()
+        effect_ref = _acceptance_effect_text(effect_id, field_name="effect_id", maximum=512)
+        conn = self._connect()
+        try:
+            return _acceptance_effect_record(
+                self._require_acceptance_effect_intent(conn, effect_ref)
+            )
+        finally:
+            conn.close()
+
+    def list_acceptance_effect_intents(
+        self,
+        *,
+        status: AcceptanceEffectStatus | str | None = None,
+        graph_id: str | None = None,
+        graph_revision: int | None = None,
+        node_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        self.assert_acceptance_effect_intent_ready()
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if status is not None:
+            try:
+                normalized_status = AcceptanceEffectStatus(
+                    str(status).strip().upper()
+                ).value
+            except ValueError as exc:
+                raise TaskStoreError(TASK_STORE_INVALID, "invalid acceptance effect status") from exc
+            clauses.append("status = ?")
+            parameters.append(normalized_status)
+        if graph_id is not None:
+            clauses.append("graph_id = ?")
+            parameters.append(
+                _acceptance_effect_text(graph_id, field_name="graph_id", maximum=255)
+            )
+        if graph_revision is not None:
+            if graph_id is None or isinstance(graph_revision, bool) or int(graph_revision) < 1:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "graph_revision filtering requires graph_id and a positive revision",
+                )
+            clauses.append("graph_revision = ?")
+            parameters.append(int(graph_revision))
+        if node_id is not None:
+            if graph_id is None:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "node_id filtering requires graph_id",
+                )
+            clauses.append("node_id = ?")
+            parameters.append(
+                _acceptance_effect_text(node_id, field_name="node_id", maximum=255)
+            )
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        parameters.append(min(1_000, max(1, int(limit))))
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM task_runtime_acceptance_effect_intent"
+                + where
+                + " ORDER BY created_ts_ms, effect_id LIMIT ?",
+                tuple(parameters),
+            ).fetchall()
+            return [_acceptance_effect_record(row) for row in rows]
+        finally:
+            conn.close()
+
+    def claim_acceptance_effect_intent(
+        self,
+        *,
+        owner_id: str,
+        lease_ms: int = 30_000,
+        effect_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Claim the oldest effect whose durable acceptance scope is committed."""
+
+        self.assert_acceptance_effect_intent_ready()
+        owner = _acceptance_effect_text(owner_id, field_name="owner_id", maximum=255)
+        if isinstance(lease_ms, bool):
+            raise TaskStoreError(TASK_STORE_INVALID, "lease_ms must be a positive integer")
+        lease_duration = min(3_600_000, max(1, int(lease_ms)))
+        selected_effect = None
+        if effect_id is not None:
+            selected_effect = _acceptance_effect_text(
+                effect_id,
+                field_name="effect_id",
+                maximum=512,
+            )
+        ts_ms = self._now()
+        expires_ts_ms = ts_ms + lease_duration
+        with self._transaction() as conn:
+            if selected_effect is not None:
+                existing_claim = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_acceptance_effect_intent
+                    WHERE effect_id = ?
+                    """,
+                    (selected_effect,),
+                ).fetchone()
+                if (
+                    existing_claim is not None
+                    and str(existing_claim["status"]) == AcceptanceEffectStatus.CLAIMED.value
+                    and str(existing_claim["lease_owner"] or "") == owner
+                    and int(existing_claim["lease_expires_ts_ms"] or 0) > ts_ms
+                ):
+                    replay = _acceptance_effect_record(existing_claim)
+                    replay["replayed"] = True
+                    return replay
+            selected_clause = " AND effect.effect_id = ?" if selected_effect is not None else ""
+            parameters: list[Any] = [ts_ms, ts_ms]
+            if selected_effect is not None:
+                parameters.append(selected_effect)
+            row = conn.execute(
+                """
+                SELECT effect.*
+                FROM task_runtime_acceptance_effect_intent AS effect
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.attempt_id = effect.attempt_id
+                 AND attempt.graph_id = effect.graph_id
+                 AND attempt.graph_revision = effect.graph_revision
+                 AND attempt.node_id = effect.node_id
+                JOIN task_runtime_node AS node
+                  ON node.graph_id = effect.graph_id
+                 AND node.graph_revision = effect.graph_revision
+                 AND node.node_id = effect.node_id
+                JOIN task_runtime_graph AS graph_row
+                  ON graph_row.graph_id = effect.graph_id
+                 AND graph_row.revision = effect.graph_revision
+                WHERE (
+                    (effect.status = 'PENDING' AND effect.available_ts_ms <= ?)
+                    OR
+                    (effect.status = 'CLAIMED' AND effect.lease_expires_ts_ms <= ?)
+                  )
+                  AND attempt.status = 'SUCCEEDED'
+                  AND node.status = 'ACCEPTED'
+                  AND (
+                    effect.commit_scope = 'NODE'
+                    OR
+                    (effect.commit_scope = 'GRAPH' AND graph_row.status = 'COMPLETED')
+                  )
+                """
+                + selected_clause
+                + " ORDER BY effect.created_ts_ms, effect.effect_id LIMIT 1",
+                tuple(parameters),
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_acceptance_effect_intent
+                SET status = 'CLAIMED', lease_owner = ?, lease_expires_ts_ms = ?,
+                    fencing_token = fencing_token + 1,
+                    attempt_count = attempt_count + 1,
+                    status_version = status_version + 1,
+                    reason_code = NULL, last_error = NULL, updated_ts_ms = ?
+                WHERE effect_id = ? AND status_version = ?
+                  AND (
+                    (status = 'PENDING' AND available_ts_ms <= ?)
+                    OR
+                    (status = 'CLAIMED' AND lease_expires_ts_ms <= ?)
+                  )
+                """,
+                (
+                    owner,
+                    expires_ts_ms,
+                    ts_ms,
+                    row["effect_id"],
+                    int(row["status_version"]),
+                    ts_ms,
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TaskStoreError(
+                    TASK_STORE_LEASE_CONFLICT,
+                    f"acceptance effect claim lost its fence: {row['effect_id']}",
+                )
+            return _acceptance_effect_record(
+                self._require_acceptance_effect_intent(conn, str(row["effect_id"]))
+            )
+
+    def commit_acceptance_effect_intent(
+        self,
+        effect_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        receipt_ref: str,
+    ) -> dict[str, Any]:
+        self.assert_acceptance_effect_intent_ready()
+        effect_ref = _acceptance_effect_text(effect_id, field_name="effect_id", maximum=512)
+        owner = _acceptance_effect_text(owner_id, field_name="owner_id", maximum=255)
+        receipt = _acceptance_effect_text(
+            receipt_ref,
+            field_name="receipt_ref",
+            maximum=512,
+        )
+        if not _DURABLE_REFERENCE_PATTERN.fullmatch(receipt):
+            raise TaskStoreError(TASK_STORE_INVALID, "receipt_ref must be a durable reference")
+        fence = _acceptance_effect_fence(fencing_token)
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            row = self._require_acceptance_effect_intent(conn, effect_ref)
+            status = AcceptanceEffectStatus(str(row["status"]))
+            if status is AcceptanceEffectStatus.COMMITTED:
+                if (
+                    str(row["lease_owner"]) == owner
+                    and int(row["fencing_token"]) == fence
+                    and str(row["receipt_ref"]) == receipt
+                ):
+                    replay = _acceptance_effect_record(row)
+                    replay["replayed"] = True
+                    return replay
+                raise TaskStoreError(
+                    TASK_STORE_OUTBOX_CONFLICT,
+                    f"acceptance effect commit replay drift: {effect_ref}",
+                )
+            self._assert_acceptance_effect_claim(
+                row,
+                owner_id=owner,
+                fencing_token=fence,
+                now_ts_ms=ts_ms,
+            )
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_acceptance_effect_intent
+                SET status = 'COMMITTED', lease_expires_ts_ms = NULL,
+                    receipt_ref = ?, reason_code = NULL, last_error = NULL,
+                    status_version = status_version + 1, updated_ts_ms = ?,
+                    committed_ts_ms = ?, failed_ts_ms = NULL
+                WHERE effect_id = ? AND status = 'CLAIMED'
+                  AND lease_owner = ? AND fencing_token = ?
+                  AND status_version = ? AND lease_expires_ts_ms > ?
+                """,
+                (
+                    receipt,
+                    ts_ms,
+                    ts_ms,
+                    effect_ref,
+                    owner,
+                    fence,
+                    int(row["status_version"]),
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TaskStoreError(
+                    TASK_STORE_LEASE_CONFLICT,
+                    f"acceptance effect commit lost its fence: {effect_ref}",
+                )
+            committed = _acceptance_effect_record(
+                self._require_acceptance_effect_intent(conn, effect_ref)
+            )
+            committed["replayed"] = False
+            return committed
+
+    def fail_acceptance_effect_intent(
+        self,
+        effect_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        reason_code: str,
+        detail: str,
+    ) -> dict[str, Any]:
+        self.assert_acceptance_effect_intent_ready()
+        effect_ref = _acceptance_effect_text(effect_id, field_name="effect_id", maximum=512)
+        owner = _acceptance_effect_text(owner_id, field_name="owner_id", maximum=255)
+        reason = _acceptance_effect_text(
+            reason_code,
+            field_name="reason_code",
+            maximum=128,
+        )
+        error_detail = _acceptance_effect_text(detail, field_name="detail", maximum=2_000)
+        fence = _acceptance_effect_fence(fencing_token)
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            row = self._require_acceptance_effect_intent(conn, effect_ref)
+            status = AcceptanceEffectStatus(str(row["status"]))
+            if status is AcceptanceEffectStatus.FAILED:
+                if (
+                    str(row["lease_owner"]) == owner
+                    and int(row["fencing_token"]) == fence
+                    and str(row["reason_code"]) == reason
+                    and str(row["last_error"]) == error_detail
+                ):
+                    replay = _acceptance_effect_record(row)
+                    replay["replayed"] = True
+                    return replay
+                raise TaskStoreError(
+                    TASK_STORE_OUTBOX_CONFLICT,
+                    f"acceptance effect failure replay drift: {effect_ref}",
+                )
+            self._assert_acceptance_effect_claim(
+                row,
+                owner_id=owner,
+                fencing_token=fence,
+                now_ts_ms=ts_ms,
+            )
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_acceptance_effect_intent
+                SET status = 'FAILED', lease_expires_ts_ms = NULL,
+                    receipt_ref = NULL, reason_code = ?, last_error = ?,
+                    status_version = status_version + 1, updated_ts_ms = ?,
+                    committed_ts_ms = NULL, failed_ts_ms = ?
+                WHERE effect_id = ? AND status = 'CLAIMED'
+                  AND lease_owner = ? AND fencing_token = ?
+                  AND status_version = ? AND lease_expires_ts_ms > ?
+                """,
+                (
+                    reason,
+                    error_detail,
+                    ts_ms,
+                    ts_ms,
+                    effect_ref,
+                    owner,
+                    fence,
+                    int(row["status_version"]),
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TaskStoreError(
+                    TASK_STORE_LEASE_CONFLICT,
+                    f"acceptance effect failure lost its fence: {effect_ref}",
+                )
+            failed = _acceptance_effect_record(
+                self._require_acceptance_effect_intent(conn, effect_ref)
+            )
+            failed["replayed"] = False
+            return failed
+
+    def reschedule_acceptance_effect_intent(
+        self,
+        effect_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        reason_code: str,
+        detail: str,
+        delay_ms: int,
+    ) -> dict[str, Any]:
+        """Return one fenced handler failure to the durable pending queue.
+
+        The attempt counter and fencing token remain monotonic.  Only the
+        current live lease owner may reschedule, so a stale handler can never
+        overwrite a newer dispatch attempt.
+        """
+
+        self.assert_acceptance_effect_intent_ready()
+        effect_ref = _acceptance_effect_text(
+            effect_id,
+            field_name="effect_id",
+            maximum=512,
+        )
+        owner = _acceptance_effect_text(owner_id, field_name="owner_id", maximum=255)
+        reason = _acceptance_effect_text(
+            reason_code,
+            field_name="reason_code",
+            maximum=128,
+        )
+        error_detail = _acceptance_effect_text(
+            detail,
+            field_name="detail",
+            maximum=2_000,
+        )
+        if isinstance(delay_ms, bool):
+            raise TaskStoreError(TASK_STORE_INVALID, "delay_ms must be a non-negative integer")
+        retry_delay = min(3_600_000, max(0, int(delay_ms)))
+        fence = _acceptance_effect_fence(fencing_token)
+        ts_ms = self._now()
+        available_ts_ms = ts_ms + retry_delay
+        with self._transaction() as conn:
+            row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_acceptance_effect_claim(
+                row,
+                owner_id=owner,
+                fencing_token=fence,
+                now_ts_ms=ts_ms,
+            )
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_acceptance_effect_intent
+                SET status = 'PENDING', available_ts_ms = ?,
+                    lease_owner = NULL, lease_expires_ts_ms = NULL,
+                    receipt_ref = NULL, reason_code = ?, last_error = ?,
+                    status_version = status_version + 1, updated_ts_ms = ?,
+                    committed_ts_ms = NULL, failed_ts_ms = NULL
+                WHERE effect_id = ? AND status = 'CLAIMED'
+                  AND lease_owner = ? AND fencing_token = ?
+                  AND status_version = ? AND lease_expires_ts_ms > ?
+                """,
+                (
+                    available_ts_ms,
+                    reason,
+                    error_detail,
+                    ts_ms,
+                    effect_ref,
+                    owner,
+                    fence,
+                    int(row["status_version"]),
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TaskStoreError(
+                    TASK_STORE_LEASE_CONFLICT,
+                    f"acceptance effect reschedule lost its fence: {effect_ref}",
+                )
+            rescheduled = _acceptance_effect_record(
+                self._require_acceptance_effect_intent(conn, effect_ref)
+            )
+            rescheduled["replayed"] = False
+            return rescheduled
 
     # -- Transactional outbox -------------------------------------------------------
 
@@ -3068,6 +4511,72 @@ class DurableTaskStore:
                 TASK_STORE_OUTBOX_CONFLICT,
                 f"outbox identity/idempotency conflict: {message.idempotency_key}",
             ) from exc
+
+    def _assert_mutation_outbox_replay(
+        self,
+        conn: sqlite3.Connection,
+        message: OutboxMessage,
+        *,
+        expected_aggregate: tuple[str, str, int],
+        expected_event_type: str,
+        expected_attempt_id: str | None,
+    ) -> None:
+        if not isinstance(message, OutboxMessage):
+            raise TaskStoreError(TASK_STORE_INVALID, "atomic replay requires an OutboxMessage")
+        message.validate()
+        if message.available_ts_ms is not None:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "mutation outbox availability is assigned only by the trusted store clock",
+            )
+        expected = (
+            str(expected_aggregate[0]),
+            str(expected_aggregate[1]),
+            int(expected_aggregate[2]),
+        )
+        if (
+            (message.aggregate_type, message.aggregate_id, message.aggregate_version) != expected
+            or message.event_type != str(expected_event_type)
+            or message.attempt_id != (str(expected_attempt_id or "").strip() or None)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "atomic replay outbox does not bind the committed mutation",
+            )
+        by_id = conn.execute(
+            "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
+            (message.outbox_id,),
+        ).fetchone()
+        by_key = conn.execute(
+            "SELECT * FROM task_runtime_outbox WHERE idempotency_key = ?",
+            (message.idempotency_key,),
+        ).fetchone()
+        if (
+            by_id is None
+            or by_key is None
+            or str(by_id["outbox_id"]) != str(by_key["outbox_id"])
+        ):
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                "atomic acceptance replay is missing its exact state outbox",
+            )
+        durable = _outbox_record(by_id)
+        drift = (
+            str(durable["outbox_id"]) != message.outbox_id
+            or str(durable["aggregate_type"]) != message.aggregate_type
+            or str(durable["aggregate_id"]) != message.aggregate_id
+            or int(durable["aggregate_version"]) != message.aggregate_version
+            or str(durable["event_type"]) != message.event_type
+            or str(durable["payload_ref"]) != message.payload_ref
+            or str(durable["idempotency_key"]) != message.idempotency_key
+            or durable["attempt_id"] != message.attempt_id
+            or tuple(durable["evidence_refs"]) != tuple(message.evidence_refs)
+        )
+        if drift:
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                "atomic acceptance state outbox replay drift",
+            )
 
     @staticmethod
     def _validated_reference(value: Any, *, field_name: str) -> str:
@@ -3417,6 +4926,51 @@ class DurableTaskStore:
         if row is None:
             raise TaskStoreError(TASK_STORE_NOT_FOUND, f"BudgetReservation not found: {budget_id}")
         return row
+
+    @staticmethod
+    def _require_acceptance_effect_intent(
+        conn: sqlite3.Connection,
+        effect_id: str,
+    ) -> sqlite3.Row:
+        row = conn.execute(
+            "SELECT * FROM task_runtime_acceptance_effect_intent WHERE effect_id = ?",
+            (str(effect_id),),
+        ).fetchone()
+        if row is None:
+            raise TaskStoreError(
+                TASK_STORE_NOT_FOUND,
+                f"AcceptanceEffectIntent not found: {effect_id}",
+            )
+        return row
+
+    @staticmethod
+    def _assert_acceptance_effect_claim(
+        row: sqlite3.Row,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        now_ts_ms: int,
+    ) -> None:
+        if str(row["status"]) != AcceptanceEffectStatus.CLAIMED.value:
+            raise TaskStoreError(
+                TASK_STORE_LEASE_CONFLICT,
+                f"acceptance effect {row['effect_id']} has no active claim",
+            )
+        if int(row["fencing_token"]) != int(fencing_token):
+            raise TaskStoreError(
+                TASK_STORE_LEASE_CONFLICT,
+                f"acceptance effect {row['effect_id']} fencing token is stale",
+            )
+        if str(row["lease_owner"] or "") != str(owner_id):
+            raise TaskStoreError(
+                TASK_STORE_OWNERSHIP_CONFLICT,
+                f"acceptance effect {row['effect_id']} is owned by another dispatcher",
+            )
+        if int(row["lease_expires_ts_ms"] or 0) <= int(now_ts_ms):
+            raise TaskStoreError(
+                TASK_STORE_LEASE_CONFLICT,
+                f"acceptance effect {row['effect_id']} claim has expired",
+            )
 
     @staticmethod
     def _require_outbox(conn: sqlite3.Connection, outbox_id: str) -> sqlite3.Row:
@@ -4074,6 +5628,225 @@ def _validated_budget_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
+def _budget_usage_record(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
+    record = dict(row)
+    delta_json = str(record.pop("delta_json"))
+    delta = _amount_from_json(delta_json, field_name="budget_usage.delta_json")
+    expected_digest = "sha256:" + hashlib.sha256(delta_json.encode("utf-8")).hexdigest()
+    dimensions = _loads_list(
+        record.pop("exceeded_dimensions_json"),
+        field_name="budget_usage.exceeded_dimensions_json",
+    )
+    if (
+        not _DURABLE_REFERENCE_PATTERN.fullmatch(str(record.get("usage_id") or ""))
+        or str(record.get("delta_digest") or "") != expected_digest
+        or any(item not in _BUDGET_AMOUNT_FIELDS for item in dimensions)
+        or len(set(dimensions)) != len(dimensions)
+        or int(record.get("accepted") or 0) not in {0, 1}
+        or int(record.get("reservation_version_after") or 0)
+        != int(record.get("reservation_version_before") or -1) + 1
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable BudgetUsage binding is invalid",
+        )
+    accepted = bool(record["accepted"])
+    if accepted == bool(dimensions):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable BudgetUsage outcome conflicts with exceeded dimensions",
+        )
+    record["accepted"] = accepted
+    record["delta"] = delta.to_dict()
+    record["exceeded_dimensions"] = [str(item) for item in dimensions]
+    record["replayed"] = False
+    return record
+
+
+def _acceptance_effect_text(value: Any, *, field_name: str, maximum: int) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or len(normalized) > int(maximum):
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            f"{field_name} must be a non-empty string of at most {maximum} characters",
+        )
+    return normalized
+
+
+def _acceptance_effect_fence(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "fencing_token must be a positive integer",
+        )
+    return int(value)
+
+
+def _acceptance_effect_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    record = dict(row)
+    try:
+        scope = AcceptanceEffectCommitScope(str(record["commit_scope"]))
+        status = AcceptanceEffectStatus(str(record["status"]))
+        revision = int(record["graph_revision"])
+        fence = int(record["fencing_token"])
+        attempt_count = int(record["attempt_count"])
+        status_version = int(record["status_version"])
+        available_ts_ms = int(record["available_ts_ms"])
+        created_ts_ms = int(record["created_ts_ms"])
+        updated_ts_ms = int(record["updated_ts_ms"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable AcceptanceEffectIntent has invalid scalar fields: {exc}",
+        ) from exc
+
+    effect_id = str(record.get("effect_id") or "")
+    effect_type = str(record.get("effect_type") or "")
+    payload_ref = str(record.get("payload_ref") or "")
+    payload_json = str(record.get("payload_json") or "")
+    payload_sha256 = str(record.get("payload_sha256") or "")
+    try:
+        payload = _loads_object(
+            payload_json,
+            field_name="acceptance_effect.payload_json",
+        )
+        canonical_payload_json = _dumps(payload)
+    except TaskStoreError as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable AcceptanceEffectIntent payload is invalid: {exc.detail}",
+        ) from exc
+    computed_payload_sha256 = "sha256:" + hashlib.sha256(
+        canonical_payload_json.encode("utf-8")
+    ).hexdigest()
+    if (
+        not _DURABLE_REFERENCE_PATTERN.fullmatch(effect_id)
+        or len(effect_type) > 128
+        or not _ACCEPTANCE_EFFECT_TYPE_PATTERN.fullmatch(effect_type)
+        or not _DURABLE_REFERENCE_PATTERN.fullmatch(payload_ref)
+        or not _SHA256_DIGEST_PATTERN.fullmatch(payload_sha256)
+        or payload_json != canonical_payload_json
+        or len(payload_json.encode("utf-8")) > _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES
+        or payload_sha256 != computed_payload_sha256
+        or not str(record.get("idempotency_key") or "").strip()
+        or not str(record.get("graph_id") or "").strip()
+        or not str(record.get("node_id") or "").strip()
+        or not str(record.get("attempt_id") or "").strip()
+        or revision < 1
+        or fence < 0
+        or attempt_count < 0
+        or status_version < 0
+        or min(available_ts_ms, created_ts_ms, updated_ts_ms) < 0
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable AcceptanceEffectIntent binding is invalid",
+        )
+
+    owner = str(record.get("lease_owner") or "").strip() or None
+    expires = record.get("lease_expires_ts_ms")
+    receipt = str(record.get("receipt_ref") or "").strip() or None
+    committed_ts = record.get("committed_ts_ms")
+    failed_ts = record.get("failed_ts_ms")
+    reason = str(record.get("reason_code") or "").strip() or None
+    last_error = str(record.get("last_error") or "").strip() or None
+    if expires is not None and int(expires) < 0:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable AcceptanceEffectIntent lease expiry is invalid",
+        )
+    if committed_ts is not None and int(committed_ts) < 0:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable AcceptanceEffectIntent commit timestamp is invalid",
+        )
+    if failed_ts is not None and int(failed_ts) < 0:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable AcceptanceEffectIntent failure timestamp is invalid",
+        )
+
+    valid_state = False
+    if status is AcceptanceEffectStatus.PENDING:
+        initial_pending = (
+            owner is None
+            and expires is None
+            and fence == 0
+            and attempt_count == 0
+            and status_version == 0
+            and receipt is None
+            and reason is None
+            and last_error is None
+            and committed_ts is None
+            and failed_ts is None
+        )
+        retry_pending = (
+            owner is None
+            and expires is None
+            and fence >= 1
+            and attempt_count >= 1
+            and status_version >= 2
+            and receipt is None
+            and reason is not None
+            and last_error is not None
+            and committed_ts is None
+            and failed_ts is None
+        )
+        valid_state = initial_pending or retry_pending
+    elif status is AcceptanceEffectStatus.CLAIMED:
+        valid_state = (
+            owner is not None
+            and expires is not None
+            and fence >= 1
+            and attempt_count >= 1
+            and status_version >= 1
+            and receipt is None
+            and reason is None
+            and last_error is None
+            and committed_ts is None
+            and failed_ts is None
+        )
+    elif status is AcceptanceEffectStatus.COMMITTED:
+        valid_state = (
+            owner is not None
+            and expires is None
+            and fence >= 1
+            and attempt_count >= 1
+            and status_version >= 2
+            and receipt is not None
+            and _DURABLE_REFERENCE_PATTERN.fullmatch(receipt) is not None
+            and reason is None
+            and last_error is None
+            and committed_ts is not None
+            and failed_ts is None
+        )
+    elif status is AcceptanceEffectStatus.FAILED:
+        valid_state = (
+            owner is not None
+            and expires is None
+            and fence >= 1
+            and attempt_count >= 1
+            and status_version >= 2
+            and receipt is None
+            and committed_ts is None
+            and failed_ts is not None
+            and reason is not None
+            and last_error is not None
+        )
+    if not valid_state:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable AcceptanceEffectIntent state is incoherent: {status.value}",
+        )
+    record["commit_scope"] = scope.value
+    record["status"] = status.value
+    record["payload"] = payload
+    record["replayed"] = False
+    return record
+
+
 def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
     record = dict(row)
     evidence_refs = _loads_list(
@@ -4125,6 +5898,9 @@ def _legacy_receipt_digest(value: Any) -> str:
 
 
 __all__ = [
+    "AcceptanceEffectCommitScope",
+    "AcceptanceEffectIntentSpec",
+    "AcceptanceEffectStatus",
     "AttemptStatus",
     "BudgetConsumptionResult",
     "DurableTaskStore",
@@ -4151,6 +5927,7 @@ __all__ = [
     "TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED",
     "TASK_STORE_SCHEMA_NOT_READY",
     "TaskStoreError",
+    "build_acceptance_effect_payload_digest",
     "build_operation_fingerprint",
     "build_outbox_payload_ref",
     "build_reconciliation_attestation_binding",

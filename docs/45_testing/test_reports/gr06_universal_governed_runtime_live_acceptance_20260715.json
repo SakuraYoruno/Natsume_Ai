@@ -1,0 +1,195 @@
+{
+  "schema_version": "natsume.gr06-live-acceptance.v1",
+  "acceptance_date": "2026-07-15",
+  "source_branch": "codex/governed-planning-runtime",
+  "baseline_commit": "31114f7ba9985e99fc82187aeb99b939bbf426ab",
+  "verdict": {
+    "universal_governed_planning_runtime": "PASS",
+    "live_route_matrix": "PASS",
+    "edge_embodiment": "SAFE_CUT_DEGRADED",
+    "full_architecture": "INCOMPLETE"
+  },
+  "route_acceptance": {
+    "chat": {
+      "request_id": "req_8059ec83b77b4936b7398cc5d4cb9cbc",
+      "graph_id": "graph-host-3705adea8b4d5ab027349f5a4ba303cb3990bf74",
+      "graph_status": "COMPLETED",
+      "node_count": 1,
+      "accepted_nodes": 1,
+      "succeeded_attempts": 1,
+      "released_leases": 1,
+      "budget_status": "CONSUMED",
+      "budget_usage": {
+        "time_ms": 6609,
+        "tokens": 2433,
+        "exceeded_dimensions": []
+      },
+      "committed_acceptance_effects": 2,
+      "unpublished_task_outbox": 0,
+      "model_attempts": [
+        {
+          "model": "deepseek-v4-flash",
+          "status": "SUCCEEDED"
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "status": "SUCCEEDED"
+        }
+      ]
+    },
+    "skill": {
+      "request_id": "req_10d82a379f19456c80d2976c96497868",
+      "graph_id": "graph-host-6e0c8e0efe576bd0c76ea3d089a73456502691d6",
+      "graph_status": "COMPLETED",
+      "node_count": 1,
+      "accepted_nodes": 1,
+      "succeeded_attempts": 1,
+      "released_leases": 1,
+      "committed_idempotency_reservations": 1,
+      "budget_status": "CONSUMED",
+      "budget_usage": {
+        "time_ms": 172,
+        "tokens": 0,
+        "tool_calls": 1,
+        "exceeded_dimensions": []
+      },
+      "committed_acceptance_effects": 2,
+      "committed_skill_receipts": 1,
+      "unpublished_task_outbox": 0
+    },
+    "delegate": {
+      "request_id": "req_f3ef72e3728446fe8ace48374d1d3444",
+      "graph_id": "graph-host-d0793fc4ee22169d4c8ea687bfdd38db17b2b434",
+      "graph_status": "COMPLETED",
+      "node_count": 1,
+      "accepted_nodes": 1,
+      "succeeded_attempts": 1,
+      "released_leases": 1,
+      "committed_idempotency_reservations": 1,
+      "committed_worker_projections": 1,
+      "budget_status": "CONSUMED",
+      "budget_usage": {
+        "time_ms": 4094,
+        "tokens": 453,
+        "tool_calls": 1,
+        "exceeded_dimensions": []
+      },
+      "committed_acceptance_effects": 2,
+      "unpublished_task_outbox": 0,
+      "model_attempts": [
+        {
+          "model": "deepseek-v4-flash",
+          "status": "SUCCEEDED"
+        }
+      ]
+    },
+    "plan": {
+      "request_id": "req_91610f0e505049edb7c5fea55707b5e1",
+      "graph_id": "graph-planning-f5d1a3fad2cdfaf8a3d8723050a76a8b5bac9f4b",
+      "graph_status": "COMPLETED",
+      "graph_revision": 1,
+      "node_count": 2,
+      "accepted_nodes": 2,
+      "succeeded_attempts": 2,
+      "released_leases": 2,
+      "committed_idempotency_reservations": 2,
+      "committed_worker_projections": 2,
+      "dependency_shape": "delegate_to_chat",
+      "budget_status": "CONSUMED",
+      "budget_usage": {
+        "time_ms": 13578,
+        "tokens": 2852,
+        "tool_calls": 1,
+        "exceeded_dimensions": []
+      },
+      "committed_acceptance_effects": 2,
+      "unpublished_task_outbox": 0,
+      "model_attempts": [
+        {
+          "model": "deepseek-v4-flash",
+          "status": "SUCCEEDED"
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "status": "SUCCEEDED"
+        }
+      ]
+    }
+  },
+  "infrastructure": {
+    "redis": "PONG",
+    "chroma_heartbeat_http": 200,
+    "neo4j_http": 200,
+    "host_health_http": 200,
+    "host_overall": "UP",
+    "observability_health_http": 200,
+    "monitor_ui_http": 200,
+    "migration_head": 88,
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_violations": 0
+  },
+  "test_evidence": {
+    "backend_selected_regression": {
+      "passed": 203,
+      "failed": 0
+    },
+    "coordinator_collision_cleanup_regression": {
+      "passed": 5,
+      "failed": 0
+    },
+    "startup_and_migration_regression": {
+      "passed": 31,
+      "failed": 0
+    },
+    "frontend": {
+      "lint": "PASS",
+      "typecheck": "PASS",
+      "production_build": "PASS",
+      "operator_client": {
+        "passed": 7,
+        "failed": 0
+      },
+      "read_model": {
+        "passed": 12,
+        "failed": 0
+      },
+      "node_unit": {
+        "passed": 29,
+        "failed": 0
+      },
+      "playwright_canonical": {
+        "passed": 84,
+        "failed": 0
+      }
+    }
+  },
+  "planning_benchmark": {
+    "evidence_level": "SIMULATION_SHADOW",
+    "case_count": 10,
+    "greedy": {
+      "success_rate": 0.2,
+      "verification_rate": 0.2,
+      "invalid_tool_rate": 0.4
+    },
+    "three_layer_search": {
+      "success_rate": 1.0,
+      "verification_rate": 1.0,
+      "invalid_tool_rate": 0.0,
+      "conditional_mcts_cases": 8,
+      "logical_latency_delta_ms": 1097
+    },
+    "production_benefit_claimed": false
+  },
+  "limitations": [
+    "ProcessServiceContainer remains a process-global service locator, so Full Architecture stays INCOMPLETE.",
+    "Edge ASR and TTS are disabled in this environment; VRM and VTS are not connected, so embodiment is SAFE_CUT_DEGRADED.",
+    "Planning benchmark evidence is simulation shadow evidence and is not a production benefit claim.",
+    "Provider token and cost dimensions are recorded only when the provider returns measured values; absent dimensions remain unmeasured."
+  ],
+  "privacy": {
+    "contains_user_text": false,
+    "contains_model_output": false,
+    "contains_secrets": false,
+    "contains_database_file": false
+  }
+}

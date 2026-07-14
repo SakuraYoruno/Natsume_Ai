@@ -249,7 +249,10 @@ def test_t_nle_23_non_lab_never_exposes_executable_high_risk_pentest_entry() -> 
     assert all(item["executable_in_current_mode"] is False for item in pentest["high_risk_entrypoints"])
 
 
-def test_t_nle_23_flag_defaults_off_before_provider_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_t_nle_23_flag_defaults_off_before_provider_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     called = 0
 
     def provider() -> dict[str, object]:
@@ -258,6 +261,9 @@ def test_t_nle_23_flag_defaults_off_before_provider_construction(monkeypatch: py
         return {"unexpected": True}
 
     monkeypatch.delenv("HOST_NLE_GOVERNANCE_VIEWS_ENABLED", raising=False)
+    # CoreSettings intentionally supports a deployment .env.  Isolate this
+    # default-value contract from the developer's live acceptance settings.
+    monkeypatch.chdir(tmp_path)
     get_core_settings.cache_clear()
     routes.set_governance_snapshot_provider(provider)
     try:

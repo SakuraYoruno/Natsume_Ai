@@ -38,7 +38,11 @@ class ExecutiveRuntimeApplicationPorts:
     get_sub_agent_dispatcher: ServiceProvider
     get_core_settings: Callable[[], ExecutiveRuntimeSettings]
 
-    get_runtime_task_registry: ServiceProvider
+    # Compatibility-only state for routes that predate the Governed Task
+    # Runtime. Canonical chat/skill/delegate/plan requests must never reach
+    # this port; their status is derived from the durable projection below.
+    get_legacy_runtime_task_registry: ServiceProvider
+    get_task_status_projection: ServiceProvider
     get_skill_registry: ServiceProvider
     get_planning_agent: ServiceProvider
     get_ledger: ServiceProvider

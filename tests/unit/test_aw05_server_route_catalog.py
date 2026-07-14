@@ -61,6 +61,45 @@ def test_scene_lanes_preserve_configured_provider_model_and_timeout(monkeypatch)
     assert "ignored" not in repr(surface) + repr(subagent)
 
 
+def test_cross_provider_role_models_are_ignored_for_selected_provider(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-runtime-default")
+    monkeypatch.setenv("HOST_EXECUTIVE_ROUTER_MODEL_ID", "gemini-2.5-flash-lite")
+    monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "gemini-2.5-pro")
+
+    executive = ServerRouteCatalog().resolve(
+        scene_type="THALAMUS_INTENT",
+        cognitive_tier="C",
+        prompt_id="test.prompt",
+    )
+    subagent = ServerRouteCatalog().resolve(
+        scene_type="SUBAGENT",
+        cognitive_tier="B",
+        prompt_id="test.prompt",
+    )
+
+    assert executive["model_id"] == "deepseek-runtime-default"
+    assert subagent["model_id"] == "deepseek-runtime-default"
+    assert any("HOST_EXECUTIVE_ROUTER_MODEL_ID" in item for item in executive["route_config_warnings"])
+    assert any("HOST_SUBAGENT_MODEL_ID" in item for item in subagent["route_config_warnings"])
+
+
+def test_provider_scoped_role_model_wins_before_generic_role_model(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_DEEPSEEK_SUBAGENT_MODEL_ID", "deepseek-specialized-agent")
+    monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "gemini-2.5-pro")
+
+    route = ServerRouteCatalog().resolve(
+        scene_type="SUBAGENT",
+        cognitive_tier="B",
+        prompt_id="test.prompt",
+    )
+
+    assert route["model_id"] == "deepseek-specialized-agent"
+    assert route["model_selection_source"] == "HOST_DEEPSEEK_SUBAGENT_MODEL_ID"
+    assert route["route_config_warnings"] == []
+
+
 def test_chat_graph_runtime_projection_uses_same_catalog(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ENABLED", "true")
     monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_PROVIDER", "openai")

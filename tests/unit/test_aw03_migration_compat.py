@@ -127,7 +127,7 @@ def test_capability_forge_proposal_log_is_migration_owned(tmp_path) -> None:
     assert rows[0]["payload"]["proposal_id"] == "forge-proposal-1"
 
 
-def test_capability_forge_migration_upgrades_an_existing_head_83_database(
+def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "head-83.sqlite3"
@@ -139,9 +139,12 @@ def test_capability_forge_migration_upgrades_an_existing_head_83_database(
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE task_runtime_acceptance_effect_intent")
+        conn.execute("DROP TABLE task_runtime_worker_projection")
+        conn.execute("DROP TABLE task_runtime_budget_usage")
         conn.execute("DROP TABLE capability_forge_proposal_log")
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 84")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 84")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 84")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 84")
         conn.commit()
         assert conn.execute(
             "SELECT MAX(migration_id) FROM schema_migrations"
@@ -153,9 +156,9 @@ def test_capability_forge_migration_upgrades_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 84
-    assert upgraded.summary["applied_count"] == 1
-    assert upgraded.records[-1].migration_id == "0084_capability_forge_proposal_log"
+    assert upgraded.summary["current_version"] == 88
+    assert upgraded.summary["applied_count"] == 5
+    assert upgraded.records[-1].migration_id == "0088_host_command_graph_revision"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -163,6 +166,24 @@ def test_capability_forge_migration_upgrades_an_existing_head_83_database(
             WHERE type = 'table' AND name = 'capability_forge_proposal_log'
             """
         ).fetchone() == ("capability_forge_proposal_log",)
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_budget_usage'
+            """
+        ).fetchone() == ("task_runtime_budget_usage",)
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_worker_projection'
+            """
+        ).fetchone() == ("task_runtime_worker_projection",)
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_acceptance_effect_intent'
+            """
+        ).fetchone() == ("task_runtime_acceptance_effect_intent",)
 
 
 def test_aw03_migrations_require_an_explicit_immediate_transaction(tmp_path) -> None:

@@ -87,6 +87,9 @@ def _build_chat_input(
         reply_target=getattr(request_body, "reply_target", None),
         suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
         suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
+        defer_effects_to_task_runtime=bool(
+            getattr(request_body, "defer_effects_to_task_runtime", False)
+        ),
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=chat_trace_stage_meta,

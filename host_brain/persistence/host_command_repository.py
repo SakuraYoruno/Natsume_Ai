@@ -1,7 +1,7 @@
 """Atomic Host command admission over the canonical TaskStore schema.
 
 This adapter is intentionally narrow: one transaction binds a typed HostCommand,
-AgentWorkOrder, ExecutorAssignment and TaskGraph, emits both required outbox
+canonical WorkOrderV3, ExecutorAssignment and TaskGraph, emits both required outbox
 events, and (when present) attaches the committed Secure Ingress claim to the
 new durable command.  It owns neither execution status nor delivery receipts;
 those remain authoritative in migrations 0052/0054/0059.
@@ -18,14 +18,17 @@ import sqlite3
 from typing import Any
 from urllib.parse import quote
 
-from host_brain.contracts.agent_runtime.task_graph import TaskGraph
+from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraph,
+    validate_task_graph_admission_state,
+)
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
     TaskStoreError,
     build_outbox_payload_ref,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.core.ids import now_ms
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
 
@@ -38,6 +41,7 @@ HOST_COMMAND_DURABLE_DATA_INVALID = "HOST_COMMAND_DURABLE_DATA_INVALID"
 
 HOST_COMMAND_MIGRATION_ASSET_KEY = "0062#host_command_admission"
 HOST_COMMAND_MIGRATION_SHA256 = "e003783038278ca82c7b8ee18fb87916ee7e6c109592a59a4f3579da378f5d59"
+HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY = "0088#host_command_graph_revision"
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
 )
@@ -176,6 +180,26 @@ class HostCommandRepository:
                     str(row[1])
                     for row in conn.execute("PRAGMA index_list(host_command_journal)").fetchall()
                 }
+                unique_indexes = {
+                    tuple(
+                        str(column[2])
+                        for column in conn.execute(
+                            f"PRAGMA index_info('{str(index_row[1])}')"
+                        ).fetchall()
+                    )
+                    for index_row in conn.execute(
+                        "PRAGMA index_list(host_command_journal)"
+                    ).fetchall()
+                    if int(index_row[2]) == 1
+                }
+                revision_asset = conn.execute(
+                    """
+                    SELECT disposition
+                    FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY,),
+                ).fetchone()
                 foreign_keys_enabled = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
             finally:
                 conn.close()
@@ -197,18 +221,32 @@ class HostCommandRepository:
             )
         missing_columns = sorted(_HOST_COMMAND_COLUMNS - columns)
         missing_indexes = sorted(_REQUIRED_INDEXES - indexes)
-        if missing_columns or missing_indexes or foreign_keys_enabled != 1:
+        revision_constraints_ready = (
+            revision_asset is not None
+            and str(revision_asset["disposition"]) in _ALLOWED_MIGRATION_DISPOSITIONS
+            and ("root_work_order_id", "graph_revision") in unique_indexes
+            and ("graph_id", "graph_revision") in unique_indexes
+            and ("root_work_order_id",) not in unique_indexes
+            and ("assignment_id",) not in unique_indexes
+        )
+        if (
+            missing_columns
+            or missing_indexes
+            or foreign_keys_enabled != 1
+            or not revision_constraints_ready
+        ):
             raise HostCommandRepositoryError(
                 HOST_COMMAND_SCHEMA_NOT_READY,
                 "host command schema is stale: "
                 f"missing_columns={missing_columns}, missing_indexes={missing_indexes}, "
-                f"foreign_keys={foreign_keys_enabled}",
+                f"foreign_keys={foreign_keys_enabled}, "
+                f"revision_constraints_ready={revision_constraints_ready}",
             )
 
     def admit(
         self,
         command: Any,
-        work_order: AgentWorkOrder,
+        work_order: AgentWorkOrder | WorkOrderV3,
         assignment: Any,
         graph: TaskGraph,
     ) -> dict[str, Any]:
@@ -349,20 +387,26 @@ class HostCommandRepository:
     def _normalize_admission(
         self,
         command: Any,
-        work_order: AgentWorkOrder,
+        work_order: AgentWorkOrder | WorkOrderV3,
         assignment: Any,
         graph: TaskGraph,
     ) -> dict[str, Any]:
+        if not isinstance(work_order, WorkOrderV3):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "governed command admission requires an explicit WorkOrderV3",
+            )
         command_payload, command_value = _typed_roundtrip(
             command,
             HostCommand,
             field_name="command",
         )
-        work_order_payload, work_order_value = _typed_roundtrip(
-            work_order,
-            AgentWorkOrder,
-            field_name="work_order",
-        )
+        work_order_payload, work_order_value = _work_order_roundtrip(work_order)
+        if work_order_value.budget_policy is None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "governed WorkOrderV3 requires an explicit BudgetPolicy",
+            )
         assignment_payload, assignment_value = _typed_roundtrip(
             assignment,
             ExecutorAssignment,
@@ -386,21 +430,52 @@ class HostCommandRepository:
             field_name="command.graph_revision",
             minimum=1,
         )
-        if work_order_id != work_order_value.work_order_id:
-            raise HostCommandRepositoryError(HOST_COMMAND_INVALID, "command/work_order identity mismatch")
+        if work_order_id != work_order_value.root_work_order_id:
+            raise HostCommandRepositoryError(HOST_COMMAND_INVALID, "command/work_order root identity mismatch")
         if work_order_id != graph_value.root_work_order_id:
             raise HostCommandRepositoryError(HOST_COMMAND_INVALID, "work_order/TaskGraph root identity mismatch")
         if graph_id != graph_value.graph_id or graph_revision != graph_value.revision:
             raise HostCommandRepositoryError(HOST_COMMAND_INVALID, "command/TaskGraph revision mismatch")
+        if work_order_value.task_graph_id is not None:
+            if (
+                work_order_value.task_graph_id != graph_id
+                or work_order_value.graph_revision != graph_revision
+            ):
+                raise HostCommandRepositoryError(
+                    HOST_COMMAND_INVALID,
+                    "WorkOrderV3/TaskGraph lineage mismatch",
+                )
+            graph_node_ids = {node.node_id for node in graph_value.nodes}
+            if work_order_value.task_node_id not in graph_node_ids:
+                raise HostCommandRepositoryError(
+                    HOST_COMMAND_INVALID,
+                    "WorkOrderV3.task_node_id is outside the admitted TaskGraph",
+                )
         if (
-            graph_value.status.value != "CREATED"
-            or len(graph_value.nodes) != 1
-            or graph_value.nodes[0].status.value != "READY"
+            work_order_value.business_idempotency_scope
+            and work_order_value.business_idempotency_scope
+            != str(command_payload.get("business_scope") or "")
         ):
             raise HostCommandRepositoryError(
                 HOST_COMMAND_INVALID,
-                "command admission requires exactly one READY node in a CREATED TaskGraph",
+                "WorkOrderV3 business idempotency scope differs from HostCommand",
             )
+        if (
+            work_order_value.operation_fingerprint
+            and work_order_value.operation_fingerprint
+            != str(command_payload.get("operation_fingerprint") or "")
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "WorkOrderV3 operation fingerprint differs from HostCommand",
+            )
+        try:
+            validate_task_graph_admission_state(graph_value)
+        except Exception as exc:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                f"command admission TaskGraph state is invalid: {exc}",
+            ) from exc
         if _required_text(
             assignment_payload.get("work_order_id"),
             field_name="assignment.work_order_id",
@@ -559,8 +634,8 @@ class HostCommandRepository:
             WHERE command_id = ?
                OR (surface = ? AND request_id = ?)
                OR (ingress_claim_ref IS NOT NULL AND ingress_claim_ref = ?)
-               OR root_work_order_id = ?
-               OR assignment_id = ?
+               OR (root_work_order_id = ? AND graph_revision = ?)
+               OR (graph_id = ? AND graph_revision = ?)
             ORDER BY command_id
             """,
             (
@@ -569,7 +644,9 @@ class HostCommandRepository:
                 normalized["request_id"],
                 normalized["ingress_claim_ref"],
                 normalized["root_work_order_id"],
-                normalized["assignment_id"],
+                normalized["graph_revision"],
+                normalized["graph_id"],
+                normalized["graph_revision"],
             ),
         ).fetchall()
         distinct = {str(row["command_id"]) for row in rows}
@@ -812,13 +889,21 @@ class HostCommandRepository:
             current_graph=current_graph_payload,
             current_nodes=node_rows,
         )
+        if _digest(_canonical_json(work_order_payload)) != str(record["work_order_digest"]):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_DURABLE_DATA_INVALID,
+                "durable work_order digest mismatch",
+            )
+        _, durable_work_order = _work_order_roundtrip(
+            work_order_payload,
+            require_instance=False,
+        )
         typed_payloads = (
             ("command", command_payload, HostCommand, record["command_digest"]),
-            ("work_order", work_order_payload, AgentWorkOrder, record["work_order_digest"]),
             ("assignment", assignment_payload, ExecutorAssignment, record["assignment_digest"]),
             ("graph", frozen_graph_payload, TaskGraph, record["graph_digest"]),
         )
-        typed_values: dict[str, Any] = {}
+        typed_values: dict[str, Any] = {"work_order": durable_work_order}
         for name, payload, expected_type, expected_digest in typed_payloads:
             canonical = _canonical_json(payload)
             if _digest(canonical) != str(expected_digest):
@@ -949,6 +1034,36 @@ def _assert_current_graph_identity(
                 HOST_COMMAND_DURABLE_DATA_INVALID,
                 f"current TaskNode immutable binding drift: {node_id}",
             )
+
+
+def _work_order_roundtrip(
+    value: Any,
+    *,
+    require_instance: bool = True,
+) -> tuple[dict[str, Any], WorkOrderV3]:
+    """Version-dispatch a v2/v3 WorkOrder and return canonical durable v3."""
+
+    if require_instance and not isinstance(value, (AgentWorkOrder, WorkOrderV3)):
+        raise HostCommandRepositoryError(
+            HOST_COMMAND_INVALID,
+            "work_order must be AgentWorkOrder or WorkOrderV3",
+        )
+    try:
+        payload = (
+            _mapping_from_typed(value, field_name="work_order")
+            if require_instance
+            else dict(value)
+        )
+        typed = WorkOrderV3.from_mapping(deepcopy(payload))
+        typed.validate()
+        return _mapping_from_typed(typed, field_name="work_order"), typed
+    except HostCommandRepositoryError:
+        raise
+    except Exception as exc:
+        raise HostCommandRepositoryError(
+            HOST_COMMAND_INVALID if require_instance else HOST_COMMAND_DURABLE_DATA_INVALID,
+            f"work_order violates its versioned contract: {exc}",
+        ) from exc
 
 
 def _typed_roundtrip(

@@ -1265,12 +1265,8 @@ test.describe('Canonical monitor regression coverage', () => {
 
     const backButton = page.getByRole('button', { name: '返回分组' })
     await expect(backButton).toBeVisible()
-    await expect.poll(async () => {
-      if (new URL(page.url()).hash !== '#/observability/insights') {
-        await page.getByRole('button', { name: '返回分组' }).click()
-      }
-      return new URL(page.url()).hash
-    }).toBe('#/observability/insights')
+    await backButton.evaluate((button) => button.click())
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights')
   })
 
   test('Sessions triage rail filters issue requests and opens Trace evidence', async ({ page, baseURL }) => {

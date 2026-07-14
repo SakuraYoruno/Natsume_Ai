@@ -136,6 +136,47 @@ def validate_output_contract(content: str, contract: OutputContract) -> Any:
     return parsed
 
 
+def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, int]:
+    """Normalize only provider-reported, unit-explicit budget dimensions."""
+
+    if not isinstance(usage, Mapping) or not usage:
+        return {}
+
+    def _present_int(*keys: str) -> tuple[bool, int]:
+        for key in keys:
+            if key not in usage:
+                continue
+            value = usage.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return False, 0
+            return True, int(value)
+        return False, 0
+
+    measured: dict[str, int] = {}
+    has_total, total = _present_int("total_tokens", "totalTokenCount")
+    if has_total:
+        measured["token_count"] = total
+    else:
+        has_prompt, prompt = _present_int(
+            "prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount"
+        )
+        has_completion, completion = _present_int(
+            "completion_tokens",
+            "output_tokens",
+            "candidatesTokenCount",
+            "outputTokenCount",
+        )
+        if has_prompt and has_completion:
+            measured["token_count"] = prompt + completion
+
+    # Cost is accepted only in the canonical integer micro-unit.  Currency
+    # floats and provider-specific price estimates are deliberately ignored.
+    has_cost, cost = _present_int("model_cost_micros")
+    if has_cost:
+        measured["model_cost_micros"] = cost
+    return measured
+
+
 class ModelAttemptService:
     """Resolve once, then own every provider and semantic retry attempt."""
 
@@ -581,6 +622,14 @@ class ModelAttemptService:
         elapsed_ms = max(0, int((self._monotonic() - started_monotonic) * 1000))
         merged_metadata = dict(started.metadata)
         merged_metadata.update(dict(metadata or {}))
+        # This is the only point that still owns the typed ProviderResponse.
+        # Preserve provider-reported measurements for the outer Task budget;
+        # never estimate a missing token or cost dimension.
+        provider_budget = _provider_budget_measurements(
+            response.usage if response is not None else None
+        )
+        if provider_budget:
+            merged_metadata["provider_budget_measurements"] = provider_budget
         return replace(
             started,
             status=status,

@@ -80,3 +80,19 @@ def test_startup_check_runs_catalog_before_opening_durable_ledger(
             "SELECT MAX(migration_id) FROM schema_migrations"
         ).fetchone()[0]
         assert int(latest) >= 69
+
+
+def test_cli_db_path_remains_authoritative_when_asgi_rebuilds_ports(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "cli-authoritative.sqlite3"
+    monkeypatch.setenv("NATSUME_AUDIT_DB", "stale.sqlite3")
+    get_persistence_settings.cache_clear()
+
+    try:
+        host_main._bind_cli_persistence_path(str(db_path))
+
+        assert get_persistence_settings().canonical_db_path == str(db_path)
+    finally:
+        get_persistence_settings.cache_clear()

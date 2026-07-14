@@ -203,6 +203,11 @@ _INTENT_AGENT_SYSTEM_PROMPT_EXTRA = (
     "你是执行意图 Agent。先判断用户真正要求的动作，再使用已授权工具完成它。"
     "涉及文件、网络、系统、子任务分派时必须优先调用工具，不要用空泛说明替代执行。"
 )
+_INTENT_AGENT_GOVERNED_DELEGATE_PROMPT = (
+    "你是已被 Task Runtime 选定的执行意图子 Agent。只处理当前冻结任务："
+    "若无需工具，直接给出准确、简洁的结果；若需要工具或外部副作用，"
+    "只给出可执行的受治理交接计划，绝不声称尚未发生的动作已经完成。"
+)
 _INTENT_AGENT_ERROR_SUMMARY = "执行意图处理失败。"
 
 _TRANSLATE_AGENT_RUNTIME_TEXTS = {
@@ -594,6 +599,14 @@ _SPECS: dict[str, PromptSpec] = {
         purpose="intent_agent_react_system_prompt_extra",
         output_type="text",
         content=_INTENT_AGENT_SYSTEM_PROMPT_EXTRA,
+        category="agent_prompt",
+        scope="intent_agent",
+    ),
+    "intent_agent_handler.governed_delegate_prompt": _spec(
+        "intent_agent_handler.governed_delegate_prompt",
+        purpose="intent_agent_governed_delegate_prompt",
+        output_type="text",
+        content=_INTENT_AGENT_GOVERNED_DELEGATE_PROMPT,
         category="agent_prompt",
         scope="intent_agent",
     ),

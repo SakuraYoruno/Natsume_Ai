@@ -16,7 +16,7 @@ class InputRuntimeApplicationPorts:
     get_life_snapshot_reader: Callable[[], Any]
     get_multimodal_observer: Callable[[], Any]
     get_multimodal_processor: Callable[[], Any]
-    get_runtime_task_registry: Callable[[], Any]
+    get_task_status_projection: Callable[[], Any]
     notify_user_interaction: Callable[[], None]
     evaluate_governor_with_timing: Callable[..., Any]
     build_chat_emotion_snapshot: Callable[..., Any]

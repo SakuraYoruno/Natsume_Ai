@@ -168,6 +168,45 @@ def _graph(*, graph_id: str = "graph-1", node_status: TaskNodeStatus = TaskNodeS
     return graph
 
 
+def _dependency_graph(*, graph_id: str = "graph-dependencies") -> TaskGraph:
+    graph = TaskGraph(
+        graph_id=graph_id,
+        root_work_order_id=f"work-order::{graph_id}",
+        revision=1,
+        planner_ref="planner://test/dependencies",
+        status=TaskGraphStatus.CREATED,
+        created_at=1_700_000_000_000,
+        nodes=(
+            TaskNode(
+                node_id="root",
+                dependencies=(),
+                route="skill:test",
+                input_refs=(),
+                output_contract={},
+                retry_policy={"max_attempts": 1},
+                risk_level=1,
+                acceptance_criteria=(),
+                status=TaskNodeStatus.READY,
+                status_version=0,
+            ),
+            TaskNode(
+                node_id="dependent",
+                dependencies=("root",),
+                route="skill:test",
+                input_refs=(),
+                output_contract={},
+                retry_policy={"max_attempts": 1},
+                risk_level=1,
+                acceptance_criteria=(),
+                status=TaskNodeStatus.READY,
+                status_version=0,
+            ),
+        ),
+    )
+    graph.validate()
+    return graph
+
+
 def _migrated_store(
     tmp_path: Path,
     *,
@@ -282,6 +321,37 @@ def _advance_node_to_waiting_acceptance(store: DurableTaskStore) -> None:
             ),
             verification_result=verification,
         )
+
+
+def test_gr03a_attempt_claim_requires_every_dependency_to_be_accepted(tmp_path: Path) -> None:
+    store = _migrated_store(tmp_path, name="dependency-gate.sqlite3")
+    graph = _dependency_graph()
+    store.create_graph(
+        graph,
+        outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
+    )
+
+    with pytest.raises(TaskStoreError) as error:
+        store.create_attempt(
+            attempt_id="attempt-dependent-before-root",
+            graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+            node_id="dependent",
+            attempt_no=1,
+            expected_node_version=0,
+            operation_scope=None,
+            operation_fingerprint=None,
+            outbox=_event(
+                "TASK_ATTEMPT",
+                "attempt-dependent-before-root",
+                0,
+                "TASK_ATTEMPT_CREATED",
+                attempt_id="attempt-dependent-before-root",
+            ),
+        )
+
+    assert error.value.reason_code == TASK_STORE_INVALID
+    assert store.read_scheduler_snapshot(graph.graph_id, graph.revision)["attempts"] == []
 
 
 @pytest.mark.parametrize(

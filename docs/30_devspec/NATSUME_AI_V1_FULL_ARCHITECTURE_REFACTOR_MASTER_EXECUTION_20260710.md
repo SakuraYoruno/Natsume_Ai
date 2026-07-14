@@ -3,17 +3,40 @@
 
 # Natsume AI V1 完整架构重构执行合同（Architecture Waves v2）
 
-版本：v2.1
-日期：2026-07-13
-状态：`CORE_RELEASE_DONE`
+版本：v2.3
+日期：2026-07-15
+状态：`CORE_INFRASTRUCTURE_PASS__FULL_ARCHITECTURE_INCOMPLETE`
 文档类型：DevSpec / Master Execution Contract
-当前代码基线：`codex/m48-integration`，AW-00～AW-08 全部 `DONE`；Core Release Program Acceptance 22/22 stages `PASS`，Final Architecture Gate 1～15 全部 `PASS`，验收源提交 `d59f1e4b38ef2289bd741e90666927d9f3d19505`
+当前代码基线：`origin/dev@31114f7ba9985e99fc82187aeb99b939bbf426ab`（PR #46 merge）；Core Infrastructure Release 验收历史为 22/22 stages `PASS`，但 Universal Governed Runtime、原生多节点 TaskGraph 与 Generic Planning Search 未完成，因此该结果不得再解释为 Full Architecture Program Acceptance。
 目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 上游参考：`C:/Users/34145/Downloads/Natsume_AI_V1_高级能力拓展重构计划_新增长期演化能力.md`
 
 本文从 v2.0 起成为完整重构的唯一执行合同。v1.0 的 `TASK-0461～TASK-0622` 保留为历史需求、测试和实现线索，不再作为调度单元、提交单元、批准 Gate 或完成度计数。任何旧任务卡、Seal 文档、WIP owner、MASTER handoff 或逐任务证据要求与本文冲突时，以本文为准。
 
 代码事实优先于计划假设。执行者可以直接修订受影响的代码和计划，不需要为普通仓库改动等待额外确认；只有本文第 8 节定义的真实高风险阻断条件才允许停止。
+
+## 2026-07-14 封板纠错（覆盖本文后续历史性 DONE 表述）
+
+PR #46 完成了大量持久化、迁移、Journal/Outbox、ModelAttempt、Capability、Digital Life、Gateway、Edge 与 Operator Projection 地基，但把已实现 vertical slice 的自洽验收错误外推成了完整架构完成。本文 v2.1 中所有 `CORE_RELEASE_DONE`、`AW-00～AW-08 DONE`、`Final Architecture Gate PASS` 和“后续只进入 Evolution Follow-up”的结论，自本节起只作为历史记录，不再具有完整程序封板效力。
+
+重新定级如下：
+
+| 能力面 | 2026-07-14 代码事实结论 |
+|---|---|
+| Durable Infrastructure / Model / Capability / Life / Gateway / Edge | `PASS`（Core Infrastructure） |
+| Universal Governed Runtime | `INCOMPLETE`：生产 `GovernedHostRuntime.supports()` 仅接受 direct skill |
+| Native Multi-node TaskGraph | `NOT_IMPLEMENTED`：Host admission、repository 与 coordinator 强制单节点 |
+| Durable Budget Enforcement | `NOT_WIRED`：合同存在，canonical runtime 无预算预留/消费/释放闭环 |
+| Review / Resume Runtime | `NOT_WIRED`：ReviewStore 未进入普通 Task 状态机 composition |
+| Generic Planning Search | `NOT_IMPLEMENTED`：L1/L2/L3 仍为 Pentest 领域实现，未形成公共 Runtime |
+| Immutable search path / graph revision replan | `NOT_IMPLEMENTED` |
+| Transactional Chat Commit | `INCOMPLETE`：user turn 可先于 Task admission 写入，post-process 仍有异步旁路 |
+| Legacy execution truths | `STILL_PRESENT`：Executive SkillDag 与内存 RuntimeTaskRegistry 仍拥有执行状态 |
+| Full Architecture Program Acceptance | `INVALID / REOPENED` |
+
+恢复后的唯一执行入口为 `NATSUME_AI_UNIVERSAL_GOVERNED_PLANNING_EXECUTION_20260714.md`。完成判据必须按 chat、skill、delegate、plan 四条生产路线逐条证明 `HostCommand → immutable TaskGraph revision → node Attempt/Lease/Budget/Review → Verification → Acceptance → Receipt`，不得再用单条 direct-skill vertical slice 或基础设施 Gate 代替范围覆盖。
+
+截至 2026-07-15，本轮已完成 Universal Runtime、multi-node TaskGraph、Budget/Review、Generic Planning Search、revision replan、Acceptance Outbox 与 canonical task truth 的代码切流，并完成 Docker、前后端、真实 provider 及 chat/skill/delegate/plan 四路线实测；最新机器事实以 `configs/release/universal_governed_runtime_coverage.json` 和 `docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json` 为准。该目标程序可以定级为 `LIVE_ROUTE_MATRIX_PASS`。但全局 `ProcessServiceContainer` / service locator 尚未移除，原 Final Architecture Gate 1～15 也未在本轮被重新完整证明，因此本文总状态仍不得改回 `FULL_ARCHITECTURE_DONE`。
 
 ---
 
@@ -431,7 +454,7 @@ AW-08 只有在以下全部成立时才完成：
 14. compatibility facade、旧 writer/runtime/scheduler/flag 和 dead fallback usage=0 并已删除。
 15. 完整离线套件、golden/replay/chaos/security/performance、真实隔离 smoke、identity regression、migration/restore 和 rollback drill 一次通过。
 
-最终结果（2026-07-13）：Gate 1～15 全部满足；Program Acceptance 回执状态为 `PASS`，AW-08 与本执行合同进入 `DONE`。
+历史结果（2026-07-13，已撤销完整架构效力）：当时记录为 Gate 1～15 `PASS`、AW-08 `DONE`。2026-07-14 代码事实复核证明该结论只覆盖 Core Infrastructure 与选定 vertical slices，不能作为 Full Architecture Program Acceptance；当前必须以本文开头的纠错结论和 Universal Governed Planning Runtime 独立验收为准。
 
 任何失败都必须对应真实代码、数据或环境缺口。不得用新增文档、任务编号或批准状态替代 Gate。
 
@@ -456,7 +479,7 @@ AW-08 只有在以下全部成立时才完成：
 
 ---
 
-## 11. 当前执行板
+## 11. PR #46 历史 Core Infrastructure 执行板（非当前 Full Architecture 验收）
 
 | Wave | 状态 | 下一可验证结果 |
 |---|---|---|
@@ -468,8 +491,8 @@ AW-08 只有在以下全部成立时才完成：
 | AW-05 | `DONE` | ModelAttempt/Prompt/Route、Capability Broker、durable Skill/MCP authority 与三类 Domain Pack 已完成 production cutover；无 P0/P1 |
 | AW-06 | `DONE` | Edge/Host 显式实现导入归零，设备单 authority、durable lease/fence/receipt 与 reconnect no-replay 已切流；无 P0/P1 |
 | AW-07 | `DONE` | durable projection/lease/fence/rebuild、Query auth/privacy、generated BFF command client 已切流；无 P0/P1 |
-| AW-08 | `DONE` | compatibility facade、旧 authority/Pentest 旁路与生成污染已删除；Program Acceptance 22/22 stages PASS，最终回执绑定 `d59f1e4b` |
+| AW-08 | `HISTORICAL_CORE_RELEASE_DONE` | 当时的 22/22 stages 仅证明 Core Infrastructure 与选定切片；`Full Architecture DONE` 解释已撤销 |
 
-Core Release 完成后，另立 Evolution Follow-up Goal，范围为历史 TASK-0609～0619：workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration。该 Goal 必须复用已经封板的 contracts/governance/persistence，不得在核心 authority 未完成时提前堆叠。
+PR #46 的 Follow-up 清单只列出 workspace isolation、Skill Compiler、benchmark/scenario/counterfactual、feedback proposal、Knowledge OS 与 Identity Migration，遗漏了原始目标中的通用三层 Planning Search。该遗漏已由 `NATSUME_AI_UNIVERSAL_GOVERNED_PLANNING_EXECUTION_20260714.md` 恢复，并于 2026-07-15 完成独立的代码、聚合测试和四路线 live 验收。
 
-AW-08 已按 `Model/Prompt → Life/Memory/Evidence → Capability/Agent/Task → Edge/Gateway → Obs/release hygiene` 完成五个删除包和 production reference scan；Core Release Manifest/SBOM/Rollback Matrix 及 Program Acceptance 回执已冻结。后续工作只进入独立 Evolution Follow-up Goal，不得重新引入已退休 authority 或绕过已封板的 contracts/governance/persistence。
+当前结论分为两层：Universal Governed Planning Runtime 为 `PASS`；Full Architecture 为 `INCOMPLETE`。后者至少仍缺 `composition_without_global_service_locator`，不得再用历史 Core Release 回执、测试总数或本轮路线 PASS 代替 Gate 1～15 的重新证明。

@@ -56,6 +56,46 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return int(default)
 
 
+def _require_durable_assistant_turn_result(value: Any) -> None:
+    result = dict(value or {}) if isinstance(value, Mapping) else {}
+    status = str(result.get("status") or "").strip().upper()
+    reason_code = str(result.get("reason_code") or "").strip().upper()
+    if status == "OK":
+        return
+    if status == "SKIPPED" and reason_code in {
+        "DUPLICATE_CONVERSATION_TURN",
+        "DUPLICATE_COMMAND",
+    }:
+        return
+    raise RuntimeError(
+        (reason_code or "CONVERSATION_ASSISTANT_TURN_NOT_DURABLE")
+        + ": accepted assistant turn was not durably recorded"
+    )
+
+
+def _require_durable_life_memory_result(
+    value: Mapping[str, Any],
+    *,
+    request_id: str,
+) -> None:
+    result = dict(value or {})
+    status = str(result.get("status") or "").strip().upper()
+    receipt_request_id = str(result.get("request_id") or "").strip()
+    if receipt_request_id != str(request_id or "").strip():
+        raise RuntimeError(
+            "LIFE_MEMORY_RECEIPT_BINDING_MISMATCH: durable Memory receipt "
+            "does not belong to the accepted request"
+        )
+    # SKIPPED is a durable policy decision, not a missing write.  COMMITTED
+    # includes both a new admission and an idempotent replay of that receipt.
+    if status in {"COMMITTED", "SKIPPED"}:
+        return
+    raise RuntimeError(
+        str(result.get("reason_code") or "LIFE_MEMORY_NOT_DURABLE")
+        + ": accepted chat Memory admission has no durable receipt"
+    )
+
+
 async def _async_post_process(
     *,
     application_ports: AgentRuntimeApplicationPorts,
@@ -100,6 +140,13 @@ async def _async_post_process(
         normalized_trace_stage_meta.get("skip_default_mode_on_conversation_end")
     )
     surface_main_chain_used = bool(normalized_trace_stage_meta.get("surface_main_chain_used"))
+    # A Digital Life projection is already running behind a durable outbox.
+    # Conversation and LifeMemory writes performed by that projection are
+    # therefore part of the durable commit chain: hiding their failure would
+    # incorrectly acknowledge the projection and make the loss permanent.
+    durable_projection_mode = bool(
+        normalized_trace_stage_meta.get("life_projection_mode")
+    )
 
     try:
         from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
@@ -176,7 +223,7 @@ async def _async_post_process(
                 provider_name=provider_name,
                 model_id=model_id,
             )
-            application_ports.record_assistant_turn(
+            assistant_turn_result = application_ports.record_assistant_turn(
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,
@@ -194,6 +241,8 @@ async def _async_post_process(
                     "reply_envelope": dict(normalized_trace_stage_meta.get("reply_envelope") or {}),
                 },
             )
+            if durable_projection_mode:
+                _require_durable_assistant_turn_result(assistant_turn_result)
             try:
                 application_ports.get_conversation_experience_store().update_assistant_reply(
                     request_id=request_id,
@@ -205,6 +254,8 @@ async def _async_post_process(
             except Exception as exp_exc:
                 _logger.debug("[%s] cortex_orchestrator conversation experience reply update failed: %s", request_id, exp_exc)
     except Exception as exc:
+        if durable_projection_mode:
+            raise
         _logger.debug("[%s] cortex_orchestrator post_process conversation_turn failed: %s", request_id, exc)
 
     try:
@@ -276,6 +327,11 @@ async def _async_post_process(
                 if hasattr(life_memory_receipt, "as_dict")
                 else dict(life_memory_receipt or {})
             )
+            if durable_projection_mode:
+                _require_durable_life_memory_result(
+                    life_memory_write,
+                    request_id=request_id,
+                )
             life_memory_write["source"] = (
                 "surface_main_chain" if surface_main_chain_used else "agent_runtime"
             )
@@ -291,6 +347,8 @@ async def _async_post_process(
                     "surface_memory_write": dict(life_memory_write),
                 }
     except Exception as exc:
+        if durable_projection_mode:
+            raise
         _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
 
     if bool(normalized_trace_stage_meta.get("life_projection_mode")):

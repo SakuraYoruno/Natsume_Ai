@@ -136,6 +136,72 @@ def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
         ledger.close()
 
 
+def test_dispatch_worker_never_redelivers_a_governed_acceptance_receipt() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    mocked_deliver = AsyncMock()
+    try:
+        with patch(
+            "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "accepted once",
+                    "commit_event": {
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "APPROVE",
+                        "governed": True,
+                        "execution_receipt": {
+                            "graph_id": "graph-governed-delivery",
+                            "graph_revision": 1,
+                            "status": "ACCEPTED",
+                            "accepted": True,
+                        },
+                        "audit_refs": {
+                            "acceptance_effects": {
+                                "count": 3,
+                                "committed": 3,
+                                "failed": 0,
+                                "pending": 0,
+                            }
+                        },
+                    },
+                }
+            ),
+        ), patch(
+            "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
+            new=mocked_deliver,
+        ):
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_governed_delivery_once",
+                    session_id="qq_dm_governed_delivery_once",
+                    source="GATEWAY",
+                    text="hi",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_governed_delivery_once",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="governed.awaited",
+                    run_in_thread=False,
+                    ports=_ports(),
+                )
+            )
+
+        mocked_deliver.assert_not_awaited()
+        completed = next(
+            row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED"
+        )
+        assert "gateway_delivery_authority=acceptance_effect_outbox" in str(
+            completed.get("detail") or ""
+        )
+    finally:
+        ledger.close()
+
+
 def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:

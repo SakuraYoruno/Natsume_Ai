@@ -8,7 +8,6 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _format_template_text,
     _load_template_mapping,
     _mapping_section,
-    _mapping_text,
     _parse_bool_env,
     _sse,
     _airlock_sanitize_input,
@@ -35,10 +34,9 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
 import json
 import time
 
-from host_brain.agent_runtime.runtime_texts import (
-    _load_runtime_texts_section,
-    _logger,
-)
+from host_brain.agent_runtime.runtime_texts import _logger
+
+
 def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(summary or {})
     surface_memory_trace = _surface_memory_trace_for_audit(raw)
@@ -660,38 +658,6 @@ async def _persist_post_process_audit(
                 "ts_ms": ts_ms,
             }
         )
-
-    try:
-        runtime_task_registry = ports.runtime_task_registry()
-        runtime_task = runtime_task_registry.get_by_request_id(request_id)
-        if runtime_task is not None and str(runtime_task.status).upper() in {"RUNNING", "RECOVERING"}:
-            runtime_task_status_templates = _load_runtime_texts_section(
-                "runtime_task_status",
-                render_target_lang=render_target_lang,
-            )
-            has_failure = bool(runtime_task.error or runtime_task.result_code)
-            if has_failure:
-                runtime_task_registry.mark_failed(
-                    runtime_task.task_id,
-                    detail=_mapping_text(
-                    runtime_task_status_templates,
-                        "failed_detail",
-                    ),
-                    error=str(runtime_task.error or "").strip(),
-                    result_code=str(runtime_task.result_code or "").strip() or None,
-                    result_text=narrative,
-                )
-            else:
-                runtime_task_registry.mark_completed(
-                    runtime_task.task_id,
-                    detail=_mapping_text(
-                    runtime_task_status_templates,
-                        "completed_detail",
-                    ),
-                    result_text=narrative,
-                )
-    except Exception as exc:
-        _logger.debug("[%s] runtime task finalize failed: %s", request_id, exc)
 
     ledger.log_llm_node_call(
         {

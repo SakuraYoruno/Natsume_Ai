@@ -196,6 +196,27 @@ def validate_task_graph_transition(
     return target_status
 
 
+def validate_task_graph_admission_state(graph: "TaskGraph") -> None:
+    """Require the canonical CREATED DAG projection used for new admissions."""
+
+    graph.validate()
+    if graph.status is not TaskGraphStatus.CREATED or not graph.nodes:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "TaskGraph admission requires a non-empty CREATED graph",
+        )
+    invalid: list[str] = []
+    for node in graph.nodes:
+        expected = TaskNodeStatus.BLOCKED if node.dependencies else TaskNodeStatus.READY
+        if node.status is not expected:
+            invalid.append(f"{node.node_id}:{node.status.value}->{expected.value}")
+    if invalid:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "TaskGraph admission node states are invalid: " + ",".join(invalid),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TaskNode:
     node_id: str
@@ -467,5 +488,6 @@ __all__ = [
     "TaskNode",
     "TaskNodeStatus",
     "validate_task_graph_transition",
+    "validate_task_graph_admission_state",
     "validate_task_node_transition",
 ]

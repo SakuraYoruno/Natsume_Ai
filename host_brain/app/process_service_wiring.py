@@ -56,7 +56,7 @@ def configure_process_service_ports(
     from host_brain.app.multimodal_observer import MultimodalObserver
     from host_brain.app.obs_routes_sysmode import _get_mode_transition_service
     from host_brain.app.recall.semantic_recall import SemanticRecaller
-    from host_brain.app.runtime_task_registry import RuntimeTaskRegistry
+    from host_brain.app.runtime_task_registry import LegacyRuntimeTaskRegistry
     from host_brain.app.settings import get_persistence_settings
     from host_brain.app.startup import (
         build_edge_dependency_probe_statuses,
@@ -92,7 +92,7 @@ def configure_process_service_ports(
             model_transport=invoke_model_provider_transport,
             graph_handler_bindings=graph_handler_bindings,
             multimodal_observer_factory=MultimodalObserver,
-            runtime_task_registry_factory=RuntimeTaskRegistry,
+            legacy_runtime_task_registry_factory=LegacyRuntimeTaskRegistry,
             capability_gap_telemetry_factory=CapabilityGapTelemetry,
             capability_forge_service_factory=CapabilityForgeService,
             routing_matrix_factory=RoutingMatrix,

@@ -750,12 +750,24 @@ def get_planning_agent() -> PlanningAgent:
     return _container().planning_agent
 
 
-def get_runtime_task_registry() -> Any:
-    if _container().runtime_task_registry is None:
-        _container().runtime_task_registry = (
-            require_process_application_ports().runtime_task_registry_factory()
+def get_legacy_runtime_task_registry() -> Any:
+    """Return compatibility-only, process-local Executive task state.
+
+    This is not an execution or progress authority. Canonical Host routes use
+    the durable Task Runtime and ``DurableTaskStatusProjection`` instead.
+    """
+
+    if _container().legacy_runtime_task_registry is None:
+        _container().legacy_runtime_task_registry = (
+            require_process_application_ports().legacy_runtime_task_registry_factory()
         )
-    return _container().runtime_task_registry
+    return _container().legacy_runtime_task_registry
+
+
+def get_runtime_task_registry() -> Any:
+    """Deprecated alias retained for external legacy integrations."""
+
+    return get_legacy_runtime_task_registry()
 
 
 def get_runtime_capability_registry() -> RuntimeCapabilityRegistry:

@@ -251,7 +251,10 @@ async def health_check(
             details=health_report,
         )
     except Exception as exc:
-        _logger.error("Health check failed", extra={"request_id": request_id, "error": str(exc)})
+        _logger.exception(
+            "Health check failed",
+            extra={"request_id": request_id, "error": str(exc)},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service health check failed",

@@ -150,10 +150,11 @@ def _build_task_progress_sub_context(
     session_id: str,
     person_id: str,
 ) -> SimpleNamespace:
-    from host_brain.composition.process_services import get_runtime_task_registry  # noqa: PLC0415
+    from host_brain.app.durable_task_status import build_durable_task_status_projection  # noqa: PLC0415
+    from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
 
-    registry = get_runtime_task_registry()
-    summary = registry.summarize_for_chat(
+    projection = build_durable_task_status_projection(ledger=get_ledger())
+    summary = projection.summarize_for_chat(
         person_id=person_id,
         session_id=session_id,
         exclude_request_id=request_id,

@@ -27,6 +27,8 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
@@ -112,6 +114,16 @@ def _build_fake_container(
         events.append("repository:build")
         return _Closeable("repository", events)
 
+    def build_review_store(db_path: str) -> _Closeable:
+        assert db_path == str(path.resolve())
+        events.append("review-store:build")
+        return _Closeable("review-store", events)
+
+    def build_worker_projection_store(db_path: str) -> _Closeable:
+        assert db_path == str(path.resolve())
+        events.append("worker-projection-store:build")
+        return _Closeable("worker-projection-store", events)
+
     def build_agent_result_repository(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
         events.append("agent-result:build")
@@ -142,6 +154,8 @@ def _build_fake_container(
         startup_outbox_limit=23,
         migration_runner_builder=build_migration,
         task_store_builder=build_store,
+        review_store_builder=build_review_store,
+        worker_projection_store_builder=build_worker_projection_store,
         command_repository_builder=build_repository,
         agent_result_repository_builder=build_agent_result_repository,
         scheduler_definition_repository_builder=build_scheduler_definition_repository,
@@ -162,6 +176,8 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "migration:build",
         "migration:apply:startup::task-runtime",
         "task-store:build",
+        "review-store:build",
+        "worker-projection-store:build",
         "repository:build",
         "agent-result:build",
         "scheduler-definition:build",
@@ -223,12 +239,22 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         events.append("repository:build")
         raise OSError("unstable platform detail")
 
+    def build_review_store(_path: str) -> _Closeable:
+        events.append("review-store:build")
+        return _Closeable("review-store", events)
+
+    def build_worker_projection_store(_path: str) -> _Closeable:
+        events.append("worker-projection-store:build")
+        return _Closeable("worker-projection-store", events)
+
     with pytest.raises(TaskRuntimeContainerConstructionError) as caught:
         build_process_task_runtime_container(
             ledger=_Ledger(path),
             canonical_db_path=path,
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
+            review_store_builder=build_review_store,
+            worker_projection_store_builder=build_worker_projection_store,
             command_repository_builder=fail_repository,
         )
 
@@ -238,7 +264,11 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert events == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
+        "review-store:build",
+        "worker-projection-store:build",
         "repository:build",
+        "worker-projection-store:close",
+        "review-store:close",
         "task-store:close",
         "migration:close",
     ]
@@ -281,13 +311,15 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
         "scheduler-definition:close",
         "agent-result:close",
         "repository:close",
+        "worker-projection-store:close",
+        "review-store:close",
         "task-store:close",
         "migration:close",
     ]
     assert container.closed
     assert not container.activated
     asyncio.run(container.aclose())
-    assert len(events) == 12
+    assert len(events) == 14
 
 
 def test_canonical_authority_mismatch_builds_nothing(tmp_path: Path) -> None:
@@ -335,6 +367,8 @@ def test_real_sqlite_adapters_share_the_migrated_canonical_ledger(
 
         assert type(container.migration_runner) is SQLiteMigrationRunner
         assert type(container.task_store) is DurableTaskStore
+        assert type(container.review_store) is ReviewStore
+        assert type(container.worker_projection_store) is WorkerProjectionStore
         assert type(container.command_repository) is HostCommandRepository
         assert type(container.agent_result_repository) is AgentExecutionResultRepository
         assert type(container.scheduler_definition_repository) is (
@@ -346,6 +380,12 @@ def test_real_sqlite_adapters_share_the_migrated_canonical_ledger(
         assert type(container.event_store) is RuntimeEventStore
         assert type(container.outbox_publisher) is RuntimeOutboxPublisher
         assert str(container.task_store.db_path.resolve()) == (
+            ledger.canonical_db_path
+        )
+        assert str(container.review_store.db_path.resolve()) == (
+            ledger.canonical_db_path
+        )
+        assert str(container.worker_projection_store.db_path.resolve()) == (
             ledger.canonical_db_path
         )
         assert str(container.command_repository.db_path.resolve()) == (

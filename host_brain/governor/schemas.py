@@ -71,6 +71,9 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "target": str,
             "occurrence_ref": str,
             "sys_mode": str,
+            # Thalamus attaches this canonical understanding field to every
+            # execution intent before Governor evaluation.
+            "semantic_intent": dict,
             "pragmatic_frame": dict,
             "conversation_understanding": dict,
         },

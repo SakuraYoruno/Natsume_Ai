@@ -108,12 +108,19 @@ def _governed_context() -> dict[str, object]:
         "request_id": "req-test",
         "principal_id": "test-principal",
         "target_id": "codex_production",
+        "command_target_id": "codex_production",
         "work_order_id": "work-order-test",
         "graph_id": "graph-governed-production-test",
         "graph_revision": 1,
         "node_id": "node-governed-production-test",
         "lease_id": "lease-governed-production-test",
+        "lease_owner_id": "worker-governed-production-test",
         "fencing_token": 1,
+        "reservation_id": "reservation-governed-production-test",
+        "node_grant_ref": "grant://governed-production-child",
+        "parent_grant_ref": "grant://governed-production-parent",
+        "business_scope": "scope-governed-production-test",
+        "operation_fingerprint": "sha256:" + "b" * 64,
     }
 
 
@@ -197,6 +204,7 @@ def _dispatch_governed_executor(payload: dict[str, object]) -> dict:
         skill_id=skill_id,
         principal_id="test-principal",
         target_id=skill_id,
+        session_id="session-governed-production-test",
         governed_execution_context=governed,
         durable_ledger=dependencies.get_ledger(),
         validated_by="test.governed_task_fixture",
