@@ -138,7 +138,7 @@
         "automatic repair of historical half-committed BLOCKED graphs with failure Nodes or FAILED graphs with ACTIVE Budgets",
         "unified optional-Attempt observation for WAITING_APPROVAL, which still uses the dedicated pre-review path",
         "revisioned TaskGraph Outbox aggregate identity; legacy Graph Outboxes lack graph_revision, so complete taskbatch marker missing-row or wrong-binding history scans are safe only for a single-revision graph id, while multi-revision reads can validate only the returned decision row against its exact Outbox",
-        "execution persistence and orchestration modularization: governed_task_adapter.py is now below the 1500-line inventory threshold after extracting route-aware authority/replay validation, but task_repository.py still exceeds its existing 4600-line ceiling and coordinator.py remains an unclassified large file; the mixed-file architecture gate is not green"
+        "execution persistence and orchestration modularization: governed_task_adapter.py is below the 1500-line inventory threshold after extracting route-aware authority/replay validation; TaskStore value objects now live in task_store_types.py with identity-preserving compatibility re-exports, reducing task_repository.py to about 12330 lines without moving SQL or transaction authority. task_repository.py still exceeds its existing 4600-line ceiling and coordinator.py remains an unclassified large file; the mixed-file architecture gate is not green"
       ],
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "terminal_failure_boundary": "Ordinary and exhausted pre-reservation resolver failures atomically close Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes. Any existing operation reservation rejects this path, and Budget finalization remains outside the bundle.",
@@ -155,6 +155,7 @@
         "host_brain/contracts/agent_runtime/parallel_success.py",
         "host_brain/contracts/agent_runtime/graph_cancellation.py",
         "host_brain/persistence/task_repository.py",
+        "host_brain/persistence/task_store_types.py",
         "host_brain/persistence/worker_projection_repository.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/heartbeat.py",

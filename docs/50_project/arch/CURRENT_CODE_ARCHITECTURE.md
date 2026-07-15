@@ -74,6 +74,7 @@ Chat / Host Input / Gateway
 - `host_brain/task_runtime/acceptance_effects.py`
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py`
 - `host_brain/persistence/task_repository.py`
+- `host_brain/persistence/task_store_types.py`
 
 ### 3.1 已接线范围
 
@@ -127,7 +128,7 @@ final cancellation 只有在 active ownership 与 operation/effect/review 不确
 
 该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，但生产 authority provider/受控入口/canary 与跨进程自动 reconciliation/takeover/continuation 未完成。B4/0090、B5/0091 语义继续有效；revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、历史半提交和统一 `WAITING_APPROVAL` 仍是缺口。
 
-执行层的代码结构门禁仍为红，但第一刀已经产生真实下降：Host 的 route-aware authority、exact replay 与 WorkOrder fail-closed 校验迁到约 0.35k 行的 `governed_task_authority.py`，`governed_task_adapter.py` 从约 1.7k 行降到约 1.4k 行并退出 1.5k 大文件 inventory。迁移同时修复 `chat/delegate` replay 被误套 direct-skill metadata 的隐藏拒绝路径；三类 direct route 现在先共用 HostCommand/WorkOrder/planning/grant/review/target binding，只有 skill 叠加专属校验。门禁仍失败是因为 `task_repository.py` 当前约 12.5k 行、超过既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分。后续不得通过提高 allowlist 上限封板，必须继续按持久化事务族与编排阶段拆分。
+执行层的代码结构门禁仍为红，但已有两刀真实下降。Host 的 route-aware authority、exact replay 与 WorkOrder fail-closed 校验迁到约 0.35k 行的 `governed_task_authority.py`，adapter 从约 1.7k 行降到约 1.4k 行，并修复 `chat/delegate` replay 被误套 direct-skill metadata 的拒绝路径。TaskStore 的稳定错误、状态枚举、Acceptance Effect/Outbox/value records 与 payload-ref 构造迁入约 0.28k 行的 `task_store_types.py`；该模块不导入 repository、不持有连接/SQL/事务，`task_repository.py` 继续兼容重导出同一类型对象并从约 12.56k 降到约 12.33k 行。门禁仍失败是因为 repository 远超既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分。后续不得提高 allowlist 上限，必须继续抽 row codec/decision integrity 与持久化事务族、编排阶段。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
