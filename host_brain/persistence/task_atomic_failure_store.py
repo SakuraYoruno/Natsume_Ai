@@ -627,4 +627,3 @@ class TaskAtomicFailureStoreMixin:
             "lease": dict(lease),
             "replayed": True,
         }
-

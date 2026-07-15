@@ -70,6 +70,7 @@ def test_task_repository_reexports_canonical_task_store_value_types() -> None:
         "TASK_STORE_OUTBOX_CONFLICT",
         "TASK_STORE_OWNERSHIP_CONFLICT",
         "TASK_STORE_SCHEMA_NOT_READY",
+        "TASK_STORE_SCHEDULER_CAPACITY",
         "TaskStoreError",
         "build_outbox_payload_ref",
     )

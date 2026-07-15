@@ -115,7 +115,7 @@ def _assert_execute_calls_use_conn(
 
 
 def test_retry_and_atomic_failure_mixins_preserve_public_method_identity() -> None:
-    assert task_repository.DurableTaskStore.__bases__[-3:] == (
+    assert task_repository.DurableTaskStore.__bases__[6:9] == (
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,

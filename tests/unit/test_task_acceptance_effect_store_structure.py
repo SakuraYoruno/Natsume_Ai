@@ -31,6 +31,12 @@ from host_brain.persistence.task_retry_replay_store import (
 from host_brain.persistence.task_atomic_failure_store import (
     TaskAtomicFailureStoreMixin,
 )
+from host_brain.persistence.task_dag_state_store import (
+    TaskDagStateStoreMixin,
+)
+from host_brain.persistence.task_ready_claim_store import (
+    TaskReadyClaimStoreMixin,
+)
 
 
 STAGING_METHODS = (
@@ -65,6 +71,8 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
+        TaskDagStateStoreMixin,
+        TaskReadyClaimStoreMixin,
     )
     for name in STAGING_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
