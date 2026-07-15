@@ -120,6 +120,8 @@ flowchart TB
 - `host_brain/task_runtime/coordinator_records.py`：durable record 校验、并行节点 outcome 与稳定字段读取；纯叶子模块。
 - `host_brain/task_runtime/coordinator_receipts.py`：不可变 execution receipt、构造器与 terminal/commit event rendering；纯叶子模块并保持旧导入 identity。
 - `host_brain/task_runtime/graph_cancellation_records.py`：取消 intent 校验、Node 状态投影与 Budget target/projection；不拥有取消编排 authority。
+- `host_brain/task_runtime/graph_cancellation_runtime.py`：两阶段取消 request/continue、exact replay、advance/finalize 与本地 cancel/join 编排；只依赖同一 Store、共享 Outbox/Registry、lease TTL 和只读 Projection。
+- `host_brain/task_runtime/graph_cancellation_projection.py`：读取取消 intent、Graph/Node/Budget/Attempt/decision durable facts并构造 terminal receipt；只持 Store，不拥有 mutation authority。
 - `host_brain/task_runtime/runtime_outbox.py`：每个 Coordinator 唯一的 Outbox message factory/publisher/limit/发布锁；不持有 Store 或 Coordinator。
 - `host_brain/task_runtime/local_graph_execution_registry.py`：graph revision 级本地 task tracking 与 bounded cancel/join；只作 durable cancellation 的进程内加速器。
 - `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
@@ -150,7 +152,7 @@ flowchart TB
 
 TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 已不再阻塞静态文件门禁，剩余问题集中在 Coordinator。
 
-Coordinator 的纯边界与两项 stateful 进程内边界已拆出，主文件由 5,860 降到 5,332 行。确定性 records/receipts/cancellation projections 不依赖 runtime authority；RuntimeOutbox 统一 27 个构造与 31 个发布调用的单实例锁域；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join。Durable cancellation request/continue 仍在 Coordinator，发布锁也不覆盖跨进程 claim/CAS，因此静态 Gate 仍为红，不能把本地状态收口写成编排或恢复闭环完成。
+Coordinator 的纯边界与四项 stateful/read-only 进程内边界已拆出，主文件由 5,860 降到 4,627 行。确定性 records/receipts/cancellation payload helpers 不依赖 runtime authority；RuntimeOutbox 统一 27 个构造与 31 个发布调用的单实例锁域；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join；GraphCancellationRuntime 与只读 GraphCancellationProjection 接管 request/continue/replay/finalize 及 durable terminal projection，且共享原 Store/Outbox/Registry。Coordinator 只保留公开取消薄委托与执行重入委托。发布锁仍不覆盖跨进程 claim/CAS，也没有 pending-intent scanner/takeover/continuation，因此静态 Gate 仍为红，不能把进程内编排拆分写成生产恢复闭环完成。
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
@@ -160,7 +162,7 @@ pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bu
 
 0090/B4 继续从 durable Node、Attempt、Reservation、BudgetUsage 重建 failure/review/Budget canonical v2 decision。全节点 Accepted 时，B5 对每个 frozen worker projection 重算 canonical digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式 result projection 编译整图 effects 和公开结果。`complete_parallel_graph_success()` 在单 UoW 中提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、全图 effect intents 与 0091 decision。completed replay 只读 0091、不重编 effects；两次响应丢失后重读 terminal authority。
 
-B5C 以迁移 0092 建立 canonical cancellation intent/decision/effect fence。Application 只提供无 HTTP/UI 暴露的内部入口，并要求 authority verifier 将 request、principal、source、reason 精确绑定既有 durable Graph revision；当前生产 composition 没有注入该 verifier。phase 1 UoW 先写 intent、Graph `BLOCKED` 及 Node/Attempt/Lease/Review/token/operation/effect fence，提交后 Coordinator 才 cancel/join 本进程 child 与 heartbeat。execute re-entry 能读取 durable intent 并继续 advance/finalize；本地 task handle 不拥有取消 authority。
+B5C 以迁移 0092 建立 canonical cancellation intent/decision/effect fence。Application 只提供无 HTTP/UI 暴露的内部入口，并要求 authority verifier 将 request、principal、source、reason 精确绑定既有 durable Graph revision；当前生产 composition 没有注入该 verifier。phase 1 UoW 先写 intent、Graph `BLOCKED` 及 Node/Attempt/Lease/Review/token/operation/effect fence，提交后 GraphCancellationRuntime 才通过共享 registry cancel/join 本进程 child 与 heartbeat。execute re-entry 由 Coordinator 薄委托该 Runtime 读取 durable intent 并继续 advance/finalize；只读 Projection 与本地 task handle 都不拥有取消 authority。
 
 phase 2 只在 active ownership 与 operation/effect/review 不确定性全部 reconciliation 后提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 和 canonical decision。`ACCEPTED` Node + `SUCCEEDED` Attempt 对应的 NODE effect 已拥有 acceptance authority，取消后继续 delivery；其余 NODE effect 与未完成 Graph 的 GRAPH effect被 fence。0091 success 与 0092 cancellation first-writer-wins，请求与封口响应丢失 exact replay；shutdown/disconnect 不自动变成业务取消。
 

@@ -5,6 +5,7 @@ This module owns no runtime ports, locks, tasks, or Coordinator reference.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -228,10 +229,28 @@ def _evidence_refs(value: Mapping[str, Any]) -> tuple[str, ...]:
         return ()
     return tuple(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
+
+def _attempt_id(admitted: AdmittedExecution, *, attempt_no: int) -> str:
+    material = (
+        f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}/"
+        f"{admitted.assignment_id}/{int(attempt_no)}"
+    )
+    return "attempt::governed::" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _exception_reason(exc: BaseException, default: str) -> str:
+    return (
+        _text(getattr(exc, "reason_code", None))
+        or _text(default)
+        or exc.__class__.__name__.upper()
+    )
+
 __all__ = [
     "_ParallelNodeOutcome",
+    "_attempt_id",
     "_assert_durable_identity",
     "_evidence_refs",
+    "_exception_reason",
     "_mapping",
     "_nested_mapping",
     "_node_input_refs",

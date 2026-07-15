@@ -7,13 +7,17 @@ import host_brain.task_runtime as task_runtime
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import coordinator_receipts
 from host_brain.task_runtime import coordinator_records
+from host_brain.task_runtime import graph_cancellation_projection
 from host_brain.task_runtime import graph_cancellation_records
+from host_brain.task_runtime import graph_cancellation_runtime
 
 
 RECORD_NAMES = (
     "_ParallelNodeOutcome",
+    "_attempt_id",
     "_assert_durable_identity",
     "_evidence_refs",
+    "_exception_reason",
     "_mapping",
     "_nested_mapping",
     "_node_input_refs",
@@ -96,11 +100,38 @@ def test_coordinator_reexports_the_exact_extracted_value_objects_and_helpers() -
         assert getattr(coordinator, name) is getattr(coordinator_records, name)
     for name in RECEIPT_NAMES:
         assert getattr(coordinator, name) is getattr(coordinator_receipts, name)
-    for name in CANCELLATION_RECORD_NAMES:
-        assert getattr(coordinator, name) is getattr(
+    runtime_record_names = {
+        "_cancellation_budget_target",
+        "_cancellation_final_node_states",
+        "_cancellation_node_states",
+        "_cancellation_requested_node_states",
+        "_validated_graph_cancellation_intent",
+    }
+    projection_record_names = {
+        "_cancellation_budget_projection",
+        "_validated_graph_cancellation_intent",
+    }
+    assert runtime_record_names | projection_record_names == set(
+        CANCELLATION_RECORD_NAMES
+    )
+    for name in runtime_record_names:
+        assert getattr(graph_cancellation_runtime, name) is getattr(
             graph_cancellation_records,
             name,
         )
+    for name in projection_record_names:
+        assert getattr(graph_cancellation_projection, name) is getattr(
+            graph_cancellation_records,
+            name,
+        )
+    assert (
+        graph_cancellation_runtime._exception_reason
+        is coordinator_records._exception_reason
+    )
+    assert (
+        graph_cancellation_projection._attempt_id
+        is coordinator_records._attempt_id
+    )
 
 
 def test_extracted_modules_are_pure_and_never_reverse_import_coordinator() -> None:
@@ -188,7 +219,6 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
     }
     assert {
         "_assert_durable_identity",
-        "_validated_graph_cancellation_intent",
         "approved_commit_event",
         "build_execution_receipt",
         "terminal_event",
@@ -206,30 +236,173 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
         )
     }
     assert identity_call_owners == {
-        "_cancellation_nodes",
         "_execute_node_stream",
         "_execute_stream_impl",
     }
+    projection_tree = _module_tree(graph_cancellation_projection)
+    projection_owner = next(
+        node
+        for node in projection_tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "GraphCancellationProjection"
+    )
+    assert {
+        method.name
+        for method in projection_owner.body
+        if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_assert_durable_identity"
+            for node in ast.walk(method)
+        )
+    } == {"nodes"}
 
 
-def test_cancellation_orchestration_remains_owned_by_coordinator() -> None:
+def test_cancellation_orchestration_is_owned_by_leaf_services() -> None:
     assert {
         "request_graph_cancellation",
+        "continue_requested_graph_cancellation",
+        "continue_graph_cancellation",
+    } <= graph_cancellation_runtime.GraphCancellationRuntime.__dict__.keys()
+    assert {
+        "cancellation_for_graph",
+        "graph",
+        "nodes",
+        "budget_record",
+        "decision_for_intent",
+        "terminal_event",
+    } <= graph_cancellation_projection.GraphCancellationProjection.__dict__.keys()
+    assert "request_graph_cancellation" in (
+        coordinator.GovernedTaskCoordinator.__dict__
+    )
+    assert not {
         "_continue_graph_cancellation",
         "_cancellation_nodes",
         "_cancellation_budget_record",
         "_cancellation_decision_for_intent",
         "_graph_cancellation_terminal_event",
-    } <= coordinator.GovernedTaskCoordinator.__dict__.keys()
+    } & coordinator.GovernedTaskCoordinator.__dict__.keys()
+    assert not {"_attempt_id", "_exception_reason"} & {
+        node.name
+        for node in _module_tree(coordinator).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     assert not {
         "request_graph_cancellation",
         "_continue_graph_cancellation",
     } & _top_level_definitions(graph_cancellation_records)
 
+    coordinator_owner = next(
+        node
+        for node in _module_tree(coordinator).body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "GovernedTaskCoordinator"
+    )
+    request = next(
+        node
+        for node in coordinator_owner.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "request_graph_cancellation"
+    )
+    request_calls = [
+        node
+        for node in ast.walk(request)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+    ]
+    assert len(request_calls) == 1
+    assert request_calls[0].func.attr == "request_graph_cancellation"
+    assert isinstance(request_calls[0].func.value, ast.Attribute)
+    assert request_calls[0].func.value.attr == "_graph_cancellations"
+
+    execute_impl = next(
+        node
+        for node in coordinator_owner.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_execute_stream_impl"
+    )
+    reentry_calls = [
+        node
+        for node in ast.walk(execute_impl)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "continue_requested_graph_cancellation"
+    ]
+    assert len(reentry_calls) == 1
+    assert isinstance(reentry_calls[0].func.value, ast.Attribute)
+    assert reentry_calls[0].func.value.attr == "_graph_cancellations"
+
+
+def test_cancellation_services_are_small_and_hold_no_coordinator_callback() -> None:
+    modules = (
+        graph_cancellation_runtime,
+        graph_cancellation_projection,
+    )
+    for module in modules:
+        source = inspect.getsource(module)
+        assert len(source.splitlines()) < 800
+        assert "callback" not in source.lower()
+        assert "coordinator" not in _runtime_import_tokens(ast.parse(source))
+
+    assert tuple(
+        inspect.signature(
+            graph_cancellation_runtime.GraphCancellationRuntime
+        ).parameters
+    ) == (
+        "task_store",
+        "runtime_outbox",
+        "execution_registry",
+        "lease_ttl_ms",
+    )
+    assert tuple(
+        inspect.signature(
+            graph_cancellation_projection.GraphCancellationProjection
+        ).parameters
+    ) == ("task_store",)
+    assert set(graph_cancellation_runtime.GraphCancellationRuntime.__slots__) == {
+        "_store",
+        "_runtime_outbox",
+        "_execution_registry",
+        "_lease_ttl_ms",
+        "_projection",
+    }
+    assert graph_cancellation_projection.GraphCancellationProjection.__slots__ == (
+        "_store",
+    )
+
+    runtime_tree = _module_tree(graph_cancellation_runtime)
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"RuntimeOutbox", "LocalGraphExecutionRegistry"}
+        for node in ast.walk(runtime_tree)
+    )
+    projection_tree = _module_tree(graph_cancellation_projection)
+    projection_store_calls = {
+        node.func.attr
+        for node in ast.walk(projection_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Attribute)
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+        and node.func.value.attr == "_store"
+    }
+    assert projection_store_calls == {
+        "get_graph_cancellation_for_graph",
+        "get_graph",
+        "get_node",
+        "read_scheduler_snapshot",
+        "get_graph_cancellation_decision_for_intent",
+    }
+
 
 def test_extracted_callables_have_no_coordinator_or_self_parameter() -> None:
     for function in (
         coordinator_records._assert_durable_identity,
+        coordinator_records._attempt_id,
+        coordinator_records._exception_reason,
         coordinator_receipts.build_execution_receipt,
         coordinator_receipts.approved_commit_event,
         coordinator_receipts.terminal_event,

@@ -4,6 +4,10 @@ import ast
 import inspect
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import graph_cancellation_runtime
+from host_brain.task_runtime.graph_cancellation_runtime import (
+    GraphCancellationRuntime,
+)
 from host_brain.task_runtime.local_graph_execution_registry import (
     LocalGraphExecutionRegistry,
 )
@@ -23,6 +27,25 @@ def _method(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     return next(
         node
         for node in _coordinator_ast().body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
+    )
+
+
+def _cancellation_runtime_ast() -> ast.ClassDef:
+    tree = ast.parse(inspect.getsource(graph_cancellation_runtime))
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == GraphCancellationRuntime.__name__
+    )
+
+
+def _cancellation_method(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    return next(
+        node
+        for node in _cancellation_runtime_ast().body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name == name
     )
@@ -94,6 +117,51 @@ def test_coordinator_owns_one_registry_without_raw_lock_or_task_map() -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
+    cancellation_assignments = [
+        node
+        for node in ast.walk(init)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "_graph_cancellations"
+            for target in node.targets
+        )
+    ]
+    assert len(cancellation_assignments) == 1
+    cancellation_call = cancellation_assignments[0].value
+    assert isinstance(cancellation_call, ast.Call)
+    assert isinstance(cancellation_call.func, ast.Name)
+    assert cancellation_call.func.id == GraphCancellationRuntime.__name__
+    cancellation_keywords = {
+        keyword.arg: keyword.value for keyword in cancellation_call.keywords
+    }
+    assert set(cancellation_keywords) == {
+        "task_store",
+        "runtime_outbox",
+        "execution_registry",
+        "lease_ttl_ms",
+    }
+    task_store_binding = cancellation_keywords["task_store"]
+    assert isinstance(task_store_binding, ast.Name)
+    assert task_store_binding.id == "task_store"
+    outbox_binding = cancellation_keywords["runtime_outbox"]
+    assert isinstance(outbox_binding, ast.Attribute)
+    assert isinstance(outbox_binding.value, ast.Name)
+    assert outbox_binding.value.id == "self"
+    assert outbox_binding.attr == "_runtime_outbox"
+    registry_binding = cancellation_keywords["execution_registry"]
+    assert isinstance(registry_binding, ast.Attribute)
+    assert isinstance(registry_binding.value, ast.Name)
+    assert registry_binding.value.id == "self"
+    assert registry_binding.attr == "_execution_registry"
+    ttl_binding = cancellation_keywords["lease_ttl_ms"]
+    assert isinstance(ttl_binding, ast.Attribute)
+    assert isinstance(ttl_binding.value, ast.Name)
+    assert ttl_binding.value.id == "self"
+    assert ttl_binding.attr == "_lease_ttl_ms"
+
 
 def test_execute_stream_tracks_the_complete_inner_async_iteration() -> None:
     execute_stream = _method("execute_stream")
@@ -133,10 +201,10 @@ def test_execute_stream_tracks_the_complete_inner_async_iteration() -> None:
 
 
 def test_durable_intent_publish_finally_cancel_then_continue_order_is_preserved() -> None:
-    request = _method("request_graph_cancellation")
+    request = _cancellation_method("request_graph_cancellation")
     publish_calls = _attribute_calls(request, "publish_pending")
     cancel_calls = _attribute_calls(request, "cancel_and_join")
-    continue_calls = _attribute_calls(request, "_continue_graph_cancellation")
+    continue_calls = _attribute_calls(request, "continue_graph_cancellation")
     assert len(publish_calls) == 1
     assert len(cancel_calls) == 1
     assert len(continue_calls) == 1

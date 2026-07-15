@@ -9,8 +9,42 @@ from typing import Any
 import pytest
 
 from host_brain.task_runtime import coordinator as coordinator_module
+from host_brain.task_runtime import (
+    graph_cancellation_runtime as graph_cancellation_runtime_module,
+)
 from host_brain.task_runtime import runtime_outbox as runtime_outbox_module
 from host_brain.task_runtime.runtime_outbox import RuntimeOutbox
+
+
+def _outbox_owners() -> tuple[ast.ClassDef, ...]:
+    modules_and_classes = (
+        (
+            graph_cancellation_runtime_module,
+            "GraphCancellationRuntime",
+        ),
+        (coordinator_module, "GovernedTaskCoordinator"),
+    )
+    return tuple(
+        next(
+            node
+            for node in ast.parse(inspect.getsource(module)).body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+        )
+        for module, class_name in modules_and_classes
+    )
+
+
+def _runtime_outbox_calls(owner: ast.ClassDef) -> list[ast.Call]:
+    return [
+        node
+        for node in ast.walk(owner)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Attribute)
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+        and node.func.value.attr == "_runtime_outbox"
+    ]
 
 
 class _Factory:
@@ -257,6 +291,24 @@ def test_coordinator_wires_one_runtime_outbox_and_keeps_budget_factory_binding()
     assert isinstance(budget_factory, ast.Name)
     assert budget_factory.id == "outbox_factory"
 
+    cancellation_calls = [
+        node
+        for node in ast.walk(initializer)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "GraphCancellationRuntime"
+    ]
+    assert len(cancellation_calls) == 1
+    cancellation_outbox = next(
+        item.value
+        for item in cancellation_calls[0].keywords
+        if item.arg == "runtime_outbox"
+    )
+    assert isinstance(cancellation_outbox, ast.Attribute)
+    assert isinstance(cancellation_outbox.value, ast.Name)
+    assert cancellation_outbox.value.id == "self"
+    assert cancellation_outbox.attr == "_runtime_outbox"
+
     forbidden_fields = {
         "_publisher",
         "_outbox_factory",
@@ -277,22 +329,11 @@ def test_coordinator_wires_one_runtime_outbox_and_keeps_budget_factory_binding()
     }
 
 
-def test_every_coordinator_outbox_call_uses_the_shared_instance_and_explicit_command() -> None:
-    tree = ast.parse(inspect.getsource(coordinator_module))
-    owner = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "GovernedTaskCoordinator"
-    )
+def test_every_runtime_outbox_call_uses_the_shared_instance_and_explicit_command() -> None:
     calls = [
-        node
-        for node in ast.walk(owner)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Attribute)
-        and isinstance(node.func.value.value, ast.Name)
-        and node.func.value.value.id == "self"
-        and node.func.value.attr == "_runtime_outbox"
+        call
+        for owner in _outbox_owners()
+        for call in _runtime_outbox_calls(owner)
     ]
     builds = [node for node in calls if node.func.attr == "build"]
     publishes = [node for node in calls if node.func.attr == "publish_pending"]
@@ -310,43 +351,43 @@ def test_every_coordinator_outbox_call_uses_the_shared_instance_and_explicit_com
         assert command_value.value.id in {"admitted", "node_admission"}
 
 
-def test_coordinator_outbox_call_matrix_is_frozen() -> None:
-    tree = ast.parse(inspect.getsource(coordinator_module))
-    owner = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "GovernedTaskCoordinator"
-    )
+def test_runtime_outbox_call_matrix_is_frozen() -> None:
     rows: list[str] = []
     best_effort_count = 0
-    for method in owner.body:
-        if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        calls = [
-            node
-            for node in ast.walk(method)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Attribute)
-            and isinstance(node.func.value.value, ast.Name)
-            and node.func.value.value.id == "self"
-            and node.func.value.attr == "_runtime_outbox"
-        ]
-        for call in sorted(calls, key=lambda node: (node.lineno, node.col_offset)):
-            rows.append(
-                f"{method.name}:"
-                + ast.dump(call, annotate_fields=True, include_attributes=False)
-            )
-            if call.func.attr == "publish_pending" and any(
-                keyword.arg == "best_effort"
-                and isinstance(keyword.value, ast.Constant)
-                and keyword.value.value is True
-                for keyword in call.keywords
+    for owner in _outbox_owners():
+        owner_call_ids = {
+            id(call) for call in _runtime_outbox_calls(owner)
+        }
+        for method in owner.body:
+            if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            calls = [
+                node
+                for node in ast.walk(method)
+                if id(node) in owner_call_ids
+            ]
+            for call in sorted(
+                calls,
+                key=lambda node: (node.lineno, node.col_offset),
             ):
-                best_effort_count += 1
+                rows.append(
+                    f"{method.name}:"
+                    + ast.dump(
+                        call,
+                        annotate_fields=True,
+                        include_attributes=False,
+                    )
+                )
+                if call.func.attr == "publish_pending" and any(
+                    keyword.arg == "best_effort"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in call.keywords
+                ):
+                    best_effort_count += 1
 
     assert len(rows) == 58
     assert best_effort_count == 5
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "c2137be76d31f8ca44aaaeacd7fe163f453ee2a9903a77262b7b0e1c543c3e93"
+        "a50759475c981023dbbdc524137c1a93d1ed3bd995032444999322444fc26e84"
     )
