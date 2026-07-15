@@ -32,6 +32,8 @@ class TaskStorePort(Protocol):
 
     def assert_dag_scheduling_ready(self) -> None: ...
 
+    def assert_parallel_settlement_decision_ready(self) -> None: ...
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
@@ -306,9 +308,22 @@ class TaskStorePort(Protocol):
         expected_node_states: Mapping[str, Mapping[str, Any]],
         graph_target_status: str,
         budget_target_status: str | None,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
         graph_outbox: Any,
         budget_outbox: Any | None = None,
     ) -> Mapping[str, Any]: ...
+
+    def get_parallel_settlement_decision(
+        self,
+        decision_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_latest_parallel_settlement_decision(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
 
     def consume_budget_once(
         self,

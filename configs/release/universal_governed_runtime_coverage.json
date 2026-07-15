@@ -103,8 +103,8 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
-      "stage": "PARTIAL_B3_OUTER_FANIN_TERMINAL",
-      "wiring_progress": "The Coordinator has atomic pre-reservation retry and node-local parallel retry replay, heartbeat/recovery guards, and a default-off non-terminal-leaf fan-out. One live batch has outer Graph activation, node-local children, bounded progress with reserved control slots, receipt/latest-Attempt/Node validation, stable Attempt/Lease/Reservation fences, atomic Graph plus optional Budget and Outbox settlement, an outcome-lineage taskbatch digest in receipt evidence, and exact response-loss replay. Failure, Budget, review, retry, forged receipt, self-cancellation, success, backpressure, and cancellation are covered; unresolved post-reservation failure remains RECOVERY_REQUIRED. B3 is not crash-safe: re-entry that already sees FAILED/review Nodes still uses the legacy split Graph/Budget terminal path and may choose review-first instead of live failure-first. taskbatch stores a digest reference only, not the canonical decision payload. Terminal-leaf parallelism, durable cancellation, automatic reconciliation/continuation, cross-process Outbox claim/CAS, Budget high-contention semantics, real production retry markers, and online takeover remain incomplete; production fan-out is disabled.",
+      "stage": "PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL",
+      "wiring_progress": "The default-off fan-out keeps production disabled. Live and ACTIVE crash re-entry reconstruct the same canonical payload/ref from durable Node, Attempt, Reservation, and BudgetUsage facts with exact replay. Outcomes cover every admitted-Graph durable terminal Node with its latest stable Attempt, not only the current batch; the batch chooses priority/selected, and RETRY_PENDING is supported as a non-selected re-entry outcome. Ownership, or CAS followed by active-fact reread, maps to IN_PROGRESS; pure CAS remains conflict. Selected BUDGET_BLOCKED binds rejected usage; passive siblings need no local usage. Every row read validates digest, exact Outboxes and Attempt, plus usage for Budget. Full marker-history scans are single-revision only because legacy Graph Outboxes lack graph_revision; multi-revision reads validate the returned row, and revisioned identity remains required. Historical half states, terminal-leaf, durable cancellation, reconciliation/continuation, cross-process Outbox, Budget contention, production markers, and takeover remain incomplete.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
@@ -113,6 +113,8 @@
         "host_brain/task_runtime/dag_scheduler.py",
         "host_brain/composition/task_runtime.py",
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
+        "host_brain/audit/migrations/0090_task_runtime_parallel_settlement_decision.sql",
+        "host_brain/contracts/agent_runtime/parallel_settlement.py",
         "tests/unit/test_ne01_dag_scheduler.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_aw02_task_runtime_composition.py",

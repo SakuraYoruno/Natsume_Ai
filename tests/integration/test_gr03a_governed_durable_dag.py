@@ -31,6 +31,7 @@ from host_brain.persistence.host_command_repository import (
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
     TASK_STORE_CAS_CONFLICT,
+    TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEDULER_CAPACITY,
     DurableTaskStore,
     OutboxMessage,
@@ -56,6 +57,23 @@ NOW = 1_900_000_000_000
 
 def _sha(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _parallel_decision_argument_snapshot(
+    kwargs: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    return (
+        kwargs["decision_ref"],
+        json.loads(
+            json.dumps(
+                kwargs["decision_payload"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        ),
+    )
 
 
 def _elapsed_clock() -> Any:
@@ -1013,6 +1031,177 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
 
 
 @pytest.mark.asyncio
+async def test_ne01_b4_live_parallel_batch_reentry_preserves_active_authority(
+    tmp_path: Path,
+) -> None:
+    class _SplitLiveWorker(_Worker):
+        def __init__(self, calls: list[str]) -> None:
+            super().__init__(calls, set())
+            self.right_started = asyncio.Event()
+            self.release_right = asyncio.Event()
+
+        async def execute_stream(
+            self,
+            *,
+            execution_context: dict[str, Any],
+            **_: Any,
+        ):
+            node_id = execution_context["node_id"]
+            self._calls.append(node_id)
+            if node_id == "left":
+                await self.right_started.wait()
+            else:
+                self.right_started.set()
+                await self.release_right.wait()
+            yield _fan_out_commit(node_id)
+
+    class _ForbiddenReentryResolver:
+        def __init__(self) -> None:
+            self.resolve_count = 0
+
+        def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+            self.resolve_count += 1
+            raise AssertionError(
+                f"live parallel re-entry must not resolve {executor}/{worker_route}"
+            )
+
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    record = repository.admit(command, work_order, assignment, graph)
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    worker = _SplitLiveWorker(calls)
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_StaticResolver(worker),
+        acceptance=_Acceptance(decisions_by_node={"left": "REVIEW"}),
+        bounded_fanout_enabled=True,
+    )
+
+    async def collect_first_execution() -> list[dict[str, Any]]:
+        return [
+            event
+            async for event in first_runtime.execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    first_task = asyncio.create_task(collect_first_execution())
+    first_events: list[dict[str, Any]] | None = None
+    try:
+        await asyncio.wait_for(worker.right_started.wait(), timeout=2.0)
+        store = DurableTaskStore(db_path, clock=lambda: NOW)
+        for _ in range(200):
+            left = store.get_node(graph.graph_id, graph.revision, "left")
+            right = store.get_node(graph.graph_id, graph.revision, "right")
+            snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+            if (
+                left["status"] == "WAITING_ACCEPTANCE_REVIEW"
+                and right["status"] == "RUNNING"
+                and snapshot["active_leases"]
+            ):
+                break
+            await asyncio.sleep(0.005)
+        else:
+            pytest.fail("parallel execution did not reach review/running split state")
+
+        before_snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+        before_authority = {
+            "attempts": [
+                (
+                    row["attempt_id"],
+                    row["node_id"],
+                    row["status"],
+                    row["status_version"],
+                )
+                for row in before_snapshot["attempts"]
+            ],
+            "active_leases": [
+                (
+                    row["lease_id"],
+                    row["attempt_id"],
+                    row["status"],
+                    row["fencing_token"],
+                )
+                for row in before_snapshot["active_leases"]
+            ],
+        }
+        assert {row[1] for row in before_authority["attempts"]} == {
+            "left",
+            "right",
+        }
+        right_attempt_ids = {
+            row[0] for row in before_authority["attempts"] if row[1] == "right"
+        }
+        assert {row[1] for row in before_authority["active_leases"]} == (
+            right_attempt_ids
+        )
+
+        forbidden_resolver = _ForbiddenReentryResolver()
+        reentry_runtime = _coordinator(
+            db_path,
+            calls,
+            worker_resolver=forbidden_resolver,
+            acceptance=_Acceptance(decisions_by_node={"left": "REVIEW"}),
+            bounded_fanout_enabled=True,
+        )
+        with pytest.raises(GovernedRuntimeError) as in_progress:
+            _ = [
+                event
+                async for event in reentry_runtime.execute_stream(
+                    admitted=admitted,
+                    command=record["command"],
+                    work_order=record["work_order"],
+                )
+            ]
+        assert in_progress.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+        assert forbidden_resolver.resolve_count == 0
+        assert sorted(calls) == ["left", "right"]
+
+        after_snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+        after_authority = {
+            "attempts": [
+                (
+                    row["attempt_id"],
+                    row["node_id"],
+                    row["status"],
+                    row["status_version"],
+                )
+                for row in after_snapshot["attempts"]
+            ],
+            "active_leases": [
+                (
+                    row["lease_id"],
+                    row["attempt_id"],
+                    row["status"],
+                    row["fencing_token"],
+                )
+                for row in after_snapshot["active_leases"]
+            ],
+        }
+        assert after_authority == before_authority
+    finally:
+        worker.release_right.set()
+        first_events = await asyncio.wait_for(first_task, timeout=3.0)
+
+    assert first_events[-1]["execution_receipt"]["status"] == (
+        "WAITING_ACCEPTANCE_REVIEW"
+    )
+    assert sorted(calls) == ["left", "right"]
+
+
+@pytest.mark.asyncio
 async def test_ne01_parallel_budget_overrun_is_settled_once_by_outer_fan_in(
     tmp_path: Path,
 ) -> None:
@@ -1094,6 +1283,777 @@ async def test_ne01_parallel_budget_overrun_is_settled_once_by_outer_fan_in(
 
 
 @pytest.mark.asyncio
+async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_lineage(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+        token_limit=15,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+        node_delays={"right": 0.08},
+        token_counts={"left": 5, "right": 20},
+    )
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_StaticResolver(worker),
+        bounded_fanout_enabled=True,
+    )
+    first_settlement_calls = 0
+
+    def timeout_before_outer_settlement(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal first_settlement_calls
+        first_settlement_calls += 1
+        raise TimeoutError("simulated outer Budget settlement timeout")
+
+    first_runtime._store.settle_parallel_graph_budget = timeout_before_outer_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=first_runtime,
+    )
+
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in first_app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    assert first_settlement_calls == 2
+    assert sorted(calls) == ["left", "right"]
+    crashed_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashed_snapshot = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert crashed_store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
+    assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
+    rejected_usages = [
+        row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
+    ]
+    assert len(rejected_usages) == 1
+    rejected_usage = rejected_usages[0]
+    rejected_usage_id = rejected_usage["usage_id"]
+    rejected_node_id = rejected_usage["node_id"]
+    rejected_attempt_id = rejected_usage["attempt_id"]
+    assert rejected_node_id == "right"
+    assert crashed_store.get_node("graph-gr03a", 1, rejected_node_id)[
+        "status"
+    ] == "FAILED"
+
+    reentry_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+        ),
+    )
+    reentry_events = [
+        event
+        async for event in reentry_app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+    receipt = reentry_events[-1]["execution_receipt"]
+    settlement = receipt["projection"]["parallel_settlement"]
+    decision_ref = settlement["decision_ref"]
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["node_id"] == rejected_node_id
+    assert receipt["attempt_id"] == rejected_attempt_id
+    assert settlement == {
+        "graph_status": "BLOCKED",
+        "decision_ref": decision_ref,
+    }
+    assert decision_ref.startswith("taskbatch://sha256/")
+    assert rejected_usage_id in receipt["evidence_refs"]
+    assert decision_ref in receipt["evidence_refs"]
+    assert sorted(calls) == ["left", "right"]
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    decision = store.get_parallel_settlement_decision(decision_ref)
+    payload = decision["payload"]
+    assert payload["decision_kind"] == "BUDGET"
+    assert payload["selected_node_id"] == rejected_node_id
+    selected_outcome = next(
+        outcome
+        for outcome in payload["outcomes"]
+        if outcome["node_id"] == payload["selected_node_id"]
+    )
+    assert selected_outcome["attempt_id"] == rejected_attempt_id
+    assert selected_outcome["status"] == "BUDGET_BLOCKED"
+    assert selected_outcome["accepted"] is False
+    assert rejected_usage_id in selected_outcome["evidence_refs"]
+
+    replay_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+        ),
+    )
+    replay_events = [
+        event
+        async for event in replay_app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+    replay_receipt = replay_events[-1]["execution_receipt"]
+    assert replay_receipt["status"] == "BUDGET_BLOCKED"
+    assert replay_receipt["replayed"] is True
+    assert replay_receipt["node_id"] == rejected_node_id
+    assert replay_receipt["attempt_id"] == rejected_attempt_id
+    assert replay_receipt["projection"]["parallel_settlement"] == {
+        "graph_status": "BLOCKED",
+        "decision_ref": decision_ref,
+    }
+    assert rejected_usage_id in replay_receipt["evidence_refs"]
+    assert decision_ref in replay_receipt["evidence_refs"]
+    assert sorted(calls) == ["left", "right"]
+
+    with sqlite3.connect(db_path) as conn:
+        settlement_counts = dict(
+            conn.execute(
+                """
+                SELECT event_type, COUNT(*)
+                FROM task_runtime_outbox
+                WHERE event_type IN (
+                    'TASK_GRAPH_BLOCKED', 'BUDGET_RESERVATION_RELEASED'
+                )
+                GROUP BY event_type
+                """
+            ).fetchall()
+        )
+        decision_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_parallel_settlement_decision"
+        ).fetchone()[0]
+    assert settlement_counts == {
+        "BUDGET_RESERVATION_RELEASED": 1,
+        "TASK_GRAPH_BLOCKED": 1,
+    }
+    assert decision_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_order(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    limited = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(
+                work_order.budget_policy.limits,
+                tool_call_count=0,
+            ),
+        ),
+    )
+    calls: list[str] = []
+    forbidden_resolver = _FailingResolver()
+    runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=forbidden_resolver,
+        bounded_fanout_enabled=True,
+    )
+    original_precharge = runtime._budgets.precharge  # noqa: SLF001
+    right_precharge_finished = asyncio.Event()
+    precharge_order: list[str] = []
+
+    async def right_first_precharge(
+        context: Any,
+        *,
+        node_id: str,
+        attempt_id: str,
+        tool_call_count: int = 1,
+    ) -> Any:
+        if node_id == "left":
+            precharge_order.append("left:waiting")
+            await asyncio.wait_for(right_precharge_finished.wait(), timeout=2.0)
+            precharge_order.append("left:after-right")
+            return await original_precharge(
+                context,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                tool_call_count=tool_call_count,
+            )
+        assert node_id == "right"
+        precharge_order.append("right:charging")
+        try:
+            charge = await original_precharge(
+                context,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                tool_call_count=tool_call_count,
+            )
+            assert charge.accepted is False
+            precharge_order.append("right:rejected")
+            return charge
+        finally:
+            right_precharge_finished.set()
+
+    runtime._budgets.precharge = right_first_precharge  # type: ignore[method-assign]  # noqa: SLF001
+    events = [
+        event
+        async for event in GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=runtime,
+        ).execute_stream(
+            command=command,
+            work_order=limited,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    assert precharge_order == [
+        "left:waiting",
+        "right:charging",
+        "right:rejected",
+        "left:after-right",
+    ]
+    assert calls == []
+    assert forbidden_resolver.resolve_count == 0
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    rejected_usages = [
+        row for row in snapshot["budget_usage"] if row["accepted"] is False
+    ]
+    assert len(snapshot["budget_usage"]) == 1
+    assert len(rejected_usages) == 1
+    rejected_usage = rejected_usages[0]
+    assert rejected_usage["node_id"] == "right"
+    right_attempt_id = rejected_usage["attempt_id"]
+    rejected_usage_id = rejected_usage["usage_id"]
+
+    receipt = events[-1]["execution_receipt"]
+    decision_ref = receipt["projection"]["parallel_settlement"]["decision_ref"]
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["accepted"] is False
+    assert receipt["node_id"] == "right"
+    assert receipt["attempt_id"] == right_attempt_id
+    assert rejected_usage_id in receipt["evidence_refs"]
+    assert decision_ref in receipt["evidence_refs"]
+    assert store.get_graph(graph.graph_id, graph.revision)["status"] == "BLOCKED"
+    assert snapshot["budgets"][0]["status"] == "RELEASED"
+
+    decision = store.get_parallel_settlement_decision(decision_ref)
+    payload = decision["payload"]
+    assert payload["decision_kind"] == "BUDGET"
+    assert payload["selected_node_id"] == "right"
+    selected_outcome = next(
+        outcome
+        for outcome in payload["outcomes"]
+        if outcome["node_id"] == payload["selected_node_id"]
+    )
+    assert selected_outcome["attempt_id"] == right_attempt_id
+    assert selected_outcome["status"] == "BUDGET_BLOCKED"
+    assert selected_outcome["accepted"] is False
+    assert rejected_usage_id in selected_outcome["evidence_refs"]
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentry(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    limited = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(
+                work_order.budget_policy.limits,
+                tool_call_count=0,
+            ),
+        ),
+    )
+    calls: list[str] = []
+    first_resolver = _FailingResolver()
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=first_resolver,
+        bounded_fanout_enabled=True,
+    )
+    original_precharge = first_runtime._budgets.precharge  # noqa: SLF001
+    right_precharge_finished = asyncio.Event()
+    precharge_order: list[str] = []
+
+    async def right_first_precharge(
+        context: Any,
+        *,
+        node_id: str,
+        attempt_id: str,
+        tool_call_count: int = 1,
+    ) -> Any:
+        if node_id == "left":
+            precharge_order.append("left:waiting")
+            await asyncio.wait_for(right_precharge_finished.wait(), timeout=2.0)
+            precharge_order.append("left:after-right")
+            return await original_precharge(
+                context,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                tool_call_count=tool_call_count,
+            )
+        assert node_id == "right"
+        precharge_order.append("right:charging")
+        try:
+            charge = await original_precharge(
+                context,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                tool_call_count=tool_call_count,
+            )
+            assert charge.accepted is False
+            precharge_order.append("right:rejected")
+            return charge
+        finally:
+            right_precharge_finished.set()
+
+    first_runtime._budgets.precharge = right_first_precharge  # type: ignore[method-assign]  # noqa: SLF001
+    live_decisions: list[tuple[str, dict[str, Any]]] = []
+    first_settlement_calls = 0
+
+    def crash_before_budget_settlement(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal first_settlement_calls
+        first_settlement_calls += 1
+        live_decisions.append(
+            (
+                kwargs["decision_ref"],
+                json.loads(
+                    json.dumps(
+                        kwargs["decision_payload"],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                ),
+            )
+        )
+        raise TimeoutError("simulated crash before right-first Budget settlement")
+
+    first_runtime._store.settle_parallel_graph_budget = crash_before_budget_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=first_runtime,
+    )
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in first_app.execute_stream(
+                command=command,
+                work_order=limited,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert precharge_order == [
+        "left:waiting",
+        "right:charging",
+        "right:rejected",
+        "left:after-right",
+    ]
+    assert first_settlement_calls == 2
+    assert first_resolver.resolve_count == 0
+    assert calls == []
+    crashed_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashed_snapshot = crashed_store.read_scheduler_snapshot(graph.graph_id, 1)
+    rejected_usages = [
+        row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
+    ]
+    assert len(crashed_snapshot["budget_usage"]) == 1
+    assert len(rejected_usages) == 1
+    rejected_usage = rejected_usages[0]
+    assert rejected_usage["node_id"] == "right"
+    assert crashed_snapshot["graph_record"]["status"] == "ACTIVE"
+    assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
+
+    reentry_resolver = _FailingResolver()
+    reentry_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=reentry_resolver,
+        bounded_fanout_enabled=True,
+    )
+    committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001
+    reentry_decisions: list[tuple[str, dict[str, Any]]] = []
+    reentry_settlement_calls = 0
+
+    def commit_reentry_budget_settlement(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal reentry_settlement_calls
+        reentry_settlement_calls += 1
+        reentry_decisions.append(
+            (
+                kwargs["decision_ref"],
+                json.loads(
+                    json.dumps(
+                        kwargs["decision_payload"],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                ),
+            )
+        )
+        return committed_settlement(*args, **kwargs)
+
+    reentry_runtime._store.settle_parallel_graph_budget = commit_reentry_budget_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    reentry_events = [
+        event
+        async for event in GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=reentry_runtime,
+        ).execute_stream(
+            command=command,
+            work_order=limited,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    assert reentry_settlement_calls == 1
+    assert reentry_resolver.resolve_count == 0
+    assert calls == []
+    receipt = reentry_events[-1]["execution_receipt"]
+    decision_ref = receipt["projection"]["parallel_settlement"]["decision_ref"]
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["node_id"] == "right"
+    assert receipt["attempt_id"] == rejected_usage["attempt_id"]
+    assert rejected_usage["usage_id"] in receipt["evidence_refs"]
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    persisted = store.get_parallel_settlement_decision(decision_ref)
+    persisted_payload = persisted["payload"]
+    expected_decision = (decision_ref, persisted_payload)
+    assert live_decisions == [expected_decision, expected_decision]
+    assert reentry_decisions == [expected_decision]
+    assert persisted["decision_ref"] == decision_ref
+    assert persisted_payload["decision_kind"] == "BUDGET"
+    assert persisted_payload["selected_node_id"] == "right"
+    outcomes = {
+        outcome["node_id"]: outcome for outcome in persisted_payload["outcomes"]
+    }
+    assert outcomes["right"]["status"] == "BUDGET_BLOCKED"
+    assert outcomes["right"]["attempt_id"] == rejected_usage["attempt_id"]
+    assert rejected_usage["usage_id"] in outcomes["right"]["evidence_refs"]
+    assert outcomes["left"]["status"] == "FAILED"
+    assert outcomes["left"]["accepted"] is False
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_later_batch_failure_decision_includes_prior_accepted_batch(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (
+            ("seed", ()),
+            ("left", ("seed",)),
+            ("right", ("seed",)),
+            ("join", ("left", "right")),
+        ),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    worker = _Worker(calls, set())
+    acceptance = _Acceptance(decisions_by_node={"left": "REVIEW"})
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+        acceptance=acceptance,
+        bounded_fanout_enabled=True,
+    )
+    live_decisions: list[tuple[str, dict[str, Any]]] = []
+    first_settlement_calls = 0
+
+    def crash_before_later_batch_settlement(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal first_settlement_calls
+        first_settlement_calls += 1
+        live_decisions.append(_parallel_decision_argument_snapshot(kwargs))
+        raise TimeoutError("simulated crash before later-batch settlement")
+
+    first_runtime._store.settle_parallel_graph_budget = crash_before_later_batch_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=first_runtime,
+    )
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in first_app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    assert first_settlement_calls == 2
+    assert calls == ["seed", "left"]
+    crashed_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashed_snapshot = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
+    crashed_statuses = {
+        node["node_id"]: node["status"]
+        for node in crashed_snapshot["graph_record"]["nodes"]
+    }
+    assert crashed_snapshot["graph_record"]["status"] == "ACTIVE"
+    assert crashed_snapshot["budgets"][0]["status"] == "ACTIVE"
+    assert crashed_statuses == {
+        "seed": "ACCEPTED",
+        "left": "WAITING_ACCEPTANCE_REVIEW",
+        "right": "FAILED",
+        "join": "BLOCKED",
+    }
+
+    reentry_resolver = _FailingResolver()
+    reentry_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=reentry_resolver,
+        acceptance=acceptance,
+        bounded_fanout_enabled=True,
+    )
+    committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001
+    reentry_decisions: list[tuple[str, dict[str, Any]]] = []
+    reentry_settlement_calls = 0
+
+    def commit_later_batch_reentry(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal reentry_settlement_calls
+        reentry_settlement_calls += 1
+        reentry_decisions.append(_parallel_decision_argument_snapshot(kwargs))
+        return committed_settlement(*args, **kwargs)
+
+    reentry_runtime._store.settle_parallel_graph_budget = commit_later_batch_reentry  # type: ignore[method-assign]  # noqa: SLF001
+    events = [
+        event
+        async for event in GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=reentry_runtime,
+        ).execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    assert reentry_settlement_calls == 1
+    assert reentry_resolver.resolve_count == 0
+    assert calls == ["seed", "left"]
+    receipt = events[-1]["execution_receipt"]
+    decision_ref = receipt["projection"]["parallel_settlement"]["decision_ref"]
+    assert receipt["status"] == "FAILED"
+    assert receipt["node_id"] == "right"
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    persisted = store.get_parallel_settlement_decision(decision_ref)
+    expected_decision = (decision_ref, persisted["payload"])
+    assert live_decisions == [expected_decision, expected_decision]
+    assert reentry_decisions == [expected_decision]
+    assert persisted["decision_ref"] == decision_ref
+    payload = persisted["payload"]
+    assert payload["decision_kind"] == "FAILURE"
+    assert payload["selected_node_id"] == "right"
+    outcomes = {outcome["node_id"]: outcome for outcome in payload["outcomes"]}
+    assert list(outcomes) == ["left", "right", "seed"]
+    assert outcomes["seed"]["status"] == "ACCEPTED"
+    assert outcomes["seed"]["accepted"] is True
+    assert outcomes["left"]["status"] == "WAITING_ACCEPTANCE_REVIEW"
+    assert outcomes["right"]["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_failed_batch_decision_keeps_retry_pending_sibling(
+    tmp_path: Path,
+) -> None:
+    class _RetryLeftFailRightResolver:
+        def __init__(self) -> None:
+            self.resolve_counts = {"left": 0, "right": 0}
+
+        def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+            assert executor == "canonical"
+            node_id = worker_route.removeprefix("worker:")
+            self.resolve_counts[node_id] += 1
+            if node_id == "left":
+                raise RetryableWorkerPreparationError(
+                    "WORKER_PREPARATION_TRANSIENT",
+                    "left worker is temporarily unavailable",
+                )
+            raise RuntimeError("right worker registry failed before reservation")
+
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    graph = replace(
+        graph,
+        nodes=tuple(
+            replace(
+                node,
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 60_000},
+            )
+            if node.node_id == "left"
+            else node
+            for node in graph.nodes
+        ),
+    )
+    first_resolver = _RetryLeftFailRightResolver()
+    calls: list[str] = []
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=first_resolver,
+        bounded_fanout_enabled=True,
+    )
+    live_decisions: list[tuple[str, dict[str, Any]]] = []
+    first_settlement_calls = 0
+
+    def crash_before_retry_sibling_settlement(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal first_settlement_calls
+        first_settlement_calls += 1
+        live_decisions.append(_parallel_decision_argument_snapshot(kwargs))
+        raise TimeoutError("simulated crash before retry-sibling settlement")
+
+    first_runtime._store.settle_parallel_graph_budget = crash_before_retry_sibling_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=first_runtime,
+    )
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in first_app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert first_settlement_calls == 2
+    assert first_resolver.resolve_counts == {"left": 1, "right": 1}
+    assert calls == []
+    crashed_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashed_snapshot = crashed_store.read_scheduler_snapshot(graph.graph_id, 1)
+    crashed_statuses = {
+        node["node_id"]: node["status"]
+        for node in crashed_snapshot["graph_record"]["nodes"]
+    }
+    assert crashed_snapshot["graph_record"]["status"] == "ACTIVE"
+    assert crashed_snapshot["budgets"][0]["status"] == "ACTIVE"
+    assert crashed_statuses == {
+        "left": "RETRY_PENDING",
+        "right": "FAILED",
+        "join": "BLOCKED",
+    }
+    assert [
+        (attempt["node_id"], attempt["status"])
+        for attempt in crashed_snapshot["attempts"]
+    ] == [("left", "FAILED"), ("right", "FAILED")]
+
+    reentry_resolver = _FailingResolver()
+    reentry_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=reentry_resolver,
+        bounded_fanout_enabled=True,
+    )
+    committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001
+    reentry_decisions: list[tuple[str, dict[str, Any]]] = []
+    reentry_settlement_calls = 0
+
+    def commit_retry_sibling_reentry(
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        nonlocal reentry_settlement_calls
+        reentry_settlement_calls += 1
+        reentry_decisions.append(_parallel_decision_argument_snapshot(kwargs))
+        return committed_settlement(*args, **kwargs)
+
+    reentry_runtime._store.settle_parallel_graph_budget = commit_retry_sibling_reentry  # type: ignore[method-assign]  # noqa: SLF001
+    events = [
+        event
+        async for event in GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=reentry_runtime,
+        ).execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    assert reentry_settlement_calls == 1
+    assert reentry_resolver.resolve_count == 0
+    assert calls == []
+    receipt = events[-1]["execution_receipt"]
+    decision_ref = receipt["projection"]["parallel_settlement"]["decision_ref"]
+    assert receipt["status"] == "FAILED"
+    assert receipt["node_id"] == "right"
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    persisted = store.get_parallel_settlement_decision(decision_ref)
+    expected_decision = (decision_ref, persisted["payload"])
+    assert live_decisions == [expected_decision, expected_decision]
+    assert reentry_decisions == [expected_decision]
+    assert persisted["decision_ref"] == decision_ref
+    payload = persisted["payload"]
+    assert payload["decision_kind"] == "FAILURE"
+    assert payload["selected_node_id"] == "right"
+    outcomes = {outcome["node_id"]: outcome for outcome in payload["outcomes"]}
+    assert outcomes["left"]["status"] == "RETRY_PENDING"
+    assert outcomes["left"]["accepted"] is False
+    assert outcomes["right"]["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
 async def test_ne01_parallel_review_blocks_graph_after_all_node_outcomes(
     tmp_path: Path,
 ) -> None:
@@ -1111,6 +2071,8 @@ async def test_ne01_parallel_review_blocks_graph_after_all_node_outcomes(
         require_full_barrier=True,
         node_delays={"left": 0.05},
     )
+    review_store = ReviewStore(db_path, clock=lambda: NOW)
+    review_runtime = TaskNodeReviewRuntime(review_store, clock=lambda: NOW)
     app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
         coordinator=_coordinator(
@@ -1118,6 +2080,7 @@ async def test_ne01_parallel_review_blocks_graph_after_all_node_outcomes(
             calls,
             worker_resolver=_StaticResolver(worker),
             acceptance=_Acceptance(decisions_by_node={"right": "REVIEW"}),
+            review_runtime=review_runtime,
             bounded_fanout_enabled=True,
         ),
     )
@@ -1166,6 +2129,714 @@ async def test_ne01_parallel_review_blocks_graph_after_all_node_outcomes(
     assert review_settlement[0][0] is None
     assert decision_ref in json.loads(review_settlement[0][1])
     assert budget_release_count == 0
+
+    review = receipt["projection"]["review"]
+    assert review["review_status"] == "PENDING"
+    assert review["resume_phase"] == ReviewResumePhase.POST_EXECUTION_ACCEPTANCE.value
+
+    pending_replay = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ][-1]["execution_receipt"]
+    assert pending_replay["status"] == "WAITING_ACCEPTANCE_REVIEW"
+    assert pending_replay["node_id"] == "right"
+    assert pending_replay["attempt_id"] == receipt["attempt_id"]
+    assert pending_replay["replayed"] is True
+    assert pending_replay["projection"]["parallel_settlement"] == {
+        "graph_status": "BLOCKED",
+        "decision_ref": decision_ref,
+    }
+    assert decision_ref in pending_replay["evidence_refs"]
+    assert sorted(calls) == ["left", "right"]
+
+    rejected = review_store.reject_review(
+        review["review_id"],
+        actor_id="gr03-reviewer",
+    )
+    assert rejected["review"]["status"] == "REJECTED"
+    denied_receipt = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ][-1]["execution_receipt"]
+    assert denied_receipt["status"] == "REVIEW_DENIED"
+    assert denied_receipt["node_id"] == "right"
+    assert "parallel_settlement" not in denied_receipt["projection"]
+    assert decision_ref not in denied_receipt["evidence_refs"]
+    assert store.get_graph("graph-gr03a", 1)["status"] == "FAILED"
+    assert store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
+    assert store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
+        "status"
+    ] == "RELEASED"
+    assert sorted(calls) == ["left", "right"]
+
+    failed_replay = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ][-1]["execution_receipt"]
+    assert failed_replay["status"] == "FAILED"
+    assert failed_replay["node_id"] == "right"
+    assert failed_replay["replayed"] is True
+    assert "parallel_settlement" not in failed_replay["projection"]
+    assert decision_ref not in failed_replay["evidence_refs"]
+    assert sorted(calls) == ["left", "right"]
+    latest_decision = store.get_latest_parallel_settlement_decision("graph-gr03a", 1)
+    assert latest_decision is not None
+    assert latest_decision["decision_ref"] == decision_ref
+    assert latest_decision["payload"]["graph_target_status"] == "BLOCKED"
+
+
+@pytest.mark.parametrize("lose_reentry_settlement_response", (False, True))
+@pytest.mark.asyncio
+async def test_ne01_b4_crash_reentry_failure_beats_review_and_persists_decision(
+    tmp_path: Path,
+    lose_reentry_settlement_response: bool,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=False,
+        node_delays={"left": 0.05},
+    )
+    acceptance = _Acceptance(decisions_by_node={"left": "REVIEW"})
+    first_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+        acceptance=acceptance,
+        bounded_fanout_enabled=True,
+    )
+    first_settlement_calls = 0
+    first_settlement_decisions: list[tuple[str, dict[str, Any]]] = []
+
+    def crash_before_settlement(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal first_settlement_calls
+        first_settlement_calls += 1
+        first_settlement_decisions.append(
+            (
+                kwargs["decision_ref"],
+                json.loads(
+                    json.dumps(
+                        kwargs["decision_payload"],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                ),
+            )
+        )
+        raise TimeoutError("simulated process crash before outer settlement commit")
+
+    first_runtime._store.settle_parallel_graph_budget = crash_before_settlement  # type: ignore[method-assign]  # noqa: SLF001
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=first_runtime,
+    )
+
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in first_app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    assert first_settlement_calls == 2
+    assert calls == ["left"]
+    crashed_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    assert crashed_store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
+    assert crashed_store.get_node("graph-gr03a", 1, "left")["status"] == (
+        "WAITING_ACCEPTANCE_REVIEW"
+    )
+    assert crashed_store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
+    assert crashed_store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
+        "status"
+    ] == "ACTIVE"
+
+    reentry_runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+        acceptance=acceptance,
+        bounded_fanout_enabled=True,
+    )
+    committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001
+    reentry_settlement_calls = 0
+    reentry_settlement_decisions: list[tuple[str, dict[str, Any]]] = []
+
+    def settle_reentry(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal reentry_settlement_calls
+        reentry_settlement_calls += 1
+        reentry_settlement_decisions.append(
+            (
+                kwargs["decision_ref"],
+                json.loads(
+                    json.dumps(
+                        kwargs["decision_payload"],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                ),
+            )
+        )
+        result = committed_settlement(*args, **kwargs)
+        if lose_reentry_settlement_response and reentry_settlement_calls == 1:
+            raise TimeoutError("simulated committed re-entry settlement response loss")
+        return result
+
+    reentry_runtime._store.settle_parallel_graph_budget = settle_reentry  # type: ignore[method-assign]  # noqa: SLF001
+    reentry_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=reentry_runtime,
+    )
+    events = [
+        event
+        async for event in reentry_app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "FAILED"
+    assert receipt["node_id"] == "right"
+    assert receipt["accepted"] is False
+    settlement = receipt["projection"]["parallel_settlement"]
+    assert settlement["graph_status"] == "FAILED"
+    decision_ref = settlement["decision_ref"]
+    assert decision_ref.startswith("taskbatch://sha256/")
+    assert decision_ref in receipt["evidence_refs"]
+    assert calls == ["left"]
+    assert reentry_settlement_calls == (
+        2 if lose_reentry_settlement_response else 1
+    )
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    assert store.get_graph("graph-gr03a", 1)["status"] == "FAILED"
+    assert store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
+        "status"
+    ] == "RELEASED"
+    with sqlite3.connect(db_path) as conn:
+        terminal_counts = dict(
+            conn.execute(
+                """
+                SELECT event_type, COUNT(*)
+                FROM task_runtime_outbox
+                WHERE event_type IN (
+                    'TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED',
+                    'BUDGET_RESERVATION_RELEASED'
+                )
+                GROUP BY event_type
+                """
+            ).fetchall()
+        )
+        decision_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_parallel_settlement_decision"
+        ).fetchone()[0]
+    assert terminal_counts == {
+        "BUDGET_RESERVATION_RELEASED": 1,
+        "TASK_GRAPH_FAILED": 1,
+    }
+    assert decision_count == 1
+
+    decision = store.get_parallel_settlement_decision(decision_ref)
+    parsed_payload = json.loads(decision["payload_json"])
+    canonical_payload_json = json.dumps(
+        parsed_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    digest = hashlib.sha256(canonical_payload_json.encode("utf-8")).hexdigest()
+    assert decision["payload"] == parsed_payload
+    assert decision["payload_json"] == canonical_payload_json
+    assert decision["payload_sha256"] == f"sha256:{digest}"
+    assert decision["decision_ref"] == decision_ref == f"taskbatch://sha256/{digest}"
+    assert parsed_payload["decision_kind"] == "FAILURE"
+    assert parsed_payload["selected_node_id"] == "right"
+    assert parsed_payload["graph_target_status"] == "FAILED"
+    assert parsed_payload["budget_target_status"] == "RELEASED"
+    assert parsed_payload["node_states"] == {
+        "join": {"status": "BLOCKED", "status_version": 0},
+        "left": {"status": "WAITING_ACCEPTANCE_REVIEW", "status_version": 6},
+        "right": {"status": "FAILED", "status_version": 3},
+    }
+    assert [outcome["node_id"] for outcome in parsed_payload["outcomes"]] == [
+        "left",
+        "right",
+    ]
+    expected_decision = (decision_ref, parsed_payload)
+    assert first_settlement_decisions == [expected_decision, expected_decision]
+    assert reentry_settlement_decisions == [expected_decision] * (
+        2 if lose_reentry_settlement_response else 1
+    )
+
+    replay_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+            acceptance=acceptance,
+        ),
+    )
+    replay_events = [
+        event
+        async for event in replay_app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+    replay_receipt = replay_events[-1]["execution_receipt"]
+    assert replay_receipt["status"] == "FAILED"
+    assert replay_receipt["node_id"] == "right"
+    assert replay_receipt["replayed"] is True
+    assert replay_receipt["projection"]["parallel_settlement"] == {
+        "graph_status": "FAILED",
+        "decision_ref": decision_ref,
+    }
+    assert decision_ref in replay_receipt["evidence_refs"]
+    assert calls == ["left"]
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_parallel_settlement_ownership_conflict_maps_to_in_progress(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=False,
+        node_delays={"left": 0.05},
+    )
+    runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+        bounded_fanout_enabled=True,
+    )
+    settlement_calls = 0
+
+    def concurrent_owner_wins(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal settlement_calls
+        settlement_calls += 1
+        raise TaskStoreError(
+            TASK_STORE_OWNERSHIP_CONFLICT,
+            "another coordinator owns the parallel settlement fence",
+        )
+
+    runtime._store.settle_parallel_graph_budget = concurrent_owner_wins  # type: ignore[method-assign]  # noqa: SLF001
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=runtime,
+    )
+
+    with pytest.raises(GovernedRuntimeError) as in_progress:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    assert in_progress.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert settlement_calls == 1
+    assert calls == ["left"]
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    assert store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
+    assert store.get_node("graph-gr03a", 1, "left")["status"] == "ACCEPTED"
+    assert store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
+    assert store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
+        "status"
+    ] == "ACTIVE"
+    with sqlite3.connect(db_path) as conn:
+        outer_terminal_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM task_runtime_outbox
+            WHERE event_type IN (
+                'TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED',
+                'BUDGET_RESERVATION_RELEASED'
+            )
+            """
+        ).fetchone()[0]
+        decision_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_parallel_settlement_decision"
+        ).fetchone()[0]
+    assert outer_terminal_count == 0
+    assert decision_count == 0
+
+
+@pytest.mark.parametrize(
+    ("claim_sibling", "expected_reason", "expected_settlement_calls"),
+    (
+        (True, "GOVERNED_EXECUTION_IN_PROGRESS", 1),
+        (False, "GOVERNED_DURABLE_STATE_CONFLICT", 2),
+    ),
+)
+@pytest.mark.asyncio
+async def test_ne01_b4_parallel_settlement_cas_maps_only_live_authority_to_in_progress(
+    tmp_path: Path,
+    claim_sibling: bool,
+    expected_reason: str,
+    expected_settlement_calls: int,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left",))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=False,
+        node_delays={"left": 0.05},
+    )
+    runtime = _coordinator(
+        db_path,
+        calls,
+        worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+        bounded_fanout_enabled=True,
+    )
+    store = runtime._store  # noqa: SLF001
+    settlement_calls = 0
+    observed_expected_join_states: list[dict[str, Any]] = []
+    competing_attempt_id = "attempt::gr03a::cas-race-join"
+
+    def cas_after_settlement_snapshot(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal settlement_calls
+        settlement_calls += 1
+        observed_expected_join_states.append(
+            dict(kwargs["expected_node_states"]["join"])
+        )
+        if claim_sibling and settlement_calls == 1:
+            expected_join = kwargs["expected_node_states"]["join"]
+            assert expected_join["status"] == "BLOCKED"
+            join = store.get_node("graph-gr03a", 1, "join")
+            assert join["status"] == "BLOCKED"
+            ready = store.transition_node(
+                "graph-gr03a",
+                1,
+                "join",
+                expected_version=join["status_version"],
+                target_status="READY",
+                outbox=_runtime_outbox(
+                    "TASK_NODE",
+                    "graph-gr03a@1/join",
+                    join["status_version"] + 1,
+                    "TASK_NODE_READY",
+                ),
+            )
+            claimed = store.claim_ready_node(
+                attempt_id=competing_attempt_id,
+                graph_id="graph-gr03a",
+                graph_revision=1,
+                node_id="join",
+                expected_node_version=ready["status_version"],
+                expected_attempt_count=0,
+                owner_id="gr03a-competing-worker",
+                lease_ttl_ms=120_000,
+                budget_id=kwargs["budget_id"],
+                operation_scope="gr03a-cas-race:join",
+                operation_fingerprint=_sha("gr03a-cas-race:join"),
+                attempt_created_outbox=_runtime_outbox(
+                    "TASK_ATTEMPT",
+                    competing_attempt_id,
+                    0,
+                    "TASK_ATTEMPT_CREATED",
+                    attempt_id=competing_attempt_id,
+                ),
+                attempt_leased_outbox=_runtime_outbox(
+                    "TASK_ATTEMPT",
+                    competing_attempt_id,
+                    1,
+                    "TASK_ATTEMPT_LEASED",
+                    attempt_id=competing_attempt_id,
+                ),
+            )
+            assert claimed["node"]["status"] == "LEASED"
+            assert claimed["attempt"]["status"] == "LEASED"
+            assert claimed["lease"]["status"] == "ACTIVE"
+        raise TaskStoreError(
+            TASK_STORE_CAS_CONFLICT,
+            "parallel settlement snapshot changed after it was read",
+        )
+
+    runtime._store.settle_parallel_graph_budget = cas_after_settlement_snapshot  # type: ignore[method-assign]  # noqa: SLF001
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=runtime,
+    )
+
+    with pytest.raises(GovernedRuntimeError) as raised:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    assert raised.value.reason_code == expected_reason
+    assert settlement_calls == expected_settlement_calls
+    assert all(
+        expected == {"status": "BLOCKED", "status_version": 0}
+        for expected in observed_expected_join_states
+    )
+    assert calls == ["left"]
+    snapshot = DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
+        "graph-gr03a",
+        1,
+    )
+    assert snapshot["graph_record"]["status"] == "ACTIVE"
+    assert snapshot["budgets"][0]["status"] == "ACTIVE"
+    if claim_sibling:
+        node_statuses = {
+            row["node_id"]: row["status"]
+            for row in snapshot["graph_record"]["nodes"]
+        }
+        assert node_statuses["join"] == "LEASED"
+        active_attempts = [
+            row
+            for row in snapshot["attempts"]
+            if row["attempt_id"] == competing_attempt_id
+        ]
+        assert len(active_attempts) == 1
+        assert active_attempts[0]["status"] == "LEASED"
+        active_leases = [
+            row
+            for row in snapshot["active_leases"]
+            if row["attempt_id"] == competing_attempt_id
+        ]
+        assert len(active_leases) == 1
+        assert active_leases[0]["status"] == "ACTIVE"
+    else:
+        assert snapshot["active_leases"] == []
+        assert all(
+            row["status"] not in {"CREATED", "LEASED", "RUNNING"}
+            for row in snapshot["attempts"]
+        )
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_parallel_settlement_decision"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_ne01_b4_terminal_replay_rejects_newer_selected_attempt(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    graph = replace(
+        graph,
+        nodes=tuple(
+            replace(
+                node,
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
+            )
+            if node.node_id == "right"
+            else node
+            for node in graph.nodes
+        ),
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=False,
+        node_delays={"left": 0.05},
+    )
+    events = [
+        event
+        async for event in GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=_coordinator(
+                db_path,
+                calls,
+                worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
+                bounded_fanout_enabled=True,
+            ),
+        ).execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+    receipt = events[-1]["execution_receipt"]
+    decision_ref = receipt["projection"]["parallel_settlement"]["decision_ref"]
+    assert receipt["status"] == "FAILED"
+    assert receipt["node_id"] == "right"
+    assert calls == ["left"]
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    graph_before = store.get_graph(graph.graph_id, graph.revision)
+    historical_before = store.get_parallel_settlement_decision(decision_ref)
+    selected = next(
+        outcome
+        for outcome in historical_before["payload"]["outcomes"]
+        if outcome["node_id"] == historical_before["payload"]["selected_node_id"]
+    )
+    assert selected["node_id"] == "right"
+    assert selected["status"] == "FAILED"
+
+    later_attempt_id = "attempt::gr03a::right::late-failed"
+    later_lease_id = "lease::gr03a::right::late-failed"
+    with sqlite3.connect(db_path) as conn:
+        prior_attempt = conn.execute(
+            """
+            SELECT * FROM task_runtime_attempt
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = 'right'
+            ORDER BY attempt_no DESC, attempt_id DESC
+            LIMIT 1
+            """,
+            (graph.graph_id, graph.revision),
+        ).fetchone()
+        assert prior_attempt is not None
+        prior_attempt = tuple(prior_attempt)
+        prior_columns = [
+            row[1]
+            for row in conn.execute("PRAGMA table_info(task_runtime_attempt)")
+        ]
+        prior = dict(zip(prior_columns, prior_attempt, strict=True))
+        assert prior["attempt_id"] == selected["attempt_id"]
+        assert prior["attempt_no"] == 1
+        assert prior["status"] == "FAILED"
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms, error_ref
+            ) VALUES (?, ?, ?, 'right', 2, 'FAILED', 3, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                later_attempt_id,
+                graph.graph_id,
+                graph.revision,
+                prior["owner_id"],
+                prior["operation_scope"],
+                prior["operation_fingerprint"],
+                NOW + 10,
+                NOW + 10,
+                NOW + 10,
+                NOW + 11,
+                NOW + 11,
+                "taskerror://gr03a/right/late-failed",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_lease(
+                lease_id, attempt_id, owner_id, fencing_token,
+                acquired_ts_ms, heartbeat_ts_ms, expires_ts_ms,
+                released_ts_ms, status, status_version
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'RELEASED', 1)
+            """,
+            (
+                later_lease_id,
+                later_attempt_id,
+                prior["owner_id"],
+                NOW + 10,
+                NOW + 10,
+                NOW + 120_000,
+                NOW + 11,
+            ),
+        )
+        conn.commit()
+
+    graph_after = store.get_graph(graph.graph_id, graph.revision)
+    assert graph_after["status"] == graph_before["status"] == "FAILED"
+    assert graph_after["status_version"] == graph_before["status_version"]
+    historical_after = store.get_parallel_settlement_decision(decision_ref)
+    assert historical_after["decision_ref"] == decision_ref
+    assert historical_after["payload"] == historical_before["payload"]
+    latest_historical = store.get_latest_parallel_settlement_decision(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert latest_historical is not None
+    assert latest_historical["decision_ref"] == decision_ref
+
+    replay_resolver = _FailingResolver()
+    replay_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=replay_resolver,
+        ),
+    )
+    with pytest.raises(GovernedRuntimeError) as drift:
+        _ = [
+            event
+            async for event in replay_app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+    assert drift.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
+    assert "selected Attempt is not latest" in drift.value.detail
+    assert replay_resolver.resolve_count == 0
+    assert calls == ["left"]
 
 
 @pytest.mark.parametrize("lose_retry_response", (False, True))

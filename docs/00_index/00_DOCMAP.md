@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B3_OUTER_FANIN_TERMINAL`；默认关闭且production OFF。单次运行内、非 terminal-leaf 且通过Reservation fence的outer原子裁决已接；未决副作用保持`RECOVERY_REQUIRED`。crash/re-entry仍走旧分步终态，taskbatch仅摘要；terminal-leaf、durable cancel、自动reconciliation/continuation、跨进程Outbox claim、Budget高竞争语义、production marker和online takeover未完成。
+- Durable DAG：`PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL`；默认关闭且 production OFF。live/re-entry outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），并从 Reservation/BudgetUsage 重建同一 payload/ref exact replay；当前 batch 只定优先级/selected。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict。selected Budget usage 与 row digest/Outbox/Attempt/usage fail-closed。multi-revision marker 扫描仍需 revisioned Outbox identity；其余边界不变。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

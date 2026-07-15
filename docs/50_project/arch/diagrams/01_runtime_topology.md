@@ -82,6 +82,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成；Scheduler 与 Internal 已接通。默认关闭的 live、非 terminal-leaf fan-out 已将共享终态移到 outer并对未决副作用保持`RECOVERY_REQUIRED`；但crash/re-entry仍走旧分步终态，taskbatch也仅为摘要。terminal-leaf、durable cancel、自动reconciliation/continuation、跨进程Outbox claim、显式composition和完整route matrix仍未闭环。
+- 图上有连线不等于全部 NE-01 已完成。默认关闭的 live/re-entry 从整个 admitted Graph 的 durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`）及 Reservation/BudgetUsage 重建同一 payload/ref并 exact replay；当前 batch 只定优先级/selected。ownership/CAS 后 active ownership 才返回 `IN_PROGRESS`，纯 CAS为 conflict。multi-revision marker 扫描仍需 revisioned TaskGraph Outbox identity；其余历史半提交、terminal-leaf、durable cancel、reconciliation/continuation 等未闭环。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

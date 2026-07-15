@@ -101,23 +101,31 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    S["compute_dag_schedule"] --> Q{"selected > 1 且\n仍有未 ACCEPTED 后继/剩余节点?"}
+    SCHEMA["0090 schema ready?\nBudget / worker 前 fail-fast"] --> S["compute_dag_schedule"]
+    S --> Q{"selected > 1 且\n仍有未 ACCEPTED 后继/剩余节点?"}
     Q -->|"否 / 生产默认路径"| SEQ["顺序执行"]
     Q -.->|"bounded_fanout_enabled=true\n默认 OFF，生产未启用"| ACTIVATE["outer 在 spawn 前激活 Graph"]
     ACTIVATE --> LIMIT["BudgetPolicy concurrency 有界 child"]
     LIMIT --> NODE["child deferred authority\nAttempt / Node / Lease / Reservation\nBudget usage / EXCEEDED"]
     LIMIT --> MERGE["progress slots 默认 32，慢消费者反压\n每 child 预留 control slot"]
     NODE --> WAIT["正常非接受不 fail-fast\n等待所有已启动 sibling 落稳"]
-    WAIT --> SNAP["receipt ↔ durable Node/latest Attempt\n完整 node status/version + stable Attempt\n零 ACTIVE Lease / 未决 Reservation\ntaskbatch://sha256/&lt;digest&gt;"]
-    SNAP --> DECIDE{"批次结果"}
+    WAIT --> SNAP["live / ACTIVE crash-re-entry\ndurable Node/latest Attempt outcomes\n完整 snapshot + stable Attempt\n零 ACTIVE Lease / 未决 Reservation"]
+    REENTRY["重启后 ACTIVE 多节点 Graph"] -.-> LIVE{"live Node / active Attempt / ACTIVE Lease?"}
+    LIVE -->|"是"| INPROGRESS["GOVERNED_EXECUTION_IN_PROGRESS\n不 resolve worker / 不抢 authority"]
+    LIVE -->|"否"| SNAP
+    SNAP --> CANON["整个 admitted Graph durable terminal Nodes\n+ latest stable Attempts / Reservation / BudgetUsage\n含非 selected RETRY_PENDING\n重建 live/re-entry 同一 payload/ref"]
+    CANON --> DECIDE{"批次结果"}
+    DECIDE_NOTE["优先级：recovery > Budget > failure > review"] -.-> DECIDE
     DECIDE -->|"failure"| FAILED["Graph FAILED\nBudget RELEASED"]
     DECIDE -->|"Budget overrun"| BUDGET["Graph BLOCKED\nBudget RELEASED"]
     DECIDE -->|"post-review"| REVIEW["Graph BLOCKED\nBudget 保持 ACTIVE"]
     DECIDE -->|"全部 ACCEPTED"| ORDER["按 admission 顺序校验 outcomes\n继续调度"]
     NODE -->|"Operation Reservation 未决"| RECOVERY["RECOVERY_REQUIRED\nGraph/Budget 不终结"]
-    FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n单事务 + exact replay"]
+    FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n+ 0090 canonical v2 decision\n单事务 + exact replay"]
     BUDGET --> ATOMIC
     REVIEW --> ATOMIC
+    ATOMIC --> MATCH["terminal replay：Graph target + status_version 精确匹配\nReview BLOCKED→FAILED 不泄漏旧 ref"]
+    BUDGET --> USAGE["selected=BUDGET_BLOCKED 绑定 rejected usage\n被动 blocked sibling 无需本地 usage"]
     ATOMIC --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     P0["P0：terminal-leaf batch 与最终成功终态\n仍走顺序路径"]
@@ -125,16 +133,21 @@ flowchart TD
     P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
     CANCEL["外层取消：cancel + join child / heartbeat\n无 durable cancel fence"] -.-> LIMIT
     CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
+    HISTORY["P1：历史 BLOCKED+failure / FAILED+ACTIVE Budget\n归 reconciliation，不由 ACTIVE 重入自动修复"] -.-> REENTRY
+    PREVIEW["P1：WAITING_APPROVAL 仍走 pre-review 专线\n未统一 optional-attempt observation"] -.-> SNAP
 
     style LIMIT fill:#fff3cd,stroke:#a87500
     style P0 fill:#ffd9d9,stroke:#b31d28
     style P1 fill:#fff3cd,stroke:#a87500
     style CANCEL fill:#fff3cd,stroke:#a87500
     style CAS fill:#fff3cd,stroke:#a87500
+    style HISTORY fill:#fff3cd,stroke:#a87500
+    style PREVIEW fill:#fff3cd,stroke:#a87500
     style RECOVERY fill:#fff3cd,stroke:#a87500
+    style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-实验证据证明 concurrency=2 的 root 真重叠、concurrency=1 保持串行、size=1 时慢消费者会反压 child；每 child 的保留 control slot 还保证自发 `CancelledError` 不会让 supervisor 永久挂起。正常 pre-reservation failure 不再取消仍运行的 sibling；待所有 sibling 落稳后，outer 单次提交 Graph `FAILED` + Budget `RELEASED`，且首次结算响应丢失只 exact replay、不重复 Outbox。Budget overrun 与 post-review 也有对应证据。receipt↔latest Attempt/Node、完整快照及 Lease/Reservation fence 共同约束裁决；post-reservation 未决副作用保持 `RECOVERY_REQUIRED`。但该图只描述 live batch：crash/re-entry 若已看到 FAILED/review Node 仍走旧分步终态路径，taskbatch 也只有摘要而无 canonical payload。该图不是 production wiring；terminal-leaf、durable cancel、自动 recovery continuation 与跨进程 Outbox claim 均未闭环。
+live/re-entry outcomes 全量来自 admitted Graph durable terminal Nodes/latest stable Attempts，`RETRY_PENDING` 可作为非 selected outcome；当前 batch 只定优先级/selected。response-loss exact replay；ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict。selected Budget usage 与 row digest/Outbox/Attempt/usage fail-closed。完整 marker 扫描仅 single-revision 安全；multi-revision 仍需 revisioned Outbox identity。该图不是 production wiring。
 
 ## Plan 分支的真实边界
 
@@ -158,7 +171,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B3_OUTER_FANIN_TERMINAL` 仅在默认关闭、生产未启用的单次 live 非 terminal-leaf fan-out 中，由 outer 原子提交可结算 failure/Budget/review 的 Graph、可选 Budget `RELEASED` 与 Outbox；crash/re-entry 仍走旧路径，`taskbatch` 仅摘要。terminal-leaf 并行、durable cancel fence、跨进程 Outbox claim/CAS、Budget CAS 高竞争语义、built-in retry marker、online takeover、即时 reconciliation 与 Review continuation 尚未完成。
+3. `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` 默认关闭、生产未启用；live/re-entry 的 payload/ref 与 exact replay 已统一，但 multi-revision 完整 marker 扫描仍需 revisioned TaskGraph Outbox identity。历史半提交、`WAITING_APPROVAL`、terminal-leaf、durable cancel、跨进程 Outbox、Budget 高竞争、online takeover、reconciliation/continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 

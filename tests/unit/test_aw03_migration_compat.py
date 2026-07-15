@@ -158,9 +158,12 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 89
-    assert upgraded.summary["applied_count"] == 6
-    assert upgraded.records[-1].migration_id == "0089_task_runtime_dag_scheduling"
+    assert upgraded.summary["current_version"] == 90
+    assert upgraded.summary["applied_count"] == 7
+    assert (
+        upgraded.records[-1].migration_id
+        == "0090_task_runtime_parallel_settlement_decision"
+    )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -186,6 +189,13 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
             WHERE type = 'table' AND name = 'task_runtime_acceptance_effect_intent'
             """
         ).fetchone() == ("task_runtime_acceptance_effect_intent",)
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+                AND name = 'task_runtime_parallel_settlement_decision'
+            """
+        ).fetchone() == ("task_runtime_parallel_settlement_decision",)
 
 
 def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) -> None:
@@ -195,13 +205,19 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 89")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 89")
+        # Rewind the catalog consistently from 0089. Leaving the 0090 receipt
+        # behind would create an impossible migration-history gap rather than
+        # exercising the checksum-bound 0089 replay compatibility path.
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 89")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 89")
         conn.commit()
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    assert repaired.records[-1].migration_id == "0089_task_runtime_dag_scheduling"
+    assert [record.migration_id for record in repaired.records[-2:]] == [
+        "0089_task_runtime_dag_scheduling",
+        "0090_task_runtime_parallel_settlement_decision",
+    ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             "SELECT disposition FROM schema_migration_assets WHERE migration_id = 89"
@@ -219,6 +235,91 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
 
         conn.execute("DROP INDEX idx_task_runtime_node_retry_due")
         assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
+
+
+def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "head-89-to-90.sqlite3"
+    runner = SQLiteMigrationRunner(db_path=db_path)
+    seeded = runner.apply_migrations(request_id="0090-seed", ts_ms=30)
+    assert seeded.success is True, seeded.as_dict()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE task_runtime_parallel_settlement_decision")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 90")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 90")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "graph-head-89",
+                1,
+                "work-order-head-89",
+                "planner://head-89",
+                "ACTIVE",
+                1,
+                "{}",
+                "CANONICAL",
+                30,
+                30,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_node(
+                graph_id, graph_revision, node_id, status, status_version,
+                node_json, retry_not_before_ms, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "graph-head-89",
+                1,
+                "node-head-89",
+                "RETRY_PENDING",
+                1,
+                "{}",
+                1_234,
+                30,
+                30,
+            ),
+        )
+        conn.commit()
+        assert conn.execute(
+            "SELECT MAX(migration_id) FROM schema_migrations"
+        ).fetchone() == (89,)
+
+    upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
+
+    assert upgraded.success is True, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 90
+    assert upgraded.summary["applied_count"] == 1
+    assert (
+        upgraded.records[-1].migration_id
+        == "0090_task_runtime_parallel_settlement_decision"
+    )
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+                AND name = 'task_runtime_parallel_settlement_decision'
+            """
+        ).fetchone() == ("task_runtime_parallel_settlement_decision",)
+        assert conn.execute(
+            """
+            SELECT status, retry_not_before_ms
+            FROM task_runtime_node
+            WHERE graph_id = 'graph-head-89'
+                AND graph_revision = 1
+                AND node_id = 'node-head-89'
+            """
+        ).fetchone() == ("RETRY_PENDING", 1_234)
 
 
 def test_aw03_migrations_require_an_explicit_immediate_transaction(tmp_path) -> None:

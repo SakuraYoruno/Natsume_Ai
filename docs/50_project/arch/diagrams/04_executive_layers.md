@@ -120,4 +120,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 共享 canonical Task lineage。`PARTIAL_B3_OUTER_FANIN_TERMINAL` 的默认关闭 fan-out 为 live、非 terminal-leaf batch 建立 outer snapshot/Attempt/Lease/Reservation fence及Graph/可选Budget/Outbox原子裁决，未决副作用保持`RECOVERY_REQUIRED`。但crash/re-entry的既有FAILED/review Node仍走旧分步终态路径，taskbatch仅有摘要引用；因此还不是crash-safe authority。NE-01仍需统一重入裁决并持久canonical decision payload，再处理terminal-leaf、durable cancel、自动reconciliation/continuation、跨进程Outbox claim、Budget高竞争语义、built-in marker、online takeover、显式composition与route matrix。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。`PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` 默认关闭：live/re-entry outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），当前 batch 只定优先级/selected；payload/ref 与 exact replay 已统一。ownership/CAS 后 active ownership 才映射 `IN_PROGRESS`，纯 CAS为 conflict。multi-revision marker 扫描仍需 revisioned Outbox identity。下一步仍是 terminal-leaf 与 durable cancel，其余 reconciliation/continuation 等未完成。

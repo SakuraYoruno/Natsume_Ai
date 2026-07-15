@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B3_OUTER_FANIN_TERMINAL` | 默认关闭且生产未启用；仅单次 live、非 terminal-leaf 批次的可结算 failure/Budget/review 已由 outer 基于完整快照原子提交 Graph、可选 Budget `RELEASED` 与 Outbox。crash/re-entry 仍走旧路径，`taskbatch` 仅摘要；terminal-leaf、durable cancel、跨进程 Outbox claim、online takeover/自动 continuation 未闭环 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` | 默认关闭且生产未启用；live/re-entry 从 durable Node/Attempt/Reservation/BudgetUsage 重建同一 payload/ref 并 exact replay。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS 保持 conflict；selected Budget usage 和 decision row digest/Outbox/Attempt/usage fail-closed。multi-revision 完整 marker 扫描仍需 revisioned Outbox identity；terminal-leaf、durable cancel、跨进程 Outbox、takeover/continuation 未闭环 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -104,11 +104,17 @@ operation reservation 建立后，Coordinator 会创建 `DurableExecutionHeartbe
 
 Coordinator 现在还有一个 `bounded_fanout_enabled` 实验开关，构造默认值为 `false`，生产 composition 没有传入启用值。当 `compute_dag_schedule()` 一次选出多个 claimable 节点，且图中仍有不属于该批次、尚未 `ACCEPTED` 的后继/剩余节点时，outer 会先把 Graph 从 `CREATED` 激活，再把已选节点创建为 asyncio child；批次数量已由 scheduler 按 Budget concurrency 截断，纯 terminal-leaf 仍排除。非终态 progress 由 `fanout_event_buffer_size` 个 semaphore slot 限制在途数量（默认 32，非正值拒绝），慢消费者会反压 producer；总 queue 另为每个 child 预留一个 control slot，因此 terminal/error/self-cancel 不会被满 progress buffer 阻塞或丢失。
 
+Coordinator 在任何 Budget activation 或 worker resolution 前调用 `assert_parallel_settlement_decision_ready()`；`0090` 缺表/缺列会以 schema-not-ready fail-fast。对于 `ACTIVE` 多节点重入，若 durable snapshot 仍含 live Node、active Attempt 或 `ACTIVE` Lease，入口返回 `GOVERNED_EXECUTION_IN_PROGRESS`，不会 resolve 新 worker、改变 Attempt/Lease，也不会抢现有 owner 的 execution authority。结算窗口遇到 ownership fence，或 CAS 后重读发现 active Node/Attempt/Lease，也返回 `IN_PROGRESS`；纯 CAS 且没有 active ownership 事实仍转为 `GOVERNED_DURABLE_STATE_CONFLICT`。
+
 并行 child 使用 deferred shared-terminal 模式：它仍独占自己的 Attempt、Node、Lease、Reservation，并可记录 Budget usage 或把预算标成 `EXCEEDED`，但不得终结共享 Graph，也不得把 Budget 置为 `RELEASED/CONSUMED`。因此普通的 node-local 非接受不会 fail-fast cancel sibling；outer 会等待所有已启动 sibling 到达 durable node-local terminal，再按固定优先级解释整批结果。并行 `_publish_outbox()` 先受 Coordinator 本地 asyncio lock 保护；同进程 Host/Internal/Scheduler 共享的 `RuntimeOutboxPublisher` 又以实例级 `threading.Lock` 串行化 list/append/mark drain。跨线程合同用两个 worker 证明共享 publisher 的 peak active drain 为 1，但该锁不覆盖多进程。
 
-outer 裁决前先校验 receipt 与 durable Node/latest Attempt status/lineage，再重读 Graph、Budget 与完整 Node status/version 集合，拒绝缺失/额外节点、非稳定 Attempt、任一 `ACTIVE` Lease 或未决 Operation Reservation。裁决以包含 outcome attempt/reason/evidence lineage 的 `taskbatch` digest 绑定整批快照，在单一事务中写 Graph `FAILED/BLOCKED`、可选 Budget `RELEASED` 与对应 Outbox；decision ref 也进入 receipt evidence，提交响应丢失只在聚合版本、节点快照和 Outbox 精确一致时 replay。测试验证 pre-reservation failure 单次收口及 response-loss replay、Budget overrun、post-review、node-only retry replay、伪 receipt 拒绝、自取消无挂死；post-reservation failure 的未决 Reservation 则持续返回 `RECOVERY_REQUIRED`，Graph/Budget 不提前终结。既有并发、fan-in、progress 背压和外层取消证据继续成立。
+live 与 crash/re-entry 不再从瞬时 receipt 拼不同决策：两者均重读 durable Node、Attempt、Reservation、BudgetUsage，重建完全相同的 canonical `Natsume.task_runtime.parallel_settlement.v2` payload/ref，并把 Graph、可选 Budget、Outbox、decision row 同事务提交；response-loss 只 exact replay。为保证跨批次重入 digest 稳定，outcomes 从整个 admitted Graph 的 durable terminal Nodes 和每节点 latest stable Attempt 全量重建，不只当前 claimable batch；当前 batch 只决定优先级与 selected。`RETRY_PENDING` 是合法的非 selected durable outcome，也可由重入恢复。BUDGET selected `BUDGET_BLOCKED` 绑定 rejected usage；共享超额后的被动 blocked sibling 不要求本地 usage。每次读取 decision row 都验证 digest、精确 Graph/可选 Budget Outbox 与 Attempt lineage，BUDGET 再验证 usage；terminal replay 另校验 Graph target/version，并要求 selected outcome 的 Attempt 仍为该节点 current latest。
 
-该路径仍不能默认启用。B3 只统一单次运行内、非 terminal-leaf 且通过 Reservation fence 的 shared terminal。崩溃重入若循环入口直接看到 FAILED/review Node，仍走旧 Graph transition + Budget finalize 分步路径，没有完整 snapshot fence/taskbatch 事务；同时存在 review 与 failure 时旧路径会优先 review，而在线 outer 是 failure-first。`taskbatch` 目前只保存摘要引用，canonical decision payload 不可独立解析。纯 terminal-leaf、durable cancel fence、跨进程 Outbox claim、Budget 高竞争语义也仍未完成。
+合同/集成测试覆盖：live 首次构造与 crash/re-entry 重构得到同一 payload/ref、提交响应丢失 exact replay、较早批次 terminal Node 被纳入后续 decision、`RETRY_PENDING` sibling 作为非 selected outcome、Budget selected usage 与被动 blocked sibling 分离、newer selected Attempt replay rejection，以及 decision row/marker corruption fail-closed。
+
+历史 marker 校验存在一个真实 schema 边界：旧 TaskGraph Outbox 只有 `aggregate_id=graph_id`，没有 `graph_revision`。因此完整扫描 `taskbatch` marker 的缺 decision row/错绑只在该 graph ID 仅一个 revision 时安全；多 revision 读取仍会对返回 decision row 的 digest、Outbox、Attempt、usage 做精确校验，但不能完整判断其他 revision 历史 marker 是否缺行。要封闭此缺口，需要 revisioned TaskGraph Outbox aggregate identity。
+
+该路径仍不能默认启用。B4 已让 `ACTIVE` 多节点 Graph 在崩溃重入时从 durable Node/latest Attempt 重建 outcomes，并按 recovery > Budget > failure > review 复用 live outer 的完整 snapshot/Attempt/Lease/Reservation fence 与原子事务；同时存在 review 与 failure 时会稳定选择 failure。canonical decision journal 也让 `taskbatch` ref 可独立解析并受 replay 防篡改校验。范围不包含历史已半提交状态：`BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 不会由该入口自动修复；`WAITING_APPROVAL` 仍走独立 pre-review 专线，没有纳入统一的 optional-attempt observation。纯 terminal-leaf、durable cancel fence、跨进程 Outbox claim、Budget 高竞争语义也仍未完成。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
@@ -116,8 +122,9 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 仍缺：
 
-- B3 fan-out 未进生产；非 terminal-leaf 的共享 Graph/Budget 终态已移到 outer fan-in，但 terminal-leaf batch 与最终成功终态仍未并行；
-- crash/re-entry 的既有 FAILED/review Node 仍绕过 outer 原子裁决，优先级也可能与在线 fan-in 不一致；taskbatch canonical decision payload 尚未持久化；
+- B4 fan-out 未进生产；live 与 `ACTIVE` 多节点重入的共享 Graph/Budget 终态已移到 outer snapshot transaction，但 terminal-leaf batch 与最终成功终态仍未并行；
+- 历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态仍待 reconciliation；`WAITING_APPROVAL` 仍非统一 optional-attempt observation；
+- legacy TaskGraph Outbox 缺 `graph_revision`，多 revision 的完整 `taskbatch` marker 历史扫描仍待 revisioned Outbox identity；
 - 取消没有 durable cancel fence，进程崩溃后的回收仍依赖 TTL/startup recovery；
 - 同进程共享 publisher 已串行，跨进程 Outbox drain 仍缺 durable claim/CAS 或单 writer；
 - 生产 resolver 尚未把现实瞬态准备故障映射到显式 marker；promotion 与 claim 也不是同一决策事务；
@@ -248,8 +255,8 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 统一 crash/re-entry 对既有 FAILED/review Node 的裁决：复用 live outer 的完整快照事务与 failure-first 优先级，并持久化可解析的 canonical decision payload。
-2. 在已完成的 live、非 terminal-leaf outer 收口上补齐 terminal-leaf 并行、最终成功终态与 durable cancel fence；通过故障矩阵后才考虑生产启用。
+1. 在已完成的 live/`ACTIVE` crash-re-entry 非 terminal-leaf outer 收口上补齐 terminal-leaf 并行、最终成功终态与 durable cancel fence；通过故障矩阵后才考虑生产启用。
+2. 将历史 `BLOCKED + failure Node` / `FAILED + ACTIVE Budget` 半提交修复归入 reconciliation，并把 `WAITING_APPROVAL` 收敛为统一 optional-attempt observation。
 3. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程 publisher 实例锁不能替代该 authority。
 4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，收敛 Budget CAS/`ALREADY_EXCEEDED` 并发语义，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。
 5. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机并自动重调度。

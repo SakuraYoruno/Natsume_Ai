@@ -96,6 +96,9 @@ class _FakeTaskStore:
     def assert_dag_scheduling_ready(self) -> None:
         return None
 
+    def assert_parallel_settlement_decision_ready(self) -> None:
+        return None
+
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
         return dict(self.graph)
 
@@ -531,6 +534,48 @@ async def test_dag_schema_is_checked_before_budget_mutation() -> None:
         ]
 
     assert calls == ["schema:rejected"]
+    assert store.budget is None
+
+
+@pytest.mark.asyncio
+async def test_parallel_decision_schema_is_checked_before_budget_or_worker() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    def _reject_stale_schema() -> None:
+        calls.append("parallel-schema:rejected")
+        raise RuntimeError("migration 0090 missing")
+
+    store.assert_parallel_settlement_decision_ready = _reject_stale_schema  # type: ignore[method-assign]
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    with pytest.raises(RuntimeError, match="migration 0090 missing"):
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert calls == ["parallel-schema:rejected"]
     assert store.budget is None
 
 

@@ -59,6 +59,13 @@ from host_brain.contracts.agent_runtime.verification_contract import (
     VerificationResult,
 )
 from host_brain.core.ids import now_ms
+from host_brain.contracts.agent_runtime.parallel_settlement import (
+    CanonicalParallelSettlementDecision,
+    MAX_PARALLEL_SETTLEMENT_PAYLOAD_BYTES,
+    PARALLEL_SETTLEMENT_SCHEMA_VERSION,
+    ParallelSettlementContractError,
+    normalize_parallel_settlement_decision,
+)
 
 
 TASK_STORE_SCHEMA_NOT_READY = "TASK_STORE_SCHEMA_NOT_READY"
@@ -149,6 +156,28 @@ _ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS = frozenset(
         "updated_ts_ms",
         "committed_ts_ms",
         "failed_ts_ms",
+    }
+)
+_PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS = frozenset(
+    {
+        "decision_ref",
+        "schema_version",
+        "graph_id",
+        "graph_revision",
+        "graph_version_before",
+        "graph_version_after",
+        "budget_id",
+        "budget_version_before",
+        "budget_version_after",
+        "decision_kind",
+        "selected_node_id",
+        "graph_target_status",
+        "budget_target_status",
+        "payload_json",
+        "payload_sha256",
+        "graph_outbox_id",
+        "budget_outbox_id",
+        "created_ts_ms",
     }
 )
 _DURABLE_REFERENCE_PATTERN = re.compile(
@@ -784,6 +813,27 @@ class DurableTaskStore:
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "task runtime retry deadline invariant is invalid: "
                 f"{invalid_retry_row['node_id']}:{invalid_retry_row['status']}",
+            )
+
+    def assert_parallel_settlement_decision_ready(self) -> None:
+        """Require the NE-01 B4 canonical parallel-decision journal."""
+
+        conn = self._connect()
+        try:
+            columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_parallel_settlement_decision)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        missing = sorted(_PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS - columns)
+        if missing:
+            raise TaskStoreError(
+                TASK_STORE_SCHEMA_NOT_READY,
+                "task runtime parallel decision migration 0090 is not applied: "
+                f"{missing}",
             )
 
     def assert_acceptance_effect_intent_ready(self) -> None:
@@ -5445,6 +5495,96 @@ class DurableTaskStore:
             )
             return self._budget_record(self._require_budget(conn, budget_id))
 
+    def get_parallel_settlement_decision(self, decision_ref: str) -> dict[str, Any]:
+        """Resolve and integrity-check one canonical parallel decision."""
+
+        self.assert_parallel_settlement_decision_ready()
+        reference = str(decision_ref or "").strip()
+        if not reference:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "parallel settlement decision_ref is required",
+            )
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_parallel_settlement_decision
+                WHERE decision_ref = ?
+                """,
+                (reference,),
+            ).fetchone()
+            if row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"parallel settlement decision not found: {reference}",
+                )
+            record = _parallel_settlement_decision_record(row)
+            _assert_parallel_settlement_decision_outbox_binding(conn, record)
+            self._validate_parallel_decision_attempt_lineage(
+                conn,
+                decision=normalize_parallel_settlement_decision(record["payload"]),
+                graph_id=str(record["graph_id"]),
+                revision=int(record["graph_revision"]),
+                require_latest=False,
+                reason_code=TASK_STORE_DURABLE_DATA_INVALID,
+            )
+            return record
+        finally:
+            conn.close()
+
+    def get_latest_parallel_settlement_decision(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> dict[str, Any] | None:
+        """Return the newest decision for a graph revision, if one exists."""
+
+        self.assert_parallel_settlement_decision_ready()
+        graph_ref = str(graph_id or "").strip()
+        if not graph_ref or isinstance(revision, bool) or int(revision) < 1:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "parallel settlement graph identity is invalid",
+            )
+        conn = self._connect()
+        try:
+            declared_ref = _find_invalid_declared_parallel_settlement_decision_ref(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=int(revision),
+            )
+            if declared_ref is not None:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "parallel settlement Graph Outbox has an invalid or missing "
+                    f"decision for {graph_ref}@{int(revision)}: {declared_ref}",
+                )
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_parallel_settlement_decision
+                WHERE graph_id = ? AND graph_revision = ?
+                ORDER BY graph_version_after DESC, decision_ref DESC
+                LIMIT 1
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            if row is None:
+                return None
+            record = _parallel_settlement_decision_record(row)
+            _assert_parallel_settlement_decision_outbox_binding(conn, record)
+            self._validate_parallel_decision_attempt_lineage(
+                conn,
+                decision=normalize_parallel_settlement_decision(record["payload"]),
+                graph_id=graph_ref,
+                revision=int(revision),
+                require_latest=False,
+                reason_code=TASK_STORE_DURABLE_DATA_INVALID,
+            )
+            return record
+        finally:
+            conn.close()
+
     def settle_parallel_graph_budget(
         self,
         graph_id: str,
@@ -5456,6 +5596,8 @@ class DurableTaskStore:
         expected_node_states: Mapping[str, Mapping[str, Any]],
         graph_target_status: TaskGraphStatus | str,
         budget_target_status: BudgetReservationStatus | str | None,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
         graph_outbox: OutboxMessage,
         budget_outbox: OutboxMessage | None = None,
     ) -> dict[str, Any]:
@@ -5464,10 +5606,14 @@ class DurableTaskStore:
         Children may mutate only their Attempt/Node/Lease and shared budget
         usage.  This outer fan-in boundary verifies the complete durable node
         snapshot and absence of active leases before it changes the TaskGraph
-        and, optionally, releases the shared BudgetReservation.  An exact
-        response-loss replay returns the already committed pair; any snapshot,
-        state, version, or outbox drift fails closed.
+        and, optionally, releases the shared BudgetReservation.  The canonical
+        decision payload, Graph/Budget mutations, and their Outboxes commit in
+        the same transaction.  An exact response-loss replay returns the
+        already committed decision; any snapshot, state, version, payload, or
+        outbox drift fails closed.
         """
+
+        self.assert_parallel_settlement_decision_ready()
 
         graph_ref = str(graph_id or "").strip()
         budget_ref = str(budget_id or "").strip()
@@ -5530,6 +5676,44 @@ class DurableTaskStore:
             graph_target=graph_target,
             budget_target=budget_target,
         )
+        try:
+            decision = normalize_parallel_settlement_decision(decision_payload)
+        except ParallelSettlementContractError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                f"parallel settlement decision is invalid: {exc}",
+            ) from exc
+        decision_reference = str(decision_ref or "").strip()
+        expected_state_payload = {
+            node_id: {"status": status, "status_version": version}
+            for node_id, (status, version) in normalized_states.items()
+        }
+        expected_budget_target = budget_target.value if budget_target is not None else None
+        if (
+            decision.decision_ref != decision_reference
+            or decision.payload["graph_id"] != graph_ref
+            or decision.payload["graph_revision"] != int(revision)
+            or decision.payload["graph_status_version_before"]
+            != expected_graph_version
+            or decision.payload["graph_target_status"] != graph_target.value
+            or decision.payload["budget_id"] != budget_ref
+            or decision.payload["budget_status_version_before"]
+            != expected_budget_version
+            or decision.payload["budget_target_status"] != expected_budget_target
+            or decision.payload["node_states"] != expected_state_payload
+            or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or decision.payload["budget_outbox_id"]
+            != (budget_outbox.outbox_id if budget_outbox is not None else None)
+            or decision_reference not in graph_outbox.evidence_refs
+            or (
+                budget_outbox is not None
+                and decision_reference not in budget_outbox.evidence_refs
+            )
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "parallel settlement decision does not bind the requested mutation",
+            )
         ts_ms = self._now()
 
         with self._transaction() as conn:
@@ -5599,6 +5783,12 @@ class DurableTaskStore:
                     TASK_STORE_OWNERSHIP_CONFLICT,
                     "parallel graph settlement requires every operation reservation to be reconciled",
                 )
+            self._validate_parallel_decision_attempt_lineage(
+                conn,
+                decision=decision,
+                graph_id=graph_ref,
+                revision=int(revision),
+            )
 
             graph = self._require_graph(conn, graph_ref, int(revision))
             budget = self._require_budget(conn, budget_ref)
@@ -5660,9 +5850,18 @@ class DurableTaskStore:
                         expected_event_type="BUDGET_RESERVATION_RELEASED",
                         expected_attempt_id=None,
                     )
+                decision_record = self._assert_parallel_settlement_decision_replay(
+                    conn,
+                    decision=decision,
+                    graph_version_before=expected_graph_version,
+                    budget_version_before=expected_budget_version,
+                    graph_outbox=graph_outbox,
+                    budget_outbox=budget_outbox,
+                )
                 return {
                     "graph": _graph_record(graph, node_rows),
                     "budget": self._budget_record(budget),
+                    "decision": decision_record,
                     "replayed": True,
                 }
 
@@ -5675,6 +5874,11 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
                     "parallel graph settlement requires an ACTIVE TaskGraph",
+                )
+            if decision.payload["graph_status_before"] != str(graph["status"]):
+                raise TaskStoreError(
+                    TASK_STORE_CAS_CONFLICT,
+                    "parallel decision Graph source status differs",
                 )
             self._require_version(
                 budget,
@@ -5693,6 +5897,11 @@ class DurableTaskStore:
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
                     "parallel graph settlement requires an ACTIVE or EXCEEDED budget",
+                )
+            if decision.payload["budget_status_before"] != str(budget["status"]):
+                raise TaskStoreError(
+                    TASK_STORE_CAS_CONFLICT,
+                    "parallel decision Budget source status differs",
                 )
 
             if budget_target is not None:
@@ -5733,9 +5942,19 @@ class DurableTaskStore:
                 outbox=graph_outbox,
                 ts_ms=ts_ms,
             )
+            decision_record = self._insert_parallel_settlement_decision(
+                conn,
+                decision=decision,
+                graph_version_before=expected_graph_version,
+                budget_version_before=expected_budget_version,
+                graph_outbox=graph_outbox,
+                budget_outbox=budget_outbox,
+                ts_ms=ts_ms,
+            )
             return {
                 "graph": graph_record,
                 "budget": self._budget_record(self._require_budget(conn, budget_ref)),
+                "decision": decision_record,
                 "replayed": False,
             }
 
@@ -5864,6 +6083,175 @@ class DurableTaskStore:
                     TASK_STORE_INVALID,
                     "parallel settlement may keep Budget ACTIVE only for a durable review gate",
                 )
+
+    @staticmethod
+    def _validate_parallel_decision_attempt_lineage(
+        conn: sqlite3.Connection,
+        *,
+        decision: CanonicalParallelSettlementDecision,
+        graph_id: str,
+        revision: int,
+        require_latest: bool = True,
+        reason_code: str = TASK_STORE_CAS_CONFLICT,
+    ) -> None:
+        expected_attempt_statuses = {
+            "ACCEPTED": {AttemptStatus.SUCCEEDED.value},
+            "WAITING_ACCEPTANCE_REVIEW": {AttemptStatus.SUCCEEDED.value},
+            "VERIFICATION_FAILED": {AttemptStatus.SUCCEEDED.value},
+            "FAILED": {AttemptStatus.FAILED.value},
+            "BUDGET_BLOCKED": {AttemptStatus.FAILED.value},
+            "RETRY_PENDING": {AttemptStatus.FAILED.value},
+            "CANCELLED": {AttemptStatus.CANCELLED.value},
+        }
+        for outcome in decision.payload["outcomes"]:
+            node_id = str(outcome["node_id"])
+            attempt_id = str(outcome["attempt_id"])
+            attempt = conn.execute(
+                "SELECT * FROM task_runtime_attempt WHERE attempt_id = ?",
+                (attempt_id,),
+            ).fetchone()
+            latest = conn.execute(
+                """
+                SELECT attempt_id FROM task_runtime_attempt
+                WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+                ORDER BY attempt_no DESC, attempt_id DESC
+                LIMIT 1
+                """,
+                (str(graph_id), int(revision), node_id),
+            ).fetchone()
+            allowed = expected_attempt_statuses.get(str(outcome["status"]))
+            if (
+                attempt is None
+                or (
+                    require_latest
+                    and (
+                        latest is None
+                        or str(latest["attempt_id"]) != attempt_id
+                    )
+                )
+                or str(attempt["graph_id"]) != str(graph_id)
+                or int(attempt["graph_revision"]) != int(revision)
+                or str(attempt["node_id"]) != node_id
+                or allowed is None
+                or str(attempt["status"]) not in allowed
+            ):
+                raise TaskStoreError(
+                    reason_code,
+                    f"parallel settlement Attempt lineage drifted: {node_id}",
+                )
+        if decision.payload["decision_kind"] == "BUDGET":
+            _assert_parallel_budget_usage_lineage(
+                conn,
+                decision.payload,
+                reason_code=reason_code,
+            )
+
+    @staticmethod
+    def _insert_parallel_settlement_decision(
+        conn: sqlite3.Connection,
+        *,
+        decision: CanonicalParallelSettlementDecision,
+        graph_version_before: int,
+        budget_version_before: int,
+        graph_outbox: OutboxMessage,
+        budget_outbox: OutboxMessage | None,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        payload = decision.payload
+        budget_released = payload["budget_target_status"] == "RELEASED"
+        try:
+            conn.execute(
+                """
+                INSERT INTO task_runtime_parallel_settlement_decision(
+                    decision_ref, schema_version, graph_id, graph_revision,
+                    graph_version_before, graph_version_after, budget_id,
+                    budget_version_before, budget_version_after, decision_kind,
+                    selected_node_id, graph_target_status, budget_target_status,
+                    payload_json, payload_sha256, graph_outbox_id,
+                    budget_outbox_id, created_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.decision_ref,
+                    PARALLEL_SETTLEMENT_SCHEMA_VERSION,
+                    payload["graph_id"],
+                    payload["graph_revision"],
+                    int(graph_version_before),
+                    int(graph_version_before) + 1,
+                    payload["budget_id"],
+                    int(budget_version_before),
+                    int(budget_version_before) + (1 if budget_released else 0),
+                    payload["decision_kind"],
+                    payload["selected_node_id"],
+                    payload["graph_target_status"],
+                    payload["budget_target_status"],
+                    decision.payload_json,
+                    decision.payload_sha256,
+                    graph_outbox.outbox_id,
+                    budget_outbox.outbox_id if budget_outbox is not None else None,
+                    int(ts_ms),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "parallel settlement decision identity already exists",
+            ) from exc
+        row = conn.execute(
+            """
+            SELECT * FROM task_runtime_parallel_settlement_decision
+            WHERE decision_ref = ?
+            """,
+            (decision.decision_ref,),
+        ).fetchone()
+        if row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel settlement decision insert was not durable",
+            )
+        return _parallel_settlement_decision_record(row)
+
+    @staticmethod
+    def _assert_parallel_settlement_decision_replay(
+        conn: sqlite3.Connection,
+        *,
+        decision: CanonicalParallelSettlementDecision,
+        graph_version_before: int,
+        budget_version_before: int,
+        graph_outbox: OutboxMessage,
+        budget_outbox: OutboxMessage | None,
+    ) -> dict[str, Any]:
+        row = conn.execute(
+            """
+            SELECT * FROM task_runtime_parallel_settlement_decision
+            WHERE decision_ref = ?
+            """,
+            (decision.decision_ref,),
+        ).fetchone()
+        if row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "terminal Graph replay is missing its canonical parallel decision",
+            )
+        record = _parallel_settlement_decision_record(row)
+        budget_released = decision.payload["budget_target_status"] == "RELEASED"
+        if (
+            record["payload_json"] != decision.payload_json
+            or record["payload_sha256"] != decision.payload_sha256
+            or record["graph_version_before"] != int(graph_version_before)
+            or record["graph_version_after"] != int(graph_version_before) + 1
+            or record["budget_version_before"] != int(budget_version_before)
+            or record["budget_version_after"]
+            != int(budget_version_before) + (1 if budget_released else 0)
+            or record["graph_outbox_id"] != graph_outbox.outbox_id
+            or record["budget_outbox_id"]
+            != (budget_outbox.outbox_id if budget_outbox is not None else None)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "canonical parallel decision replay drifted",
+            )
+        return record
 
     def consume_budget(
         self,
@@ -8595,6 +8983,280 @@ def _acceptance_effect_record(
     record["payload"] = payload
     record["replayed"] = False
     return record
+
+
+def _parallel_settlement_decision_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    record = dict(row)
+    payload_json = str(record.get("payload_json") or "")
+    if len(payload_json.encode("utf-8")) > MAX_PARALLEL_SETTLEMENT_PAYLOAD_BYTES:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable parallel settlement payload is too large",
+        )
+    try:
+        payload = _loads_object(
+            payload_json,
+            field_name="task_runtime_parallel_settlement_decision.payload_json",
+        )
+        decision = normalize_parallel_settlement_decision(payload)
+    except (TaskStoreError, ParallelSettlementContractError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable parallel settlement decision is invalid: {exc}",
+        ) from exc
+    budget_released = decision.payload["budget_target_status"] == "RELEASED"
+    expected = {
+        "decision_ref": decision.decision_ref,
+        "schema_version": PARALLEL_SETTLEMENT_SCHEMA_VERSION,
+        "graph_id": decision.payload["graph_id"],
+        "graph_revision": decision.payload["graph_revision"],
+        "graph_version_before": decision.payload["graph_status_version_before"],
+        "graph_version_after": decision.payload["graph_status_version_before"] + 1,
+        "budget_id": decision.payload["budget_id"],
+        "budget_version_before": decision.payload["budget_status_version_before"],
+        "budget_version_after": (
+            decision.payload["budget_status_version_before"]
+            + (1 if budget_released else 0)
+        ),
+        "decision_kind": decision.payload["decision_kind"],
+        "selected_node_id": decision.payload["selected_node_id"],
+        "graph_target_status": decision.payload["graph_target_status"],
+        "budget_target_status": decision.payload["budget_target_status"],
+        "payload_sha256": decision.payload_sha256,
+        "graph_outbox_id": decision.payload["graph_outbox_id"],
+        "budget_outbox_id": decision.payload["budget_outbox_id"],
+    }
+    actual = {
+        "decision_ref": str(record.get("decision_ref") or ""),
+        "schema_version": str(record.get("schema_version") or ""),
+        "graph_id": str(record.get("graph_id") or ""),
+        "graph_revision": int(record.get("graph_revision") or 0),
+        "graph_version_before": int(record.get("graph_version_before") or 0),
+        "graph_version_after": int(record.get("graph_version_after") or 0),
+        "budget_id": str(record.get("budget_id") or ""),
+        "budget_version_before": int(record.get("budget_version_before") or 0),
+        "budget_version_after": int(record.get("budget_version_after") or 0),
+        "decision_kind": str(record.get("decision_kind") or ""),
+        "selected_node_id": str(record.get("selected_node_id") or ""),
+        "graph_target_status": str(record.get("graph_target_status") or ""),
+        "budget_target_status": (
+            str(record.get("budget_target_status") or "").strip() or None
+        ),
+        "payload_sha256": str(record.get("payload_sha256") or ""),
+        "graph_outbox_id": str(record.get("graph_outbox_id") or ""),
+        "budget_outbox_id": (
+            str(record.get("budget_outbox_id") or "").strip() or None
+        ),
+    }
+    if payload_json != decision.payload_json or actual != expected:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable parallel settlement decision binding drifted",
+        )
+    record["payload"] = decision.payload
+    record["payload_json"] = decision.payload_json
+    record["payload_sha256"] = decision.payload_sha256
+    return record
+
+
+def _assert_parallel_settlement_decision_outbox_binding(
+    conn: sqlite3.Connection,
+    record: Mapping[str, Any],
+) -> None:
+    decision_ref = str(record.get("decision_ref") or "")
+    graph_row = conn.execute(
+        "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
+        (str(record.get("graph_outbox_id") or ""),),
+    ).fetchone()
+    if graph_row is None:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "parallel settlement decision is missing its Graph Outbox",
+        )
+    graph_outbox = _outbox_record(graph_row)
+    if (
+        graph_outbox["aggregate_type"] != "TASK_GRAPH"
+        or graph_outbox["aggregate_id"] != record["graph_id"]
+        or int(graph_outbox["aggregate_version"])
+        != int(record["graph_version_after"])
+        or graph_outbox["event_type"]
+        != f"TASK_GRAPH_{record['graph_target_status']}"
+        or graph_outbox["attempt_id"] is not None
+        or decision_ref not in graph_outbox["evidence_refs"]
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "parallel settlement Graph Outbox binding drifted",
+        )
+
+    budget_outbox_id = str(record.get("budget_outbox_id") or "").strip() or None
+    if record.get("budget_target_status") is None:
+        if budget_outbox_id is not None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "review settlement unexpectedly binds a Budget Outbox",
+            )
+        return
+    budget_row = conn.execute(
+        "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
+        (budget_outbox_id,),
+    ).fetchone()
+    if budget_row is None:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "parallel settlement decision is missing its Budget Outbox",
+        )
+    budget_outbox = _outbox_record(budget_row)
+    if (
+        budget_outbox["aggregate_type"] != "BUDGET_RESERVATION"
+        or budget_outbox["aggregate_id"] != record["budget_id"]
+        or int(budget_outbox["aggregate_version"])
+        != int(record["budget_version_after"])
+        or budget_outbox["event_type"] != "BUDGET_RESERVATION_RELEASED"
+        or budget_outbox["attempt_id"] is not None
+        or decision_ref not in budget_outbox["evidence_refs"]
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "parallel settlement Budget Outbox binding drifted",
+        )
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "parallel settlement decision payload is missing",
+        )
+    _assert_parallel_budget_usage_lineage(
+        conn,
+        payload,
+        reason_code=TASK_STORE_DURABLE_DATA_INVALID,
+    )
+
+
+def _assert_parallel_budget_usage_lineage(
+    conn: sqlite3.Connection,
+    payload: Mapping[str, Any],
+    *,
+    reason_code: str,
+) -> None:
+    if str(payload.get("decision_kind") or "") != "BUDGET":
+        return
+    selected_node_id = str(payload.get("selected_node_id") or "")
+    outcomes = payload.get("outcomes")
+    selected = next(
+        (
+            outcome
+            for outcome in outcomes
+            if isinstance(outcome, Mapping)
+            and str(outcome.get("node_id") or "") == selected_node_id
+        ),
+        None,
+    ) if isinstance(outcomes, list) else None
+    if selected is None:
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision selected outcome is missing",
+        )
+    evidence_refs = {str(item) for item in selected.get("evidence_refs") or ()}
+    usage_rows = conn.execute(
+        """
+        SELECT * FROM task_runtime_budget_usage
+        WHERE budget_id = ? AND graph_id = ? AND graph_revision = ?
+          AND node_id = ? AND attempt_id = ? AND accepted = 0
+        ORDER BY reservation_version_after, created_ts_ms, usage_id
+        """,
+        (
+            str(payload.get("budget_id") or ""),
+            str(payload.get("graph_id") or ""),
+            int(payload.get("graph_revision") or 0),
+            selected_node_id,
+            str(selected.get("attempt_id") or ""),
+        ),
+    ).fetchall()
+    if not any(
+        str(usage["usage_id"]) in evidence_refs
+        and bool(usage["exceeded_dimensions"])
+        for usage in (_budget_usage_record(row) for row in usage_rows)
+    ):
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision lacks its rejected durable usage lineage",
+        )
+
+
+def _find_invalid_declared_parallel_settlement_decision_ref(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> str | None:
+    """Find a Graph Outbox declaration with no correctly bound decision row.
+
+    TaskGraph Outboxes predate an explicit ``graph_revision`` column, so a
+    complete marker scan is safe only while one revision exists for the graph
+    id.  Every ``taskbatch://sha256/`` marker in that history must resolve to a
+    decision bound to the same revision and exact Graph Outbox.
+    """
+
+    graph_row = conn.execute(
+        """
+        SELECT 1 FROM task_runtime_graph
+        WHERE graph_id = ? AND revision = ?
+        """,
+        (graph_id, int(graph_revision)),
+    ).fetchone()
+    if graph_row is None:
+        return None
+    revision_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_graph WHERE graph_id = ?",
+            (graph_id,),
+        ).fetchone()[0]
+    )
+    if revision_count != 1:
+        # Historical TaskGraph Outboxes do not carry graph_revision.  Scanning
+        # them across revisions could mistake another revision's equal
+        # status/version marker for the queried revision.  The selected row is
+        # still validated against its exact Outbox by the caller; complete
+        # cross-revision missing-marker detection requires revisioned Outbox
+        # aggregate identity.
+        return None
+    rows = conn.execute(
+        """
+        SELECT * FROM task_runtime_outbox
+        WHERE aggregate_type = 'TASK_GRAPH'
+          AND aggregate_id = ?
+          AND event_type IN ('TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED')
+        ORDER BY aggregate_version DESC, outbox_id DESC
+        """,
+        (graph_id,),
+    ).fetchall()
+    for row in rows:
+        outbox = _outbox_record(row)
+        for reference in outbox["evidence_refs"]:
+            if reference.startswith("taskbatch://sha256/"):
+                decision_row = conn.execute(
+                    """
+                    SELECT graph_id, graph_revision, graph_outbox_id
+                    FROM task_runtime_parallel_settlement_decision
+                    WHERE decision_ref = ?
+                    """,
+                    (reference,),
+                ).fetchone()
+                if decision_row is None:
+                    return reference
+                same_revision = (
+                    str(decision_row["graph_id"]) == graph_id
+                    and int(decision_row["graph_revision"]) == int(graph_revision)
+                )
+                exact_outbox = (
+                    str(decision_row["graph_outbox_id"]) == str(outbox["outbox_id"])
+                )
+                if not same_revision or not exact_outbox:
+                    return reference
+    return None
 
 
 def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
