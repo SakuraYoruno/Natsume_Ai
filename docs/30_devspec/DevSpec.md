@@ -140,6 +140,7 @@ Host exact replay 必须按 `command.route_type` 校验 authority：`chat/delega
 - atomic success 与 bounded fan-out 使用独立、默认关闭的进程能力开关。atomic policy 必须在 repository admission 前验证 runtime capability、acceptance-effects writer、durable projection reader、node-grant service、parent grant 与显式 `result_node_id`；不满足即 fail closed。terminal-leaf 实际并发还必须另行启用 bounded fan-out，不能从 policy 或图形状推断开关。
 - cancel、timeout、crash、lease expiry 和 process restart 不得重复已确认副作用。
 - TaskStore 的 `task_store_types.py` 只拥有稳定值对象，`task_record_codec.py` 只拥有确定性 JSON/SQLite Row 校验与转换；二者不得打开连接、执行 SQL、读取时钟或开始事务。`task_decision_integrity.py` 只拥有 decision/outbox lineage 的只读校验，必须借用调用方现有事务连接且只能执行 `SELECT`；不得另开连接、另建快照、提交事务或取得 mutation authority。
+- Acceptance Effect 持久化按 atomic staging 与 fenced delivery 拆为无状态 mixin；mixin 不得定义 `__init__`、连接、时钟或事务 owner，只能复用 `DurableTaskStore` 的 `_connect()` / `_transaction()`。`_stage_acceptance_effect_intent_in_transaction(conn, ...)` 必须继续接受调用方当前连接，Parallel Success、Node/Graph acceptance 不得因模块拆分跨事务。
 
 ### 3.4.1 Durable cancellation
 

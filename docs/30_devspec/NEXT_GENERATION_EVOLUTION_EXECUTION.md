@@ -155,7 +155,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
-- 当前 mixed-file gate 仍明确为红，但已有四刀真实下降：Host authority 模块让 adapter 退出 inventory 并修复 `chat/delegate` replay；TaskStore 值对象迁入 `task_store_types.py`；26 个确定性 JSON/Row codec 迁入约 1.01k 行的 `task_record_codec.py`；五个只读 decision/outbox lineage 校验迁入约 0.54k 行的 `task_decision_integrity.py`。integrity 模块只借用调用方现有事务连接执行 `SELECT`，不取得连接、时钟、事务或 mutation authority；旧私有调用继续指向 canonical 实现。`task_repository.py` 由约 12.56k 降到 10,882 行，但仍超过既有 4.6k ceiling；`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；下一刀按 Graph/Attempt、Budget/settlement/cancellation 等同一事务族拆分持久化边界，再拆 admission/scheduling/execution/settlement 编排边界；
+- 当前 mixed-file gate 仍明确为红，但已有五刀真实下降：Host authority 模块让 adapter 退出 inventory 并修复 `chat/delegate` replay；TaskStore 值对象、26 个确定性 JSON/Row codec、五个只读 decision/outbox lineage 校验分别迁入明确模块；Acceptance Effect 又按 atomic staging 与 fenced delivery 拆为约 0.64k/0.60k 行的无状态 mixin。两个 mixin 不创建 Store、连接、时钟或事务，Parallel Success 仍把现有 `conn` 传给 staging；旧公开/私有路径继续重导出 canonical 对象。`task_repository.py` 由约 12.56k 降到 9,722 行，但仍超过既有 4.6k ceiling；`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；下一刀继续按 Graph/Attempt、Budget/settlement/cancellation 等同一事务族拆分持久化边界，再拆 admission/scheduling/execution/settlement 编排边界；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；

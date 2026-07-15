@@ -129,6 +129,24 @@ def _dumps(value: Any) -> str:
         ) from exc
 
 
+def build_acceptance_effect_payload_digest(payload: Mapping[str, Any]) -> str:
+    """Return the digest TaskStore expects for a canonical JSON effect payload."""
+
+    if not isinstance(payload, Mapping):
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "acceptance effect payload must be a JSON object",
+        )
+    canonical = _dumps(dict(payload))
+    payload_size = len(canonical.encode("utf-8"))
+    if payload_size < 2 or payload_size > _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES:
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "acceptance effect payload exceeds the canonical size limit",
+        )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _reject_non_finite_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant is forbidden: {value}")
 
