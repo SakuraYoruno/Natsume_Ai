@@ -3,7 +3,7 @@
 
 # 当前需求可追溯矩阵
 
-版本：v3.0
+版本：v3.1
 核对日期：2026-07-15
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -23,7 +23,7 @@
 | FR | 工程合同 | 生产落点 | 主要验证 | 当前状态 |
 |---|---|---|---|---|
 | FR-CHAT | DevSpec §2～4 | `host_brain/app/chat_routes.py`、Cortex、Surface | chat/integration、GR-06 固定 receipt | `WIRED_WITH_LIMITS` |
-| FR-INGRESS | DevSpec §2、§8 | Secure Ingress、Host/Gateway/Scheduler/Internal adapters | route-matrix contracts、代码审计 | `PARTIAL_INTERNAL_BROKEN` |
+| FR-INGRESS | DevSpec §2、§8 | Secure Ingress、Host/Gateway/Scheduler/Internal adapters | route-matrix contracts、Scheduler/Internal production integration | `WIRED_WITH_OPERATOR_MATRIX_LIMITS` |
 | FR-SURFACE | DevSpec §4、§11 | Surface/Reply authority、Life projection | surface/life contracts、writer 审计 | `PARTIAL_PERSONA_PROPOSAL_MISSING` |
 | FR-MEMORY、FR-CANON | DevSpec §5 | typed repositories、Canon Apply、recall | memory/canon contracts | `WIRED_WITH_KNOWLEDGE_GAPS` |
 | FR-TOOL、FR-CAPABILITY | DevSpec §7 | Capability Broker、Skill/Tool/MCP ports | capability/supply-chain contracts | `PARTIAL_LIFECYCLE` |
@@ -39,9 +39,9 @@
 |---|---|---|---|---|---|---|
 | TRACE-EXEC-01 | FR-ARCH-003 | Host 四路线必须共享 WorkOrderV3/TaskGraph | Cortex、GovernedHostRuntime | GR-05/06 receipt；T-GR-RUNTIME-01 | `WIRED` | NE-01 守卫 |
 | TRACE-EXEC-02 | FR-ARCH-003 | Scheduler 必须进入同一 admission | Scheduler governed runtime | production cutover integration；child grant/receipt lineage | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | 代码审计；T-GR-RUNTIME-01 | `BROKEN` | NE-01 |
+| TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | production cutover integration；principal/child grant/Review/receipt lineage | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry | coordinator/task store/dag scheduler | B0 scheduler unit + GR-03 tests | `PARTIAL_B0_CONTRACT_ONLY` | NE-01 |
-| TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | GR-03/05 tests | `PARTIAL_HOST_ONLY` | NE-01 |
+| TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | Host/Scheduler/Internal integrations | `PARTIAL_CORE_INGRESS` | NE-01 |
 | TRACE-EXEC-06 | FR-NLE-003 | Review token 后自动安全 continuation | ReviewStore/review runtime | Review tests/UI | `PARTIAL_MANUAL` | NE-01 |
 | TRACE-EXEC-07 | FR-ARCH-003 | 不得有第二任务真相 | Durable Task/Conversation projections | registry absence contract + code audit | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-08 | FR-ARCH-001 | 显式 composition、无 locator | Task container + process service locator | static scan/code audit | `INCOMPLETE` | NE-01 |

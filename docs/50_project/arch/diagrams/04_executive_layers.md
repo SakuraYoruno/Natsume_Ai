@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.1
+版本：v3.2
 核对日期：2026-07-15
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
@@ -74,21 +74,19 @@ flowchart LR
     SCH["Scheduler trigger"]
     NEW["WorkOrderV3 + Budget + child grant"]
     OK["Verification + Acceptance + Receipt"]
-    INT["Internal trigger"]
-    OLD["AgentWorkOrder"]
+    INT["Authenticated Internal trigger"]
+    CLEAN["strip caller authority\nv2 → WorkOrderV3 + Budget"]
     ADMIT["HostCommand admission\nrequires WorkOrderV3 + BudgetPolicy"]
-    FAIL["HOST_COMMAND_INVALID"]
 
     SCH --> NEW --> ADMIT --> OK
-    INT --> OLD --> ADMIT --> FAIL
+    INT --> CLEAN --> ADMIT
 
     style NEW fill:#d7f5df,stroke:#22863a
     style OK fill:#d7f5df,stroke:#22863a
-    style OLD fill:#ffd9d9,stroke:#b31d28
-    style FAIL fill:#ffd9d9,stroke:#b31d28
+    style CLEAN fill:#d7f5df,stroke:#22863a
 ```
 
-Scheduler 已沿正确方向接通。Internal 的修复不能通过放宽 admission 接受旧合同完成，必须生成完整 WorkOrderV3、TaskGraph、Budget、node grant、Review 和 receipt lineage。
+Scheduler 与 Internal 已沿同一方向接通。Internal 没有放宽 admission：边界 v2 在清除 caller authority 后编译为完整 WorkOrderV3、TaskGraph、Budget、node grant、Review 和 receipt lineage；既有 executor 只消费授权验证后的兼容投影。
 
 ## Graph revision
 
@@ -120,4 +118,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零。NE-01 仍需让 Internal 等剩余执行入口共享同一 Task lineage，并把 B0 调度合同接入真实 durable 并发/retry/recovery；Executive 退役不能替代这些剩余条件。
+Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。NE-01 仍需把 B0 调度合同接入真实 durable 并发/retry/recovery，并完成显式 composition 与最终 route matrix 验收；Executive 退役不能替代这些剩余条件。

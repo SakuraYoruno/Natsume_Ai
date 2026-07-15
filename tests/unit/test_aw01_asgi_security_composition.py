@@ -192,6 +192,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     def fake_build_internal_runtime(**kwargs):
         assert kwargs["task_runtime_container"] is task_runtime_container
         assert kwargs["ledger"] is ledger
+        assert kwargs["token_service"] is token_service
         assert kwargs["result_repository"] is task_runtime_container.agent_result_repository
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner"

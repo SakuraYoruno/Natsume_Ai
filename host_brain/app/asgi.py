@@ -772,6 +772,7 @@ def create_app() -> FastAPI:
                 internal_runtime = build_governed_internal_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
+                    token_service=get_token_service(),
                     result_repository=task_runtime.agent_result_repository,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,

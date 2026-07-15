@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.2
+版本：v5.3
 核对日期：2026-07-15
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -19,13 +19,13 @@
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在 |
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
-| Internal Agent | `BROKEN` | 仍提交 `AgentWorkOrder`，但 admission 已强制 `WorkOrderV3 + BudgetPolicy` |
+| Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
 | 原生多节点 Durable TaskGraph | `PARTIAL` | 依赖推进及执行资产已有；B0 已冻结稳定 fan-out/fan-in/retry 决策和 canonical retry policy，但尚未接入生产 Coordinator/Store |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
-| Budget | `HOST_WIRED / PROGRAM_PARTIAL` | Host 四路线有 durable ledger；并发预算与 DEGRADE/REVIEW 策略未完整执行 |
+| Budget | `CORE_INGRESS_WIRED / PROGRAM_PARTIAL` | Host 四路线、Scheduler 与 Internal 有 durable ledger；并发预算与 DEGRADE/REVIEW 策略未完整执行 |
 | Review/Resume | `MANUAL_CONTINUATION` | token 与 checkpoint 已持久化；resume 不会自动重新调度原图 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
 | Composition | `INCOMPLETE` | 仍有模块级 `ProcessServiceContainer` 和大量 `get_*()` service locator |
@@ -84,7 +84,7 @@ Chat / Host Input / Gateway
 
 Executive 已从生产 Cortex application ports 删除。旧 `_execute_explicit_skill_dag`、进程内任务 registry、factory、accessor 和相关生产写入均已删除；`executive_runtime/runtime.py` 只保留拒绝边界与孤立 helper，不再是生产路由器。
 
-Scheduler 已修复并有真实任务证据。仍未闭环的是 Internal Agent：`host_brain/app/internal_task_runtime.py::_build_contracts` 仍生成 `AgentWorkOrder`，首个真实 admission 会被 `HostCommandRepository` 拒绝。
+Scheduler 与 Internal Agent 均已有真实任务证据。Internal 会先剥离调用方伪造的 lineage/approval authority，把 ingress v2 编译为 canonical `WorkOrderV3`；只有 `delegate:agent_runtime` child grant 完整验证后，才向既有 executor 投影兼容对象。前置 Review 不执行 handler，执行结果要求 Review 时进入 `WAITING_ACCEPTANCE_REVIEW`，不会误 ACCEPT。
 
 ## 4. TaskGraph、预算、Review 与副作用
 
@@ -102,14 +102,14 @@ B0 新增的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它�
 
 ### 4.2 Budget
 
-`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已在 Host 四路线执行预扣、计量和结算。真实计量覆盖时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数。
+`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已在 Host 四路线、Scheduler 与 Internal Agent 执行预扣、计量和结算。真实计量覆盖时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数。
 
 限制：
 
 - provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；
 - concurrency 字段没有运行时 charge；
 - 超限后的 `DEGRADE`、`REVIEW` 尚未形成完整分支，当前核心路径主要阻断；
-- Scheduler 已进入该主链；Internal Agent 尚未进入。
+- Scheduler 与 Internal Agent 已进入该主链；其 program-wide Budget 策略仍受本节其余限制。
 
 ### 4.3 Review/Resume
 
@@ -222,8 +222,8 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 修复 Internal Agent 的 `WorkOrderV3 + Budget + node grant + Review` admission。
-2. 把 B0 调度决策接入 Durable Store/Coordinator，实现原子 claim、真实 retry/backoff、并发、恢复与自动 continuation。
+1. 把 B0 调度决策接入 Durable Store/Coordinator，实现原子 claim、真实 retry/backoff、并发、恢复与自动 continuation。
+2. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机。
 3. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
 4. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
 5. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。

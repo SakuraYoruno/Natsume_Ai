@@ -3,7 +3,7 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v1.1
+版本：v1.2
 日期：2026-07-15
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
@@ -32,9 +32,9 @@
 |---|---|
 | Host `chat/skill/delegate/plan` | 已接 canonical runtime，作为可复用地基 |
 | Scheduler | `WIRED`：真实 occurrence 已贯通 `WorkOrderV3 + Budget + child grant + Review + Verification + Acceptance + Receipt` |
-| Internal Agent | `BROKEN`：仍提交 `AgentWorkOrder`，优先修复 |
+| Internal Agent | `WIRED`：边界 v2 已立即编译为 V3，完整 Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已通过真实集成 |
 | Durable DAG | 多节点基础与 B0 调度/retry 合同已冻结；生产并发、retry/backoff、恢复和 continuation 未实现 |
-| Budget | Host 已接；program-wide 与全部策略语义未完成 |
+| Budget | Host/Scheduler/Internal 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
@@ -95,15 +95,18 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 - Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
 - Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
+- Internal Agent 真实 `WorkOrderV3` admission、Secure Ingress principal、Budget、`delegate:agent_runtime` child grant、PRE/POST Review、Verification、Acceptance、Receipt 与 replay；
 - Durable DAG 的 B0 纯调度决策与 canonical retry policy 冻结，尚未接生产 Coordinator/Store；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
 - Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
 
-Internal Agent、Lane B 的 B1～B4、Lane D 的 durable workspace authority/隔离 worktree/显式 composition 仍未完成，因此 NE-01 不得封板。
+Lane A 已完成；Lane B 的 B1～B4、Lane D 的 durable workspace authority/隔离 worktree/显式 composition 仍未完成，因此 NE-01 不得封板。长时间人工 Review 超过 child-grant TTL 的统一 renewal/derivation 仍随 Review continuation 一并解决。
 
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 
 #### Lane A：Scheduler / Internal contract repair
+
+状态：`COMPLETED`（Scheduler 与 Internal 均有首次真实 admission/replay 证据）。
 
 - 将 `AgentWorkOrder` 转为显式 `WorkOrderV3`；
 - 每路必须有 `BudgetPolicy`、node-bound grant、Review runtime、Verification、Acceptance 与 Receipt；

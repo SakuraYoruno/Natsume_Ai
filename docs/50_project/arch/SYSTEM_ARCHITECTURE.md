@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v1.0
+版本：v1.1
 核对日期：2026-07-15
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -219,7 +219,7 @@ flowchart LR
 | Acceptance | 是否接纳结果并允许副作用 | 决定 effect intent |
 | Receipt | 外部或持久副作用实际发生了什么 | 不可变证据 |
 
-Scheduler 已统一为 `WorkOrderV3 + BudgetPolicy`，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 当前失败的根因不是“没有 Runtime 类”，而是仍构造 `AgentWorkOrder`；修复必须统一合同和完整 lineage，不能加兼容绕过。
+Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为 ingress/executor 兼容对象：调用方 authority 在边界清除，child grant 验证前不能调用 executor。长时间人工 Review 超出 grant TTL 的 renewal/derivation 尚未随自动 continuation 闭环。
 
 ## 6. 状态与数据 authority
 
@@ -315,9 +315,9 @@ flowchart LR
 
 | 新主干 | 待退役/修复 |
 |---|---|
-| Governed Host canonical routes + durable read projections | Internal/领域兼容入口尚未全部迁移 |
+| Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
-| WorkOrderV3 + BudgetPolicy | Internal `AgentWorkOrder` |
+| WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
 | TaskGraph revision + B0 DAG decision | 生产并发/retry/backoff/recovery 尚未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |

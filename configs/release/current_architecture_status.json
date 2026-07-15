@@ -32,11 +32,15 @@
       ]
     },
     "internal_agent_governed_runtime": {
-      "status": "BROKEN",
-      "reason": "Internal Agent constructs AgentWorkOrder while HostCommand admission requires WorkOrderV3 with BudgetPolicy.",
+      "status": "WIRED",
+      "scope": ["authenticated internal Agent WorkOrder"],
+      "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + positive BudgetPolicy + delegate:agent_runtime TaskNode + verified child grant + Review + Verification + Acceptance + Receipt + replay",
+      "compatibility_boundary": "AgentWorkOrder is accepted only at ingress and projected back to the existing executor only after canonical admission and child-grant verification.",
+      "known_limit": "Long human-review delays beyond child-grant TTL still depend on the shared grant renewal/derivation design.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
-        "host_brain/persistence/host_command_repository.py"
+        "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/unit/test_ne01_internal_task_runtime.py"
       ]
     },
     "native_multi_node_task_graph": {
