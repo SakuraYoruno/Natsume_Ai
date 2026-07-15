@@ -12,7 +12,7 @@
 > 当前代码校准说明（2026-05-30）
 > - 本文是 2026-04-16 的器官族能力分级盘点与升级计划，适合作为质量侧 backlog / 阶段快照阅读，不应当作当前 tribe family 运行时总表。
 > - 2026-05-30 现状：`host_brain/tribe/registry.py:_DEFAULT_FAMILY_SPECS` 已为 23 个 family（原计划中的 22 个已全部 A 级化，另增 `glymphatic` family）；灰度开关已全数删除。
-> - 当前仓库对 tribe / organ 的现行口径应以 `CURRENT_CODE_ARCHITECTURE.md` (v3.0)、`CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)、`AGENT_ORCHESTRATION_DETAIL.md` 和实际代码为准。
+> - 当前仓库对 tribe / organ 的现行口径应以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 和实际代码为准。
 > - 文中“已完成”“待补”等结论只代表当时盘点时点，是否仍成立应以当前模块接线、路由可达性与真实调用关系复核。
 
 ---

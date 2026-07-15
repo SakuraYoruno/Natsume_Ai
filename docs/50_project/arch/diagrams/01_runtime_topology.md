@@ -1,99 +1,87 @@
-受众：MASTER
-标题：图 01 — 运行面拓扑（5 个独立 ASGI / 进程）
+受众：PROJECT
+标题：图 01——当前运行拓扑
 
-版本：v1.0
-日期：2026-05-30
-归属：docs/50_project/arch/diagrams/
+# 图 01：当前运行拓扑
 
----
+版本：v2.0
+核对日期：2026-07-15
 
-## 怎么读这张图
-
-| 颜色 | 含义 |
-|---|---|
-| 🟦 蓝色 | 由本仓库 `host_brain/` 启动的进程 |
-| 🟩 绿色 | 由本仓库 `edge_client/` 启动的进程 |
-| 🟧 橙色 | 静态资源 / UI |
-| 🟨 黄色 | 外部平台（微信 / QQ / 飞书 / 企业微信 / Telegram / Line 等） |
-
-主入口都不再是单文件 `fastapi_app.py`，而是 `asgi.py + create_app()` 模式。
-
-## 拓扑图
+## 拓扑
 
 ```mermaid
-graph TB
-    subgraph Platforms["🟨 外部平台"]
-        WX[WeChat]
-        QQ[QQ]
-        FS[Feishu]
-        WC[WeCom]
-        TG[Telegram]
-        LN[Line]
+flowchart LR
+    USER["用户 / API Client"]
+    OP["Operator"]
+    PLATFORM["消息平台"]
+    MODEL["模型 Provider"]
+
+    subgraph HostProc["Host Main process"]
+        HOST["host_brain.app.asgi:app\n默认 127.0.0.1:18080"]
+        DOMAIN["Governed Runtime + Domain State"]
+        HOST --> DOMAIN
     end
 
-    USER["🧑 用户 / 前端"] -->|"HTTP /v1/chat"| HOST
-    Platforms -->|"webhook"| GW
-
-    subgraph HostProc["🟦 host_brain (进程 1)"]
-        HOST["Host Main<br/>host_brain/__main__.py<br/>host_brain.app.asgi:app<br/>:8000"]
+    subgraph ObsProc["Observability process"]
+        OBS["host_brain.app.obs_fastapi_app:app\n默认 127.0.0.1:18082"]
     end
 
-    subgraph ObsProc["🟦 host_brain (进程 2)"]
-        OBS["Observability Backend<br/>host_brain/obs_main.py<br/>host_brain.app.obs_fastapi_app:app<br/>:18082"]
+    subgraph EdgeProc["Edge process"]
+        EDGE["Edge RPC\n默认 127.0.0.1:17800"]
+        GW["Unified Gateway\n默认 19000，按配置启用"]
     end
 
-    subgraph EdgeProc["🟩 edge_client (进程 3)"]
-        EDGE["Edge RPC<br/>edge_client/__main__.py<br/>:17800"]
+    subgraph Presentation["Presentation"]
+        MON["Monitor UI"]
+        PET["Desktop Pet / Avatar"]
     end
 
-    subgraph GwProc["🟩 edge_client (进程 4)"]
-        GW["Unified Message Gateway<br/>edge_client/gateway/bootstrap.py<br/>:19000"]
+    subgraph OptionalInfra["Optional external services"]
+        NEO["Neo4j"]
+        CHR["Chroma"]
+        REDIS["Redis"]
     end
 
-    subgraph MonUI["🟧 静态资源"]
-        MON["Monitor UI<br/>host_brain/app/monitor_ui/<br/>(由 Host & Obs 共同托管)"]
-    end
-
-    HOST <-->|"/edge/* RPC<br/>speak/vts/screenshot/automate"| EDGE
-    GW -->|"/v1/host/input"| HOST
-    HOST -->|"/v1/gateway/reply"| GW
-    HOST -->|"warm cache write"| OBS
-    OBS -->|"/api/ui/* /obs/*"| MON
-    HOST -->|"/panel"| MON
+    USER -->|"POST /v1/chat"| HOST
+    PLATFORM -->|"webhook"| GW
+    GW -->|"Host input contract"| HOST
+    HOST -->|"durable reply/effect"| GW
+    HOST -->|"signed RPC"| EDGE
+    EDGE -->|"effect receipt / event"| HOST
+    DOMAIN -->|"ModelAttempt"| MODEL
+    DOMAIN --> NEO
+    DOMAIN --> CHR
+    DOMAIN --> REDIS
+    OBS -->|"read-only durable projection"| DOMAIN
+    OP --> MON --> OBS
+    EDGE --> PET
+    HOST -."static/compat hosting".-> MON
 ```
 
-## 关键端点速查
+## 运行面边界
 
-| 运行面 | 端口 | 关键路由 |
-|---|---:|---|
-| Host Main | `8000` | `/v1/chat`、`/v1/host/input`、`/v1/edge/events`、`/v1/agent/*`、`/canon/*`、`/scheduler/*`、`/host-scheduler/*`、`/tools/*`、`/bond/*`、`/prompt-config/*`、`/api/ui/*`、`/obs/*`（兼容挂载）、`/health`、`/ready`、`/startup`、`/metrics`、`/panel` |
-| Obs Backend | `18082` | `/obs/*`、`/api/ui/*`（独立 warm cache 后端） |
-| Edge RPC | `17800` | `speak`、`barge_in`、`vts`、`screenshot`、`automate`、`visual_locate`、`proactive_push/proactive_messages`、`fallback/*`、`wx/*` |
-| Unified Gateway | `19000` | webhook 平台适配（WeChat/QQ/Feishu/WeCom/Telegram/Line） |
+| 运行面 | Authority | 依赖失效时的语义 |
+|---|---|---|
+| Host | Command、Task、Life、Memory 等业务协调 authority | 核心合同失败应拒绝或显式降级 |
+| Observability | Query/Projection，不拥有业务写入 | 观测不可用不能偷偷改变业务状态 |
+| Gateway | Transport inbox/outbox 与平台 delivery | 平台失败保留可恢复投递状态 |
+| Edge | 设备执行与本机 receipt | 设备不可用返回 `DEGRADED/UNAVAILABLE` |
+| UI/Pet | 人机界面和表现 | 不得成为任务、Persona 或 Life 真相 |
+| Neo4j/Chroma/Redis | 可选图、向量或运行辅助 | 不得因可选服务可用性改变 canonical writer |
+
+Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进程数量”理解部署。生产可以拆分进程，但 authority 边界不随部署方式改变。
 
 ## 代码锚点
 
-| 节点 | 精确路径 |
-|---|---|
-| Host Main 入口 | `host_brain/__main__.py` → `uvicorn.run("host_brain.app.asgi:app", ...)` |
-| Host Main 装配 | `host_brain/app/asgi.py:create_app()` → `host_brain/app/app_factory.py:create_host_fastapi_app()` → `host_brain/app/router_registry.py:register_host_routers(app)` |
-| Obs Backend 入口 | `host_brain/obs_main.py` → `host_brain.app.obs_fastapi_app:app`（**单文件保留**） |
-| Edge RPC 入口 | `edge_client/__main__.py` → `edge_client/app/fastapi_app.py` |
-| Gateway 入口 | `edge_client/gateway/bootstrap.py` → `edge_client/gateway/server.py` |
+- Host CLI：`host_brain/__main__.py`
+- Host ASGI composition：`host_brain/app/asgi.py`、`host_brain/app/app_factory.py`、`host_brain/app/router_registry.py`
+- Observability：`host_brain/obs_main.py`、`host_brain/app/obs_fastapi_app.py`
+- Edge RPC：`edge_client/__main__.py`、`edge_client/app/fastapi_app.py`
+- Gateway：`edge_client/runtime/bootstrap.py`、`edge_client/gateway/bootstrap.py`、`edge_client/gateway/server.py`
+- 跨进程合同：`natsume_contracts/`
+- 可选服务：`scripts/runtime/docker-compose.external.yml`
 
-## 不变量
+## 不能从本图推出的结论
 
-1. Host Main 与 Obs 是**两个独立 ASGI app**，各自有进程和端口。
-2. Edge RPC 与 Unified Gateway 在 `edge_client/` 下但部署互相独立，可分进程或合并启动。
-3. 旧的 `host_brain/app/fastapi_app.py` 已删除；当前 Host Main 装配是 `asgi.py + app_factory.py + router_registry.py` 三件套。
-4. Monitor UI 是静态资源，**两个 Host 端都能托管**，但 warm cache 类接口由 Obs Backend 提供。
-
----
-
-## 已废弃节点（不得在新图中保留为活动）
-
-| 节点 | 状态 |
-|---|---|
-| `host_brain/app/fastapi_app.py` | ❌ 已删除（v3.0 重写归档至 `_history/2026-04-22_arch_snapshot/`） |
-| `host_brain/app/main.py` | ❌ 已迁移至 `__main__.py` |
-| 单 ASGI 模式（Host + Obs 同进程） | ❌ 已拆为独立后端 |
+- 图上有连线不等于所有 route 已通过同一 runtime；Scheduler/Internal 当前仍是 `BROKEN`。
+- 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
+- Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

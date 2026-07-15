@@ -1,0 +1,156 @@
+{
+  "schema_version": "natsume.current-architecture-status.v1",
+  "as_of_date": "2026-07-15",
+  "source_baseline": {
+    "dev_commit": "9b6db346b",
+    "repository_cleanup_commit": "f0cd1dfd7"
+  },
+  "overall_status": "INCOMPLETE",
+  "active_wave": "NE-00",
+  "active_wave_status": "COMPLETED",
+  "next_wave": "NE-01",
+  "status_authority": "CURRENT_CODE_AUDIT",
+  "historical_receipts_are_scope_bound": true,
+  "capabilities": {
+    "host_canonical_routes": {
+      "status": "WIRED",
+      "scope": ["chat", "skill", "delegate", "plan"],
+      "evidence_refs": [
+        "host_brain/agent_runtime/cortex_runtime.py",
+        "host_brain/app/governed_task_adapter.py",
+        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+      ]
+    },
+    "scheduler_governed_runtime": {
+      "status": "BROKEN",
+      "reason": "Scheduler constructs AgentWorkOrder while HostCommand admission requires WorkOrderV3 with BudgetPolicy.",
+      "evidence_refs": [
+        "host_brain/scheduler/governed_runtime.py",
+        "host_brain/persistence/host_command_repository.py"
+      ]
+    },
+    "internal_agent_governed_runtime": {
+      "status": "BROKEN",
+      "reason": "Internal Agent constructs AgentWorkOrder while HostCommand admission requires WorkOrderV3 with BudgetPolicy.",
+      "evidence_refs": [
+        "host_brain/app/internal_task_runtime.py",
+        "host_brain/persistence/host_command_repository.py"
+      ]
+    },
+    "native_multi_node_task_graph": {
+      "status": "PARTIAL",
+      "implemented": [
+        "durable admission",
+        "dependency progression",
+        "attempt",
+        "lease",
+        "idempotency reservation",
+        "budget",
+        "review",
+        "verification",
+        "acceptance"
+      ],
+      "missing": ["parallel DAG scheduling", "runtime retry", "retry backoff"]
+    },
+    "executive_authority_removal": {
+      "status": "PARTIAL",
+      "reason": "Canonical routes fail closed, but legacy SkillDag execution and LegacyRuntimeTaskRegistry writes remain."
+    },
+    "planning_search_kernel": {
+      "status": "WIRED",
+      "evidence_refs": ["host_brain/planning_search/"]
+    },
+    "host_candidate_plan_generation": {
+      "status": "MISSING",
+      "reason": "Host plan search only validates and orders approved planned_steps."
+    },
+    "pentest_conditional_mcts": {
+      "status": "SHADOW_UNCALIBRATED",
+      "production_influence": "NOT_ACCEPTED",
+      "reason": "Candidate expansion is root-fixed and calibration is in-memory and baseline-root scoped."
+    },
+    "research_production_planning_benefit": {
+      "status": "UNPROVEN",
+      "existing_evidence_level": "SIMULATION_SHADOW"
+    },
+    "code_production_planning_benefit": {
+      "status": "UNPROVEN",
+      "existing_evidence_level": "SIMULATION_SHADOW"
+    },
+    "budget_enforcement": {
+      "status": "PARTIAL",
+      "scope": "HOST_CANONICAL_ROUTES",
+      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "program-wide coverage"]
+    },
+    "review_resume": {
+      "status": "PARTIAL",
+      "continuation": "MANUAL",
+      "automatic_reschedule": false
+    },
+    "conversation_effects": {
+      "status": "PARTIAL",
+      "semantics": "POST_ACCEPTANCE_DURABLE_EVENTUAL",
+      "single_global_transaction": false
+    },
+    "explicit_composition_root": {
+      "status": "PARTIAL",
+      "global_service_locator": "PRESENT",
+      "evidence_refs": [
+        "host_brain/composition/process_service_container.py",
+        "host_brain/composition/process_services.py",
+        "host_brain/composition/process_runtime_services.py"
+      ]
+    },
+    "world_model": {
+      "status": "PARTIAL",
+      "runtime_projection_default": "DISABLED",
+      "write_api_available": false,
+      "reason": "The current asset is a read-only fact projection, not a predictive or planning world model."
+    },
+    "scene_engine": {
+      "status": "PARTIAL_DEFAULT_OFF",
+      "production_default": "DISABLED",
+      "feature_flag": "HOST_LIFE_PROJECTION_ENABLED"
+    },
+    "intent_arbiter": {"status": "MISSING"},
+    "action_preview": {
+      "status": "PARTIAL",
+      "production_authority_provider": "MISSING",
+      "production_endpoint_semantics": "ELIGIBILITY_ONLY",
+      "unified_shadow_runner": "MISSING"
+    },
+    "runtime_guardian": {
+      "status": "PARTIAL",
+      "implemented": ["degradation state", "heartbeat", "recovery evidence"],
+      "missing": ["production catalog startup composition", "complete front-door coverage", "durable SLO owner"],
+      "catalog_default_mode": "AUDIT"
+    },
+    "workspace_isolation": {
+      "status": "PARTIAL",
+      "reason": "WorkspacePolicy is wired but still permits arbitrary paths/runtime_repo and does not provide OS, tenant, or worktree isolation."
+    },
+    "evolution_lab": {"status": "PLACEHOLDER"},
+    "counterfactual_analysis": {"status": "MISSING"},
+    "capability_maturity": {"status": "PARTIAL", "production_policy_default": "DISABLED"},
+    "skill_compiler": {"status": "MISSING"},
+    "experience_feedback_pipeline": {
+      "status": "PARTIAL_BROKEN_PATH",
+      "reason": "Prefrontal calls PersonaGrowthTracker.on_interaction_cycle with arguments that do not match its signature; the TypeError is swallowed."
+    },
+    "persona_growth_authority": {
+      "status": "UNSAFE_DIRECT_WRITERS",
+      "known_entry_classes": [
+        "bond stage or milestone growth",
+        "interaction cycle growth",
+        "scheduler-allowed emergent weekly growth"
+      ],
+      "reason": "Multiple production-reachable or registered paths can call apply_growth_delta directly without proposal, shadow, review, version activation, or rollback.",
+      "required_action": "CENTRAL_FAIL_CLOSED_ALL_ENTRIES_IN_NE_01_REPLACE_ALL_IN_NE_06"
+    },
+    "knowledge_os": {"status": "MISSING"},
+    "identity_snapshot": {"status": "PARTIAL", "release_gate_default": "DISABLED"},
+    "identity_migration": {"status": "MISSING"}
+  },
+  "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
+  "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"
+}

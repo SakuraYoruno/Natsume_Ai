@@ -3,6 +3,8 @@
 
 # Natsume AI 通用规划搜索与 Governed Runtime 正式执行合同
 
+> 历史快照：GR 执行已结束，本文不再是当前执行合同。其 `PASS` 只覆盖当时声明的 Host 四路线与模拟证据，不能证明 Scheduler/Internal、真实跨领域规划收益或 Full Architecture 完成。
+
 版本：v1.1
 日期：2026-07-15
 状态：`GR-01～GR-06_LIVE_ROUTE_MATRIX_PASS__FULL_ARCHITECTURE_INCOMPLETE`

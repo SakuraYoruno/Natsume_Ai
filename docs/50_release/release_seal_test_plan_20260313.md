@@ -198,7 +198,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 7. `docs/60_trace/risk_registry.md`
 8. `docs/50_release/rollback/ROLLBACK_RUNBOOK_2026-03-10.md`
 9. `docs/50_release/rollback/RELEASE_ROLLBACK_GATE_20260310_010648.md`
-10. `docs/50_project/ENV_EXTERNAL_SERVICES_CHECKLIST.md`
+10. `docs/50_project/arch/DEPLOYMENT_ARCHITECTURE.md`
 11. `docs/50_project/MULTI_AGENT_ARCH_REFACTOR_2026-03.md`（多智能体架构定版，P0～P16 实施顺序与最终封板）。
 12. `docs/50_project/MULTI_AGENT_UPGRADE_PLAN_2026-03-16.md`（多智能体能力与契约参考，M-MA1～M-MA6）。
 13. `docs/60_trace/dataflow_report_20260311.md`（数据流全景，含 P15/P16 多智能体分派数据流 §十三）。

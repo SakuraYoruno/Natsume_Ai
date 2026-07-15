@@ -3,6 +3,8 @@
 
 # Natsume AI V1 完整架构重构目标蓝图（代码事实版）
 
+> 历史快照：本文已被无日期、状态分离的 `../../../50_project/arch/TARGET_ARCHITECTURE.md` 取代。
+
 版本：v1.1
 日期：2026-07-12
 状态：`ADOPTED_TARGET_ARCHITECTURE`

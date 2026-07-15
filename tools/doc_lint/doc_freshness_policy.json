@@ -1,59 +1,234 @@
 {
-  "version": 1,
+  "version": 3,
   "name": "Natsume_Ai 文档过期门禁（代码事实对齐）",
   "default_max_age_days": 14,
   "rules": [
     {
       "id": "arch-current",
       "doc": "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
-      "note": "主入口与核心链路文件变化后，应在本文件同步路径级架构事实。",
+      "note": "生产入口、核心接线或跨进程合同变化后，必须同步路径级当前事实。",
       "max_age_days": 7,
       "sources": [
         "host_brain/**/*.py",
         "edge_client/**/*.py",
+        "natsume_contracts/**/*.py",
         "configs/**/*.json",
-        "scripts/runtime/**/*.ps1",
-        "docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md",
-        "docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md",
-        "docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md"
+        "scripts/runtime/**/*.ps1"
       ]
     },
     {
-      "id": "arch-core-modules",
-      "doc": "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
-      "note": "主模块职责、接线、边界变化需回写到核心模块索引。",
+      "id": "arch-system",
+      "doc": "docs/50_project/arch/SYSTEM_ARCHITECTURE.md",
+      "note": "进程、逻辑分层、composition、authority 或跨进程边界变化后，必须同步系统总览。",
       "max_age_days": 7,
-      "sources": [
-        "host_brain/**/*.py",
-        "tests/unit/**/*.py",
-        "tests/contract/**/*.py"
-      ]
-    },
-    {
-      "id": "arch-dataflow",
-      "doc": "docs/50_project/arch/dataflow_report.md",
-      "note": "数据流和回流链路变化后，需同步架构数据流报告。",
-      "max_age_days": 10,
       "sources": [
         "host_brain/app/**/*.py",
-        "host_brain/observability/**/*.py",
+        "host_brain/composition/**/*.py",
+        "host_brain/orchestration/**/*.py",
+        "host_brain/task_runtime/**/*.py",
         "edge_client/**/*.py",
+        "natsume_contracts/**/*.py"
+      ]
+    },
+    {
+      "id": "arch-functional-modules",
+      "doc": "docs/50_project/arch/FUNCTIONAL_MODULES.md",
+      "note": "模块责任、用户能力或包边界变化后，必须同步功能模块地图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/**/*.py",
+        "edge_client/**/*.py",
+        "natsume_contracts/**/*.py",
+        "host_brain/app/monitor_ui/src/**/*",
+        "desktop_pet/**/*"
+      ]
+    },
+    {
+      "id": "arch-data-flow",
+      "doc": "docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md",
+      "note": "入口、Task、Acceptance、Gateway、Memory 或副作用接线变化后，必须同步端到端数据流。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/app/**/*.py",
+        "host_brain/orchestration/**/*.py",
+        "host_brain/task_runtime/**/*.py",
+        "host_brain/memory/**/*.py",
+        "host_brain/digital_life/**/*.py",
+        "edge_client/gateway/**/*.py",
+        "edge_client/actuators/**/*.py",
+        "natsume_contracts/**/*.py"
+      ]
+    },
+    {
+      "id": "theory-core",
+      "doc": "docs/15_theory/Theory.md",
+      "note": "状态本体、治理、规划、执行、记忆或长期演化语义发生实质变化后，必须同步核心理论。",
+      "max_age_days": 14,
+      "sources": [
+        "host_brain/governor/**/*.py",
+        "host_brain/orchestration/**/*.py",
+        "host_brain/task_runtime/**/*.py",
+        "host_brain/planning_search/**/*.py",
+        "host_brain/digital_life/**/*.py",
+        "host_brain/persona/**/*.py",
+        "host_brain/memory/**/*.py",
+        "host_brain/canon/**/*.py"
+      ]
+    },
+    {
+      "id": "arch-monitor-ui",
+      "doc": "docs/50_project/arch/MONITOR_UI_ARCHITECTURE.md",
+      "note": "前端路由、页面、状态查询、命令入口或构建方式变化后，必须同步 Monitor UI 架构。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/app/monitor_ui/src/**/*",
+        "host_brain/app/monitor_ui/package.json",
+        "host_brain/app/obs_*.py"
+      ]
+    },
+    {
+      "id": "arch-deployment",
+      "doc": "docs/50_project/arch/DEPLOYMENT_ARCHITECTURE.md",
+      "note": "启动入口、环境配置、Docker 外部依赖或进程端口变化后，必须同步部署架构。",
+      "max_age_days": 10,
+      "sources": [
+        ".env*.example",
+        "scripts/runtime/*.ps1",
+        "scripts/runtime/docker-compose.external.yml",
+        "host_brain/app/settings/**/*.py",
+        "host_brain/pyproject.toml",
+        "edge_client/pyproject.toml",
+        "natsume_contracts/pyproject.toml",
+        "desktop_pet/package.json"
+      ]
+    },
+    {
+      "id": "diagram-runtime-topology",
+      "doc": "docs/50_project/arch/diagrams/01_runtime_topology.md",
+      "note": "运行进程或 composition 变化后，必须同步运行拓扑图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/app/app_factory.py",
+        "host_brain/composition/**/*.py",
+        "edge_client/__main__.py",
+        "edge_client/gateway/**/*.py",
+        "scripts/runtime/start_*.ps1"
+      ]
+    },
+    {
+      "id": "diagram-main-chain",
+      "doc": "docs/50_project/arch/diagrams/02_main_chain_flow.md",
+      "note": "治理、命令、图或执行状态机变化后，必须同步主链图。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/orchestration/**/*.py",
+        "host_brain/task_runtime/**/*.py",
+        "host_brain/agent_runtime/**/*.py"
+      ]
+    },
+    {
+      "id": "diagram-recall",
+      "doc": "docs/50_project/arch/diagrams/03_dataflow_recall.md",
+      "note": "记忆写入、召回、Canon 或引用证据变化后，必须同步召回图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/memory/**/*.py",
+        "host_brain/retrieval/**/*.py",
+        "host_brain/canon/**/*.py"
+      ]
+    },
+    {
+      "id": "diagram-executive-planning",
+      "doc": "docs/50_project/arch/diagrams/04_executive_layers.md",
+      "note": "Executive compatibility、Agent Runtime 或 PlanningSearch 分层变化后，必须同步规划分层图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/agent_runtime/**/*.py",
+        "host_brain/planning_search/**/*.py",
+        "host_brain/app/runtime_task_registry.py"
+      ]
+    },
+    {
+      "id": "diagram-digital-life",
+      "doc": "docs/50_project/arch/diagrams/05_tribe_topology.md",
+      "note": "Digital Life、Tribe、Bond 或主动行为变化后，必须同步生命域拓扑图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/digital_life/**/*.py",
+        "host_brain/tribe/**/*.py",
+        "host_brain/bond/**/*.py",
+        "host_brain/scheduler/**/*.py"
+      ]
+    },
+    {
+      "id": "diagram-input-output",
+      "doc": "docs/50_project/arch/diagrams/06_input_output_routes.md",
+      "note": "Host Input、Gateway、渠道或 Edge actuator 变化后，必须同步输入输出图。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/app/input_routes.py",
+        "host_brain/channels/**/*.py",
+        "edge_client/gateway/**/*.py",
+        "edge_client/actuators/**/*.py"
+      ]
+    },
+    {
+      "id": "diagram-observability",
+      "doc": "docs/50_project/arch/diagrams/07_observability_topology.md",
+      "note": "观测 BFF、Trace、投影或健康入口变化后，必须同步观测拓扑图。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/observability/**/*.py",
+        "host_brain/app/obs_*.py",
         "host_brain/app/monitor_ui/src/**/*"
       ]
     },
     {
-      "id": "arch-body-frontend",
-      "doc": "docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md",
-      "note": "前端页面结构、导航与布局变更后，应同步前端体量与结构说明。",
+      "id": "arch-diagram-index",
+      "doc": "docs/50_project/arch/diagrams/00_INDEX.md",
+      "note": "任一当前架构图变化后，必须同步图册导航与口径说明。",
       "max_age_days": 10,
       "sources": [
-        "host_brain/app/monitor_ui/src/**/*"
+        "docs/50_project/arch/diagrams/0[1-7]_*.md"
+      ]
+    },
+    {
+      "id": "arch-machine-status",
+      "doc": "configs/release/current_architecture_status.json",
+      "note": "生产接线与能力状态变化后，必须同步机器可读当前状态。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/**/*.py",
+        "edge_client/**/*.py",
+        "natsume_contracts/**/*.py"
+      ]
+    },
+    {
+      "id": "arch-gap-matrix",
+      "doc": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+      "note": "当前事实、目标或机器状态变化后，必须重新解释目标差距。",
+      "max_age_days": 7,
+      "sources": [
+        "configs/release/current_architecture_status.json",
+        "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md"
+      ]
+    },
+    {
+      "id": "active-execution-contract",
+      "doc": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
+      "note": "差距或目标合同变化后，唯一活动执行合同必须同步入口、依赖和 Gate。",
+      "max_age_days": 14,
+      "sources": [
+        "configs/release/current_architecture_status.json",
+        "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md"
       ]
     },
     {
       "id": "trace-requirements",
       "doc": "docs/60_trace/requirements_trace.md",
-      "note": "需求-任务-测试回溯表需与最新测试口径和任务链路保持一致。",
+      "note": "需求、合同和测试变化后，必须同步需求到证据的追溯关系。",
       "max_age_days": 14,
       "sources": [
         "tests/**/*.py",
@@ -65,14 +240,20 @@
     {
       "id": "index-docmap",
       "doc": "docs/00_index/00_DOCMAP.md",
-      "note": "入口地图应与核心架构/Trace/任务文档变更保持一致。",
+      "note": "核心理论、架构、实施、Trace 或 README 变化后，必须同步文档地图。",
       "max_age_days": 14,
       "sources": [
+        "docs/15_theory/Theory.md",
         "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
-        "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
+        "docs/50_project/arch/SYSTEM_ARCHITECTURE.md",
+        "docs/50_project/arch/FUNCTIONAL_MODULES.md",
+        "docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md",
+        "docs/50_project/arch/MONITOR_UI_ARCHITECTURE.md",
+        "docs/50_project/arch/DEPLOYMENT_ARCHITECTURE.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md",
+        "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+        "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
         "docs/60_trace/requirements_trace.md",
-        "docs/50_project/guides/DOCUMENT_SYNC_WORKFLOW.md",
-        "docs/50_project/index.md",
         "README.md"
       ]
     }

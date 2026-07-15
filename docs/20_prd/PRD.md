@@ -1,429 +1,245 @@
 受众：MASTER
-标题：产品需求文档（PRD）
+标题：Natsume AI 产品需求文档
 
-# Natsume Ai 产品需求文档（PRD）
-版本：v2.6
-日期：2026-07-11
-定位：以当前代码事实为基线，记录已提供能力与已批准待实施需求的入口、边界和验收口径；规划项必须显式标注，不能写成已实现事实。
+# Natsume AI 产品需求文档
 
-状态说明：`FR-NLE-001`～`FR-NLE-005` 是 M48-A `READY_FOR_EXECUTION` 规划项；`TASK-0461`～`TASK-0485` 已完成；`TASK-0486` 已完成本地验证与 Seal 资产，但状态为 `BLOCKED`。Canonical Scheduler 已提供 owner-confirmed、read-only、无副作用 shadow 决策与 legacy diff；Verification 已提供 fail-closed allowlist runner、VerificationResult/evidence refs 与 required non-PASS 状态阻断；Acceptance Judge 已提供 criterion-level verdict、final decision 与 `ACCEPTED` 状态门；Review / Resume 已提供 durable ReviewStore、绑定 subject version/checkpoint 的一次性 resume token、PRE/POST 分态与 `confirmed=true` 不可绕过的 durable review 声明；Canonical Runtime cutover 控制面已提供 `legacy|shadow|canonical` assignment、canary owner gate、kill switch、legacy drain 与 cross-executor resume guard，生产默认仍为 legacy/0% canary；Runtime Event 已提供 0056 durable timeline、TaskStore outbox publisher、EventBus/reference adapters、内部 JSON/SSE replay 与 dedupe key，replay 默认关闭且禁止字段 fail-closed；Context 已在既有 `AgentContextEnvelope` 上升级到 v2，具备 refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed 与安全审计摘要；Digital Life 状态保存已提供 expected-version CAS、0057 OCC migration、冲突/显式 fallback 审计与 20 并发无 silent overwrite 验证；WorldProjection 已提供只读 snapshot read model，facts 带 source/confidence/observed/expires/epistemic/conflict 字段，且不反写 Life/Canon/Memory；AppraisalRecord 已把既有 emotional episode/aftereffect 确定性连接到 appraisal、affect/drive、expression 与 boundary signal，Bond score/stage 仅作为只读兼容投影，所有生产写调用收敛到 BondDynamics command；SceneDecision 已接入 ProactiveVoice 与 Surface 表达约束，ActionArbiter 消费 Governor 的 intent/action/scope/static-risk/token binding，只有一致的可执行 route token 才能进入共享 TokenService 的一次性 handler 前门，AIRLOCK 永远暂停，显式用户目标保持优先且 dry-run 可生成脱敏 Runtime Event；Execution/Review Operator UI 已提供版本化只读 DAG/attempt/budget/verification/review/resume/cursor replay 视图，resume 继续受 token/subject/version/phase/checkpoint 绑定；Federated Capability Maturity 从 Skill、MCP、Pentest 与 Agent Runtime registry 生成 canonical risk 1–5 和 L0–L5 scorecard，自动流程只允许降级，升级候选只有持久化为 durable Review 后才提供定位链接；DegradationState 具备 durable restore、transition/recovery evidence，并在 ActionArbiter、MCP、Skill、Canon、Pentest、TTS/VTS/SSE 与 remote resume 前门 fail-closed；Release Identity Snapshot 提供 immutable snapshot、字段级 diff、MASTER Review candidate 与前一 release ref 回滚计划，不含私密人格或记忆正文；Life evolution read views 从实际 World/Appraisal/Bond/Scene/ActionArbiter producer 提供只读投影，空数据显式 `UNAVAILABLE`，dry-run 不执行也不写 Life Core；Capability/Health/Identity governance views 已在 Skills、System Config 与 Security Pentest 页面呈现治理状态，非 Lab 高风险入口保持禁用。AgentJobRegistry 仍是 legacy job authority，未切 durable read authority；生产副本迁移前仍需备份与 dry-run 批准。`FR-ARCH-001`～`FR-ARCH-010` 是 M48～M57 `ADOPTED_TARGET_ARCHITECTURE` 目标需求，`TASK-0487～0622` 为尚未解锁实施的 `PROGRAMMED`。其余章节主要描述 2026-06-30 已核验的当前能力。规划项只有在对应 TASK、测试与 Seal 证据成立后才转为已实现事实。
+版本：v4.0
+日期：2026-07-15
+文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
----
+本文只定义产品必须提供什么、禁止什么以及如何验收，不记录代码完成度、文件数量、端口默认值或阶段状态。
+
+- 当前实现事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
+- 稳定目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
+- 当前差距：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
+- 唯一活动执行合同：[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)
 
 ## 1. 产品定义
 
-Natsume Ai 是一个本地优先的 AI 陪伴系统，由 5 个协同运行面组成：
+Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它既要提供自然、连续的陪伴，也要可靠执行研究、代码、工具、设备和安全实验任务，并在长期运行中安全演化。
 
-| 运行面 | 端口 | 入口 | 职责 |
-|--------|------|------|------|
-| Host Main | :8000 | `host_brain.app.asgi:app` | 主权裁决、人格渲染、记忆、审计、路由装配 |
-| Obs Backend | :18082 | `host_brain/obs_main.py` | 可观测性后端 |
-| Edge RPC | :17800 | `edge_client/__main__.py` | 本地感知与执行中枢 |
-| Unified Message Gateway | :19000 | `edge_client/gateway/server.py` | 多平台消息收发 |
-| Desktop Pet | :18788 | `desktop_pet/main.cjs` | Electron 桌面宠物 |
+系统包含以下协作面，但它们不能形成平行事实源：
 
-Host Main 由 `host_brain/app/asgi.py` 暴露 ASGI app，并通过 `app_factory` 与 `router_registry` 装配 HTTP 路由。核心原则：**模型/Agent 候选层负责提案，Host 负责事实、长期记忆、人格/回复政策、安全门控与最终表达收口；Edge、DesktopPet、MateEngine、VTS、VRM 只作为外显执行面。所有执行事实必须可审计回放。**
+| 产品面 | 用户价值 | Authority 边界 |
+|---|---|---|
+| Host | 对话、人格、记忆、规划、任务与治理 | 拥有身份、授权、任务、长期状态与最终回复裁决 |
+| Operator / Observability | 解释、回放、审查、运维 | 默认只读；写动作必须重新进入 Command Plane |
+| Gateway | 多平台消息收发 | 负责传输、去重和回执，不拥有用户/人格事实 |
+| Edge / Embodiment | 语音、Avatar、桌宠、设备与本地执行 | 物理效果的最终 actuator；不得反向裁决 Host 事实 |
+| Domain Packs | Code、Research、Pentest 等领域能力 | 提供候选、工具、验证器和知识命名空间，不复制核心 Runtime |
 
----
+核心原则：模型和 Agent 只能提出候选；Host 负责授权、冻结计划、执行状态、验收、长期状态和最终表达。任何外部副作用都必须可审计、可恢复、可对账。
 
-## 2. 核心功能需求
+## 2. 核心体验需求
 
-### FR-CHAT：Normal Chat 主链
+### FR-CHAT：连续对话
 
-- 入口：`POST /v1/chat`，SSE 流式响应。
-- 三阶段协议：PRESENCE（在场流，非权威）→ COMMIT（提交流，Governor 后产生）→ POST（渲染流，读 Commit 快照）。
-- 主链：`chat_routes/chat_handler → thalamus → Governor → Cortex/Executive → SurfaceMainChain → ReplyEnvelope`。
-- 工程装配链：`host_brain.app.asgi:app → app_factory.create_host_fastapi_app() → router_registry → chat_routes.handle_v1_chat_route()`。
-- `chat_immune_gate` 在 HTTP 层做 fastpath/BLOCK 拦截，再进入主编排。
-- SurfaceMainChain（`host_brain/persona/surface_main_chain.py`）是 normal chat 文本的**唯一作者**；旧 prompt_builder 链路只作为辅助 facts/state 提供者。
+- 支持流式对话，并区分非权威在场信号、权威提交结果和提交后投影。
+- 最终可发送文本必须经过唯一 Reply/Surface authority 收口。
+- 对话可使用经授权的记忆、关系、情绪、场景和任务上下文，但不得泄漏 raw thought、密钥或未授权私密正文。
+- 普通聊天、技能调用、委派和复杂计划必须共享同一受治理执行链；不得因界面不同切回第二套执行 Runtime。
 
-验收口径：
-- `/v1/chat` 的最终可发送文本必须经 `ReplyEnvelope` 收口。
-- 未经 Governor 许可的执行意图不得进入外显执行面。
-- PRESENCE 内容不得被下游当作权威事实。
+验收：
 
-### FR-INGRESS：Host 输入回流
+- 非权威流不会被持久化为用户确认事实。
+- 被 Governor 拒绝的执行意图不会触发工具、消息或设备副作用。
+- 最终回复、对应 Task/Attempt 和副作用 receipt 可通过同一 correlation lineage 追溯。
 
-- `POST /v1/host/input` 是 Gateway/ASR ingress，用于归一化外部消息与语音输入，不是简单转发 `/v1/chat`。
-- 输入链路承担即时 ACK、质量分析、偏航检测、进度推送与重对齐通知，再进入 thalamus 与 Cortex/Executive 后续链路。
-- `POST /v1/edge/events` 是 Edge runtime events，用于播放状态、资源门控、inline waiters 等事件上报，不走 `/v1/host/input`。
+### FR-INGRESS：统一输入与身份
 
-验收口径：
-- Gateway/ASR 输入必须携带来源与回包上下文，不能被写成“直接调用 chat”。
-- Edge 运行时事件与用户输入必须分流，避免事件被误判成用户话语。
+- Chat、Gateway、ASR、Scheduler、Internal Agent 和 Operator Command 必须进入统一 Secure Ingress。
+- 每次输入都必须绑定 principal、surface、scope、nonce/idempotency、correlation 和回复上下文。
+- 用户消息、设备事件、系统维护事件和调度任务必须显式分流，禁止互相冒充。
 
-### FR-SURFACE：人格渲染
+验收：伪造身份、重复 nonce、越权 scope、重放请求和来源不明输入均 fail closed，并留下脱敏审计。
 
-- 75 文件位于 `host_brain/persona/`（120+ 类），按 Phase I-XVI 组织，包括：
-  - `persona_engine.py`（Persona 引擎，7 维特质向量）+ `personality_traits.py`
-  - `inner_world.py`（2,565 行，离线状态机）+ `inner_activity_agent.py` + `inner_monologue.py`
-  - `surface_main_chain.py` → `surface_runtime.py`（2,668 行）→ `surface_memory_recall.py`（4,539 行）→ `surface_packet_compiler.py`
-  - `surface/candidate_scoring.py`（1,912 行）→ `surface/scoring/`（6 文件评分管线：parse → stage_positions → control_affect → texture）
-  - `proactive_voice.py`（1,477 行，6 种场景主动表达）+ `emotional_proactive.py`
-  - `text_quality_gate.py`、`galgame_text_contract.py`（1,631 行）
-- 人格设定文件：`Soul.md`（项目根目录）。
-- Surface 层渲染已裁决事实、记忆候选、风格约束与情绪标签。Inner-state leakage 通过 `ReplyControlPacket`（7 字段）影响 LLM tone，不暴露原始私密思维。
+### FR-SURFACE：人格与最终表达
 
-### FR-GATEWAY：多平台消息网关
+- 最终表达应保持人格连续、语境适配、关系边界和用户主权。
+- 用户情绪观察与 Natsume 自身 Affect 必须使用不同类型和 writer。
+- Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
+- 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
-- 独立运行面，6 平台适配器：wechat、qq、feishu、wecom、telegram、line。
-- 链路：平台 Webhook → `gateway/server.py` → `adapter.parse_inbound()` → `MessageNormalizer.normalize()` → `GatewayRouter.route()` → `EdgeInputReporter._send()` → `POST /v1/host/input` → Host 输入回流链 → `edge_rpc_client.py` → `POST /v1/gateway/reply` → `OutboundDispatcher.dispatch()` → 平台 adapter `send_reply()`。
-- 出入站均走 AIRLOCK 净化。
-
-### FR-EMOTION：情感系统
-
-- `host_brain/core/metabolism.py`：EmotionVector（VAD 三维连续情绪）、HardState。
-- `host_brain/core/emotion_timeline.py`：情感时间线、compute_emotion_echo。
-- `host_brain/core/endocrine.py`：离散硬状态 → 连续内分泌基调（dopamine/serotonin/cortisol）。
-- emotion_tag 确定性映射到 VTS 表情 ID 和 TTS 语气。
+验收：同一已裁决输入在冻结版本下可复现表达控制；人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。
 
 ### FR-MEMORY：生活记忆
 
-- LifeMemoryStore（`host_brain/memory/life_memory.py`，8260+ 行，SQLite 持久化）是记忆 SSOT。
-- 多路召回融合：`RecallFusionServiceContract` → vector + FTS5 混合 → 候选过滤 → `surface_memory_recall` 决定注入。
-- 记忆蒸馏：Episodic → 语义记忆 → Canon pending 提案。
-- Markdown 知识库召回（`markdown_kb_store.py`）作为补充通道。
+- 生活记忆必须有唯一写服务，区分事件、语义总结、关系证据和可重建索引。
+- 召回结果必须带来源、可见性、有效期和置信度；衍生索引不能冒充事实真源。
+- 预览、重试、回放和失败任务不得重复推进记忆或生命状态。
 
-### FR-CANON：World Canon 与人格锚
+验收：每个长期字段只有一个 writer；删除/过期/冲突/恢复和索引重建均可对账。
 
-- World Canon：`host_brain/canon/world/` 与 `WorldCanonStore`，维护最小权威内容集合，用于一致性引用（非执行事实）。
-- 当前不设独立风格 Canon 功能项；表达风格由 `Soul.md`、Soul/Persona 编译锚、SurfaceMainChain 控制包与硬门禁共同约束。
-- Canon 更新走 Host 审批、版本化写入与审计；不得用 Canon 声明“已执行/已保存/用户已确认”等事实。
+### FR-CANON：权威知识与人格锚
 
-### FR-TRIBE：器官族系统
+- Canon 只保存经审查的权威引用，不得被用作“动作已执行”“用户已确认”等执行事实。
+- Canon 变更必须经过 proposal、内容绑定审批、版本化 apply 和审计。
+- 领域私有知识默认留在领域 namespace；跨域 promotion 必须重新审查。
 
-- 23 个 family spec，均 A 级升级完毕，无灰度开关。
-- `host_brain/tribe/registry.py`：family 注册。
-- 关键 agent：thalamus_agent（意图编译）、immune_agent（风险门控）、limbic_agent（动机态）、proprioception_agent（认知负荷）、prefrontal_agent（漂移告警）。
+验收：无有效授权、内容 hash 不匹配、重复消费或跨域直接写入均被拒绝。
 
-### FR-AGENT-RUNTIME：Agent Runtime
+### FR-GATEWAY：多平台消息
 
-- Agent Runtime 的核心输入契约是 `AgentWorkOrder`。
-- 必填/关键字段：`domain`、`run_mode`、`objective`、`workspace`、`allowed_actions`、`forbidden_actions`、`approval_policy`。
-- 写模式必须同时受 `WorkspacePolicy` 与 `approval_policy` 限制：需要显式 `allowed_actions` 包含 `write_files`，需要禁止 `modify_secret_files`，并在 `approval_policy.require_confirm=true` 时要求 `approval_policy.confirmed=true`。
-- `self_evolve` 不得直接在 main/master 分支写入。
+- 支持可配置的平台适配器，统一归一化入站、幂等、durable inbox/outbox、回包上下文和 delivery receipt。
+- 原始签名验证必须在解析和净化前完成；平台适配器不能绕过 Host 授权或直接写长期状态。
+- 网络失败、限流和平台拒绝必须可重试、可进入 DLQ，并避免重复发送。
 
-验收口径：
-- Agent 写入类任务不能只凭自然语言授权执行。
-- 运行结果必须带工作目录、artifact、审计事件或可追踪失败原因。
+### FR-VOICE / FR-EMBODIMENT：语音与具身
 
-### FR-OBS：可观测性
+- 支持 ASR、TTS、打断、Avatar、桌宠和可选硬件表现。
+- 物理输出只由 Edge/Device authority 执行，并使用设备身份、协议版本、capability handshake 和 receipt。
+- 能力或硬件不可用时必须显式返回 `DEGRADED/UNAVAILABLE/NOT_TESTED`，禁止伪成功。
 
-- Obs Backend（`host_brain/obs_main.py`）独立进程。
-- Monitor UI（`host_brain/app/monitor_ui/`）是多页面 SPA。
-- `host_brain/app/monitor_ui/src/app/routeManifest.jsx` 是 Monitor 路由与导航 SSOT。
-- 当前导航固定为 7 组：Cockpit、Life Systems、Observability、Operations、Execution、Security Lab、Integrations。
-- 预热缓存：runtime snapshot、trace feed、insights summary、digital life overview、life body。
+### FR-OBS：可观测与 Operator
 
-### FR-AVATAR：外显执行面
+- 提供服务健康、任务图、Attempt、Budget、Review、Trace、World/Scene、Capability、Experiment、Identity 和 delivery 投影。
+- 每个 read model 必须带 schema version、freshness/source cursor 和 degraded state。
+- Operator 的审批、恢复、取消、回滚等写动作必须重新进入 Secure Ingress 和 Governed Command Plane。
 
-- Edge、DesktopPet、MateEngine、VTS、VRM 是外显执行面；事实、长期记忆、人格/回复政策、安全门控均在 Host。
-- Desktop Pet：Electron 应用（`desktop_pet/main.cjs`），HTTP 控制端口 18788。
-  - Actions：show、hide、preset、touch、emote、speak、click_through、status。
-- MateEngine：UDP 桥接（`host_brain/channels/mateengine.py`），端口 32145。
-  - 13 种 v0 事件、11 种 pose preset、状态→姿势→表情映射。
-  - 支持 action_sequence / choreography 编排。
-- VTS：emotion_tag → expression_id 确定性映射（16 种表情）。
-- `/v1/edge/visual_locate` 当前为 stub/removed，返回 `VLM_REMOVED`，不得作为可用视觉定位自动化能力验收。
+### FR-PENTEST：授权安全实验室
 
-### FR-VOICE：语音链
+- Pentest 仅在明确授权的目标、范围、时间窗和速率内运行。
+- 只读侦察与副作用阶段必须分级；高风险阶段要求显式 approval、scope/rate/engagement guard。
+- 领域认知、AttackGraph 和工具知识留在 Pentest adapter；通用搜索只持领域无关合同。
+- 虚拟 rollout 不得调用真实工具。Conditional MCTS 在 durable calibration 与收益 Gate 通过前只能 shadow，不能影响生产选择。
 
-- ASR：faster-whisper large-v3，流式/分段。
-- TTS：GPT-SoVITS，全 GPU 常驻。
-- Barge-in：用户开口可打断当前播报。
-- Edge 资源闸门：ASR > 播放 > TTS 合成 > 兜底 LLM。
+验收：越界目标、过期授权、未批准副作用、真实工具进入 rollout 和重复 side effect 数量均为 0。
 
-### FR-MODE：模式切换
+### FR-PROACTIVE：主动行为
 
-- 6 种系统模式：normal、focus、gaming、sleep、maintenance、locked。
-- `host_brain/core/mode_transition.py`：ModeTransitionService。
-- 6 种触发来源：MANUAL、AUTO_GAMING、AUTO_IDLE、AUTO_WAKEUP、AUTO_SCHEDULE、SKILL。
-- 模式影响：能力矩阵、资源预算、调度器行为。
+- 主动表达必须结合显式用户偏好、场景、关系边界、打扰成本和当前任务。
+- 每次主动动作必须经过 Intent Arbitration、Governor、durable outbox 和 receipt。
+- 用户可暂停、限制、解释或撤销主动能力。
+- 主动行为和后台演化不得直接修改 Persona trait；成长只能形成 proposal。
 
-### FR-CODEX：Codex Runtime
+## 3. 统一执行与规划
 
-- Codex 作为正式 LLM provider，配置：`HOST_CODEX_BASE_URL`、`HOST_CODEX_MODEL_ID`。
-- `host_brain/integrations/codex_cli_provider.py`：CLI 适配。
-- App-server 线程预热保留在当前运行时能力中。
+### FR-AGENT-RUNTIME：受治理 Agent 执行
 
-### FR-SECURITY：安全与免疫
+- 所有生产 admission 必须转换为版本化 `WorkOrderV3`，显式携带目标、workspace、允许/禁止动作、审批策略和 `BudgetPolicy`。
+- Chat、Gateway、Scheduler、Internal Agent、Operator 和 Domain Pack 必须共享 HostCommand → TaskGraph → Attempt → Grant → Verification → Acceptance → Receipt lineage。
+- 每个节点使用 node-bound grant；worker 不得扩大 scope、预算或自行二次规划。
+- 写任务必须绑定受控 workspace；秘密文件、主分支和任务外路径默认不可写。
 
-- `host_brain/app/chat_immune_gate.py`：免疫门控（HTTP 层 fastpath/BLOCK）。
-- `host_brain/airlock/`：入站隔离（quarantine、sandbox、sanitizer、pii_filter）+ 出站净化。
-- Governor rate limiting + Token 体系（approval/confirm/undo）。
-- 审计三联画：intent_log / governor_log / skill_exec_log。
+验收：缺预算、缺 scope、无 node grant、workspace 越界或不完整 lineage 的任务不能执行。
 
-### FR-SECURITY-LAB：Pentest 安全实验室
+### FR-PLANNING：通用规划搜索
 
-- `/v1/pentest` 是 Security Lab 入口，124 个 Python 文件分为 10 个子系统。
-- API 入口：capabilities、environment、runs、run detail、events、cancel、approve-side-effect、continue-side-effect、report、knowledge ingest/stats。
-- ToolSpec：88 个，Executor：92 个，Side-effect：37 个，0 缺 executor。
-- 规划器：3 条路径（MCTS + ReAct + CognitiveEngine），由 `PENTEST_COGNITIVE_KERNEL` 环境变量控制。
-- Agent 子包（`pentest/agent/`，31 文件）：cognitive_engine、belief_model、goal_model、evolution_core、meta_cognition 等。
-- Adversarial 子包（9 文件）：红蓝对抗 game loop + 遗传算法策略协同进化（pop=20）。
-- Swarm 子包（8 文件）：多 agent 协调器 + 消息总线 + 图合并。
-- Online 子包（5 文件）：三层安全门控（ONLINE_SCAN_MODE=offline|manual + AuthorizationManager + RateGovernor 硬编码限速）。
-- Phase1-3 与 report 默认可作为 readonly/fixture 工作流；Phase4/5 side-effect 必须经过安全实验室护栏。
-- Phase4/5 side-effect 需要同时满足 `allow_exploit`、Governor/approval token、scope guard、rate guard、engagement manifest guard。
+- 规划输入是目标、冻结上下文、约束和预算；输出是可审查的候选路径和选中路径。
+- L1 根据虚拟状态动态生成合法后继；L2 接受领域认知排序；L3 只在价值/不确定性条件满足时运行受预算 MCTS。
+- 搜索、模拟和反事实分析永远不持有真实副作用端口。
+- 选中路径必须编译为不可变 TaskGraph；执行期失败重规划必须生成同一 graph 的新 revision。
+- 生产 influence 前必须使用真实 workload、真实 verifier、真实成本和 durable baseline/candidate outcome 证明净收益。
 
-### FR-PROACTIVE：主动自主性
+验收：已批准步骤的拓扑排序不能冒充候选规划；synthetic fixture 不能冒充生产收益。
 
-- Proactive 回路：`DigitalLifeSupervisor.tick_loop()` → `autonomous_self.apply_autonomous_self_cycle()`（8 维奖励权重 + 7 维自适应特质）→ `PersonaProactiveVoice.evaluate()`（6 种场景，24h per-type 冷却）→ Edge RPC proactive_push。
-- API 端点：
-  - `POST /v1/digital-life/proactive/attempt` — 手动触发（dry_run/forced）
-  - `GET /v1/digital-life/proactive/recent` — 近期 outbox
-  - `GET /v1/digital-life/proactive/episodes/recent` — 近期 episodes
-- 观测端点：`GET /obs/proactive-autonomy` — proactive autonomy 快照（inner_weather/reach_out_calibration/active_projects/proactive_readiness/top_intention/dialogue_closure）
-- Monitor UI：`/proactive-autonomy` 页面（ProactiveAutonomyDashboard）
-- 持久化：`life_continuity.py`（1,920 行）SQLite `proactive_life_outbox` 表
+### FR-TOOL / FR-CAPABILITY：工具与能力
 
-### FR-SCHEDULER：调度系统
+- 所有工具经统一 Capability Catalog/Broker、风险、授权、预算和执行 journal 调用。
+- 外部能力必须经过签名、SBOM、quarantine、sandbox verification、staged activation 和 rollback。
+- Capability maturity 只能自动降级或收紧；升级必须有 durable evidence 和 Review。
 
-- 声明式 Intent 调度（`host_brain/scheduler/`）：NatsumeScheduler + SchedulerHealthReporter。
-- Host 常驻任务调度（`host_brain/app/automation/task_scheduler.py`）：HostTaskScheduler。
-- 两者分开管理：声明式调度面向业务 intent，常驻调度面向系统维护任务。
+## 4. 长期演化需求
 
-### FR-NLE：V1 长期演化安全收敛
+### FR-NLE-001：单一 Canon 与 Data authority
 
-#### FR-NLE-001：领域与核心状态边界
+- Domain、Memory、Life、Knowledge 和 Canon 必须有明确 namespace、writer 和 promotion 边界。
+- migration、journal、outbox 和 projection 使用统一版本化 Data Plane；运行时不得临时建表或持有第二份长期真相。
 
-- Domain Pack 只能写本领域状态；不得直接写 Persona、Bond、LifeMemory 或 WorldCanon。
-- WorldCanon 变更必须经过唯一受治理 Apply 入口；候选编号本身不构成审批。
-- 现有领域数据迁移必须可对账、可回滚，并保留来源与证据引用。
+### FR-NLE-002：持久 Task Control Plane
 
-验收口径：
+- TaskGraph 的 dependency、revision、attempt、lease、heartbeat、retry/backoff、cancel、recovery 和 idempotency 必须持久化。
+- token、tool、time、concurrency、retry 和 model cost 必须可预留、计量、阻断和回放。
+- 依赖已满足节点可有界并发；循环依赖必须阻断，禁止忽略依赖继续执行。
 
-- Pentest 在 domain-only 模式下对 WorldCanon 的直接读写为 0。
-- 无有效授权、授权过期、主体/版本不匹配或重复消费时，Canon Apply 必须拒绝并留下审计证据。
+### FR-NLE-003：验证、Review 与回放
 
-#### FR-NLE-002：统一、持久的任务控制面
+- required verification 只有 `PASS` 可进入 Acceptance；`FAIL/ERROR/NOT_RUN` 均 fail closed。
+- 执行前审批与执行后验收 Review 使用不同状态；resume token 一次性、绑定 subject/version/checkpoint。
+- resume 后应安全续跑原图，不重放已确认副作用。
+- 关键事件先持久化再广播，并支持 cursor 补发和客户端去重。
 
-- 一个复杂任务只生成并消费同一 TaskGraph revision；Planner 不得在执行阶段静默生成第二份计划。
-- Child WorkOrder 与 SubAgent request 必须保留 root/parent/graph/node lineage、权限和 Context 引用，不能由调用者拼装无来源字典。
-- TaskGraph 的依赖、attempt、lease、heartbeat、retry、cancel、recovery 和业务幂等状态必须持久化。
-- token、tool、time、concurrency、retry 和 model cost 预算必须可预留、计量、阻断和回放；模型不得自行扩大预算。
-- 新旧执行器切换只影响新任务；存量任务不得跨执行器恢复或重复执行副作用。
+### FR-NLE-004：World、Scene 与 Intent
 
-验收口径：
+- World authority 统一用户、项目、环境、任务和长期目标事实；消费者使用只读、带 provenance/confidence/TTL/conflict 的版本化 projection。
+- Scene Engine 将当前局面解析为表达、主动性和风险约束，并记录 transition。
+- Intent Arbiter 合并用户目标、任务、关系、场景、权限和长期目标，且显式用户目标优先。
+- 高风险动作必须经过统一 preview/shadow；preview 不执行真实副作用。
 
-- 未满足依赖的节点启动数为 0；循环依赖显式阻断。
-- 进程重启后任务可恢复；同一业务副作用不因重规划、重试或重复 resume 再次执行。
+### FR-NLE-005：安全演化与运行守护
 
-#### FR-NLE-003：验证、审查与事件回放
+- Runtime Guardian 统一 dependency health、degradation、recovery、maintenance/sleep 和 SLO evidence。
+- Persona、策略、能力和知识的自动学习只能生成 proposal，不得直接写生产状态。
+- 发布前生成 Identity Snapshot；重大人格/关系/主权差异必须由用户 Review，并保留 rollback。
 
-- required verification 只有 `PASS` 可进入已验证状态；`FAIL`、`ERROR` 和 `NOT_RUN` 均 fail closed。
-- 执行前审批与执行后验收审查必须使用不同状态和恢复阶段。
-- 关键 Task、Review、Verification 和裁决事件必须先持久化再广播，并支持 cursor 补发和客户端去重。
-- durable trace 不得包含原始模型内部推理、密钥、完整 cookie 或未授权私密记忆正文。
+## 5. 完整架构需求
 
-验收口径：
+### FR-ARCH-001：模块与依赖
 
-- 验证失败仍被接受、无效 token 被消费、重复 resume 再次产生副作用的数量均为 0。
-- 关键事件可完整回放；SSE 重连无静默缺失；禁止字段泄漏数量为 0。
+采用模块化单体优先，明确 Contract/Domain/Application/Adapter/Composition 边界。业务依赖由外向内；不得保留未批准的循环依赖、混合职责巨石或全局 service locator。
 
-#### FR-NLE-004：Digital Life 长期演化最小闭环
+### FR-ARCH-002：跨进程合同与 CQE 分离
 
-- Digital Life 状态写入必须使用版本条件更新，禁止 silent overwrite。
-- World Model 是现有事实源的只读投影；推断内容必须携带来源、置信度、观察时间、过期时间和冲突状态。
-- Appraisal、Bond、Scene 和 Action Arbitration 必须复用现有情绪、关系、主动行为与 Governor 能力，不建立平行状态真源。
-- 情绪或关系推断可以收紧表达和主动性，但不得覆盖用户显式任务或放宽安全门禁。
+Host、Obs、Gateway、Edge 和 Worker 只通过版本化 Command/Query/Event 合同协作。Query 只读投影，Command 进入治理链，关键 Event 与 Outbox 同事务提交。
 
-当前完成项（2026-07-11）：TASK-0476 / T-NLE-14 已完成 Digital Life state OCC；TASK-0477 / T-NLE-15 已完成只读 WorldProjection；TASK-0478 / T-NLE-16 已完成 Appraisal/Bond 收敛。TASK-0479 / T-NLE-17 已完成 source-preserving SceneDecision、ProactiveVoice/Surface 实际接线、Governor authority binding、fail-closed route/AIRLOCK gate、共享 TokenService handler 前门、只收紧的 ActionArbiter、显式用户目标优先和无外部副作用 preview；执行切流开关 `HOST_ACTION_ARBITER_ENABLED` 默认关闭，非法 route pair 与 AIRLOCK 不受兼容开关放宽。M48 Digital Life 最小闭环的四张任务卡均已完成。
+### FR-ARCH-003：单一 Governed Runtime
 
-验收口径：
+所有生产入口共享同一身份、授权、WorkOrder、TaskGraph、Budget、Review、Verification、Acceptance 和 Receipt。Executive、Scheduler 或 Domain 不得维护第二任务真相或第二执行 authority。
 
-- 并发状态写入无静默覆盖；WorldProjection 不提供反写接口。
-- 代表性互动可从事件回放至 Appraisal、affect/drive、表达策略；Bond 的边界、裂痕和修复语义保持一致。
+### FR-ARCH-004：单核 Digital Life
 
-#### FR-NLE-005：安全升级与 Operator 观测
+生命状态由唯一 Event/Reducer/Projection 模型推进；Surface、Tribe、Scheduler 和后台循环不得各自推进平行生命时钟。人格成长遵循 proposal → Lab/shadow → Review → version activation → rollback。
 
-- Capability maturity 只作为权限附加收紧条件；自动降级允许，自动升级禁止。
-- 核心依赖故障必须进入可解释的 DegradationState，并在恢复时留下健康证据。
-- 发布前必须生成可比较的 Identity Snapshot；重大人格差异需人工审查。
-- Monitor UI 应在现有信息架构中展示 TaskGraph、Review、Trace、World/Scene、Capability、Health 和 Identity read model。
+### FR-ARCH-005：Memory 与 Knowledge OS
 
-验收口径：
+Life Memory 服务人格连续性；Knowledge OS 服务项目、概念、流程和决策。KnowledgeItem 必须记录 provenance、version、validity、confidence、conflict 和 decision refs，并支持 promotion、deprecation 和回滚。
 
-- 成熟度不会把原本需要审批的能力提升为无审批执行。
-- 新观测页面不提供绕过 Review 的写入口，也不显示 raw thought 或未授权私密正文。
+### FR-ARCH-006：Domain Pack 平台
 
-### FR-ARCH：V1 完整架构重构（M48～M57）
+领域包只提供 manifest、候选/工具、repository port、knowledge namespace、verifier、risk、benchmark 和 UI contribution；不得复制 TaskGraph、Scheduler、Governor、Review、Model Plane、EventBus 或 Persona。
 
-目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`。
+### FR-ARCH-007：Model、Prompt 与 Capability Plane
 
-正式执行入口：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`。
+模型调用统一 route/attempt/usage/timeout/retry/fallback/预算 trace；Prompt 版本化并声明输入输出合同；Capability 使用同一 Broker、Governor、Review 和签名生命周期。
 
-本组需求定义 M48 安全地基之后的完整目标产品边界，不表示当前代码已经具备这些能力。目标是收敛现有巨石、循环依赖、重复真相源和并行运行时；禁止以长期双核、长期双写或新增另一套平台能力完成表面迁移。
+### FR-ARCH-008：独立 Edge Device Runtime
 
-#### FR-ARCH-001：模块分层与依赖治理（M49 建界，M57 终验）
+Edge 可独立安装升级，只依赖共享合同；Host 不导入 Edge 私有实现。物理输出有唯一设备 authority，断线重连后 receipt 可对账且不重复执行。
 
-- 产品应采用模块化单体优先的目标形态，并形成 Contracts/Kernel、Domain、Application、Interface/Adapter、Composition 的明确边界。
-- 业务依赖只能由外向内；Composition 是装配具体实现的唯一例外，业务包不得反向导入 Composition、HTTP route、全局依赖容器或 provider 实现。
-- `host_brain/app` 必须从隐式系统内核退化为明确的 interface/application/legacy facade；巨型混合职责文件按行为切片拆分，不得通过复制再造新巨石。
+### FR-ARCH-009：Query Plane 与 Operator Console
 
-验收口径：
+Obs 和 UI 不直接查询业务私有表或进程缓存，不泄漏 raw thought/secret/private memory。任何写动作必须返回 Command Plane。
 
-- 目标包之间双向依赖为 0；所有临时例外均有 ADR、owner 和删除版本。
-- 新增超过 800 行的混合职责文件为 0；现有超过 1500 行的生产巨石已拆分或取得纯数据/生成代码例外批准。
+### FR-ARCH-010：Evolution Lab 与 Release
 
-#### FR-ARCH-002：跨运行面合同与 Command/Query/Event 分离（M48-B/M49 建界，M56 终验）
+- Evolution Lab 提供 versioned scenario、benchmark、shadow 和 counterfactual，且没有生产 writer 或 actuator。
+- Skill Compiler 将文档、API、脚本和 accepted trace 转为带合同、测试、SBOM、签名和 rollback 的 draft；默认不能自动上线。
+- Feedback 只生成 `FeedbackProposal`；Knowledge、Capability、Policy 和 Persona 通过版本化 apply 激活。
+- Identity Migration 在隔离环境执行人格/关系回归，重大差异默认阻断。
+- ReleaseManifest 绑定代码、schema、protocol、model/prompt/assets、SBOM、Gate 和 rollback compatibility。
 
-- Host、Edge、Gateway 与 Operator UI 必须共享独立、版本化的 identity、ID、error、command、query、event、risk 和 embodiment 合同，不共享 Host 实现包。
-- 所有写请求进入 Governed Command Plane；Query Plane 只读版本化投影；关键状态变化与 Event/Outbox 同事务提交。
-- 合同必须携带 schema/protocol version、principal、correlation/causation、idempotency、visibility 和 evidence refs，并提供兼容窗口与协商规则。
+## 6. 非功能需求
 
-验收口径：
+| ID | 要求 |
+|---|---|
+| NFR-PERF | 尽快提供可取消的在场反馈；最终结果受显式预算和可观测 SLO 控制，超时必须可解释降级 |
+| NFR-RELIABILITY | 关键状态可恢复、幂等；依赖故障不静默丢任务或重复副作用 |
+| NFR-AUDIT | command → graph/revision → node → attempt → verification → acceptance → effect/receipt 可串联回放 |
+| NFR-SAFETY | 写入、外显执行、Pentest 和能力激活必须有 scope、approval、审计与拒绝原因 |
+| NFR-PRIVACY | secret、cookie、raw thought 和未授权私密记忆不进入 durable trace、Lab dataset 或 UI |
+| NFR-PORTABILITY | Host/Obs/Gateway/Edge 可独立启动、升级和降级，协议不兼容时 fail closed |
+| NFR-OPERABILITY | 健康、降级、预算、Review、回滚和数据恢复均有 Operator evidence |
 
-- Edge 对 `host_brain.*` 实现包导入为 0；重复 method/path handler 为 0。
-- Runtime inline DDL 为 0；空库、旧库、备份恢复和回滚演练使用同一受控 migration catalog 通过。
+## 7. 最终产品验收
 
-#### FR-ARCH-003：统一 Host Runtime 与任务执行主链（M50）
+只有以下全部成立，才可声明完整架构完成：
 
-- Secure Ingress、Conversation/Work Orchestration、Task Runtime、Agent Runtime、Governor、Lifecycle 和 Service Catalog 必须形成单一生产主链。
-- 一个任务只能消费同一 TaskGraph revision；授权、预算、attempt、lease、verification、acceptance 和副作用 receipt 必须沿同一 lineage 可恢复、可回放。
-- 工具、消息、主动行为及其他外部副作用必须经过 durable outbox；Obs 或 legacy route 不得形成第二条写主链。
+1. 所有生产入口使用同一 Governed Runtime，第二任务/授权/执行真相为 0。
+2. Durable DAG 的并发、retry/backoff、Review continuation、Budget 和 crash recovery 均有真实证据。
+3. Research/Code/Pentest 的 PlanningSearch 使用真实 workload 和 verifier，且 promotion 有 durable calibration。
+4. World/Scene/Intent/Preview/Guardian 形成统一局面与动作治理。
+5. Evolution Lab、Skill Compiler、Feedback、Knowledge OS 和 Identity Migration 各完成至少一条受治理闭环。
+6. 直接 Persona trait writer、未经审批能力升级、未签名激活和 Lab 生产副作用数量均为 0。
+7. migration/restore、security/privacy、performance/chaos、rollback、Docker、Host、Obs、UI、Gateway、Edge 与可用设备完成统一验收。
 
-验收口径：
-
-- 同一 action 只有一个有效 AuthorizationGrant、Task/Attempt lineage 和副作用 receipt。
-- 重启、重试、重复 resume 和新旧执行器切换不会重复执行副作用；旧任务由旧执行器 drain，不跨执行器恢复。
-
-#### FR-ARCH-004：单核 Digital Life 与长期人格连续性（M51）
-
-- LifeEventJournal 与版本化 reducers/projections 是生命状态唯一推进模型；LifeContinuity、LifeOrgans、Tribe、InnerWorld、Surface 和 Scheduler 不得各自推进平行生命时钟。
-- 用户情绪观察与夏目自身 Affect 必须使用不同类型和 writer；Relationship、Homeostasis、World、Scene、Intent 和 Identity 均有唯一写模型。
-- Surface Context 构造必须纯读；Tribe Agent 只能提交 `StateContribution`；主动行为和具身动作必须通过 durable outbox 并产生 receipt。
-- 人格成长必须经过 proposal、shadow evaluation、版本激活和 rollback，不得直接改写不可变人格基线。
-
-验收口径：
-
-- 预览、重试和回放不会推进生命状态；并发写入无 silent overwrite。
-- 同一事件可确定性重放出 Affect、Drive、Relationship、Scene 和 Expression 投影；重启前后裂痕、修复、边界与身份版本一致。
-
-#### FR-ARCH-005：统一 Memory、Knowledge 与 Data Plane（M52）
-
-- LifeMemoryService 是生活记忆唯一写服务；Episodic、Semantic、Distillation、Canon 与领域知识必须有明确 namespace、promotion 和 retention 边界。
-- EventJournal、Transactional Outbox、Repository/UoW 和 versioned projection 构成统一 Data Plane；业务模块不得直接持有 Ledger 私有连接或运行时建表。
-- Neo4j、Chroma、Tribe Registry、进程缓存和 Monitor cache 只能作为可重建 projection/cache，不能成为长期状态真相源。
-- WorldCanon 只能通过 proposal/review/apply 聚合写入，并校验批准内容 hash；Pentest 等领域知识不得进入普通人格对话权威 Canon。
-
-验收口径：
-
-- 每个长期字段只有一个 writer，所有 projection 均能从 journal/权威 store 重建并对账。
-- 普通聊天检索 Pentest 私有知识为 0；备份、恢复、压缩、遗忘和索引重建均有可重复证据。
-
-#### FR-ARCH-006：Domain Pack 平台（M53）
-
-- Code、Research、Media、Personal Knowledge、Desktop、Hardware、Pentest、BioOps 和 MCP 等领域必须通过统一 Pack SDK/Registry 接入。
-- Pack 只提供 manifest、capability/tool、领域 repository port、knowledge namespace、verifier/acceptance、risk、benchmark 和 UI contribution。
-- Pack 不得拥有第二套 TaskGraph、Scheduler、Governor、Review、Model Gateway、EventBus、Persona、Bond 或身份系统，也不得直接导入全局容器和其他领域私有 Store。
-
-验收口径：
-
-- 每个 Pack 可独立启停、版本化、授权、观测和回滚；停用单个 Pack 不破坏 Host 核心主链。
-- 静态依赖扫描和运行时权限测试均证明 Pack 不能跨领域直接写核心状态。
-
-#### FR-ARCH-007：统一 Model、Prompt、Capability 与 Governance Plane（M54）
-
-- 模型调用必须收敛为 `ModelRequest → RouteDecision → ProviderAttempt → StructuredResult`，统一 timeout、retry、fallback、熔断、预算、usage 和 route trace。
-- Prompt 模板必须版本化并声明 owner、input contract、slots 与 output schema；业务模块不得绕过 Model Plane 调用私有 provider helper。
-- CapabilityCatalog、唯一 Tool/Capability Broker、Governor、Review Token 与签名 SkillBundle 必须共享统一风险及授权语义；maturity 只能收紧权限。
-
-验收口径：
-
-- 一次模型请求的所有 provider attempt、预算消耗、降级原因和结构化验证可串联回放。
-- 未签名、无 SBOM、未隔离或未审批的 Skill/Provider bundle 不能在 Host 进程激活；自动提权数量为 0。
-
-#### FR-ARCH-008：独立 Edge Device Runtime（M55）
-
-- Edge 必须可独立安装和升级，只依赖版本化共享合同与 Edge 自有层；Host 不得反向依赖 Edge 私有实现。
-- Gateway、Voice、Avatar、Desktop Pet、MateEngine、VTS/VRM 和硬件适配器必须通过统一设备身份、协议版本、capability handshake、inbox/outbox 和 receipt 接入。
-- 物理输出只能由 Edge Device Runtime 持有最终 authority；所有本地 Bridge 默认 loopback 且要求 token/HMAC，远程暴露必须显式配置和审计。
-
-验收口径：
-
-- Edge 独立安装测试通过，Host 实现导入为 0；协议不兼容时 fail closed 并给出可解释降级状态。
-- 同一具身命令不会被多个出口重复执行，断线重连后 receipt 可对账且不会重放已完成副作用。
-
-#### FR-ARCH-009：只读 Query Plane 与 Operator Console（M56）
-
-- Obs 必须成为只读 Query/Observability Plane；read model 必须携带 schema version、freshness、source cursor 和 degraded state。
-- Operator Console 应提供 Operate、Understand、Replay/Lab 三个受治理产品面；任何写动作必须重新进入 Secure Ingress，UI 风险标签不能代替后端授权。
-- UI client 应由版本化 OpenAPI/合同生成，并纳入 type、unit/component、a11y、E2E 与权限可见性验证。
-
-验收口径：
-
-- Query/UI 不直接查询业务私有表、进程全局缓存或未授权私密正文；Obs 绕过 Command Plane 的写入口为 0。
-- raw thought、secret、cookie 和未授权私密记忆泄漏为 0；重放视图可按 cursor 解释完整因果链。
-
-#### FR-ARCH-010：Evolution Lab、兼容退役与 Release 治理（M57）
-
-- Evolution Lab 负责 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 Identity Migration；评测结果只能生成受审提案，不能直接改写生产策略、人格或能力权限。
-- 完整迁移采用 Strangler + Contract-First + Shadow Compare；shadow 只比较结果，禁止同时执行真实副作用，兼容 facade 必须声明 owner、usage telemetry 和删除版本。
-- ReleaseManifest 必须覆盖 commit、package、schema、protocol、model/prompt/avatar assets、SBOM、质量 Gate 和 rollback compatibility。
-
-验收口径：
-
-- compatibility facade 在 usage=0 且经过两个稳定发布窗口后按计划删除；无永久双核或永久双写。
-- Golden Paths、replay、chaos、performance、security、backup/restore、identity regression 与 rollback drill 全部具有 Seal 证据后，M57 才可标记完成。
-
----
-
-## 3. 非功能需求
-
-- **NFR-PERF**：3-5 秒开口（在场回应 + 云超时退化链：Gemini → Codex relay → DeepSeek → host_14b）。
-- **NFR-RELIABILITY**：依赖故障不崩溃，输出结构稳定，关键链路可观测。
-- **NFR-AUDIT**：≥99% 请求可串联追溯（request_id → intent → governor → skill_exec → result）。
-- **NFR-SAFETY**：写入、外显执行、Pentest side-effect 必须有明确 scope、approval、审计与可解释拒绝原因。
-
----
-
-## 4. 外部接口
-
-| 接口 | 端点 | 说明 |
-|------|------|------|
-| Chat | `POST /v1/chat` | 主对话入口（SSE） |
-| Host Input | `POST /v1/host/input` | Gateway/ASR ingress，不是 `/v1/chat` 简单转发 |
-| Edge Events | `POST /v1/edge/events` | Edge 运行时事件上报 |
-| Edge Visual Locate | `POST /v1/edge/visual_locate` | 当前返回 `VLM_REMOVED`，不可作为可用自动化能力 |
-| Gateway Webhook | `POST /v1/gateway/{platform}/webhook` | 平台消息入站 |
-| Gateway Reply | `POST /v1/gateway/reply` | Host → Gateway 出站 |
-| Desktop Pet | `GET/POST :18788` | 桌面宠物控制 |
-| MateEngine | UDP :32145 | 姿态/表情/动作控制 |
-| Agent Run | `POST /v1/agent/run` | Agent 执行入口，底层受 AgentWorkOrder 约束 |
-| Pentest Capabilities | `GET /v1/pentest/capabilities` | Pentest 工具与阶段元信息 |
-| Pentest Environment | `GET /v1/pentest/environment` | Lab mode、allow_exploit、Kali/OOB 环境状态 |
-| Pentest Runs | `GET/POST /v1/pentest/runs` | 创建与列出安全实验室 run |
-| Pentest Run Detail | `GET /v1/pentest/runs/{run_id}` | 单次 run 详情 |
-| Pentest Events | `GET /v1/pentest/runs/{run_id}/events` | run 事件流 |
-| Pentest Cancel | `POST /v1/pentest/runs/{run_id}/cancel` | 取消 run |
-| Pentest Approve Side Effect | `POST /v1/pentest/runs/{run_id}/approve-side-effect` | 记录 Phase4/5 approval token |
-| Pentest Continue Side Effect | `POST /v1/pentest/runs/{run_id}/continue-side-effect` | 在 approval 后继续受控 side-effect continuation |
-| Pentest Report | `GET /v1/pentest/runs/{run_id}/report` | 读取 markdown/json 报告 |
-| Obs Health | `GET /obs/services/health` | 全服务健康聚合 |
-| Obs Sessions | `GET /obs/sessions` | 会话列表 |
-| Obs Trace | `GET /obs/trace/{request_id}` | 链路节点详情 |
-| Obs Metrics | `GET /obs/metrics/timeseries` | 指标时序 |
-
----
-
-## 5. 验收边界
-
-- Host Main 入口以 `host_brain.app.asgi:app` 为准，`app_factory` 与 `router_registry` 是装配事实。
-- `/v1/chat`、`/v1/host/input`、`/v1/edge/events` 必须保持职责分离。
-- Agent 写模式必须走 `AgentWorkOrder` + `WorkspacePolicy` + `approval_policy`。
-- Monitor UI 导航以 `routeManifest.jsx` 为唯一来源，7 组导航名不得在其他文档中另造口径。
-- Pentest Phase4/5 不得被描述为无条件自动执行；必须写明 allow_exploit、approval token、scope/rate/manifest guard。
-- `/v1/edge/visual_locate` 当前不可用，只能按 `VLM_REMOVED` 降级处理。
-
----
-
-## 6. 当前架构事实入口
-
-以下文档为当前代码的权威参考（均标注 `[LIVING]`）：
-
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` — 模块全景
-- `docs/50_project/arch/dataflow_report.md` — 数据流报告
-- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` — 核心模块详细参考
-- `docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` — 应用/审计/技能层契约
-- `docs/30_devspec/DevSpec.md` — 工程契约参考
+当前是否满足这些条件，只能由 `ARCHITECTURE_GAP_MATRIX.md` 和最终机器 receipt 判断；历史 PASS、测试数量或代码行数不能替代本验收。

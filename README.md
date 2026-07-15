@@ -1,120 +1,311 @@
 受众：PROJECT
-标题：Natsume AI 仓库总览
+标题：Natsume AI 工程总览与运行指南
 
 # Natsume AI
 
-版本：v6.1 Living
-代码对齐日期：2026-06-30
+Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-Natsume AI 是一个围绕“数字生命体”构建的本地运行时仓库。当前代码的核心不是单一聊天服务，而是 Host Brain、Observability、Edge RPC、Unified Message Gateway、Monitor UI、Desktop Pet、MateEngine/VRM 桥接等多个运行面协同。
+本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但通用智能规划、统一 Scheduler/Internal 执行、人格安全演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
 
-本 README 只保留可从当前代码直接核验的入口、目录和导航。实现细节以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` 和实际代码为准。
+## 当前状态
 
-## 文档规则
+| 范围 | 当前结论 | 说明 |
+|---|---|---|
+| Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
+| Durable Task Runtime | `PARTIAL` | Graph、Attempt、Lease、Budget、Review、Verification、Acceptance 已有；并发、retry/backoff 和自动 continuation 未闭环 |
+| Scheduler / Internal Agent | `BROKEN` | 仍生成旧 WorkOrder，不能通过当前 admission 合同 |
+| Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
+| Persona 演化 | `UNSAFE_DIRECT_WRITERS` | 仍有路径可绕过 proposal、Review、版本激活和 rollback 直接改 trait |
+| 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |
 
-- 所有 Markdown 文件必须以两行开头：`受众：MASTER|CODEX|PROJECT` 和 `标题：...`。
-- `[LIVING]` 文档跟随代码变化；发生冲突时，以代码为事实源。
-- 架构事实入口在 `docs/50_project/arch/`，历史计划和阶段复盘只作为追溯资料。
+权威入口：
 
-## 当前运行面
+- [当前代码事实](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
+- [系统架构总览](docs/50_project/arch/SYSTEM_ARCHITECTURE.md)
+- [功能模块地图](docs/50_project/arch/FUNCTIONAL_MODULES.md)
+- [关键数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md)
+- [目标架构](docs/50_project/arch/TARGET_ARCHITECTURE.md)
+- [架构差距矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
+- [下一代正式执行合同](docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)
+- [机器可读状态](configs/release/current_architecture_status.json)
 
-| 运行面 | 入口 | 端口/配置 | 当前事实 |
-|---|---|---|---|
-| Host Brain | `host_brain/__main__.py` -> `host_brain.app.asgi:app` | `HOST_APP_PORT`，CLI fallback `8000`；示例环境常设 `18080` | 主 API、聊天、工具、记忆、数字生命、Pentest 路由 |
-| Observability | `host_brain/obs_main.py` -> `host_brain.app.obs_fastapi_app:app` | `HOST_OBS_APP_PORT`，fallback `18082` | 独立 FastAPI app，承接 `/obs/*`、`/api/ui/*` 等监控流量 |
-| Monitor Proxy | `scripts/runtime/start_monitor_proxy.ps1` | `HOST_MONITOR_PROXY_PORT`，fallback `18180` | Nginx 代理 `/monitor/` 静态资产、Host upstream 和 Obs upstream |
-| Edge RPC | `edge_client/__main__.py` | `EDGE_RPC_PORT`，fallback `17800` | Edge 侧 ASR/TTS/avatar/resource gate 等 RPC 能力 |
-| Unified Gateway | `edge_client/gateway/bootstrap.py` + `edge_client/gateway/server.py` | `EDGE_GATEWAY_PORT`，fallback `19000` | 平台 webhook、统一输入回流、平台回复分发 |
-| Desktop Pet | `desktop_pet/main.cjs` | `NATSUME_DESKTOP_PET_PORT`，fallback `18788` | Electron + Live2D 本地桌宠，提供 `/health` 与 `/action` |
-| MateEngine/VRM | `host_brain/channels/mateengine.py`、`edge_client/config.py` | MateEngine UDP `32145`，VRM bridge `18770` | Host 侧动作/说话桥接，Edge 侧 VRM bridge 配置 |
+## 系统全景
 
-## 代码主干
+```mermaid
+flowchart LR
+    U["用户 / Operator"]
+    P["外部消息平台"]
+    UI["Monitor UI / Desktop Pet"]
 
-| 路径 | 当前规模 | 说明 |
-|---|---:|---|
-| `host_brain/app/` | 228 Python 文件 | Host FastAPI、主链、路由、Obs app、Monitor UI 后端接口 |
-| `host_brain/persona/` | 75 Python 文件 | 人格、内心世界、回复规划、Surface 主链与评分 |
-| `host_brain/persona/surface/` | 17 Python 文件 | Surface 数据模型、输入校验、prompt、候选评分、scoring 子包 |
-| `host_brain/pentest/` | 124 Python 文件 | 授权渗透测试代理、工具执行、安全边界、报告和自主 agent |
-| `host_brain/runtime/` | 6 Python 文件 | 数字生命后台 tick、连续性、器官状态、自主发起 |
-| `host_brain/memory/` | 24 Python 文件 | LifeMemoryStore、召回融合、Canon、上下文压缩 |
-| `host_brain/tribe/` | 34 Python 文件 | 23 个 family spec、25 个默认 agent descriptor、事件总线 |
-| `host_brain/governor/` | 10 Python 文件 | 决策、规则、tier policy、rate limit、token budget |
-| `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；Pentest 不走这里注册 |
-| `edge_client/` | 80 Python 文件 | Edge RPC、Gateway、平台适配器、Edge tribe bridge |
-| `desktop_pet/` | Electron 项目 | Live2D 桌宠本地窗口与 HTTP 控制面 |
+    subgraph EdgeSide["接入与外显面"]
+        GW["Unified Gateway"]
+        EDGE["Edge RPC\nASR / TTS / Avatar / Device"]
+    end
 
-## 关键入口
+    subgraph Host["Host"]
+        IN["Secure Ingress / Input Runtime"]
+        GOV["Governor / Scope / Grant"]
+        CMD["HostCommand + WorkOrderV3"]
+        GRAPH["Immutable TaskGraph"]
+        TASK["Durable Task Runtime"]
+        WORKER["Worker / Capability Broker / Model Runtime"]
+        ACCEPT["Verification / Acceptance"]
+        EFFECT["Durable Effect Intents"]
+        LIFE["Life / Persona / Memory / Bond / Canon"]
+        QUERY["Read-only Projections"]
+    end
 
-### Chat 主链
-
-```text
-POST /v1/chat
-  -> host_brain/app/app_factory.py 注册 endpoint
-  -> host_brain/app/chat_routes.py::handle_v1_chat_route()
-  -> host_brain/app/chat_handler.py::handle_chat()
-  -> host_brain/app/agent_runtime_shared.py
-  -> host_brain/app/executive_runtime_core.py
-  -> host_brain/app/surface_main_chain_adapter.py
-  -> host_brain/persona/surface_main_chain.py
+    U --> IN
+    P --> GW --> IN
+    IN --> GOV --> CMD --> GRAPH --> TASK --> WORKER --> ACCEPT --> EFFECT
+    EFFECT --> LIFE
+    EFFECT --> GW
+    EFFECT --> EDGE
+    LIFE --> QUERY
+    TASK --> QUERY
+    QUERY --> UI
+    EDGE --> UI
 ```
 
-### Host 路由事实
+图中是生产主干的方向，不表示每条入口都已完全接线。Scheduler/Internal 的 admission、旧 Executive compatibility path 和部分后台 writer 仍是明确缺口，详见差距矩阵。
 
-`host_brain/app/router_registry.py` 当前注册：`/canon`、`/scheduler`、`/host-scheduler/*`、`/tools`、`/prompt-config`、`/bond`、`/v1/agent`、`/v1/host/input`、`/internal/*`、`/v1/digital-life`（含 `/proactive/*`）、`/v1/memory`、`/v1/mateengine`、`/v1/pentest`、`/health`、`/ready` 等。Observability 路由（`/obs/*`、`/api/ui/*`）由独立 `obs_fastapi_app.py` 装配，含 `/obs/proactive-autonomy` 快照端点。
+## 运行面
 
-`/v1/chat` 和 `/v1/edge/events` 由 `host_brain/app/app_factory.py` 单独注册，不是 `router_registry.py` 中的普通 router include。
+| 运行面 | 启动入口 | 核心职责 | 主要边界 |
+|---|---|---|---|
+| Host Main | `python -m host_brain` | 对话入口、Governor、Task/Agent Runtime、Life、Memory、业务 API | 真实命令与长期状态的主要协调面 |
+| Observability | `python -m host_brain.obs_main` | 只读运行投影、Trace、健康状态、Operator BFF | 不应成为业务事实 writer |
+| Monitor UI | `host_brain/app/monitor_ui/` | Task、Review、健康、数字生命和运维视图 | 通过 Query/Operator API 读取和发命令 |
+| Edge RPC | `python -m edge_client` | ASR、TTS、Avatar、桌面与设备 actuator | 物理副作用必须回传 receipt |
+| Unified Gateway | Edge lifecycle 中的 `edge_client/gateway/bootstrap.py` | 平台 webhook、消息归一化、Host 回流与出站投递 | 平台适配器不拥有 Host 业务状态 |
+| Desktop Pet | `desktop_pet/main.cjs` | Electron + Live2D 本地表现 | 只消费状态和动作，不裁决事实 |
+| External Services | `scripts/runtime/docker-compose.external.yml` | Neo4j、Chroma、Redis | 可选依赖；不可用时按配置降级 |
 
-### Monitor UI
+Host 与 Edge 之间的共享数据结构位于 `natsume_contracts/`。该目录是跨进程版本化合同，不是重复实现或可删除的临时目录。
 
-React 源码位于 `host_brain/app/monitor_ui/src/`。当前 `routeManifest.jsx` 注册 37 条路由，其中 35 条进入导航，分为 Cockpit、Life Systems、Observability、Operations、Execution、Security Lab、Integrations 七组。构建产物位于 `host_brain/app/static/monitor/`，由 monitor proxy 脚本通过 `/monitor/` 对外提供。
+## 核心运行链
 
-### Pentest
+### Governed 请求
 
-Pentest 使用独立调度链路，不在 `host_brain/skills/impl/` 普通 skill executor 中实现。当前事实：
+Host canonical 请求的目标 lineage 是：
 
-- ToolSpec 真源：`host_brain/pentest/tools/tool_specs.py`（88 个 ToolSpec）
-- Executor 真源：`host_brain/pentest/tools/tool_executors.py`（92 个 executor，6,029 行）
-- 88 个 ToolSpec，92 个 executor，37 个 side-effect ToolSpec，0 个缺 executor
-- Kali bridge 有 17 个 wrapper class
-- 规划器：MCTS（`mcts_planner.py`）+ ReAct（`llm_react_planner.py`）+ Cognitive（`agent/cognitive_engine.py`）三条路径
-- Agent 子包：`pentest/agent/` 31 文件（8,906 行），含认知引擎、信念模型、目标模型、演化核心
-- Adversarial：`pentest/adversarial/` 9 文件 — 红蓝对抗 game loop + 策略协同进化
-- Swarm：`pentest/swarm/` 8 文件 — 多 agent 协调器 + 消息总线 + 图合并
-- Online：`pentest/online/` 5 文件 — 安全门控、授权管理、速率治理
-- 入口文档：`host_brain/pentest/CAPABILITY.md`（v2.3）
-- 专项架构：`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`（v1.1）
+```text
+request
+  → Secure Ingress
+  → Governor decision + grant
+  → HostCommand + WorkOrderV3 + BudgetPolicy
+  → immutable TaskGraph revision
+  → node Attempt + Lease + node-bound grant
+  → worker / model / capability execution
+  → Verification
+  → Acceptance
+  → durable effect intents
+  → effect receipts and read-only projections
+```
 
-## 快速启动
+当前 `chat`、`skill`、`delegate`、`plan` 进入这条主链。`task_progress`、`recent_turn` 等 compatibility route 仍可能进入旧 Executive；Scheduler 和 Internal Agent 尚未满足新 admission 合同。
+
+### Planning Search
+
+`host_brain/planning_search/` 是领域无关、无真实副作用端口的搜索内核，提供候选扩展、排序、虚拟状态转换、reward 和 Conditional MCTS。它只能选择规划，不能直接执行工具。
+
+当前 Host Plan 只把 Governor 已批准的步骤合法化并编译为图，并不会从目标生成多套竞争方案。Pentest 已接公共搜索 adapter，但 L3 仍处于未校准 shadow；Research/Code 只有模拟证据。因此不能把“存在 MCTS 类”写成“系统已经具备通用自主规划能力”。
+
+### 状态与副作用
+
+Task Acceptance 会原子登记 effect intent，随后由 durable dispatcher 分别应用对话、Memory、Life、Gateway、Edge 等副作用。正确语义是“验收后可恢复的最终一致”，不是“所有外部系统处在同一个数据库事务”。
+
+详细流程和图见 [关键数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md) 与 [架构图册](docs/50_project/arch/diagrams/00_INDEX.md)。
+
+## 功能能力
+
+| 能力域 | 对用户提供什么 | 主要实现 |
+|---|---|---|
+| 对话与最终表达 | 流式对话、人格化表达、媒体/语音响应 | `host_brain/agent_runtime/`、`host_brain/persona/`、`host_brain/surface_runtime/` |
+| 治理与安全入口 | 身份、范围、规则裁决、授权 token、拒绝与审计 | `host_brain/secure_ingress/`、`host_brain/governor/` |
+| 任务执行 | Durable DAG、Attempt、Lease、Budget、Review、验收与恢复 | `host_brain/orchestration/`、`host_brain/task_runtime/` |
+| 模型运行 | Provider 路由、模型尝试、重试、用量与失败证据 | `host_brain/model_runtime/`、`host_brain/integrations/` |
+| Capability / Skill | 内置能力目录、授权执行、签名接收与隔离 | `host_brain/capability_plane/`、`host_brain/skills/`、`host_brain/airlock/` |
+| 记忆与知识素材 | 对话经历、语义/向量召回、Canon、来源证据 | `host_brain/memory/`、`host_brain/retrieval/`、`host_brain/canon/` |
+| 数字生命 | Life 状态、情绪、关系、人格表达、主动性 | `host_brain/digital_life/`、`host_brain/persona/`、`host_brain/bond/`、`host_brain/tribe/` |
+| 多平台与设备 | 平台消息、ASR/TTS、Avatar、桌面和设备动作 | `edge_client/gateway/`、`edge_client/actuators/`、`desktop_pet/` |
+| 观测与运维 | 健康、Trace、任务投影、Review 定位、Operator 命令 | `host_brain/observability/`、`host_brain/app/obs_*`、Monitor UI |
+| 安全实验室 | 有授权、受隔离、可审计的 Pentest 工作流 | `host_brain/pentest/`、`host_brain/security_immune/` |
+
+模块职责、依赖方向、入口和已知限制见 [功能模块地图](docs/50_project/arch/FUNCTIONAL_MODULES.md)。
+
+## 仓库结构
+
+```text
+Natsume_Ai/
+├─ host_brain/                 Host、领域能力与后端运行时
+│  ├─ app/                     ASGI、HTTP adapters、composition wiring、Monitor UI
+│  ├─ orchestration/           Command、Plan 编译、Graph revision、node grant
+│  ├─ task_runtime/            Durable 执行状态机
+│  ├─ planning_search/         无副作用规划搜索内核
+│  ├─ model_runtime/           模型路由与 ModelAttempt
+│  ├─ digital_life/ persona/   Life 状态与最终表达
+│  ├─ memory/ retrieval/       记忆写入、召回与上下文材料
+│  ├─ capability_plane/ skills/ 能力治理与内置 Skill
+│  └─ persistence/ audit/      Repository、SQLite、Migration、Journal
+├─ edge_client/                Edge RPC、Gateway、平台与设备 adapters
+├─ natsume_contracts/          Host/Edge 共享的运行时中立合同
+├─ desktop_pet/                Electron + Live2D 桌面表现
+├─ configs/                    可提交策略、发布与机器状态配置
+├─ scripts/runtime/            本地运行、外部服务与验收脚本
+├─ tests/                      unit / contract / integration / e2e / security
+├─ tools/                      静态扫描、文档门禁和发布工具
+├─ docs/                       产品、理论、架构、工程合同与历史证据
+├─ runtime/                    本地可变数据，Git 忽略
+└─ artifacts/                  临时验收产物，Git 忽略
+```
+
+顶层不承载通用 `data/`、`flows/`、`skills/`、`integrations/` 杂物目录。模块资产必须归属于明确 bounded context；可变数据进入 `runtime/`。
+
+## 本地启动
+
+### 1. 环境要求
+
+- Python 3.11 或更高版本。
+- Node.js `^20.19.0` 或 `>=22.12.0` 与 npm：Monitor UI 的 Vite 8 构建要求；Desktop Pet 和其他前端工具也使用该运行时。
+- Docker：仅 Neo4j、Chroma、Redis 等外部服务需要。
+- 真实模型、平台和设备能力需要各自密钥或本机依赖；缺失时应显式降级，不能伪装成功。
+
+### 2. 安装
 
 ```powershell
-# Host Brain
-python -m host_brain --port 18080
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -e .\natsume_contracts -e .\edge_client -e ".\host_brain[dev]"
+python -m pip install "pre-commit>=4,<5"
+```
 
-# Observability
-python -m host_brain.obs_main --port 18082
+复制配置模板并只在本地 `.env` 中填写真实密钥：
 
-# Edge RPC
-python -m edge_client --port 17800
+```powershell
+Copy-Item .env.example .env
+```
 
-# Monitor proxy
-powershell -ExecutionPolicy Bypass -File scripts/runtime/start_monitor_proxy.ps1
+建议将可变数据显式放入 `runtime/`：
 
+```dotenv
+NATSUME_DATA_DIR=runtime/data
+NATSUME_AUDIT_DB=runtime/host/audit.sqlite3
+```
+
+`.env.core.example`、`.env.optional.example` 和 `.env.experimental.example` 分别解释核心、可选和实验配置；实际字段的最终解释以 `host_brain/app/settings/` 与 `edge_client/config.py` 为准。
+
+### 3. 可选外部服务
+
+```powershell
+docker compose -f scripts/runtime/docker-compose.external.yml up -d
+docker compose -f scripts/runtime/docker-compose.external.yml ps
+```
+
+该 Compose 只启动外部依赖，不会代替 Host、Obs、Edge 或前端进程。
+
+### 4. 启动后端
+
+```powershell
+# Host，本文示例显式固定为 18080
+python -m host_brain --host 127.0.0.1 --port 18080 --startup-check
+
+# 独立 Observability，本文示例显式固定为 18082
+python -m host_brain.obs_main --host 127.0.0.1 --port 18082
+
+# Edge RPC，本文示例显式固定为 17800
+python -m edge_client --host 127.0.0.1 --port 17800
+```
+
+Gateway 通常由 Edge lifecycle 按 `EDGE_GATEWAY_ENABLED` 与 `EDGE_GATEWAY_PLATFORMS` 装配，不应再单独复制一套业务状态。
+省略这些 CLI 参数时，实际绑定地址取决于类型化设置、`.env` 和运行时环境文件；启动后应以进程日志和健康探测为准。
+
+### 5. 启动前端
+
+```powershell
+# Monitor UI 开发服务
+Set-Location host_brain/app/monitor_ui
+npm ci
+npm run dev
+```
+
+```powershell
 # Desktop Pet
-cd desktop_pet
-npm install
+Set-Location desktop_pet
+npm ci
 npm start
 ```
 
-Gateway 通常由 Edge bootstrap 组装运行；配置入口在 `edge_client/config.py`，平台范围由 `EDGE_GATEWAY_PLATFORMS` 控制，当前支持 `wechat`、`qq`、`feishu`、`wecom`、`telegram`、`line`。
+### 6. 健康与接口
 
-## 主要文档
+服务启动后，使用运行时 OpenAPI 和健康接口核对真实路由；不要依赖文档中的固定路由数量。常用入口：
 
-- 文档地图：[`docs/00_index/00_DOCMAP.md`](docs/00_index/00_DOCMAP.md)
-- 当前代码架构：[`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
-- 核心模块参考：[`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`](docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md)
-- Pentest 专项架构：[`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`](docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md)
-- Pentest 能力边界：[`host_brain/pentest/CAPABILITY.md`](host_brain/pentest/CAPABILITY.md)
-- 数据流报告：[`docs/50_project/arch/dataflow_report.md`](docs/50_project/arch/dataflow_report.md)
-- 工程契约：[`docs/30_devspec/DevSpec.md`](docs/30_devspec/DevSpec.md)
-- 人格定义：[`Soul.md`](Soul.md)
+- Host：`http://127.0.0.1:18080/docs`、`/health`、`/ready`。
+- Observability：`http://127.0.0.1:18082/docs`、`/obs/*`。
+- Edge：地址和端口由 `EDGE_RPC_HOST/EDGE_RPC_PORT` 决定。
+
+## 开发与验证
+
+按改动风险选择最小充分验证：
+
+```powershell
+# 单元或定向测试
+python -m pytest -q tests/unit/<test_file>.py
+
+# 稳定合同与集成测试
+python -m pytest -q tests/contract tests/integration
+
+# 全量 Python 测试
+python -m pytest -q
+
+# 架构与仓库静态门禁
+python tools/static_scan/run_all.py --root .
+
+# 文档权威、受众和新鲜度门禁
+python tools/doc_lint/doc_audience_lint.py --root .
+python tools/doc_lint/doc_authority_gate.py --root .
+python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+
+# 当前暂存改动的提交前检查
+python -m pre_commit run
+```
+
+前端验证命令由各自 `package.json` 定义。Monitor UI 至少应运行 `npm run build`；涉及 Operator client、Task Runtime 页面或交互时再运行对应 lint、typecheck 和测试。
+
+## 架构约束
+
+1. 一个长期状态只能有一个权威 writer；Projection、Cache、UI 和模型输出不能反向成为事实。
+2. 搜索、模拟、benchmark 和 counterfactual 路径不得持有真实工具或外部副作用端口。
+3. worker 只执行冻结的 TaskGraph revision；失败重规划必须生成新 revision。
+4. 所有模型与工具调用都必须关联 request、graph/node、attempt、grant 和 receipt。
+5. Acceptance 之前不得提交不可逆副作用；Acceptance 之后通过 durable intent/outbox 投递。
+6. 人格、策略、知识和 capability maturity 的自动变化只能生成 proposal，不能直接修改生产真相。
+7. Host、Obs、Gateway、Edge 和 UI 通过版本化合同协作，不共享隐式全局状态。
+8. 新功能必须进入现有 bounded context；禁止以顶层杂物目录或第二套 registry 绕过架构。
+
+## 文档体系
+
+| 想了解什么 | 阅读入口 |
+|---|---|
+| 产品为何存在、用户主权是什么 | [白皮书与宪法](docs/10_whitepaper/index.md) |
+| 核心理论和概念模型 | [理论体系](docs/15_theory/index.md) |
+| 系统现在如何组织 | [系统架构总览](docs/50_project/arch/SYSTEM_ARCHITECTURE.md) |
+| 每个代码域负责什么 | [功能模块地图](docs/50_project/arch/FUNCTIONAL_MODULES.md) |
+| 请求、状态和副作用如何流动 | [关键数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md) |
+| 当前哪些能力真的接通 | [当前代码事实](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md) |
+| 最终应演进到哪里 | [目标架构](docs/50_project/arch/TARGET_ARCHITECTURE.md) |
+| 目标和代码还差什么 | [架构差距矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md) |
+| 接下来按什么顺序实施 | [正式执行合同](docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) |
+| 需求如何映射到代码和测试 | [需求追溯矩阵](docs/60_trace/requirements_trace.md) |
+| 历史计划为何不再是 authority | [历史程序目录](docs/_history/programs/2026-07/README.md) |
+
+文档权威顺序是：生产代码与 machine status → Current → Target → Gap → Active Execution → PRD/DevSpec/Trace → 历史证据。历史 `DONE/PASS` 只对其固定提交、环境和声明范围成立。
+
+## 提交约定
+
+- 提交信息、PR 标题和 PR 正文统一使用中文。
+- 不提交 `.env`、密钥、`runtime/`、`artifacts/`、模型文件或本地服务数据。
+- 修改生产架构时同步更新 Current、Gap、机器状态、执行合同和相应数据流图。
+- 删除或移动文档时同步更新目录索引与文档门禁策略。

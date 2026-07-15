@@ -1,22 +1,32 @@
-受众：MASTER
-标题：项目资产目录
+受众：PROJECT
+标题：Natsume AI 项目文档目录
 
-# 项目资产目录
+# Natsume AI 项目文档目录
 
-版本：v2.0
+版本：v4.0
 维护日期：2026-07-15
-状态：当前项目入口
 
-## 首要入口
+## 架构
 
-1. `arch/CURRENT_CODE_ARCHITECTURE.md`：当前代码事实。
-2. `arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`：完整目标架构。
-3. `../30_devspec/NATSUME_AI_UNIVERSAL_GOVERNED_PLANNING_EXECUTION_20260714.md`：当前正式执行合同。
-4. `PROJECT_BRIEF.md`：项目文档协作边界。
+- [系统架构总览](arch/SYSTEM_ARCHITECTURE.md)
+- [功能模块地图](arch/FUNCTIONAL_MODULES.md)
+- [关键数据流](arch/DATA_FLOW_ARCHITECTURE.md)
+- [架构图册](arch/diagrams/00_INDEX.md)
+- [Monitor UI 架构](arch/MONITOR_UI_ARCHITECTURE.md)
+- [部署架构](arch/DEPLOYMENT_ARCHITECTURE.md)
 
-## 子目录
+## 状态与演进
 
-- `arch/index.md`：当前架构、目标和仍有复用价值的专项说明。
-- `guides/index.md`：开发、文档同步和本地工具指南。
+- [当前代码事实](arch/CURRENT_CODE_ARCHITECTURE.md)
+- [目标架构](arch/TARGET_ARCHITECTURE.md)
+- [架构差距矩阵](arch/ARCHITECTURE_GAP_MATRIX.md)
+- [下一代正式执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)
 
-阶段性任务拆解、旧 Project 看板和重复审计已移除。需要追溯时使用 Git 历史，不将历史材料重新视作当前任务来源。
+## 工程入口
+
+- [项目简报](PROJECT_BRIEF.md)
+- [工程指南](guides/index.md)
+- [文档同步工作流](guides/DOCUMENT_SYNC_WORKFLOW.md)
+- [Pentest 专项架构](arch/PENTEST_MODULES_ARCHITECTURE.md)
+
+旧架构计划和完成报告不是当前 authority；历史程序仅从 [历史目录](../_history/programs/2026-07/README.md) 进入。

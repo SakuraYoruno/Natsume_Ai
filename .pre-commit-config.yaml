@@ -8,3 +8,9 @@ repos:
         language: system
         pass_filenames: true
         files: \.md$
+      - id: doc-authority-gate
+        name: 文档权威链门禁（历史计划隔离）
+        entry: python tools/doc_lint/doc_authority_gate.py --root .
+        language: system
+        pass_filenames: false
+        files: ^(\.pre-commit-config\.yaml|README\.md|docs/|configs/release/current_architecture_status\.json|tools/|tests/)

@@ -1,147 +1,124 @@
-受众：MASTER
-标题：图 05 — Tribe 23 family 拓扑（脑区 / 内分泌 / 外周 / 执行）
+受众：PROJECT
+标题：图 05——数字生命状态与表达
 
-版本：v1.0
-日期：2026-05-30
-归属：docs/50_project/arch/diagrams/
+# 图 05：数字生命状态与表达
 
----
+版本：v2.0
+核对日期：2026-07-15
 
-## 怎么读这张图
+文件名保留为 `05_tribe_topology.md` 以兼容旧链接。本图不再把一个固定 family 清单当作整个数字生命架构，而是描述状态、记忆、关系、场景、人格和最终表达的 authority 关系。
 
-23 family 不是一个扁平列表，而是按"功能层"自然分簇：
-
-| 簇 | family | 角色 |
-|---|---|---|
-| 🧠 **认知中枢** | cortex / thalamus / prefrontal / hippocampus / language | 主链编排、意图、计划、记忆、语言 |
-| 💛 **情感与动机** | limbic / pain_reward / endocrine / mirror_neuron / interoception | 情绪、奖惩、激素、共情、内感 |
-| 👁️ **感知与监控** | proprioception / somatic / vestibular / immune | 本体感、躯体、平衡、风险 |
-| 🌐 **社交与外周** | social_brain / peripheral / language（外向） | 社交模型、外围执行、对外语言 |
-| 🌙 **节律与代谢** | circadian / glymphatic / ans / default_mode | 昼夜、清理、自主神经、默认模式 |
-| ⚡ **执行与反射** | motor_cortex / cerebellum / initiative_governor | 动作、协调、自启动 |
-
-## 23 family 全景图
-
-```mermaid
-graph TB
-    subgraph Cognition["🧠 认知中枢"]
-        C1["cortex<br/>CortexAgent"]
-        C2["thalamus<br/>ThalamusAgent"]
-        C3["prefrontal<br/>PrefrontalAgent"]
-        C4["hippocampus<br/>HippocampusAgent"]
-        C5["language<br/>LanguageSystemAgent"]
-    end
-
-    subgraph Affective["💛 情感与动机"]
-        A1["limbic<br/>LimbicAgent"]
-        A2["pain_reward<br/>PainRewardAgent"]
-        A3["endocrine<br/>EndocrineAgent"]
-        A4["mirror_neuron<br/>MirrorNeuronAgent"]
-        A5["interoception<br/>InteroceptionAgent"]
-    end
-
-    subgraph Perception["👁️ 感知与监控"]
-        P1["proprioception<br/>ProprioceptionAgent"]
-        P2["somatic<br/>SomaticAgent"]
-        P3["vestibular<br/>VestibularAgent"]
-        P4["immune<br/>ImmuneAgent"]
-    end
-
-    subgraph Social["🌐 社交与外周"]
-        S1["social_brain<br/>SocialBrainAgent"]
-        S2["peripheral<br/>PeripheralAgent"]
-    end
-
-    subgraph Rhythm["🌙 节律与代谢"]
-        R1["circadian<br/>CircadianAgent"]
-        R2["glymphatic<br/>GlymphaticAgent"]
-        R3["ans<br/>ANSAgent"]
-        R4["default_mode<br/>DefaultModeAgent"]
-    end
-
-    subgraph Motor["⚡ 执行与反射"]
-        M1["motor_cortex<br/>MotorCortexAgent"]
-        M2["cerebellum<br/>CerebellumAgent"]
-        M3["initiative_governor<br/>InitiativeGovernorAgent"]
-    end
-
-    C2 -.意图编译.-> C1
-    C1 -.编排.-> M1
-    C3 -.漂移告警.-> C1
-    C4 -.记忆召回.-> C1
-    A1 -.情绪态.-> C1
-    P4 -.风险门控.-> C1
-    A3 -.激素基调.-> A1
-    R3 -.唤醒度.-> C2
-    R1 -.昼夜.-> R2
-    M3 -.主动触发.-> C1
-    M2 -.动作协调.-> M1
-```
-
-## 主链关键 family 在 chat 流的位置
+## 状态到表达
 
 ```mermaid
 flowchart LR
-    IN["用户输入"] --> THA["thalamus<br/>意图编译"]
-    THA --> IMM["immune<br/>风险门控"]
-    IMM --> COR["cortex<br/>主链编排"]
-    COR --> LIM["limbic<br/>情绪/动机"]
-    LIM --> PRE["prefrontal<br/>self-reflection"]
-    PRE --> HIP["hippocampus<br/>记忆召回"]
-    HIP --> LANG["language<br/>语言生成"]
-    LANG --> MOT["motor_cortex<br/>动作派发"]
-    MOT --> OUT["对外回复 / Edge 动作"]
+    EVENT["Accepted interaction / system event"]
+    LIFE_CMD["Life Command"]
+    LIFE["Life reducer + projection"]
+    MEM["Memory evidence / recall"]
+    BOND["Bond events + relationship state"]
+    BODY["Emotion / motive / organ signals"]
+    WORLD["World projection\nread-only, partial"]
+    SCENE["Scene policy\npartial, default off"]
+    PERSONA["Persona expression constraints"]
+    PACKET["SurfacePacketCompiler"]
+    SURFACE["Surface Runtime\nfinal visible reply"]
+    EDGE["Voice / Avatar / Desktop cues"]
+
+    EVENT --> LIFE_CMD --> LIFE
+    EVENT --> MEM
+    EVENT --> BOND
+    LIFE --> BODY
+    LIFE --> WORLD
+    LIFE --> SCENE
+    MEM --> SCENE
+    BOND --> SCENE
+    BODY --> SCENE
+    SCENE --> PERSONA
+    MEM --> PACKET
+    BOND --> PACKET
+    BODY --> PACKET
+    PERSONA --> PACKET --> SURFACE --> EDGE
+
+    style WORLD fill:#fff3cd,stroke:#b08800
+    style SCENE fill:#fff3cd,stroke:#b08800
 ```
 
-## 23 family 完整代码事实清单
+这里的核心不是“模拟多少器官”，而是确保不同信号只提供材料，最终表达和长期状态各有明确 owner：
 
-| # | family_id | 默认 display_name |
-|---:|---|---|
-| 1 | `cortex` | CortexAgent |
-| 2 | `thalamus` | ThalamusAgent |
-| 3 | `ans` | ANSAgent |
-| 4 | `hippocampus` | HippocampusAgent |
-| 5 | `limbic` | LimbicAgent |
-| 6 | `prefrontal` | PrefrontalAgent |
-| 7 | `social_brain` | SocialBrainAgent |
-| 8 | `endocrine` | EndocrineAgent |
-| 9 | `immune` | ImmuneAgent |
-| 10 | `pain_reward` | PainRewardAgent |
-| 11 | `language` | LanguageSystemAgent |
-| 12 | `somatic` | SomaticAgent |
-| 13 | `peripheral` | PeripheralAgent |
-| 14 | `circadian` | CircadianAgent |
-| 15 | `proprioception` | ProprioceptionAgent |
-| 16 | `initiative_governor` | InitiativeGovernorAgent |
-| 17 | `default_mode` | DefaultModeAgent |
-| 18 | `mirror_neuron` | MirrorNeuronAgent |
-| 19 | `interoception` | InteroceptionAgent |
-| 20 | `motor_cortex` | MotorCortexAgent |
-| 21 | `cerebellum` | CerebellumAgent |
-| 22 | `glymphatic` | GlymphaticAgent |
-| 23 | `vestibular` | VestibularAgent |
+- Life reducer 维护可追溯生命状态。
+- Memory 保存经历与来源材料。
+- Bond 保存关系事件/状态。
+- Scene 解析当前表达约束，但目前未形成完整 canonical aggregate。
+- Persona 约束风格、边界和身份连续性。
+- Surface Runtime 生成最终可见文本。
+- Edge/Pet 只负责外显，不拥有 Persona 或 Life 真相。
+
+## Persona 演化风险
+
+```mermaid
+flowchart TD
+    FEEDBACK["Outcome / user feedback"]
+    PROPOSAL["Feedback/Persona proposal"]
+    SHADOW["Scenario / shadow evaluation"]
+    REVIEW["Review + identity diff"]
+    VERSION["Version activation"]
+    ROLLBACK["Rollback point"]
+    TRAIT["Production Persona policy"]
+
+    LEGACY1["Bond stage/milestone writer"]
+    LEGACY2["interaction-cycle writer"]
+    LEGACY3["scheduler-allowed emergent writer"]
+
+    FEEDBACK -."TARGET".-> PROPOSAL -.-> SHADOW -.-> REVIEW -.-> VERSION -.-> TRAIT
+    VERSION -.-> ROLLBACK
+    LEGACY1 --> TRAIT
+    LEGACY2 --> TRAIT
+    LEGACY3 --> TRAIT
+
+    style LEGACY1 fill:#ffd9d9,stroke:#b31d28
+    style LEGACY2 fill:#ffd9d9,stroke:#b31d28
+    style LEGACY3 fill:#ffd9d9,stroke:#b31d28
+    style TRAIT fill:#fff3cd,stroke:#b08800
+```
+
+红色路径是当前必须中央封禁的 direct writers。即使它们内部调用了 drift guard，也不等于已经通过 proposal、shadow、Review、版本激活和 rollback。
+
+## 主动行为
+
+```mermaid
+flowchart LR
+    SIGNAL["Life / schedule / environment signal"]
+    INTENT["Proactive intent"]
+    GOV["Intent arbiter / Governor"]
+    CMD["HostCommand"]
+    TASK["Governed Task Runtime"]
+    OUT["Accepted message or device effect"]
+
+    SIGNAL --> INTENT --> GOV --> CMD --> TASK --> OUT
+```
+
+后台周期、器官信号或模型建议不能直接外发消息、改变人格或执行设备动作。它们只能提出 intent，随后进入与用户请求相同的治理和验收链。当前 Intent Arbiter 尚未完整统一 user/task/life/relationship/long-term goal。
+
+## Tribe/Organ 的位置
+
+`host_brain/tribe/` 与 `host_brain/organ_ops/` 提供器官化信号、descriptor 和协作材料。它们可以影响 affect、drive、continuity、task 或 safety 上下文，但不是一组平行的状态数据库，也不应各自拥有最终回复或真实副作用 authority。具体可用 family 以 `host_brain/tribe/registry.py` 为准，不在架构文档中冻结数量。
 
 ## 代码锚点
 
-| 内容 | 文件 |
-|---|---|
-| 23 family 真源 | `host_brain/tribe/registry.py:_DEFAULT_FAMILY_SPECS` |
-| `TribeFamilySpec` 定义 | `host_brain/tribe/registry.py:10` |
-| `HostTribeRegistry` | `host_brain/tribe/registry.py:44` |
-| 默认 agent 描述 | `host_brain/tribe/registry.py:_bootstrap_default_agents` |
-| 主链 family agent | `host_brain/tribe/*_agent.py`（每个 family 各一） |
+- Life command/reducer：`host_brain/digital_life/`
+- Life composition：`host_brain/composition/life.py`
+- Persona/Surface：`host_brain/persona/`、`host_brain/surface_runtime/`
+- Scene policy：`host_brain/persona/scene_policy.py`
+- World projection：`host_brain/runtime/world_model.py`、`host_brain/persistence/world_model_query_repository.py`
+- Memory：`host_brain/memory/`、`host_brain/retrieval/`
+- Bond：`host_brain/bond/`、`host_brain/persistence/bond_*`
+- Organ influence：`host_brain/persona/surface_organ_influence.py`
+- Persona growth/direct writers：`host_brain/persona/persona_growth.py` 及 `apply_growth_delta()` 调用点
 
-## 不变量
+## 当前限制
 
-1. **23 family**，既不多也不少；任何文档说"22 个器官族"都是过期口径。
-2. 灰度开关已**全数删除**；A 级化升级闭环。
-3. family 注册以 `_DEFAULT_FAMILY_SPECS` 为唯一真源；运行时可 `set_host_tribe_registry(...)` 注入定制版本。
-4. cortex 是默认 fallback：当 descriptor 没有明确 family 时归到 cortex。
-
-## 已废弃路径
-
-| 旧路径 | 当前事实 |
-|---|---|
-| 22 个器官族 | ❌ 已升级为 23（新增 `glymphatic`） |
-| family 灰度开关 | ❌ 已全数删除 |
-| C 级 / B 级 family | ❌ 全数升级到 A 级 |
+- `HOST_LIFE_PROJECTION_ENABLED` 生产默认关闭，使 Scene 消费链默认不完整。
+- World Model 只是只读事实投影，不具备预测、虚拟 transition 或统一 context resolver 语义。
+- Persona 存在多个 direct growth writer。
+- Evolution Lab、统一 Feedback Proposal 和 Identity Migration 尚未形成生产闭环。

@@ -3,6 +3,8 @@
 
 # Natsume AI V1 长期演化能力重构架构基线（代码事实版）
 
+> 历史快照：本文已退出当前架构权威链；需求去重后的稳定目标见 `../../../50_project/arch/TARGET_ARCHITECTURE.md`。
+
 版本：v1.3
 日期：2026-07-12
 状态：`ADOPTED_ARCHITECTURE_BASELINE`

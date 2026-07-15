@@ -138,15 +138,30 @@ def build_report(
             if touched_sources and not check_all
             else sources
         )
-        source_timestamps = {}
-        for source_path in timestamp_sources:
-            source_ts = _best_effort_timestamp(
-                source_path,
-                repo_root,
+        source_timestamps: dict[str, float] = {}
+        if check_all:
+            # A scheduled full scan may resolve thousands of files. Spawning
+            # ``git log`` once per file made the gate take minutes on Windows.
+            # We only need the newest source change for freshness comparison,
+            # so resolve it with one Git pathspec query per rule and merge any
+            # dirty/untracked filesystem timestamps.
+            latest_source = _latest_source_timestamp(
+                repo_root=repo_root,
+                patterns=source_patterns,
+                sources=timestamp_sources,
                 dirty_paths=dirty_paths,
             )
-            if source_ts is not None:
-                source_timestamps[_to_rel_lower(source_path, repo_root)] = source_ts
+            if latest_source is not None:
+                source_timestamps[latest_source[0]] = latest_source[1]
+        else:
+            for source_path in timestamp_sources:
+                source_ts = _best_effort_timestamp(
+                    source_path,
+                    repo_root,
+                    dirty_paths=dirty_paths,
+                )
+                if source_ts is not None:
+                    source_timestamps[_to_rel_lower(source_path, repo_root)] = source_ts
 
         if not source_timestamps:
             failures.append(
@@ -429,6 +444,86 @@ def _best_effort_timestamp(
     if git_ts is not None:
         return git_ts
     return _filesystem_timestamp(path)
+
+
+def _latest_source_timestamp(
+    *,
+    repo_root: Path,
+    patterns: list[str],
+    sources: list[Path],
+    dirty_paths: set[str],
+) -> tuple[str, float] | None:
+    candidates: list[tuple[str, float]] = []
+    for source in sources:
+        relative = _to_rel_lower(source, repo_root)
+        if relative not in dirty_paths:
+            continue
+        timestamp = _filesystem_timestamp(source)
+        if timestamp is not None:
+            candidates.append((relative, timestamp))
+
+    git_latest = _git_latest_timestamp_for_patterns(repo_root, patterns)
+    if git_latest is not None:
+        candidates.append(git_latest)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda row: row[1])
+
+
+def _git_latest_timestamp_for_patterns(
+    root: Path,
+    patterns: list[str],
+) -> tuple[str, float] | None:
+    pathspecs: list[str] = []
+    for raw in patterns:
+        normalized = str(raw).replace("\\", "/").strip()
+        if not normalized:
+            continue
+        pathspecs.append(
+            f":(glob){normalized}" if _contains_glob(normalized) else normalized
+        )
+    if not pathspecs:
+        return None
+
+    marker = "__DOC_FRESHNESS_TS__"
+    proc = subprocess.run(
+        [
+            "git",
+            "log",
+            "-1",
+            f"--format={marker}%ct",
+            "--name-only",
+            "--",
+            *pathspecs,
+        ],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+
+    timestamp: float | None = None
+    source_path = "__git_pathspec__"
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(marker):
+            try:
+                timestamp = float(stripped.removeprefix(marker))
+            except ValueError:
+                return None
+            continue
+        if timestamp is not None:
+            source_path = stripped.replace("\\", "/").lower()
+            break
+    if timestamp is None:
+        return None
+    return source_path, timestamp
 
 
 def _filesystem_timestamp(path: Path) -> float | None:

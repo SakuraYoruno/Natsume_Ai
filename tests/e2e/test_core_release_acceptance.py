@@ -818,7 +818,7 @@ def test_required_not_run_or_failed_gate_evidence_is_fail_closed() -> None:
 
 def test_aw08_state_gate_reads_only_the_aw08_section(tmp_path: Path) -> None:
     document = tmp_path / (
-        "docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md"
+        "docs/_history/programs/2026-07/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md"
     )
     document.parent.mkdir(parents=True)
     document.write_text(

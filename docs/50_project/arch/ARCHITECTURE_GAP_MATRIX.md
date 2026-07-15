@@ -1,0 +1,103 @@
+受众：MASTER
+标题：Natsume AI 当前架构差距矩阵
+
+# Natsume AI 当前架构差距矩阵
+
+版本：v1.0
+核对日期：2026-07-15
+机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
+总体状态：`INCOMPLETE`
+
+本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
+
+## 1. 状态定义
+
+| 状态 | 含义 |
+|---|---|
+| `WIRED` | 生产 composition 与真实调用路径均已接线，关键失败模式有证据 |
+| `PARTIAL` | 有真实实现或局部接线，但缺少范围、策略或恢复语义 |
+| `BROKEN` | 看似接线，但真实首次调用会违反当前合同或失败 |
+| `UNSAFE_DIRECT_WRITERS` | 一个或多个生产 writer 绕过目标要求的 proposal、Review、版本激活或 rollback authority |
+| `SHADOW` | 只观察/模拟，不影响生产选择 |
+| `PLACEHOLDER` | 只有占位策略、字段或空壳接口 |
+| `MISSING` | 没有满足目标语义的实现 |
+| `HISTORICAL_PASS` | 仅对固定提交与固定范围成立的历史证据 |
+
+## 2. 执行与规划
+
+| 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
+|---|---|---|---|---|
+| Host 四路线 governed | `WIRED` | `cortex_runtime.py`、`governed_task_adapter.py`、GR-06 live receipt | 只覆盖 `chat/skill/delegate/plan` | NE-01 守卫回归 |
+| Scheduler governed | `BROKEN` | `scheduler/governed_runtime.py::_build_contracts` | 仍构造 `AgentWorkOrder`；admission 要求 `WorkOrderV3 + BudgetPolicy` | NE-01 |
+| Internal Agent governed | `BROKEN` | `app/internal_task_runtime.py::_build_contracts` | 同上；且缺 node-bound grant/Review/Budget composition | NE-01 |
+| 全 route universal runtime | `PARTIAL` | Cortex route split | `task_progress/recent_turn` 仍进 Executive | NE-01 |
+| Executive authority 退役 | `PARTIAL` | canonical route fail closed | legacy SkillDag 仍执行、仍写内存 registry | NE-01 |
+| 多节点 Durable DAG | `PARTIAL` | `task_runtime/coordinator.py` | 依赖/Attempt/Lease 已有；无并发，retry/backoff 不消费 | NE-01 |
+| Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` | concurrency 未计量；DEGRADE/REVIEW 分支不完整；非 Host 未覆盖 | NE-01 |
+| Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
+| 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
+| 单一任务真相 | `PARTIAL` | Durable projection | `LegacyRuntimeTaskRegistry` 仍被 Executive 写入 | NE-01 |
+| Persona 演化单一 authority | `UNSAFE_DIRECT_WRITERS` | `apply_growth_delta()` 调用审计：Bond stage/milestone、interaction cycle、emergent weekly | 多条生产可达或 scheduler-allowed 路径可直接修改 trait；未经过 proposal、shadow、Review、版本激活或 rollback | NE-01 中央封口全部入口；NE-06 全量替换 |
+| 通用 PlanningSearch 算法 | `WIRED` | `host_brain/planning_search/` | 内核可用，但不代表领域规划收益 | NE-02 |
+| Host 候选方案生成 | `MISSING` | `plan_intent_search.py` | 只重排上游已批准步骤，不生成竞争路径 | NE-02 |
+| Pentest L1/L2 | `WIRED` | `pentest/agent/agent_loop.py` | 仍需与 durable outcome/calibration 对齐 | NE-02 |
+| Pentest Conditional MCTS | `SHADOW` | `planning_search_adapter.py`、virtual world | 根候选固定；不能生成 capability-unlocking 后继；校准非 durable | NE-02 |
+| Research 真实收益 | `MISSING` | 仅 synthetic fixture | 未跑真实来源、模型、verifier、成本/延迟对照 | NE-02 |
+| Code 真实收益 | `MISSING` | 仅 synthetic fixture | 未跑隔离 worktree、真实测试/verifier 和 baseline 对照 | NE-02 |
+
+## 3. Composition 与隔离
+
+| 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
+|---|---|---|---|---|
+| 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
+| 无全局 Service Locator | `MISSING` | `process_service_container.py`、`process_*services.py` | 约 61 个槽位、63 个 accessor、79 个依赖文件 | NE-01 |
+| Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
+| Workspace ownership | `PARTIAL` | `agent_runtime/workspace_policy.py` | 局部路径检查，不是 per-task/workspace/tenant 强隔离 | NE-01 |
+| 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |
+
+## 4. 数字生命与长期演化
+
+| 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
+|---|---|---|---|---|
+| World Model | `PARTIAL` | `runtime/world_model.py`、query repository | 只读事实投影，`write_api_available=false` 且 Life projection 默认未启用；不是预测/规划 world model，也未成为 canonical context resolver | NE-03 |
+| Scene Engine | `PARTIAL_DEFAULT_OFF` | `persona/scene_policy.py`、Surface/Proactive 消费接线 | `HOST_LIFE_PROJECTION_ENABLED` 生产默认关闭；缺统一 scene aggregate、transition journal、TTL/re-evaluation owner | NE-03 |
+| Intent Arbiter | `MISSING` | Governor + ActionArbiter 仅覆盖部分语义 | 没有统一合并 user/task/life/relationship/long-term goal 的仲裁层 | NE-03 |
+| Action Preview / Shadow | `PARTIAL` | `governor/action_preview.py`、Obs route | dry-run 合同存在；生产无 trusted authority provider，端点仅 eligibility、固定不执行；没有统一 shadow runner | NE-03 |
+| Runtime Guardian | `PARTIAL` | health、degradation、heartbeat、service catalog | degradation/recovery evidence 真实；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与长期 SLO owner 不完整 | NE-03 |
+| Evolution Lab | `PLACEHOLDER` | `evolution_lab/policy.py` | 只有分支前缀校验，无 scenario/experiment store/runner/promotion | NE-04 |
+| Counterfactual | `MISSING` | Planning benchmark 不能替代 | 无替代路径 replay、decision comparator 与 outcome evidence | NE-04 |
+| Capability Maturity | `PARTIAL` | scorecard/provider/Governor adapter | 只读投影；门禁默认关闭，缺 durable promotion/degradation authority | NE-05 |
+| Capability Forge | `PARTIAL` | `app/capability_forge.py` | 能生成/批准 blueprint 和 canary 路由，不会生成新能力实现 | NE-05 |
+| Skill Compiler | `MISSING` | 无 document/trace/script compiler | 缺 typed draft、测试、SBOM、签名、sandbox、activation 全链 | NE-05 |
+| Experience Feedback | `PARTIAL_BROKEN_PATH` | response/persona/recommendation feedback | 多条局部链；Prefrontal 调用参数与 `on_interaction_cycle()` 签名不符且异常被吞；没有统一 proposal/review/rollback pipeline | NE-06 |
+| Knowledge OS | `MISSING` | Memory、Retrieval、Canon 是基础资产 | 缺 provenance/version/staleness/conflict/decision lifecycle | NE-06 |
+| Identity Snapshot | `PARTIAL` | `release/identity_snapshot.py` | 合同丰富，但 gate 默认关闭，未由 release 主链生成/持久化 | NE-06 |
+| Identity Migration | `MISSING` | 无 migration executor | 缺计划、隔离迁移、人格回归、用户确认、激活/回滚闭环 | NE-06 |
+
+## 5. 历史证据的正确解释
+
+| 证据 | 可证明 | 不能证明 |
+|---|---|---|
+| Core Release 22/22 | 对应提交的基础设施与选定 Gate 通过 | 当前全架构、所有生产 route 或演化能力完成 |
+| GR-06 live receipt | 当时 Host `chat/skill/delegate/plan` 可产生 durable lineage | Scheduler/Internal、legacy route 删除、所有副作用单事务 |
+| GR-02A benchmark | 公共算法能解决冻结的 synthetic trap | Research/Code 生产 uplift、真实成本或安全切流 |
+| Pentest calibration tests | 纯虚拟世界确定性与粗 reward 对账 | L3 替代路径真实收益或跨 run 稳定校准 |
+| M48 Identity tests | snapshot/diff/review/rollback 合同成立 | 生产 release 已生成并执行人格迁移 |
+
+## 6. 总体裁决
+
+```text
+Core Infrastructure                         HISTORICAL_PASS / REUSABLE
+Host chat-skill-delegate-plan runtime        WIRED
+Scheduler/Internal governed runtime          BROKEN
+Universal execution scope                    PARTIAL
+Persona evolution authority                  UNSAFE_DIRECT_WRITERS
+Generic planning kernel                      AVAILABLE
+Generic intelligent planning                 INCOMPLETE
+Cross-domain production benefit              UNPROVEN
+Explicit composition                         INCOMPLETE
+Long-term evolution program                  NOT IMPLEMENTED AS A WHOLE
+Full Architecture                            INCOMPLETE
+```
+
+当前执行只允许从 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 的 NE-00～NE-07 推进；不得复活旧 M49～M57 或 TASK-xxxx 状态作为调度依据。
