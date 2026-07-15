@@ -51,12 +51,15 @@ flowchart TD
     Compile --> Admission["HostCommandRepository 原子 admission"]
     Admission --> Runtime["Durable Task Runtime"]
     Runtime --> Worker["Attempt + Lease + Grant + Budget + Worker"]
-    Runtime -.->|"bounded_fanout_enabled 默认 OFF\n生产未启用"| ShadowFanOut["scheduler 选中多节点且仍有后继\nBudget concurrency 有界 child"]
-    ShadowFanOut -.-> Worker
+    Runtime -.->|"bounded_fanout_enabled 默认 OFF\n生产未启用"| ShadowFanOut["outer 激活 Graph 后 spawn\n非 terminal-leaf 有界 child"]
+    ShadowFanOut -.-> NodeLocal["child deferred authority\nAttempt/Node/Lease/Reservation\nBudget usage/EXCEEDED"]
+    NodeLocal -.-> Worker
     Worker --> HB["Durable heartbeat\nLease → Reservation"]
     HB --> Checkpoint{"checkpoint 可提交?"}
     Checkpoint -->|是| VA["COMMIT → Verification + Acceptance"]
     Checkpoint -->|否| Recovery["RECOVERY_REQUIRED\n禁止 COMMIT"]
+    VA -.-> DurableOutcome["node-local durable outcome\nreceipt ↔ latest Attempt/Node"]
+    DurableOutcome -.-> OuterSettle["outer 等 sibling 落稳\n完整 node snapshot + stable Attempt\n零 ACTIVE Lease / 未决 Reservation\n原子 Graph + 可选 Budget + Outbox"]
     VA --> Receipt["Execution receipt"]
     VA --> Effects["Acceptance effect intents"]
     Effects --> Conversation["Conversation / Life / Memory"]
@@ -70,14 +73,14 @@ flowchart TD
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO wired;
-    class Plan,Runtime,ShadowFanOut,Recovery,Conversation,Delivery partial;
+    class Plan,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,OuterSettle,Recovery,Conversation,Delivery partial;
 ```
 
 上图的核心结论是：
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 已接原子 claim/promotion、安全重试、terminal failure bundle 与 Lease/Reservation heartbeat。B2 新增默认关闭且生产未启用的影子 fan-out：仅在 scheduler 选出多个节点且仍有未验收后继/剩余节点时，按 Budget concurrency 并发。progress 使用默认 32 的有界 queue 并向 child 传播背压；首个观察到的非接受终态会在 sibling cancel/join 后直接返回，child error 同样 fail-fast，只有全成功批次按 admission 顺序验收。fail-fast 仍不能替代 shared Graph/Budget terminal authority 外提，terminal-leaf batch 也仍串行，不能写成生产并发完成。
+- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 已接原子 claim/promotion、安全重试、terminal failure bundle 与 Lease/Reservation heartbeat。B3 的默认关闭、生产未启用 fan-out 仅覆盖仍有未验收后继/剩余节点的 live 批次：outer 在 spawn 前激活 Graph，child deferred 路径只提交 Attempt/Node/Lease/Reservation 与 Budget usage/`EXCEEDED`；正常非接受等待所有 sibling 落稳后，outer 校验 receipt 与 durable Node/latest Attempt。只有可结算的 failure/Budget/review 才按完整 Node status/version、stable Attempt、零 `ACTIVE` Lease/未决 Reservation 和 `taskbatch` digest 原子提交 Graph、可选 Budget `RELEASED` 与 Outbox；retry/recovery 保持 Graph `ACTIVE`。post-reservation 未决副作用返回 `RECOVERY_REQUIRED`，不会提前终结 Graph/Budget。terminal-leaf batch 仍串行，不能写成生产并发完成。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 
@@ -212,13 +215,19 @@ claim runnable node
 | Resume | token/checkpoint durable，但消费 token 后不会自动重调度原图 | `PARTIAL` |
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
-| DAG 并发 | `bounded_fanout_enabled` 默认 `false` 且生产未启用；影子路径仅并发 scheduler 选出的 >1 节点且图中仍有未验收后继/剩余节点的批次，按 Budget concurrency 有界。concurrency=2 真重叠、=1 串行已有测试 | `PARTIAL_B2_SHADOW_FANOUT` |
-| 并行合流 | progress 通过 `Queue(maxsize=fanout_event_buffer_size)` 实时流出，默认 32、非正值拒绝；size=1 慢消费者测试证明 child 受到有界背压。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |
-| 并行终态 | 首个观察到的非接受终态会在 cancel/join 未完成 siblings 后返回，child error 同样 fail-fast；只有全成功批次按 admission 顺序验收。测试以 admission 第二节点失败证明 Graph FAILED、第一 sibling 取消、join 未跑、零 COMMIT | `SHADOW_FAIL_FAST_MECHANICS` |
-| 共享终态 authority | fail-fast 只缩小 race；failure、Budget 超限、post-review 的 shared Graph/Budget terminal authority 仍在 child 内，尚未移到外层 fan-in；terminal-leaf batch 未并行 | `P0_NOT_SAFE_FOR_PRODUCTION` |
+| DAG 并发 | `bounded_fanout_enabled` 默认 `false` 且生产未启用；影子路径仅并发 scheduler 选出的 >1 节点且图中仍有未验收后继/剩余节点的批次，outer 在 spawn 前激活 Graph，按 Budget concurrency 有界。concurrency=2 真重叠、=1 串行已有测试 | `PARTIAL_B3_OUTER_FANIN_TERMINAL` |
+| 并行合流 | progress 用 `fanout_event_buffer_size` 个 semaphore slot（默认 32、非正值拒绝）限制在途事件，并为每个 child 预留独立 control 容量；size=1 慢消费者仍会反压 child，自发 `CancelledError` 也不会因 progress 满而丢失监督信号。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |
+| 并行 child authority | deferred child 只拥有 Attempt/Node/Lease/Reservation 与 Budget usage/`EXCEEDED`；不能终结 Graph 或把 Budget 置为 `RELEASED/CONSUMED`。正常非接受等待所有已启动 sibling 到 durable node-local terminal，不再 fail-fast | `SHADOW_NODE_LOCAL_AUTHORITY` |
+| 共享终态 authority | live outer 校验 receipt node/attempt/status/accepted 与 durable Node/latest Attempt 状态、lineage 一致，重读完整 Node status/version、Graph 与 Budget，要求 stable Attempt、零 `ACTIVE` Lease 且无 `RESERVED/RECOVERY_REQUIRED` Operation Reservation；`taskbatch` digest 绑定 outcome lineage，原子提交 Graph `FAILED/BLOCKED`、可选 Budget `RELEASED` 和 Outbox。decision ref 同时进入 receipt evidence；状态/版本/Outbox 完全一致时才 exact replay | `B3_LIVE_OUTER_FANIN_WIRED` |
+| 并行终态证据 | pre-reservation failure 等 sibling 完成后单次落 Graph `FAILED` + Budget `RELEASED`，并覆盖 outer settlement 提交响应丢失；Budget overrun 落 Graph `BLOCKED` + Budget `RELEASED`；post-review 落 Graph `BLOCKED` 且 Budget 保持 `ACTIVE`；伪 receipt/旧 Attempt lineage 被拒绝 | `INTEGRATION_PROVEN` |
+| 未决副作用恢复 | post-reservation worker failure 若 Operation Reservation 仍为 `RESERVED/RECOVERY_REQUIRED`，child 与后续重入均返回 `RECOVERY_REQUIRED`，Graph/Budget 保持未终结；自动 reconciliation/continuation 仍未实现 | `FAIL_CLOSED_PARTIAL_RECOVERY` |
+| crash/re-entry 终态 | 若进程重启后循环入口已看到 FAILED/review Node，当前仍走旧 Graph/Budget 分步路径，不复用 outer snapshot/taskbatch 事务；review+failure 同存时还可能与在线 failure-first 优先级不同 | `P1_REENTRY_AUTHORITY_SPLIT` |
+| 决策记录 | `taskbatch` digest 绑定 outcome lineage并进入 receipt/outbox evidence，但 canonical decision payload 尚未持久化，摘要不可独立解析 | `P1_DIGEST_ONLY` |
+| terminal-leaf 并行 | 纯叶批次仍顺序，最终 `Graph COMPLETED + Budget CONSUMED + effects` 尚无 outer 并行事务 | `P0_NOT_IMPLEMENTED` |
 | 并行取消 | 外层取消会 cancel/join child 与 heartbeat；测试为零 COMMIT、零 task leak。但没有 durable cancel fence，crash 后只依赖 TTL/startup recovery | `IN_PROCESS_ONLY` |
 | Outbox 并发发布 | Coordinator asyncio lock 保护本实例；`RuntimeOutboxPublisher` 的实例 `threading.Lock` 把同进程 Host/Internal/Scheduler 共享实例的 list/append/mark drain 串行化，线程合同 peak=1。跨进程仍缺 durable claim/CAS | `P1_CROSS_PROCESS_UNPROVEN` |
-| Retry/backoff | Coordinator 仅对 reservation 前显式 marker 调用 `schedule_retry`；retry_count、Budget、Attempt/Node/Lease/Outbox 同事务提交，到期可重开 attempt 2，提交响应丢失 exact replay 不重复扣费，resolver cancellation 原样传播。生产 resolver 尚无现实 marker 来源 | `PARTIAL_B1_SAFE_RETRY` |
+| Budget 并发 CAS | B3 可由 child 记录 usage/`EXCEEDED`，outer 再统一 release；固定 CAS 重试上限及 `ALREADY_EXCEEDED` 在 concurrency > 4 下的唯一语义仍未收敛 | `P1_SEMANTICS_INCOMPLETE` |
+| Retry/backoff | Coordinator 仅对 reservation 前显式 marker 重试；并行 deferred child 使用 domain-separated node-only usage identity 与 `schedule_retry_node_outcome`，保持 Graph ACTIVE，提交响应丢失 exact replay 不重复扣费；预算拒绝只落 Budget `EXCEEDED` 与 node-local terminal，再交 outer 裁决。生产 resolver 尚无现实 marker 来源 | `PARTIAL_B3_SAFE_RETRY` |
 | Pre-reservation failure | 普通/耗尽 failure 通过 `fail_running_attempt_bundle` 原子落 Attempt FAILED、Node FAILED、Graph FAILED/BLOCKED、Lease RELEASED 和四条 attempt/evidence-bound Outbox；已有 reservation 时拒绝，Budget finalize 在 bundle 外 | `WIRED_NARROW_BOUNDARY` |
 | 执行心跳 | reservation 后后台先续 Lease 再续 Reservation；流事件和最终结果均 checkpoint，停止/join 后才用最新 version COMMIT。续租同参响应丢失可精确重放 | `WIRED` |
 | 心跳失败 | 任一续租或版本检查失败返回 `RECOVERY_REQUIRED`，Worker 结果绝不 COMMIT；在线 takeover、即时 reconciliation 与自动 continuation 尚未实现 | `FAIL_CLOSED_PARTIAL_RECOVERY` |
@@ -466,16 +475,17 @@ All ingress sources
 
 从当前流程到目标流程的必要变更是：
 
-1. 将影子 fan-out 的 Graph/Budget terminal authority 移到外层 fan-in，覆盖 child failure、Budget 超限、post-review 与 terminal-leaf batch；增加 durable cancel fence 并通过故障矩阵后，才允许生产启用。
-2. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程共享 publisher 实例已由 `threading.Lock` 串行。
-3. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，再完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt 在线 takeover。
-4. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation，并明确长时间等待后的 child-grant renewal/derivation。
-5. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
-6. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
-7. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
-8. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
-9. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-10. 在 D0 canonical path fence 之上建立 per-task durable workspace authority 与隔离 worktree；任意 shell 字符串、文件句柄和 reparse-point 竞态不能用路径规范化的通过代替。
+1. 统一 crash/re-entry 对既有 FAILED/review Node 的裁决：复用 live outer 的完整快照事务与 failure-first 优先级，并持久化可解析的 canonical decision payload。
+2. 在已完成的 live、非 terminal-leaf outer 收口上，补齐 terminal-leaf 并行、最终成功终态与 durable cancel fence；通过完整故障矩阵后，才允许生产启用。
+3. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程共享 publisher 实例已由 `threading.Lock` 串行。
+4. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，收敛 Budget CAS 固定重试与 `ALREADY_EXCEEDED` 语义，再完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。
+5. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation，并明确长时间等待后的 child-grant renewal/derivation。
+6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
+7. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
+8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
+9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
+10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
+11. 在 D0 canonical path fence 之上建立 per-task durable workspace authority 与隔离 worktree；任意 shell 字符串、文件句柄和 reparse-point 竞态不能用路径规范化的通过代替。
 
 ## 13. 代码证据索引
 

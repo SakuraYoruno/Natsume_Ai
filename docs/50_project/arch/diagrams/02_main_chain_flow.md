@@ -103,25 +103,38 @@ sequenceDiagram
 flowchart TD
     S["compute_dag_schedule"] --> Q{"selected > 1 且\n仍有未 ACCEPTED 后继/剩余节点?"}
     Q -->|"否 / 生产默认路径"| SEQ["顺序执行"]
-    Q -.->|"bounded_fanout_enabled=true\n仅实验测试"| LIMIT["BudgetPolicy concurrency 有界 child"]
-    LIMIT --> MERGE["progress 有界队列合流\n默认 maxsize=32，慢消费者反压"]
-    LIMIT --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
-    MERGE --> STOP{"首个观察到的非接受 terminal / child error?"}
-    STOP -->|"是"| FAILFAST["保存 terminal\ncancel + join 未完成 siblings 后返回"]
-    STOP -->|"否，全部成功"| ORDER["按 admission 顺序验收"]
+    Q -.->|"bounded_fanout_enabled=true\n默认 OFF，生产未启用"| ACTIVATE["outer 在 spawn 前激活 Graph"]
+    ACTIVATE --> LIMIT["BudgetPolicy concurrency 有界 child"]
+    LIMIT --> NODE["child deferred authority\nAttempt / Node / Lease / Reservation\nBudget usage / EXCEEDED"]
+    LIMIT --> MERGE["progress slots 默认 32，慢消费者反压\n每 child 预留 control slot"]
+    NODE --> WAIT["正常非接受不 fail-fast\n等待所有已启动 sibling 落稳"]
+    WAIT --> SNAP["receipt ↔ durable Node/latest Attempt\n完整 node status/version + stable Attempt\n零 ACTIVE Lease / 未决 Reservation\ntaskbatch://sha256/&lt;digest&gt;"]
+    SNAP --> DECIDE{"批次结果"}
+    DECIDE -->|"failure"| FAILED["Graph FAILED\nBudget RELEASED"]
+    DECIDE -->|"Budget overrun"| BUDGET["Graph BLOCKED\nBudget RELEASED"]
+    DECIDE -->|"post-review"| REVIEW["Graph BLOCKED\nBudget 保持 ACTIVE"]
+    DECIDE -->|"全部 ACCEPTED"| ORDER["按 admission 顺序校验 outcomes\n继续调度"]
+    NODE -->|"Operation Reservation 未决"| RECOVERY["RECOVERY_REQUIRED\nGraph/Budget 不终结"]
+    FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n单事务 + exact replay"]
+    BUDGET --> ATOMIC
+    REVIEW --> ATOMIC
+    ATOMIC --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
-    P0["P0：failure / Budget 超限 / post-review\nshared Graph/Budget 终态仍在 child 内"]
-    P0 -.-> STOP
+    P0["P0：terminal-leaf batch 与最终成功终态\n仍走顺序路径"]
+    P0 -.-> SEQ
     P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
     CANCEL["外层取消：cancel + join child / heartbeat\n无 durable cancel fence"] -.-> LIMIT
+    CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
 
     style LIMIT fill:#fff3cd,stroke:#a87500
     style P0 fill:#ffd9d9,stroke:#b31d28
     style P1 fill:#fff3cd,stroke:#a87500
     style CANCEL fill:#fff3cd,stroke:#a87500
+    style CAS fill:#fff3cd,stroke:#a87500
+    style RECOVERY fill:#fff3cd,stroke:#a87500
 ```
 
-实验证据证明 concurrency=2 的 root 真重叠、concurrency=1 保持串行、size=1 时慢消费者会反压 child；admission 第二节点失败时会返回该 durable terminal、取消第一 sibling、阻止 join 且不产生 `OPERATION_COMMITTED`；外层取消也没有 child/heartbeat task 泄漏。同进程 Host/Internal/Scheduler 共享的 publisher 实例以 `threading.Lock` 串行完整 drain，但跨进程仍缺 durable claim/CAS。该图是 shadow，不是 production wiring：构造默认值为 `false`，生产 composition 未开启；shared Graph/Budget terminal authority 和 terminal-leaf batch 仍未闭环。
+实验证据证明 concurrency=2 的 root 真重叠、concurrency=1 保持串行、size=1 时慢消费者会反压 child；每 child 的保留 control slot 还保证自发 `CancelledError` 不会让 supervisor 永久挂起。正常 pre-reservation failure 不再取消仍运行的 sibling；待所有 sibling 落稳后，outer 单次提交 Graph `FAILED` + Budget `RELEASED`，且首次结算响应丢失只 exact replay、不重复 Outbox。Budget overrun 与 post-review 也有对应证据。receipt↔latest Attempt/Node、完整快照及 Lease/Reservation fence 共同约束裁决；post-reservation 未决副作用保持 `RECOVERY_REQUIRED`。但该图只描述 live batch：crash/re-entry 若已看到 FAILED/review Node 仍走旧分步终态路径，taskbatch 也只有摘要而无 canonical payload。该图不是 production wiring；terminal-leaf、durable cancel、自动 recovery continuation 与跨进程 Outbox claim 均未闭环。
 
 ## Plan 分支的真实边界
 
@@ -145,7 +158,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B2_SHADOW_FANOUT` 在 B1 安全重试/heartbeat 上增加默认关闭的非 terminal-leaf 有界 fan-out；生产未启用。共享 Graph/Budget 终态、durable cancel fence、built-in retry marker、在线 takeover、即时 reconciliation 与 Review continuation 尚未完成。
+3. `PARTIAL_B3_OUTER_FANIN_TERMINAL` 仅在默认关闭、生产未启用的单次 live 非 terminal-leaf fan-out 中，由 outer 原子提交可结算 failure/Budget/review 的 Graph、可选 Budget `RELEASED` 与 Outbox；crash/re-entry 仍走旧路径，`taskbatch` 仅摘要。terminal-leaf 并行、durable cancel fence、跨进程 Outbox claim/CAS、Budget CAS 高竞争语义、built-in retry marker、online takeover、即时 reconciliation 与 Review continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 

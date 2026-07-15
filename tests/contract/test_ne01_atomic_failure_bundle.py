@@ -220,6 +220,24 @@ def _fail(
     )
 
 
+def _fail_node(
+    store: DurableTaskStore,
+    lease: dict[str, Any],
+    *,
+    attempt_outbox: OutboxMessage | None = None,
+) -> dict[str, Any]:
+    return store.fail_running_attempt_node_bundle(
+        ATTEMPT_ID,
+        owner_id=OWNER_ID,
+        fencing_token=int(lease["fencing_token"]),
+        expected_attempt_version=2,
+        expected_node_version=2,
+        expected_graph_version=1,
+        error_ref=FAILURE_REF,
+        attempt_outbox=attempt_outbox or _failure_event(),
+    )
+
+
 @pytest.mark.parametrize(
     "graph_target_status",
     (TaskGraphStatus.FAILED, TaskGraphStatus.BLOCKED),
@@ -305,6 +323,67 @@ def test_terminal_failure_bundle_exactly_replays_after_response_loss(
         if row["attempt_id"] == ATTEMPT_ID and FAILURE_REF in row["evidence_refs"]
     ]
     assert len(terminal_rows) == 4
+
+
+def test_node_failure_bundle_keeps_graph_active_and_exactly_replays(
+    tmp_path: Path,
+) -> None:
+    store, context = _running_store(tmp_path)
+    attempt_outbox = _failure_event()
+
+    committed = _fail_node(
+        store,
+        context["lease"],
+        attempt_outbox=attempt_outbox,
+    )
+    replayed = _fail_node(
+        DurableTaskStore(store.db_path, clock=MutableClock()),
+        context["lease"],
+        attempt_outbox=attempt_outbox,
+    )
+
+    assert committed["replayed"] is False
+    assert replayed["replayed"] is True
+    assert committed["attempt"]["status"] == AttemptStatus.FAILED.value
+    assert committed["node"]["status"] == TaskNodeStatus.FAILED.value
+    assert committed["lease"]["status"] == LeaseStatus.RELEASED.value
+    assert committed["graph"]["status"] == TaskGraphStatus.ACTIVE.value
+    assert committed["graph"]["status_version"] == 1
+    terminal_rows = [
+        row
+        for row in store.list_pending_outbox(limit=100)
+        if row["attempt_id"] == ATTEMPT_ID and FAILURE_REF in row["evidence_refs"]
+    ]
+    assert {row["event_type"] for row in terminal_rows} == {
+        "TASK_ATTEMPT_FAILED",
+        "TASK_NODE_FAILED",
+        "TASK_LEASE_RELEASED_TERMINAL",
+    }
+    assert not any(row["aggregate_type"] == "TASK_GRAPH" for row in terminal_rows)
+
+
+def test_node_failure_replay_rejects_later_graph_terminalization(
+    tmp_path: Path,
+) -> None:
+    store, context = _running_store(tmp_path)
+    attempt_outbox = _failure_event()
+    _fail_node(store, context["lease"], attempt_outbox=attempt_outbox)
+    store.transition_graph(
+        GRAPH_ID,
+        1,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_event(
+            "TASK_GRAPH",
+            GRAPH_ID,
+            2,
+            "TASK_GRAPH_FAILED",
+            identity="later-outer-settlement",
+        ),
+    )
+
+    with pytest.raises(TaskStoreError):
+        _fail_node(store, context["lease"], attempt_outbox=attempt_outbox)
 
 
 def test_terminal_failure_bundle_rejects_stale_fence_without_partial_state(

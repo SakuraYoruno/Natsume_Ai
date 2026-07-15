@@ -162,6 +162,19 @@ class TaskStorePort(Protocol):
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
+    def schedule_retry_node_outcome(
+        self,
+        attempt_id: str,
+        *,
+        budget_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
     def fail_running_attempt_bundle(
         self,
         attempt_id: str,
@@ -173,6 +186,19 @@ class TaskStorePort(Protocol):
         expected_graph_version: int,
         error_ref: str,
         graph_target_status: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def fail_running_attempt_node_bundle(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        error_ref: str,
         attempt_outbox: Any,
     ) -> Mapping[str, Any]: ...
 
@@ -267,6 +293,21 @@ class TaskStorePort(Protocol):
         expected_version: int,
         target_status: str,
         outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def settle_parallel_graph_budget(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        graph_target_status: str,
+        budget_target_status: str | None,
+        graph_outbox: Any,
+        budget_outbox: Any | None = None,
     ) -> Mapping[str, Any]: ...
 
     def consume_budget_once(

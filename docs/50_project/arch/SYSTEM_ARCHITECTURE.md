@@ -129,11 +129,11 @@ flowchart TB
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
-`PARTIAL_B2_SHADOW_FANOUT` 另增加默认 `false`、生产未启用的 `bounded_fanout_enabled`。当 scheduler 选出的 claimable batch 超过一个节点，并且图中仍有未 `ACCEPTED` 的后继/剩余节点时，Coordinator 按 Budget concurrency 启动 asyncio child。progress 由 `asyncio.Queue(maxsize=fanout_event_buffer_size)` 实时合流；buffer 默认 32、非正值拒绝，满队列把慢消费者背压传回 child。首个观察到的非接受终态会被保存，cancel/join 未完成 siblings 后直接返回；child error 同样 fail-fast。只有全成功批次才按 admission 顺序验收。外层取消也会 join child/heartbeat。
+`PARTIAL_B3_OUTER_FANIN_TERMINAL` 保留默认 `false`、生产未启用的 `bounded_fanout_enabled`。当 scheduler 选出的 claimable batch 超过一个节点，并且图中仍有未 `ACCEPTED` 的后继/剩余节点时，Coordinator outer 先激活 Graph，再按 Budget concurrency 启动 asyncio child；纯 terminal-leaf batch 仍顺序。progress 由默认 32 的 semaphore slot 有界反压，且每个 child 有保留 control slot，terminal/error/self-cancel 不会被满 progress buffer 吞掉。child deferred 路径只拥有 Attempt/Node/Lease/Reservation 与 Budget usage/`EXCEEDED`，不能终结 Graph 或 `RELEASE/CONSUME` Budget。正常 node-local 非接受会等待全部已启动 sibling 落稳，不再 fail-fast cancel。
 
-测试已覆盖 2 槽真重叠、1 槽串行、依赖验收后的 fan-in、流式 progress、buffer=1 的慢消费者背压、admission 第二节点失败时返回该终态并取消第一 sibling/Graph FAILED/join 未跑/零 COMMIT，以及外层取消零 COMMIT/零 task leak。Coordinator 本地 asyncio lock 序列化自身 publish；`RuntimeOutboxPublisher` 的实例级 `threading.Lock` 再保护同进程 Host/Internal/Scheduler 共享实例的 list/append/mark drain，ThreadPoolExecutor 合同观测 peak=1。
+全部已启动 child 稳定后，outer 先校验 receipt 与 durable Node/latest Attempt status/lineage，再重读完整 Node status/version、Graph 与 Budget，并要求 Attempt 已稳定、不存在 `ACTIVE` Lease 或未决 Operation Reservation。对于可结算的 failure/Budget/review，它以包含 outcome lineage 的 `taskbatch` digest 绑定整批决策，在一个事务中提交 Graph `FAILED/BLOCKED`、可选 Budget `RELEASED` 和 Outbox，decision ref 进入 receipt evidence，且支持 exact replay；retry/recovery 保持 Graph `ACTIVE`。测试分别覆盖 outer 的 pre-reservation failure/settlement response loss、Budget overrun、post-review，以及 node-only retry response loss、伪 receipt、自取消无挂死、并发/fan-in/背压/外层取消。post-reservation failure 的未决副作用保持 `RECOVERY_REQUIRED`，不会提前终结 Graph/Budget。Coordinator 与共享 publisher 的单进程发布锁仍有效。
 
-这些仍只是 shadow 机制证据。fail-fast 只缩小竞态：失败、Budget 超限或 post-review 的 shared Graph/Budget terminal authority 仍在 child 内，尚未由外层 fan-in 统一裁决；terminal-leaf batch 仍顺序，取消没有 durable cancel fence。publisher 实例锁不覆盖多进程，durable Outbox claim/CAS 仍缺。当前三类 built-in resolver 也没有现实 marker source；现实故障分类、生产 fan-out、在线 takeover、即时 reconciliation 和自动 Review continuation 均未完成。
+这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。单次运行内、非 terminal-leaf 且通过 Reservation fence 的 shared terminal 已由 outer 统一；但 crash/re-entry 看到既有 FAILED/review Node 时仍走旧分步终态路径，可能产生 review-first/failure-first 漂移。`taskbatch` 只保存摘要引用，canonical decision payload 未持久化。terminal-leaf、durable cancel fence、跨进程 Outbox claim/CAS、Budget 高竞争语义、production marker、online takeover、自动 reconciliation/Review continuation 均未完成。
 
 ### 3.5 模型与能力执行层
 
@@ -328,7 +328,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B2_SHADOW_FANOUT` | built-in resolver 尚无 marker source；默认关闭的非 terminal-leaf fan-out 影子路径已有成功/取消证据，但共享 Graph/Budget 终态、durable cancel fence、生产启用、在线 takeover、即时 reconciliation 与 Review continuation 尚未接线 |
+| TaskGraph revision + `PARTIAL_B3_OUTER_FANIN_TERMINAL` | 默认关闭且生产未启用；仅单次 live、非 terminal-leaf 批次的 failure/Budget/review 已由 outer 原子提交 Graph、可选 Budget `RELEASED` 与 Outbox。crash/re-entry 仍走旧路径，`taskbatch` 仅摘要；terminal-leaf、durable cancel、跨进程 Outbox claim、Budget CAS 高竞争语义、生产 marker、online takeover、即时 reconciliation 与 Review continuation 未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

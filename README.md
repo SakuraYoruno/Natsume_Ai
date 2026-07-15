@@ -12,7 +12,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL_B2_SHADOW_FANOUT` | B1 安全重试/心跳基础上新增默认关闭的有界 fan-out 实验路径：仅对存在未验收后继的多节点调度批次，按 Budget concurrency 并发；生产未启用。共享 Graph/Budget 终态仍未移到外层 fan-in，因此失败、预算超限或 post-review 场景不能安全放开；在线 takeover、自动 continuation 与即时 reconciliation 也未闭环 |
+| Durable Task Runtime | `PARTIAL_B3_OUTER_FANIN_TERMINAL` | 默认关闭且生产未启用；仅单次 live、非 terminal-leaf 批次的可结算 failure/Budget/review 已由 outer 基于完整快照原子提交 Graph、可选 Budget `RELEASED` 与 Outbox。crash/re-entry 仍走旧分步路径，`taskbatch` 仅持久摘要；terminal-leaf、durable cancel、在线 takeover、自动 continuation 与即时 reconciliation 未闭环 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
@@ -114,11 +114,11 @@ Durable 启动门禁当前按 `migration → task_store.recover_startup → 构�
 
 reservation 建立后，Coordinator 启动 `DurableExecutionHeartbeat`，每轮先续 Lease、再续 Operation Reservation，并在流事件及最终结果前执行 checkpoint；任一心跳失败只返回 `RECOVERY_REQUIRED`，绝不 COMMIT。两类续租支持同参响应丢失后的精确重放。
 
-`GovernedTaskCoordinator` 另有 `bounded_fanout_enabled` 实验开关，默认 `false`，生产 composition 没有启用。只有 scheduler 一次选出多个节点且图中仍存在未 `ACCEPTED` 的后继/剩余节点时，实验路径才按 `BudgetPolicy.limits.concurrency` 有界并发。progress 事件经 `asyncio.Queue(maxsize=fanout_event_buffer_size)` 实时合流，buffer 默认 32 且非正值拒绝构造；慢消费者会把背压传到 child。首个观察到的非接受终态会被保存、立即 cancel/join 未完成 siblings 并原样返回；child error 同样 fail-fast。只有全成功批次才按 admission 顺序验收；外层取消也会 join 子任务及其 heartbeat。
+`GovernedTaskCoordinator` 另有 `bounded_fanout_enabled` 实验开关，默认 `false`，生产 composition 没有启用。只有 scheduler 一次选出多个节点且图中仍存在未 `ACCEPTED` 的后继/剩余节点时，实验路径才按 `BudgetPolicy.limits.concurrency` 有界并发；纯 terminal-leaf 批次仍走顺序路径。outer 会在 spawn 前把 Graph 激活。child 进入 deferred shared-terminal 模式，只能提交 Attempt、Node、Lease、Reservation 以及 Budget usage/`EXCEEDED`，不能终结 Graph，也不能把 Budget 落为 `RELEASED/CONSUMED`。progress 由 `fanout_event_buffer_size` 个 slot 限制在途数量（默认 32，非正值拒绝），慢消费者会反压 child；每个 child 另有保留 control 容量，自发取消或错误不会因 progress 满而丢失。
 
-集成测试已证明 concurrency=2 真重叠、concurrency=1 串行、fan-in 只在依赖 `ACCEPTED` 后运行、progress 可提前流出；buffer=1 的慢消费者最多推进“已交付 + buffer + active child”个已产生事件。失败测试让 admission 中第二个节点 right 先返回失败，结果为该失败终态被返回、Graph `FAILED`、left 被取消、join 未运行且零 `OPERATION_COMMITTED`；外层取消也达到零 COMMIT、零 child/heartbeat task leak。`RuntimeOutboxPublisher` 的实例级 `threading.Lock` 还把同进程共享 publisher 的 list/append/mark drain 串行化，线程合同观测到 peak=1。
+正常的 node-local 非接受不再触发 fail-fast cancel。outer 会等待所有已启动 sibling 到达 durable node-local terminal，先校验 receipt 与 durable Node/latest Attempt status/lineage，再重读 Graph、Budget 以及完整 Node status/version 集合，并要求 Attempt 已稳定、不存在 `ACTIVE` Lease 或未决 Operation Reservation。对于可结算的 failure/Budget/review，它用包含 outcome lineage 的 `taskbatch://sha256/<digest>` 决策引用，把 Graph `FAILED/BLOCKED`、可选 Budget `RELEASED` 和对应 Outbox 在同一事务中提交；decision ref 同时进入 receipt evidence，响应丢失时只接受完整状态与 Outbox 精确一致的 replay。测试分别覆盖 outer 的 pre-reservation failure/response-loss、Budget overrun、post-review 结算，以及保持 Graph `ACTIVE` 的 node-only retry replay；另有伪 receipt 拒绝和 child 自取消不挂死证据。post-reservation failure 若副作用仍未决，则当前调用与重入都保持 `RECOVERY_REQUIRED`，不会提前终结 Graph/Budget。
 
-这仍是 `PARTIAL_B2_SHADOW_FANOUT`，不是生产并发完成。fail-fast 只缩小竞态窗口：并行节点失败、Budget 超限或进入 post-review 时，共享 Graph/Budget terminal authority 仍在 child 内，尚未统一移到外层 fan-in；纯 terminal-leaf batch 也不并行。取消只有进程内传播，没有 durable cancel fence，崩溃后仍依赖 TTL 与启动恢复。publisher 实例锁只覆盖同进程共享实例，跨进程仍缺 durable Outbox claim/CAS。生产 resolver 的 retry marker、reservation 后即时 reconciliation、在线 takeover 和自动 continuation 仍缺失。
+这仍是 `PARTIAL_B3_OUTER_FANIN_TERMINAL`，不是生产并发完成。B3 只收口单次运行内、非 terminal-leaf 且通过 Reservation fence 的 shared terminal；崩溃后重入若直接看到 FAILED/review Node，仍会走旧 Graph/Budget 分步路径，甚至可能与在线 fan-in 的 failure-first 优先级不同，尚不具备 crash-safe outer authority。`taskbatch` 当前只持久化包含 outcome lineage 的摘要引用，canonical decision payload 尚未持久化，不能称为可独立解析的完整审计记录。纯 terminal-leaf、durable cancel fence、跨进程 Outbox claim/CAS、Budget 高竞争语义、production marker、自动 reconciliation/online takeover/continuation 也未完成，因此生产开关必须保持关闭。
 
 ### Planning Search
 

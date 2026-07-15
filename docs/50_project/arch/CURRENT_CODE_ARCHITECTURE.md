@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B2_SHADOW_FANOUT` | 在 B1 安全重试/heartbeat 上新增 `bounded_fanout_enabled` 默认关闭的影子路径；生产未启用。非 terminal-leaf 的多节点调度批次可按 Budget concurrency 真并发，但共享 Graph/Budget 终态、durable cancel fence、在线 takeover/自动 continuation 尚未闭环 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B3_OUTER_FANIN_TERMINAL` | 默认关闭且生产未启用；仅单次 live、非 terminal-leaf 批次的可结算 failure/Budget/review 已由 outer 基于完整快照原子提交 Graph、可选 Budget `RELEASED` 与 Outbox。crash/re-entry 仍走旧路径，`taskbatch` 仅摘要；terminal-leaf、durable cancel、跨进程 Outbox claim、online takeover/自动 continuation 未闭环 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -102,13 +102,13 @@ B0 的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定�
 
 operation reservation 建立后，Coordinator 会创建 `DurableExecutionHeartbeat`。后台循环严格先续 Lease、再续 Reservation，Worker 的每个流事件和最终结果都经过 checkpoint；停止并 join 心跳后才允许使用最新 Reservation version 执行 COMMIT。Lease 与 Reservation 续租均写版本化 Outbox，并支持同参调用在“事务已提交但响应丢失”时精确重放。任何续租失败、版本漂移或心跳生命周期异常都会产生 `RECOVERY_REQUIRED` 收据，Coordinator 不会 COMMIT Worker 结果。这个语义只建立 fail-closed 保护，不会在同一进程内自动 takeover 或即时完成 reconciliation。
 
-Coordinator 现在还有一个 `bounded_fanout_enabled` 实验开关，构造默认值为 `false`，生产 composition 没有传入启用值。当 `compute_dag_schedule()` 一次选出多个 claimable 节点，且图中仍有不属于该批次、尚未 `ACCEPTED` 的后继/剩余节点时，影子路径把已选节点创建为 asyncio child；批次数量已由 scheduler 按 `BudgetPolicy.limits.concurrency` 截断。各 child 的非终态 progress 通过 `asyncio.Queue(maxsize=fanout_event_buffer_size)` 实时合流，buffer 默认 32，非正值在构造时拒绝；queue 满会让 child 的 `put()` 等待，把慢消费者背压传回 producer。
+Coordinator 现在还有一个 `bounded_fanout_enabled` 实验开关，构造默认值为 `false`，生产 composition 没有传入启用值。当 `compute_dag_schedule()` 一次选出多个 claimable 节点，且图中仍有不属于该批次、尚未 `ACCEPTED` 的后继/剩余节点时，outer 会先把 Graph 从 `CREATED` 激活，再把已选节点创建为 asyncio child；批次数量已由 scheduler 按 Budget concurrency 截断，纯 terminal-leaf 仍排除。非终态 progress 由 `fanout_event_buffer_size` 个 semaphore slot 限制在途数量（默认 32，非正值拒绝），慢消费者会反压 producer；总 queue 另为每个 child 预留一个 control slot，因此 terminal/error/self-cancel 不会被满 progress buffer 阻塞或丢失。
 
-首个观察到的非接受终态会保存为 `stop_terminal`，立即 cancel/join 未完成 siblings 后直接返回该 durable terminal；child error 同样 fail-fast。只有全部 child 成功时，才按 admission 顺序逐项验证 terminal。并行 `_publish_outbox()` 先受 Coordinator 本地 asyncio lock 保护；同进程 Host/Internal/Scheduler 共享的 `RuntimeOutboxPublisher` 又以实例级 `threading.Lock` 串行化 list/append/mark drain。跨线程合同用两个 worker 证明共享 publisher 的 peak active drain 为 1，但该锁不覆盖多进程。
+并行 child 使用 deferred shared-terminal 模式：它仍独占自己的 Attempt、Node、Lease、Reservation，并可记录 Budget usage 或把预算标成 `EXCEEDED`，但不得终结共享 Graph，也不得把 Budget 置为 `RELEASED/CONSUMED`。因此普通的 node-local 非接受不会 fail-fast cancel sibling；outer 会等待所有已启动 sibling 到达 durable node-local terminal，再按固定优先级解释整批结果。并行 `_publish_outbox()` 先受 Coordinator 本地 asyncio lock 保护；同进程 Host/Internal/Scheduler 共享的 `RuntimeOutboxPublisher` 又以实例级 `threading.Lock` 串行化 list/append/mark drain。跨线程合同用两个 worker 证明共享 publisher 的 peak active drain 为 1，但该锁不覆盖多进程。
 
-集成测试验证了 concurrency=2 时两个 root 真重叠、concurrency=1 时仍串行，fan-in 节点只在两个依赖均 `ACCEPTED` 后执行，且首个 progress 能在所有 root 完成前流出。buffer=1 且暂停消费者时，已产生事件数不超过“已交付 1 + buffer + active child”。失败用例让 admission 顺序第二个 right 返回失败：Coordinator 返回该失败终态，Graph 为 `FAILED`，left 被取消，join 未运行，`OPERATION_COMMITTED` 为 0。外层消费被取消时也会 join 所有 child/heartbeat，测试观测到零 COMMIT 和零 task leak。
+outer 裁决前先校验 receipt 与 durable Node/latest Attempt status/lineage，再重读 Graph、Budget 与完整 Node status/version 集合，拒绝缺失/额外节点、非稳定 Attempt、任一 `ACTIVE` Lease 或未决 Operation Reservation。裁决以包含 outcome attempt/reason/evidence lineage 的 `taskbatch` digest 绑定整批快照，在单一事务中写 Graph `FAILED/BLOCKED`、可选 Budget `RELEASED` 与对应 Outbox；decision ref 也进入 receipt evidence，提交响应丢失只在聚合版本、节点快照和 Outbox 精确一致时 replay。测试验证 pre-reservation failure 单次收口及 response-loss replay、Budget overrun、post-review、node-only retry replay、伪 receipt 拒绝、自取消无挂死；post-reservation failure 的未决 Reservation 则持续返回 `RECOVERY_REQUIRED`，Graph/Budget 不提前终结。既有并发、fan-in、progress 背压和外层取消证据继续成立。
 
-该路径不能默认启用。fail-fast 只缩小竞态窗口；节点内部目前仍各自拥有 Graph/Budget terminal authority：任一并行节点失败、Budget 超限或进入 post-review 时，shared Graph/Budget 可能在其他 child 尚运行时被提前终结，统一裁决尚未移到外层 fan-in。纯 terminal-leaf batch 因 `has_unaccepted_successor` 条件仍走顺序路径。取消也只有进程内 propagation，没有持久化 cancel fence；进程崩溃后的未决 Lease/Reservation 仍依赖 TTL 与 startup recovery。publisher 实例锁解决同进程共享实例的 drain 串行，但跨进程仍缺 durable Outbox claim/CAS 或单 writer。
+该路径仍不能默认启用。B3 只统一单次运行内、非 terminal-leaf 且通过 Reservation fence 的 shared terminal。崩溃重入若循环入口直接看到 FAILED/review Node，仍走旧 Graph transition + Budget finalize 分步路径，没有完整 snapshot fence/taskbatch 事务；同时存在 review 与 failure 时旧路径会优先 review，而在线 outer 是 failure-first。`taskbatch` 目前只保存摘要引用，canonical decision payload 不可独立解析。纯 terminal-leaf、durable cancel fence、跨进程 Outbox claim、Budget 高竞争语义也仍未完成。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
@@ -116,11 +116,12 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 仍缺：
 
-- 影子 fan-out 未进生产；并行 failure、Budget 超限与 post-review 的共享 Graph/Budget 终态仍需移到外层 fan-in，terminal-leaf batch 也尚未并行；
+- B3 fan-out 未进生产；非 terminal-leaf 的共享 Graph/Budget 终态已移到 outer fan-in，但 terminal-leaf batch 与最终成功终态仍未并行；
+- crash/re-entry 的既有 FAILED/review Node 仍绕过 outer 原子裁决，优先级也可能与在线 fan-in 不一致；taskbatch canonical decision payload 尚未持久化；
 - 取消没有 durable cancel fence，进程崩溃后的回收仍依赖 TTL/startup recovery；
 - 同进程共享 publisher 已串行，跨进程 Outbox drain 仍缺 durable claim/CAS 或单 writer；
 - 生产 resolver 尚未把现实瞬态准备故障映射到显式 marker；promotion 与 claim 也不是同一决策事务；
-- pre-reservation terminal bundle 尚未包含 Budget finalize；reservation 后 worker/commit 失败的即时 reconciliation 也未闭环；
+- Budget 并发 CAS 仍有固定重试上限与 `ALREADY_EXCEEDED` 语义缺口；reservation 后 worker/commit 失败的即时 reconciliation 也未闭环；
 - 周期 Lease/Reservation heartbeat 已接，但仍缺 mid-attempt 在线 takeover、自动 continuation；长等待后的 grant renewal/derivation 未闭环。
 
 ### 4.2 Budget
@@ -247,13 +248,14 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 把影子 fan-out 的共享 Graph/Budget 终态裁决移到外层 fan-in，覆盖 failure、Budget 超限、post-review 与 terminal-leaf batch，并加入 durable cancel fence；通过故障矩阵后才考虑生产启用。
-2. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程 publisher 实例锁不能替代该 authority。
-3. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt 在线 takeover。
-4. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机并自动重调度。
-5. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
-6. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
-7. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
-8. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
+1. 统一 crash/re-entry 对既有 FAILED/review Node 的裁决：复用 live outer 的完整快照事务与 failure-first 优先级，并持久化可解析的 canonical decision payload。
+2. 在已完成的 live、非 terminal-leaf outer 收口上补齐 terminal-leaf 并行、最终成功终态与 durable cancel fence；通过故障矩阵后才考虑生产启用。
+3. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程 publisher 实例锁不能替代该 authority。
+4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，收敛 Budget CAS/`ALREADY_EXCEEDED` 并发语义，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。
+5. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机并自动重调度。
+6. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
+7. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
+8. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
+9. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
 
 这些缺口的唯一活动执行顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
