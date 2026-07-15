@@ -125,6 +125,7 @@
         "host_brain/contracts/agent_runtime/parallel_success.py",
         "host_brain/contracts/agent_runtime/graph_cancellation.py",
         "host_brain/persistence/task_repository.py",
+        "host_brain/persistence/task_decision_integrity.py",
         "host_brain/persistence/task_record_codec.py",
         "host_brain/persistence/task_store_types.py",
         "host_brain/persistence/worker_projection_repository.py",

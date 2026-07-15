@@ -74,6 +74,7 @@ Chat / Host Input / Gateway
 - `host_brain/task_runtime/acceptance_effects.py`
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py`
 - `host_brain/persistence/task_repository.py`
+- `host_brain/persistence/task_decision_integrity.py`
 - `host_brain/persistence/task_record_codec.py`
 - `host_brain/persistence/task_store_types.py`
 
@@ -129,7 +130,7 @@ final cancellation 只有在 active ownership 与 operation/effect/review 不确
 
 该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，但生产 authority provider/受控入口/canary 与跨进程自动 reconciliation/takeover/continuation 未完成。B4/0090、B5/0091 语义继续有效；revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、历史半提交和统一 `WAITING_APPROVAL` 仍是缺口。
 
-执行层的代码结构门禁仍为红，但已有三刀真实下降。Host authority 拆分让 adapter 从约 1.7k 降到约 1.4k 行并修复 route replay。TaskStore 的稳定值对象迁入约 0.28k 行的 `task_store_types.py`；随后 Attempt transition、canonical JSON guards、Budget/Node/Graph/Acceptance Effect/Cancellation/Parallel/Outbox 等 26 个纯 Row codec 迁入约 1.01k 行的 `task_record_codec.py`。codec 不反向导入 repository，也不打开连接、执行 SQL、读取时钟或开始事务；五个 decision integrity helper 仍使用调用方同一 SQLite 连接，避免拆出第二快照。`task_repository.py` 从约 12.56k 降到约 11.39k 行。门禁仍失败是因为它远超既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分；不得提高 allowlist 上限，必须继续抽 integrity 与持久化事务族、编排阶段。
+执行层的代码结构门禁仍为红，但已有四刀真实下降。Host authority 拆分让 adapter 从约 1.7k 降到约 1.4k 行并修复 route replay。TaskStore 的稳定值对象迁入约 0.28k 行的 `task_store_types.py`；随后 Attempt transition、canonical JSON guards、Budget/Node/Graph/Acceptance Effect/Cancellation/Parallel/Outbox 等 26 个纯 Row codec 迁入约 1.01k 行的 `task_record_codec.py`；五个 decision/outbox lineage 只读校验迁入约 0.54k 行的 `task_decision_integrity.py`。integrity 模块只借用调用方同一 SQLite 事务连接执行 `SELECT`，不打开连接、不另建快照、不提交事务，也不持有 mutation authority。`task_repository.py` 从约 12.56k 降到 10,882 行。门禁仍失败是因为它远超既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分；不得提高 allowlist 上限，必须继续拆同事务持久化族与编排阶段。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
