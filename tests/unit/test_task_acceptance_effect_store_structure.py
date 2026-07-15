@@ -13,6 +13,9 @@ from host_brain.persistence.task_acceptance_effect_staging import (
 from host_brain.persistence.task_parallel_success_store import (
     TaskParallelSuccessStoreMixin,
 )
+from host_brain.persistence.task_parallel_settlement_store import (
+    TaskParallelSettlementStoreMixin,
+)
 
 
 STAGING_METHODS = (
@@ -41,6 +44,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskAcceptanceEffectStagingMixin,
         TaskAcceptanceEffectDeliveryMixin,
         TaskParallelSuccessStoreMixin,
+        TaskParallelSettlementStoreMixin,
     )
     for name in STAGING_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(

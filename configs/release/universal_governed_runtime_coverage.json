@@ -129,6 +129,8 @@
         "host_brain/persistence/task_acceptance_effect_staging.py",
         "host_brain/persistence/task_decision_integrity.py",
         "host_brain/persistence/task_parallel_success_store.py",
+        "host_brain/persistence/task_parallel_settlement_store.py",
+        "host_brain/persistence/task_parallel_state.py",
         "host_brain/persistence/task_record_codec.py",
         "host_brain/persistence/task_store_types.py",
         "host_brain/persistence/worker_projection_repository.py",

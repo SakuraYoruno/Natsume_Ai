@@ -30,6 +30,28 @@ _DURABLE_REFERENCE_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
 )
 _MAX_OUTBOX_EVIDENCE_REFS = 32
+_PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS = frozenset(
+    {
+        "decision_ref",
+        "schema_version",
+        "graph_id",
+        "graph_revision",
+        "graph_version_before",
+        "graph_version_after",
+        "budget_id",
+        "budget_version_before",
+        "budget_version_after",
+        "decision_kind",
+        "selected_node_id",
+        "graph_target_status",
+        "budget_target_status",
+        "payload_json",
+        "payload_sha256",
+        "graph_outbox_id",
+        "budget_outbox_id",
+        "created_ts_ms",
+    }
+)
 _PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS = frozenset(
     {
         "decision_ref",
