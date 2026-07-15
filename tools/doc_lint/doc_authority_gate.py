@@ -15,6 +15,7 @@ REASON_LEGACY_DOC_OUTSIDE_HISTORY = "DOC_LEGACY_OUTSIDE_HISTORY"
 REASON_LEGACY_REFERENCE_ACTIVE = "DOC_LEGACY_REFERENCE_ACTIVE"
 REASON_MACHINE_STATUS_INVALID = "DOC_MACHINE_STATUS_INVALID"
 REASON_LEGACY_STAGE_ACTIVE = "DOC_LEGACY_STAGE_ACTIVE"
+REASON_OBSOLETE_DOCUMENT_PRESENT = "DOC_OBSOLETE_DOCUMENT_PRESENT"
 
 REQUIRED_AUTHORITY_PATHS = (
     "README.md",
@@ -23,12 +24,49 @@ REQUIRED_AUTHORITY_PATHS = (
     "docs/30_devspec/DevSpec.md",
     "docs/30_devspec/DevTasks.md",
     "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
+    "docs/15_theory/Theory.md",
     "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
+    "docs/50_project/arch/SYSTEM_ARCHITECTURE.md",
+    "docs/50_project/arch/FUNCTIONAL_MODULES.md",
+    "docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md",
+    "docs/50_project/arch/MONITOR_UI_ARCHITECTURE.md",
+    "docs/50_project/arch/DEPLOYMENT_ARCHITECTURE.md",
+    "docs/50_project/arch/diagrams/00_INDEX.md",
     "docs/50_project/arch/TARGET_ARCHITECTURE.md",
     "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
     "docs/60_trace/requirements_trace.md",
     "configs/release/current_architecture_status.json",
     "tests/TESTPLAN.md",
+)
+
+OBSOLETE_CURRENT_PATHS = (
+    "docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md",
+    "docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md",
+    "docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md",
+    "docs/15_theory/LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS.md",
+    "docs/15_theory/LangGraph_Governed_Runtime_Solution.md",
+    "docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md",
+    "docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md",
+    "docs/15_theory/SOUL_SYSTEM_FULL_UPGRADE_PATH.md",
+    "docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md",
+    "docs/15_theory/soul_emotion_optimization.md",
+    "docs/35_quality/GATEWAY_ARCH_REDESIGN.md",
+    "docs/35_quality/audits/SOUL_SYSTEM_COMPLETENESS_AUDIT_20260326.md",
+    "docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md",
+    "docs/50_project/arch/CODEX_BIO_OPERATIONS_PLAN.md",
+    "docs/50_project/arch/CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md",
+    "docs/50_project/arch/CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md",
+    "docs/50_project/arch/CODEX_DIGITAL_LIFE_PRODUCTION_CLOSURE_MATRIX_20260425.md",
+    "docs/50_project/arch/CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md",
+    "docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md",
+    "docs/50_project/arch/ENV_EXTERNAL_SERVICES_CHECKLIST.md",
+    "docs/50_project/arch/ExternalServices_Config.md",
+    "docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md",
+    "docs/50_project/arch/MODE_TRANSITION_SYSTEM.md",
+    "docs/50_project/arch/NATSUME_AI_FULL_LLM_CAPABILITY_RESTORATION_PLAN_20260422.md",
+    "docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md",
+    "docs/60_trace/DIGITAL_LIFE_GAP_ANALYSIS_20260403.md",
+    "docs/60_trace/ENV_SINGLE_SOURCE_MIGRATION_2026-03-04.md",
 )
 
 ACTIVE_STAGE_SCAN_PATHS = (
@@ -77,6 +115,17 @@ def scan_repository(root: str | Path) -> list[dict[str, Any]]:
                     relative,
                     0,
                     "Required current-authority document is missing",
+                )
+            )
+
+    for relative in OBSOLETE_CURRENT_PATHS:
+        if (repo_root / relative).exists():
+            failures.append(
+                _failure(
+                    REASON_OBSOLETE_DOCUMENT_PRESENT,
+                    relative,
+                    0,
+                    "Obsolete mixed-status document must not return to the current documentation tree",
                 )
             )
 

@@ -1,90 +1,85 @@
 受众：PROJECT
-标题：文档过期治理工作流（与代码同步）
+标题：Natsume AI 文档与代码同步工作流
 
-版本：v1.0
-日期：2026-05-30
+# Natsume AI 文档与代码同步工作流
 
-这是一版「项目级文档维持」工作流，目标是把关键事实文档与代码、测试、发布数据保持可验证同步，避免“文档留在旧世界”。
+版本：v2.0
+维护日期：2026-07-15
 
-## 1. 你需要先知道什么
+文档不是代码改完后的装饰。当前架构、模块边界、数据流和机器状态必须随 production composition 同步；历史报告只保存其固定范围，不允许反向覆盖当前事实。
 
-我们把文档变更分成两个等级：
+## 1. 文档职责
 
-1) **事实文档（每次代码迭代都要同步）**
-   - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
-   - `configs/release/current_architecture_status.json`
-   - `docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md`
-   - `docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md`
-   - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
-   - `docs/60_trace/requirements_trace.md`
-   - `docs/00_index/00_DOCMAP.md`
+| 文档 | 只负责什么 | 不允许写什么 |
+|---|---|---|
+| `README.md` | 项目入口、全景、启动、验证和导航 | 细粒度任务状态 |
+| `docs/15_theory/Theory.md` | 长期不变量和概念关系 | 当前完成度和排期 |
+| `SYSTEM_ARCHITECTURE.md` | 当前结构、分层、进程和 authority | 大量易腐实现枚举 |
+| `FUNCTIONAL_MODULES.md` | 功能 → owner → 入口 → 依赖 → 缺口 | 历史里程碑叙事 |
+| `DATA_FLOW_ARCHITECTURE.md` | 当前数据、状态、副作用和 receipt | 把目标箭头画成当前实线 |
+| `CURRENT_CODE_ARCHITECTURE.md` | 代码现在是什么 | 未来承诺 |
+| `TARGET_ARCHITECTURE.md` | 稳定最终目标 | 当前状态和任务进度 |
+| `ARCHITECTURE_GAP_MATRIX.md` | 当前与目标的差距 | 新增独立目标 |
+| `NEXT_GENERATION_EVOLUTION_EXECUTION.md` | 唯一活动波次、依赖、Gate | 重复产品/理论全文 |
+| machine status JSON | 自动化消费的当前定级 | 解释性长文 |
 
-2) **静态历史文档（非现实主链，不要求实时联动）**
-   - 版本归档、阶段汇总、回溯总结、试运行记录。
+## 2. 变更触发矩阵
 
-> 规则：凡是“事实文档”，代码、测试或配置变化后，都必须尽快更新；历史归档文档不进入本门禁。
+| 改动范围 | 必须检查/更新 |
+|---|---|
+| ASGI、进程、composition、package owner | README、System、Functional Modules、Current |
+| Secure Ingress、Governor、route | Data Flow、图 02、Current、Gap、Trace |
+| TaskGraph、Attempt、Lease、Budget、Review、Acceptance | Data Flow、图 02/04、Current、Gap、TestPlan |
+| PlanningSearch 或领域 adapter | Theory、System、Data Flow、图 04、Current、Gap |
+| Life、Memory、Bond、Persona、Scene、World | Theory、Data Flow、图 03/05、Current、Gap |
+| Gateway、Edge、跨进程合同 | Data Flow、图 01/06、Deployment、Current |
+| Monitor route/query/command/API | Monitor UI、图 07、Functional Modules |
+| 环境变量、启动脚本、Docker、端口 owner | README、Deployment、示例配置 |
+| 当前状态或 Gate | machine status、Current、Gap、Execution、Trace |
 
-## 2. 门禁定义（脚本与配置）
+没有事实变化时不需要机械修改所有文档；有事实变化时，不能只改一个版本日期或写“同步中”。
 
-### 2.1 配置文件
+## 3. 更新步骤
 
-文档过期门禁由配置驱动，不用人脑背：
-- `tools/doc_lint/doc_freshness_policy.json`
+1. 从生产入口和 composition 复现调用链，不从旧文档复制。
+2. 判断变化属于理论、结构、当前状态、目标、差距还是执行，选择唯一 owner 文档。
+3. 更新代码路径、状态定级和必要 Mermaid；目标关系使用虚线或明确标 `TARGET`。
+4. 更新受影响索引和链接。
+5. 若状态变化，同步 `configs/release/current_architecture_status.json`。
+6. 若 FR 或 Gate 变化，同步 Trace/TestPlan/执行合同。
+7. 运行文档门禁、链接检查、相关代码测试和静态扫描。
 
-该配置明确了：
-- 每份目标文档（doc）
-- 对应的源码/配置/测试源（sources）
-- 允许的最大差异天数（max_age_days）
+## 4. 自动门禁
 
-### 2.2 检查脚本
+```powershell
+python tools/doc_lint/doc_audience_lint.py --root .
+python tools/doc_lint/doc_authority_gate.py --root .
+python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+python -m pre_commit run
+```
 
-- `tools/doc_lint/doc_freshness_gate.py`
+- `doc_audience_lint`：检查受众/标题头和混写规则。
+- `doc_authority_gate`：检查核心文档存在、旧执行计划隔离、机器状态与执行合同一致。
+- `doc_freshness_gate`：按源码变更提醒事实文档过期。
+- pre-commit：在提交前组合运行文档 Gate。
 
-规则核心：只要某份文档的源文件发生更新，且文档最近提交时间与源最新提交时间差超过阈值，CI 认为该文档已过期。
+门禁通过只证明规则覆盖的内容自洽，不替代人工核对生产接线。新增重要文档时应把它加入 authority/freshness Gate，而不是只加一个链接。
 
-### 2.3 CI 触发
+## 5. 删除与归档
 
-- `workflow` 文件：`\.github/workflows/doc-freshness-gate.yml`
-- 触发：`pull_request`、`push(main)`、`workflow_dispatch`、`schedule`
-- 运行策略：
-  - PR / push：只校验“本次变更触碰到源文件”的文档。
-  - schedule：全量扫描（默认 14 天阈值）用于追踪长期积压。
+- 无当前价值的旧方案、重复完成报告和模块快照直接删除，Git 历史承担追溯。
+- 只有发布回执、合规证据或需要长期保留的固定程序快照进入 `_history`/`50_release`。
+- 历史文件必须有范围和基线，不能从当前目录被当作活动计划引用。
+- 不为“文件必须存在”单独写测试；测试应验证权威链、状态一致性和链接有效性。
 
-## 3. 我怎么更新文档
+## 6. 完成定义
 
-当脚本报“过期”时，按以下顺序处理：
+文档改动完成必须满足：
 
-1. 先补齐**事实文档**中对应章节（新增/修订/重排）；
-2. 把变更映射到 `TRACE` 或 `DOCMAP`；
-3. 在本次提交里连带更新版本注记（版本号按 Project 约定）；
-4. 重新运行文档门禁确保过期项清零。
-
-更新粒度要求：以“事实性句段”为主，不需要重写整篇，删减历史推演章节也可以，前提是文档不与实际代码冲突。
-
-## 4. 失败处理策略
-
-- **一次变更触发 1–3 个事实文档过期**：同步更新这 1–3 个文档即可；
-- **变更波及多份事实文档**：按 `sources` 映射批量更新，不得只改一句“目前同步中”；
-- **无法及时更新**：在 PR 描述中说明延后计划并开一个补齐任务（不得把过期文档作为正式交付口径）。
-
-## 5. 常见例外
-
-- 归档文件、旧阶段总结、回顾类文档不在本策略内；
-- 仅改中文本提示语、参数注释、拼写不影响事实路径时，可不触发强制更新；
-- 当上游源文件是外部依赖且仓库不直接改造时，不列入“必须更新”条目，待对应里程碑评审补齐。
-
-## 6. 结果输出与治理
-
-门禁输出字段：
-- `failed_artifact`：过期文档路径；
-- `message`：超期天数与阈值；
-- `latest_source`：触发源文件；
-- `changed_source_count`：命中变更的源数量；
-- `check_all`：当前模式（是否全量扫描）。
-
-### 6.1 完成定义
-
-一个 PR 视为完成，需满足：
-- 受影响文档与配置映射一致；
-- `doc-freshness-gate` 无失败；
-- `docs` 变更不再向历史事实文档写入不再成立的路径引用。
+1. 生产代码路径真实存在。
+2. 当前、目标和历史没有混写。
+3. Mermaid 与正文使用同一状态口径。
+4. 核心相对链接全部有效。
+5. machine status 与 Current/Gap/Execution 一致。
+6. 文档门禁和受影响测试通过。
+7. README 与目录索引能让新成员找到新文档。

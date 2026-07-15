@@ -1,177 +1,141 @@
-受众：MASTER
-标题：图 03 — 召回与记忆数据流（surface recall + LifeMemoryStore SSOT）
+受众：PROJECT
+标题：图 03——记忆、Canon 与召回数据流
 
-版本：v1.1
-日期：2026-06-23
-归属：docs/50_project/arch/diagrams/
-分析锚点：dev@b28c20a2
+# 图 03：记忆、Canon 与召回数据流
 
----
+版本：v2.0
+核对日期：2026-07-15
 
-## 怎么读这张图
+本图区分三件容易混淆的事：durable 事实写入、衍生索引、对话时召回。向量相似度、语义摘要和图关系可以帮助找材料，但不能独立证明事实。
 
-当前 surface recall 是一条**SurfaceMainChain 输入构建 -> `_run_retrieval` -> RecallFusionServiceContract -> 多路 route -> MemoryRecallPacket -> prompt facts** 的链路。
-
-重点：
-1. 入口在 surface / chat retrieval helpers，不在旧 Agentic RAG。
-2. 当前 surface 主 routes 是 `life_memory_collection`、`life_episode`、`semantic_memory`、`episodic_vector`、`sqlite_ledger`、`neo4j_bond`。
-3. `LifeMemoryStore` 是记忆 SSOT；SQLite 是 source of truth；vector / semantic / graph 是衍生层。
-4. `WorldCanonStore` 通过 prompt authoritative slot 进入上下文，不是当前 surface recall route。
-
-## 召回总流程
+## 写入与投影
 
 ```mermaid
 flowchart TD
-    IN["/v1/chat or /v1/host/input<br/>chat-bound turn"]
-    SMC["SurfaceMainChain<br/>input build"]
-    RUN["chat_retrieval_helpers._run_retrieval"]
-    SVC["_build_surface_memory_recall_service<br/>RecallFusionServiceContract"]
+    ACCEPT["Accepted TaskGraph"]
+    INTENTS["Acceptance effect intents"]
+    DISP["AcceptanceEffectDispatcher"]
+    TURN["conversation.user_turn / assistant result"]
+    LIFE["Life command/event/evidence"]
+    MEM["Life Memory / conversation repositories"]
+    CANON["Governed Canon proposal/apply"]
+    LEDGER["Canonical SQLite / durable repositories"]
+    SEM["Semantic memory"]
+    VEC["Vector projection / Chroma"]
+    GRAPH["Bond/relationship graph projection"]
+    QUERY["Read-only query projections"]
 
-    IN --> SMC --> RUN --> SVC
+    ACCEPT --> INTENTS --> DISP
+    DISP --> TURN --> MEM --> LEDGER
+    DISP --> LIFE --> LEDGER
+    CANON --> LEDGER
+    LEDGER -."derived".-> SEM
+    LEDGER -."derived".-> VEC
+    LEDGER -."derived".-> GRAPH
+    LEDGER --> QUERY
 
-    subgraph Routes["current surface recall routes"]
-        direction LR
-        R0["surface_life_collection<br/>store_id=life_memory_collection"]
-        R1["surface_life_episode<br/>store_id=life_episode"]
-        R2["surface_semantic<br/>store_id=semantic_memory"]
-        R3["surface_episodic<br/>store_id=episodic_vector"]
-        R4["surface_sqlite<br/>store_id=sqlite_ledger"]
-        R5["surface_neo4j<br/>store_id=neo4j_bond"]
-    end
-
-    SVC --> R0
-    SVC --> R1
-    SVC --> R2
-    SVC --> R3
-    SVC --> R4
-    SVC --> R5
-
-    R0 --> FUS["RecallFusionResult<br/>rank/filter/dedupe"]
-    R1 --> FUS
-    R2 --> FUS
-    R3 --> FUS
-    R4 --> FUS
-    R5 --> FUS
-
-    FUS --> SMR["surface_memory_recall.py<br/>policy / guards / humanized facts"]
-    SMR --> MRP["MemoryRecallPacket<br/>required facts + evidence + time anchors"]
-    MRP --> PACK["surface_packet_compiler.py<br/>CompiledSurfaceInput"]
-    PACK --> RT["SurfaceRuntime.run(...)"]
-    RT --> ENV["ReplyEnvelope.final_reply<br/>COMMIT SSE"]
-    ENV --> POST["POST aftereffects<br/>memory write / emotion-bond / life aftereffect"]
+    style LEDGER fill:#d7f5df,stroke:#22863a
+    style SEM fill:#e8f4ff,stroke:#0366d6
+    style VEC fill:#e8f4ff,stroke:#0366d6
+    style GRAPH fill:#e8f4ff,stroke:#0366d6
 ```
 
-## SSOT 与衍生层
+Acceptance 与 effect intent 登记属于 TaskStore 的原子操作；具体 conversation、Life 或 transport handler 随后可独立重试。因此“Task 已接纳”和“所有衍生索引都已更新”不是同一时刻。
+
+## 对话召回
 
 ```mermaid
 flowchart LR
-    subgraph Truth["source of truth"]
-        LEDGER["SQLiteLedger<br/>ledger_schema.py"]
-        LM["LifeMemoryStore<br/>life_memory.py"]
-        WC["WorldCanonStore<br/>canon_world_store.py"]
+    MSG["sanitized user message"]
+    PREFETCH["retrieval/persona prefetch"]
+    FUSION["RecallFusionServiceContract"]
+
+    subgraph Sources["Recall sources"]
+        EP["life episodes / collections"]
+        SM["semantic memory"]
+        EV["episodic vector"]
+        SQL["SQLite ledger"]
+        BG["bond graph/fallback"]
     end
 
-    subgraph LedgerTables["SQLite tables"]
-        TL1["intent_log<br/>governor_log<br/>skill_exec_log"]
-        TL2["memory_ops_log<br/>life_episode<br/>life_evidence"]
-        TL3["canon_*<br/>world_canon_doc"]
-        TL4["semantic_memory<br/>retrieval_event_log"]
-    end
+    RANK["rank / filter / dedupe / provenance"]
+    PACK["MemoryRecallPacket"]
+    SURFACE["SurfacePacket / frozen context"]
+    REPLY["Surface reply worker"]
 
-    subgraph Derived["derived / compatible layers"]
-        LMC["life_memory_collection<br/>aggregated view"]
-        SEM["semantic_memory<br/>distilled long-term memory"]
-        VEC["episodic_vector / Chroma<br/>vector index"]
-        BOND["neo4j_bond<br/>relationship graph or fallback"]
-    end
-
-    LEDGER --> TL1
-    LEDGER --> TL2
-    LEDGER --> TL3
-    LEDGER --> TL4
-    LM --> LEDGER
-    LM --> LMC
-    LM --> SEM
-    LM --> VEC
-    LEDGER --> SEM
-    LEDGER --> VEC
-    LEDGER --> BOND
-    WC --> TL3
+    MSG --> PREFETCH --> FUSION
+    FUSION --> EP
+    FUSION --> SM
+    FUSION --> EV
+    FUSION --> SQL
+    FUSION --> BG
+    EP --> RANK
+    SM --> RANK
+    EV --> RANK
+    SQL --> RANK
+    BG --> RANK
+    RANK --> PACK --> SURFACE --> REPLY
 ```
 
-`life_episode` / `life_evidence` 是可追溯的生命记忆事实。`semantic_memory`、`episodic_vector`、`neo4j_bond` 可参与召回排序和上下文补强，但不能脱离来源证明成为真源。
+召回结果是带来源和置信边界的上下文材料。它必须经过过滤、去重、时间和人物范围约束，再进入冻结的 worker context；检索服务本身不写最终回复。
 
-## WorldCanon 进入 prompt 的实际路径
+## Canon 进入上下文
 
 ```mermaid
-flowchart TD
-    STORE["WorldCanonStore<br/>host_brain/memory/canon_world_store.py"]
-    SLOT["build_world_canon_slot(...)<br/>host_brain/core/prompt_context.py"]
-    AUTH["prompt_context['authoritative']<br/>kind=world_canon"]
-    FLAGS["evidence_level=CANON_REFERENCE_ONLY<br/>unsafe_as_fact=True<br/>reference_mode=citation_only"]
-    PROMPT["prompt authoritative slot"]
+flowchart LR
+    PROPOSAL["Canon proposal"]
+    REVIEW["Governed apply / version check"]
+    STORE["Canon durable state"]
+    SLOT["build_world_canon_slot"]
+    AUTH["authoritative prompt slot\nreference/citation boundary"]
+    SURFACE["Surface context"]
 
-    STORE --> SLOT --> AUTH --> FLAGS --> PROMPT
+    PROPOSAL --> REVIEW --> STORE --> SLOT --> AUTH --> SURFACE
 ```
 
-WorldCanon 是设定/典籍引用源，不证明「已执行」「已保存」「用户已确认」。它不是当前 surface recall route，也不应写成 StateArbiter 中的 StyleCanon 优先级。
+Canon 是受治理的设定/知识材料，不等于“现实中已经发生的事件”。Prompt slot 必须保留引用性质和安全标记，不能因为被放进 authoritative slot 就伪造执行证据。
 
-## ReplyEnvelope 后效
+## 纠错和删除
 
 ```mermaid
-sequenceDiagram
-    participant S as SurfaceMainChain
-    participant E as ReplyEnvelope
-    participant C as Client SSE
-    participant P as Postprocessor
-    participant M as LifeMemoryStore
-    participant B as Bond/Emotion flow
-    participant L as Life aftereffect
-    participant X as Edge/MateEngine/Desktop Pet
+flowchart LR
+    USER["用户纠错/删除请求"]
+    CMD["Governed memory/canon command"]
+    STORE["canonical correction/tombstone"]
+    REBUILD["derived projection rebuild"]
+    READ["future recall"]
 
-    S->>E: final_reply(source="surface_main_chain", audit emotion tags)
-    E->>C: COMMIT
-    E->>P: schedule async post process
-    P->>M: _write_surface_main_chain_memory_sync
-    P->>B: emotion_context + bond_summary updates
-    P->>L: record_dialogue_aftereffect
-    P->>X: TTS / VTS / desktop cues
+    USER --> CMD --> STORE --> REBUILD --> READ
 ```
 
-后效只在 COMMIT 之后调度。记忆写回进入 LifeMemoryStore / SQLiteLedger；Edge、MateEngine、Desktop Pet 只承载外显执行与状态展示。
+纠错应先落 canonical correction、版本或 tombstone，再使语义/向量/图投影失效或重建。只删向量而保留事实 writer、或只改 UI 显示，都不构成完整纠错。
+
+## Authority 规则
+
+| 数据 | 可作为事实吗 | 要求 |
+|---|---|---|
+| Accepted conversation/Life event | 可以 | 必须有 request/graph/effect lineage |
+| Canon version | 作为 Canon 引用可以 | 不得冒充真实 outcome |
+| Semantic summary | 不能单独作为事实 | 必须能回溯来源记录 |
+| Vector hit | 不能 | 只是候选检索信号 |
+| Bond graph relation | 依赖其来源 | 图投影不能覆盖 canonical event |
+| 模型生成的“记忆” | 不能直接写入 | 必须形成 proposal/evidence 并走治理 |
 
 ## 代码锚点
 
-| 链路位置 | 文件 | 关键方法 / 事实 |
-|---|---|---|
-| surface recall 入口 | `host_brain/app/chat_retrieval_helpers.py` | `_run_retrieval(...)` |
-| surface recall service | `host_brain/app/chat_retrieval_helpers.py` | `_build_surface_memory_recall_service()` |
-| 召回服务契约 | `host_brain/retrieval/recall_fusion.py` | `RecallFusionServiceContract` |
-| store 实现 | `host_brain/retrieval/recall_fusion_stores.py` | `search_life_episode` / `search_life_memory_collection` / `search_semantic_memory` / `search_sqlite_ledger` / `search_neo4j_bond` |
-| route schema | `host_brain/retrieval/recall_schemas.py` | `RecallRouteConfig` / `RecallRuntimeConfig` / `RecallFusionResult` |
-| surface facts guard | `host_brain/persona/surface_memory_recall.py` | `MemoryRecallPacket` 组装、store 优先级、事实清洗 |
-| 记忆 SSOT | `host_brain/memory/life_memory.py` | `LifeMemoryStore` |
-| ledger schema | `host_brain/audit/ledger_schema.py` | `intent_log` / `governor_log` / `skill_exec_log` / `memory_ops_log` / `life_episode` / `life_evidence` / `canon_*` / `semantic_memory` / `retrieval_event_log` |
-| WorldCanon SSOT | `host_brain/memory/canon_world_store.py` | `WorldCanonStore` |
-| WorldCanon prompt slot | `host_brain/core/prompt_context.py` | `build_world_canon_slot(...)` |
-| ReplyEnvelope | `host_brain/input_runtime/reply_envelope.py` | final reply contract |
-| Surface 后效 | `host_brain/app/surface_main_chain_adapter.py` | `_schedule_surface_life_aftereffect(...)` / `_async_post_process(...)` 调度 |
+- Acceptance effect 编译：`host_brain/task_runtime/acceptance_effects.py`
+- Effect dispatcher：`host_brain/task_runtime/acceptance_effect_dispatcher.py`
+- 生产 effect handlers：`host_brain/app/acceptance_effect_handlers.py`
+- Conversation writer：`host_brain/app/conversation_writer.py`
+- Life memory：`host_brain/memory/life_memory/`、`host_brain/persistence/life_memory_repository.py`
+- Recall service：`host_brain/retrieval/recall_fusion.py`、`recall_fusion_stores.py`
+- Surface memory packet：`host_brain/persona/surface_memory_recall.py`
+- Surface packet：`host_brain/persona/surface_packet_compiler.py`
+- Canon application：`host_brain/canon/`、`host_brain/persistence/canon_repository.py`、`canon_apply_repository.py`
+- Canon prompt slot：`host_brain/core/prompt_context.py::build_world_canon_slot`
 
-## 不变量
+## 当前限制
 
-1. 当前 surface recall routes 是 `life_memory_collection`、`life_episode`、`semantic_memory`、`episodic_vector`、`sqlite_ledger`、`neo4j_bond`。
-2. `LifeMemoryStore` + SQLiteLedger 是记忆 SSOT；vector / semantic / graph 是衍生层。
-3. `WorldCanonStore` 主要进入 `authoritative` slot，带 `unsafe_as_fact=True` 与 `reference_mode="citation_only"`；它不是当前 surface recall route。
-4. 当前源码没有 `canon_style_store.py`，也没有 `host_brain/canon/style/`；不要写 StyleCanon route 或 StateArbiter 优先级。
-5. 旧 Agentic RAG stack：`RetrievalOrchestrator`、`RetrievalPipeline`、`QueryPlanner`、`AgenticRetrievalLoop` 不属于当前链路。
-6. Edge 外显面只上报遥测/执行结果，不是事实裁决源。
-
-## 已废弃口径
-
-| 旧口径 | 当前事实 |
-|---|---|
-| `RetrievalOrchestrator -> RetrievalPipeline -> QueryPlanner` | 当前 surface recall 走 `_run_retrieval` + `RecallFusionServiceContract` |
-| `world_canon` 是当前 surface recall route | WorldCanon 通过 `build_world_canon_slot` 进入 authoritative slot |
-| StyleCanon 是召回 route | 当前无 `canon_style_store.py` / `host_brain/canon/style/` |
-| semantic/vector 可直接当事实 | 它们是衍生层，必须回到 LifeMemoryStore / SQLiteLedger provenance |
-| Edge 状态可裁决事实 | Edge 只提供遥测和执行回执 |
+- 非 canonical compatibility route 仍可能使用旧 conversation writer 和异步后效。
+- Knowledge OS 尚未统一 provenance、staleness、conflict 和 Decision Record 生命周期。
+- 可选向量/图服务的完整生产可用性取决于环境，缺失时必须显式降级。

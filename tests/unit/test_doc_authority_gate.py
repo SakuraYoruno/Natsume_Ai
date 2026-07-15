@@ -65,6 +65,16 @@ def test_legacy_document_outside_history_fails(tmp_path: Path) -> None:
     assert any(row["reason_code"] == "DOC_LEGACY_OUTSIDE_HISTORY" for row in failures)
 
 
+def test_obsolete_current_document_cannot_return(tmp_path: Path) -> None:
+    _minimal_repo(tmp_path)
+    obsolete = authority.OBSOLETE_CURRENT_PATHS[0]
+    _write(tmp_path / obsolete)
+
+    failures = authority.scan_repository(tmp_path)
+
+    assert any(row["reason_code"] == "DOC_OBSOLETE_DOCUMENT_PRESENT" for row in failures)
+
+
 def test_unqualified_legacy_reference_fails(tmp_path: Path) -> None:
     _minimal_repo(tmp_path)
     basename = authority.LEGACY_DOCUMENTS[1]
