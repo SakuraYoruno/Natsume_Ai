@@ -144,6 +144,7 @@ Host exact replay 必须按 `command.route_type` 校验 authority：`chat/delega
 - 0091 Parallel Success 持久化 mixin 只借用主 Store authority；`complete_parallel_graph_success()` 必须只有一个 owner transaction，并以同一 `conn` 贯通 cancellation fence、Node/Attempt/projection lineage、Graph/Budget/Outbox CAS、Acceptance Effect staging、0091 insert/replay 与 decision binding。Cancellation 侧在自身事务内对 0091 的直接查询不得改成另开连接的 public getter。
 - 0090 Parallel Settlement 持久化 mixin 同样只能借用一个 owner transaction；cancellation fence、完整 Node snapshot、Attempt/BudgetUsage lineage、Graph/Budget CAS、两类 Outbox 与 canonical decision insert/replay 必须使用同一 `conn`。latest reader 的 `taskbatch` marker 扫描、exact Outbox binding 和 lineage 校验必须复用同一个读连接。0090/0091/0092 共享的 Node snapshot helper 必须保持无 SQL、无 Store owner 的纯函数。
 - 0092 cancellation mutation 按 request 与 advance/finalize 拆为无状态 mixin；三个写方法各自必须恰好一个 owner transaction，所有直接 SQL 和 Graph/Budget/Outbox/CAS/evidence helper 都复用该 `conn`。request/finalize 对 0091 的 first-writer 查询必须位于同一事务快照；公共 evidence builder 继续调用主 Store `_operation_record()` 完整验证 reconciliation proof，不得在 mixin 内复制或降级。
+- Retry mutation 与 response-loss replay 必须分离职责但共享调用方当前 `conn`；任何 operation reservation 都在 Node/版本 mutation 前关闭自动 retry，existing BudgetUsage 是唯一 replay 入口。BudgetUsage、Budget/Attempt/Node/Lease/Outbox、retry deadline 与 legacy/node-only Graph disposition 必须在同一事务内精确校验。Atomic failure 只原子关闭 Attempt/Node/Lease、可选 Graph 和 3/4 条 Outbox，明确不得取得 Budget mutation authority；Budget finalize 仍在 bundle 外。
 
 ### 3.4.1 Durable cancellation
 
