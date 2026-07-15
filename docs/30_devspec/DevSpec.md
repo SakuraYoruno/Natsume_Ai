@@ -143,6 +143,7 @@ Host exact replay 必须按 `command.route_type` 校验 authority：`chat/delega
 - Acceptance Effect 持久化按 atomic staging 与 fenced delivery 拆为无状态 mixin；mixin 不得定义 `__init__`、连接、时钟或事务 owner，只能复用 `DurableTaskStore` 的 `_connect()` / `_transaction()`。`_stage_acceptance_effect_intent_in_transaction(conn, ...)` 必须继续接受调用方当前连接，Parallel Success、Node/Graph acceptance 不得因模块拆分跨事务。
 - 0091 Parallel Success 持久化 mixin 只借用主 Store authority；`complete_parallel_graph_success()` 必须只有一个 owner transaction，并以同一 `conn` 贯通 cancellation fence、Node/Attempt/projection lineage、Graph/Budget/Outbox CAS、Acceptance Effect staging、0091 insert/replay 与 decision binding。Cancellation 侧在自身事务内对 0091 的直接查询不得改成另开连接的 public getter。
 - 0090 Parallel Settlement 持久化 mixin 同样只能借用一个 owner transaction；cancellation fence、完整 Node snapshot、Attempt/BudgetUsage lineage、Graph/Budget CAS、两类 Outbox 与 canonical decision insert/replay 必须使用同一 `conn`。latest reader 的 `taskbatch` marker 扫描、exact Outbox binding 和 lineage 校验必须复用同一个读连接。0090/0091/0092 共享的 Node snapshot helper 必须保持无 SQL、无 Store owner 的纯函数。
+- 0092 cancellation mutation 按 request 与 advance/finalize 拆为无状态 mixin；三个写方法各自必须恰好一个 owner transaction，所有直接 SQL 和 Graph/Budget/Outbox/CAS/evidence helper 都复用该 `conn`。request/finalize 对 0091 的 first-writer 查询必须位于同一事务快照；公共 evidence builder 继续调用主 Store `_operation_record()` 完整验证 reconciliation proof，不得在 mixin 内复制或降级。
 
 ### 3.4.1 Durable cancellation
 

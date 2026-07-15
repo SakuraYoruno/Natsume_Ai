@@ -16,6 +16,12 @@ from host_brain.persistence.task_parallel_success_store import (
 from host_brain.persistence.task_parallel_settlement_store import (
     TaskParallelSettlementStoreMixin,
 )
+from host_brain.persistence.task_graph_cancellation_request import (
+    TaskGraphCancellationRequestMixin,
+)
+from host_brain.persistence.task_graph_cancellation_finalization import (
+    TaskGraphCancellationFinalizationMixin,
+)
 
 
 STAGING_METHODS = (
@@ -45,6 +51,8 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskAcceptanceEffectDeliveryMixin,
         TaskParallelSuccessStoreMixin,
         TaskParallelSettlementStoreMixin,
+        TaskGraphCancellationRequestMixin,
+        TaskGraphCancellationFinalizationMixin,
     )
     for name in STAGING_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(

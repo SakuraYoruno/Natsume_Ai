@@ -77,6 +77,8 @@ Chat / Host Input / Gateway
 - `host_brain/persistence/task_acceptance_effect_staging.py`
 - `host_brain/persistence/task_acceptance_effect_delivery.py`
 - `host_brain/persistence/task_decision_integrity.py`
+- `host_brain/persistence/task_graph_cancellation_request.py`
+- `host_brain/persistence/task_graph_cancellation_finalization.py`
 - `host_brain/persistence/task_parallel_success_store.py`
 - `host_brain/persistence/task_parallel_settlement_store.py`
 - `host_brain/persistence/task_parallel_state.py`
@@ -135,7 +137,7 @@ final cancellation 只有在 active ownership 与 operation/effect/review 不确
 
 该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，但生产 authority provider/受控入口/canary 与跨进程自动 reconciliation/takeover/continuation 未完成。B4/0090、B5/0091 语义继续有效；revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、历史半提交和统一 `WAITING_APPROVAL` 仍是缺口。
 
-执行层的代码结构门禁仍为红，但已有七刀真实下降。Host authority 拆分让 adapter 从约 1.7k 降到约 1.4k 行并修复 route replay。TaskStore 的值对象、Row codec、只读 integrity、Acceptance Effect 与 0091 Parallel Success 已迁入明确模块；0090 Parallel Settlement 又迁入约 0.76k 行无状态 mixin，共享 Node snapshot helper 迁入约 0.08k 行纯模块。`settle_parallel_graph_budget()` 仍只有一个 owner transaction，BudgetUsage lineage 与 Outbox marker 的写/读校验复用各自同一连接。`task_repository.py` 从约 12.56k 降到 8,230 行。门禁仍失败是因为它远超既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分；不得提高 allowlist 上限，必须继续拆同事务持久化族与编排阶段。
+执行层的代码结构门禁仍为红，但已有八刀真实下降。Host authority 拆分让 adapter 从约 1.7k 降到约 1.4k 行并修复 route replay。TaskStore 的值对象、codec、integrity、Acceptance Effect、0090/0091 与共享 snapshot 已迁入明确模块；0092 cancellation request 与 advance/finalize 又拆为约 0.70k/0.71k 行无状态 mixin。三个写方法各自保留一个 owner transaction；0091 first-writer、operation proof、effect/review fences 和 replay 语义不变，common evidence builder 仍由主 Store 唯一拥有。`task_repository.py` 从约 12.56k 降到 6,900 行。门禁仍失败是因为它超过既有 4.6k ceiling，且 `coordinator.py` 约 5.8k 行仍未拆分；不得提高 allowlist 上限，必须继续拆同事务持久化族与编排阶段。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 

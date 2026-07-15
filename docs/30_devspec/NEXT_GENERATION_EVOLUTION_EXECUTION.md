@@ -155,7 +155,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
-- 当前 mixed-file gate 仍明确为红，但已有七刀真实下降：Host authority 模块让 adapter 退出 inventory 并修复 `chat/delegate` replay；TaskStore 值对象、纯 codec、只读 integrity、Acceptance Effect、0091 success 已迁入明确模块；0090 settlement 又迁入约 0.76k 行的无状态 mixin，0090/0091/0092 共享的 Node snapshot helper 迁入约 0.08k 行纯模块。Settlement 的 cancellation fence、BudgetUsage lineage、Outbox marker、Graph/Budget CAS 和 decision replay 仍复用单一 owner/read connection；旧路径继续保持 identity。`task_repository.py` 由约 12.56k 降到 8,230 行，但仍超过既有 4.6k ceiling；`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；下一刀按 request 与 advance/finalize 两条 0092 写路径拆分 Graph Cancellation，再继续 Graph/Attempt、Budget/retry 等同一事务族和编排边界；
+- 当前 mixed-file gate 仍明确为红，但已有八刀真实下降：Host authority 模块让 adapter 退出 inventory 并修复 `chat/delegate` replay；TaskStore 值对象、codec、integrity、Acceptance Effect、0090/0091 与共享 snapshot 已迁入明确模块；0092 request 和 advance/finalize 又分别迁入约 0.70k/0.71k 行的无状态 mixin。三个写方法各自仍只有一个 owner transaction，0091 first-writer、operation proof、effect/review fence 与 exact replay 未改；公共 readiness/getters/evidence 与跨执行 fence 留在主 Store。`task_repository.py` 由约 12.56k 降到 6,900 行，但仍超过既有 4.6k ceiling；`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；下一刀拆 retry mutation 与 atomic failure，retry exact-replay helper 暂保留 owner，之后继续剩余 Graph/Attempt/Budget 持久化和编排边界；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；
