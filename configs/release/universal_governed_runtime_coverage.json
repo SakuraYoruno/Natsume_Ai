@@ -8,7 +8,9 @@
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_route_executors.py",
+        "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/integration/test_gr05_universal_host_runtime.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
       ],
@@ -29,6 +31,7 @@
       "status": "COMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_skill_execution_ports.py",
         "tests/integration/test_aw0203_governed_host_cutover.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
@@ -50,7 +53,9 @@
       "status": "COMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_route_executors.py",
+        "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/integration/test_gr05_universal_host_runtime.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
       ],

@@ -155,7 +155,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
-- 当前 mixed-file gate 明确为红：`task_repository.py` 超过既有 4.6k ceiling，`coordinator.py` 与 `governed_task_adapter.py` 仍是未完成责任分类的大文件。禁止抬高白名单上限；在继续叠加生产执行能力前，按 Graph/Attempt、Budget/settlement/cancellation 持久化边界和 admission/scheduling/execution/settlement 编排边界拆分；
+- 当前 mixed-file gate 仍明确为红，但已完成第一刀：Host authority/replay/fail-closed 校验迁入 `governed_task_authority.py`，`governed_task_adapter.py` 由约 1.7k 行降到约 1.4k 行并退出大文件 inventory；同时补齐 `chat/delegate` exact replay 的 route-aware 校验，不能再误套 direct-skill metadata。剩余红灯是 `task_repository.py` 超过既有 4.6k ceiling、`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；继续按 Graph/Attempt、Budget/settlement/cancellation 持久化边界和 admission/scheduling/execution/settlement 编排边界拆分；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；

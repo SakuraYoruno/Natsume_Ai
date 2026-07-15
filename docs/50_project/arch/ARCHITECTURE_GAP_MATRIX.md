@@ -52,7 +52,7 @@
 |---|---|---|---|---|
 | 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
-| 执行巨石拆分 | `MISSING_GATE_RED` | `task_repository.py`、`coordinator.py`、`governed_task_adapter.py` 与 `core_architecture_policy.json` | 当前分别约 12.5k、5.8k、1.7k 行；Task Store 超过既有 4.6k ceiling，Coordinator/adapter 未完成责任分类，mixed-file gate 明确失败。不得通过提高白名单上限伪装完成，继续增加执行能力前先按事务/编排边界拆分 | NE-01 Lane D |
+| 执行巨石拆分 | `PARTIAL_GATE_RED` | `task_repository.py`、`coordinator.py`、`governed_task_adapter.py`、`governed_task_authority.py` 与 `core_architecture_policy.json` | 第一刀已把 route-aware authority/replay/fail-closed 校验从 Host adapter 抽离，adapter 约 1.4k 行、authority 约 0.35k 行，前者不再触发 1.5k inventory。Task Store 仍约 12.5k 行并超过既有 4.6k ceiling，Coordinator 仍约 5.8k 行且未分类，所以 mixed-file gate 仍失败。不得通过提高白名单上限伪装完成 | NE-01 Lane D |
 | Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
 | Workspace ownership | `PARTIAL_D0_PATH_FENCE` | `agent_runtime/workspace_paths.py`、resolver/tool/verification tests | scoped 路径安全已统一；仍缺 per-task durable owner、`runtime_repo` 退役、隔离 worktree、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |

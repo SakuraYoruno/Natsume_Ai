@@ -121,6 +121,8 @@ Ingress
 
 `AgentWorkOrder` 等旧结构只能作为边界输入，在 admission 前无损转换；缺失预算、identity 或权限时 fail closed。
 
+Host exact replay 必须按 `command.route_type` 校验 authority：`chat/delegate/skill` 先统一验证 WorkOrder、HostCommand、planning lineage、grant、review waiver、target 与 capability binding；只有 `skill` 叠加 direct-skill 专属 metadata 校验。不得把 direct-skill validator 无条件套到 `chat/delegate`，也不得因 durable replay 改走较弱分支。该纯校验边界由 `app/governed_task_authority.py` 拥有，Host adapter 只负责生命周期、合同编译与 Runtime 调用。
+
 ### 3.3 TaskGraph 与 revision
 
 - TaskGraph 必须持久化 node、dependency、input/output ref、retry policy、idempotency 和 verifier。

@@ -101,7 +101,8 @@ flowchart TB
 - `host_brain/governor/`：意图规则、授权、rate limit 和 action preview。
 - `host_brain/agent_runtime/cortex_runtime.py`：Host route 识别与 governed/compatibility 分流。
 - `host_brain/orchestration/`：HostCommand、WorkOrderV3、计划图编译、revision、node grant 和 recovery intent。
-- `host_brain/app/governed_task_adapter.py`：Host 请求到 Governed Task Runtime 的应用适配。
+- `host_brain/app/governed_task_adapter.py`：Host 请求到 Governed Task Runtime 的生命周期、合同编译与应用适配。
+- `host_brain/app/governed_task_authority.py`：无状态的 HostCommand/WorkOrder/planning lineage、route-aware exact replay 与 fail-closed authority 校验；不写 Store、不执行 TaskGraph。
 
 该层决定“是否允许做、冻结成什么图”，但不应把模型输出直接当成已经执行的事实。
 
