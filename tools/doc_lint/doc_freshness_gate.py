@@ -7,6 +7,7 @@ inputs by comparing latest git-modification timestamps.
 from __future__ import annotations
 
 import argparse
+from fnmatch import fnmatchcase
 import json
 import os
 import subprocess
@@ -19,6 +20,7 @@ REASON_DOC_FRESHNESS_STALE = "DOC_FRESHNESS_STALE"
 REASON_DOC_MISSING = "DOC_TARGET_MISSING"
 REASON_DOC_FRESHNESS_CONFIG_INVALID = "DOC_FRESHNESS_CONFIG_INVALID"
 REASON_DOC_NO_SOURCE_MATCH = "DOC_NO_SOURCE_FILES"
+REASON_DOC_CHANGE_REQUIRED = "DOC_CHANGE_REQUIRED"
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "doc_freshness_policy.json"
 SECONDS_PER_DAY = 86400
@@ -53,6 +55,27 @@ def build_report(
     dirty_paths = _collect_git_dirty_paths(repo_root)
 
     failures: list[dict[str, Any]] = []
+    change_contract = _evaluate_change_contract(policy=policy, changed=changed)
+    if change_contract["invalid"]:
+        failures.append(
+            _failure(
+                reason_code=REASON_DOC_FRESHNESS_CONFIG_INVALID,
+                failed_artifact="__change_contract__",
+                message="Required change_contract must define non-empty sources and documentation patterns",
+            )
+        )
+    elif change_contract["triggered"] and not change_contract["changed_docs"]:
+        failures.append(
+            {
+                "check_id": CHECK_ID,
+                "reason_code": REASON_DOC_CHANGE_REQUIRED,
+                "failed_artifact": "__change_contract__",
+                "line": 0,
+                "message": "Production/tooling code changed without a documentation update in the same change set",
+                "changed_sources": change_contract["changed_sources"][:20],
+                "accepted_documentation_patterns": change_contract["documentation_patterns"],
+            }
+        )
     checked_rules = 0
     skipped_rules = 0
 
@@ -228,6 +251,9 @@ def build_report(
             "skipped_rules": skipped_rules,
             "failure_count": len(failures),
             "input_changed_files": len(changed),
+            "change_contract_triggered": bool(change_contract["triggered"]),
+            "change_contract_valid": not bool(change_contract["invalid"]),
+            "changed_documentation_count": len(change_contract["changed_docs"]),
             "check_all": bool(check_all),
         },
     }
@@ -302,6 +328,62 @@ def _load_config(path: Path) -> dict[str, Any]:
     if not isinstance(policy, dict):
         raise RuntimeError(f"Invalid policy format: {path}")
     return policy
+
+
+def _evaluate_change_contract(
+    *,
+    policy: dict[str, Any],
+    changed: set[str],
+) -> dict[str, Any]:
+    contract = policy.get("change_contract")
+    if not isinstance(contract, dict) or not bool(contract.get("required", False)):
+        return {
+            "invalid": False,
+            "triggered": False,
+            "changed_sources": [],
+            "changed_docs": [],
+            "documentation_patterns": [],
+        }
+
+    source_patterns = _normalized_patterns(contract.get("sources"))
+    documentation_patterns = _normalized_patterns(contract.get("documentation"))
+    if not source_patterns or not documentation_patterns:
+        return {
+            "invalid": True,
+            "triggered": False,
+            "changed_sources": [],
+            "changed_docs": [],
+            "documentation_patterns": documentation_patterns,
+        }
+
+    changed_sources = sorted(
+        path for path in changed if _path_matches_any(path, source_patterns)
+    )
+    changed_docs = sorted(
+        path for path in changed if _path_matches_any(path, documentation_patterns)
+    )
+    return {
+        "invalid": False,
+        "triggered": bool(changed_sources),
+        "changed_sources": changed_sources,
+        "changed_docs": changed_docs,
+        "documentation_patterns": documentation_patterns,
+    }
+
+
+def _normalized_patterns(raw_patterns: Any) -> list[str]:
+    if not isinstance(raw_patterns, list):
+        return []
+    return [
+        str(pattern).replace("\\", "/").strip().lower()
+        for pattern in raw_patterns
+        if str(pattern).strip()
+    ]
+
+
+def _path_matches_any(path: str, patterns: list[str]) -> bool:
+    normalized = str(path).replace("\\", "/").strip().lower()
+    return any(fnmatchcase(normalized, pattern) for pattern in patterns)
 
 
 def _collect_changed_paths(

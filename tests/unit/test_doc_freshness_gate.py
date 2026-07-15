@@ -210,6 +210,103 @@ def test_build_report_still_rejects_clean_stale_document(tmp_path: Path) -> None
     assert failure["rule_id"] == "target-doc"
 
 
+def test_change_contract_rejects_code_without_documentation_in_same_change(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "runtime.py"
+    doc = repo / "docs" / "runtime.md"
+    policy_path = repo / "freshness.json"
+    _write(source, "VALUE = 1\n")
+    _write(doc, "baseline\n")
+    policy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "change_contract": {
+                    "required": True,
+                    "sources": ["src/*"],
+                    "documentation": ["docs/*"],
+                },
+                "rules": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_all(repo, "baseline")
+
+    report = freshness.build_report(
+        repo,
+        config=policy_path,
+        changed_files=[source.relative_to(repo)],
+    )
+
+    assert report["status"] == "failed"
+    assert report["reason_code"] == freshness.REASON_DOC_CHANGE_REQUIRED
+    assert report["summary"]["change_contract_triggered"] is True
+    assert report["summary"]["changed_documentation_count"] == 0
+
+
+def test_change_contract_accepts_documentation_in_same_change(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    source = repo / "src" / "runtime.py"
+    doc = repo / "docs" / "runtime.md"
+    policy_path = repo / "freshness.json"
+    _write(source, "VALUE = 1\n")
+    _write(doc, "baseline\n")
+    policy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "change_contract": {
+                    "required": True,
+                    "sources": ["src/*"],
+                    "documentation": ["docs/*"],
+                },
+                "rules": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_all(repo, "baseline")
+
+    report = freshness.build_report(
+        repo,
+        config=policy_path,
+        changed_files=[source.relative_to(repo), doc.relative_to(repo)],
+    )
+
+    assert report["status"] == "passed"
+    assert report["summary"]["change_contract_triggered"] is True
+    assert report["summary"]["changed_documentation_count"] == 1
+
+
+def test_required_change_contract_rejects_empty_patterns(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    policy_path = repo / "freshness.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "change_contract": {
+                    "required": True,
+                    "sources": [],
+                    "documentation": [],
+                },
+                "rules": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_all(repo, "baseline")
+
+    report = freshness.build_report(repo, config=policy_path)
+
+    assert report["status"] == "failed"
+    assert report["reason_code"] == freshness.REASON_DOC_FRESHNESS_CONFIG_INVALID
+    assert report["summary"]["change_contract_valid"] is False
+
+
 def test_modified_document_mtime_is_used_by_build_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
