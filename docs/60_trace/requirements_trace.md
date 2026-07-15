@@ -3,7 +3,7 @@
 
 # 当前需求可追溯矩阵
 
-版本：v3.3
+版本：v3.4
 核对日期：2026-07-16
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -40,7 +40,7 @@
 | TRACE-EXEC-01 | FR-ARCH-003 | Host 四路线必须共享 WorkOrderV3/TaskGraph | Cortex、GovernedHostRuntime | GR-05/06 receipt；T-GR-RUNTIME-01 | `WIRED` | NE-01 守卫 |
 | TRACE-EXEC-02 | FR-ARCH-003 | Scheduler 必须进入同一 admission | Scheduler governed runtime | production cutover integration；child grant/receipt lineage | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | production cutover integration；principal/child grant/Review/receipt lineage | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry、受控 fan-out/fan-in、显式结果与整图原子成功 | coordinator/heartbeat/task store/0090+0091 decision journals/worker projection/task composition | B4/0090 保留 whole-Graph failure、Budget、review 与 crash-reentry exact replay；B5 增加持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id`、admission 前 capability/grant 门禁、canonical projection digest/identity 重验，以及单节点/串行/terminal-leaf 全成功单 UoW。0091 原子提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、完整 Graph effects 与 success decision；completed replay 不重编 effects。atomic 与 bounded 开关独立、默认 false，三处生产 composition 均 OFF | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`。P0 下一项：durable cancel。P1：revisioned 0090 marker identity、历史半提交修复、reconciliation/continuation、跨进程 Outbox、Budget 高竞争、production canary、takeover 仍缺 | NE-01 B5C |
+| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry、受控 fan-out/fan-in、显式结果、整图原子成功与 verified durable cancellation | coordinator/heartbeat/task store；0090/0091/0092 journals；graph cancellation contract；worker projection/task composition | B4/0090 与 B5/0091 保留 whole-Graph settlement、canonical projection 和 exact replay。B5C 以 0092 增加 exact-revision verified internal entry、phase-1 intent/fence、reconciliation gate 与 phase-2 Graph/Budget/Outbox/decision；accepted NODE effect 继续 delivery，其他未授权 effect 被 fence，0091 success 与 cancel first-writer-wins。request/finalize response-loss exact replay；execute re-entry 可继续既有 intent | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。生产 composition 未注入 verifier，无 HTTP/UI 或跨进程自动 reconciliation/takeover/continuation；atomic/bounded/cancellation 与 canary 均 OFF。revisioned 0090、历史半提交、跨进程 Outbox、Budget 高竞争和统一 Review 仍缺 | NE-01 B5C production wiring |
 | TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | Host/Scheduler/Internal integrations | `PARTIAL_CORE_INGRESS` | NE-01 |
 | TRACE-EXEC-06 | FR-NLE-003 | Review token 后自动安全 continuation | ReviewStore/review runtime | Review tests/UI | `PARTIAL_MANUAL` | NE-01 |
 | TRACE-EXEC-07 | FR-ARCH-003 | 不得有第二任务真相 | Durable Task/Conversation projections | registry absence contract + code audit | `WIRED` | NE-01 已完成切片 |

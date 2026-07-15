@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.4
+版本：v2.5
 核对日期：2026-07-16
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -102,7 +102,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     POLICY["TaskGraph completion_policy\nlegacy 或显式 ATOMIC_GRAPH_SUCCESS_V1"] --> GATE["atomic capability + node-grant service\n+ parent grant：admission 前校验"]
-    GATE --> SCHEMA["0090；atomic 时 0091 schema ready?\nBudget / worker 前 fail-fast"]
+    GATE --> SCHEMA["0090 + 0092；atomic 时 0091 schema ready?\nBudget / worker 前 fail-fast"]
     SCHEMA --> S["compute_dag_schedule"]
     S --> Q{"selected > 1 且\n有后继/剩余节点或 atomic policy?"}
     Q -->|"否 / 生产默认路径"| SEQ["顺序执行"]
@@ -137,7 +137,13 @@ flowchart TD
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
     P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
-    CANCEL["外层取消：cancel + join child / heartbeat\n无 durable cancel fence"] -.-> LIMIT
+    CANCEL_ENTRY["内部 verified cancellation entry\nexact Graph revision；生产未注入 verifier"] -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    CANCEL_INTENT -.-> CANCEL_LOCAL["intent 提交后才 cancel/join\n本地 child + heartbeat"]
+    CANCEL_INTENT -.-> CANCEL_RECON["active ownership / operation / effect / review\nadvance + reconciliation gate"]
+    CANCEL_RECON -.-> CANCEL_FINAL["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
+    CANCEL_FINAL -.-> PUB
+    EFFECT_RULE["accepted NODE effect 继续 delivery\n其他未授权 NODE/GRAPH effect 被 fence"] -.-> CANCEL_RECON
+    FIRST["0091 success / 0092 cancel\nfirst-writer-wins + exact replay"] -.-> CANCEL_INTENT
     CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
     HISTORY["P1：历史 BLOCKED+failure / FAILED+ACTIVE Budget\n归 reconciliation，不由 ACTIVE 重入自动修复"] -.-> REENTRY
     PREVIEW["P1：WAITING_APPROVAL 仍走 pre-review 专线\n未统一 optional-attempt observation"] -.-> SNAP
@@ -145,7 +151,13 @@ flowchart TD
     style LIMIT fill:#fff3cd,stroke:#a87500
     style OFF fill:#fff3cd,stroke:#a87500
     style P1 fill:#fff3cd,stroke:#a87500
-    style CANCEL fill:#fff3cd,stroke:#a87500
+    style CANCEL_ENTRY fill:#fff3cd,stroke:#a87500
+    style CANCEL_INTENT fill:#fff3cd,stroke:#a87500
+    style CANCEL_LOCAL fill:#fff3cd,stroke:#a87500
+    style CANCEL_RECON fill:#fff3cd,stroke:#a87500
+    style CANCEL_FINAL fill:#fff3cd,stroke:#a87500
+    style EFFECT_RULE fill:#fff3cd,stroke:#a87500
+    style FIRST fill:#fff3cd,stroke:#a87500
     style CAS fill:#fff3cd,stroke:#a87500
     style HISTORY fill:#fff3cd,stroke:#a87500
     style PREVIEW fill:#fff3cd,stroke:#a87500
@@ -153,7 +165,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 的 live/re-entry failure/review/Budget 语义保持不变。B5 atomic success 已覆盖单节点、串行、多 terminal 完成顺序、projection 篡改、flag/grant admission、restart 与双响应丢失，但开关和生产 composition 均 OFF。该图不是 production wiring。
+0090/B4 与 0091/B5 的既有语义保持不变。B5C 的 0092 contract/Store/re-entry 路径已经存在，但 verifier 尚未在生产 composition 注入，图中的 cancellation branch 没有 HTTP/UI 入口，也没有跨进程自动 reconciliation worker。该图不是 production wiring。
 
 ## Plan 分支的真实边界
 
@@ -177,7 +189,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`：atomic policy/result、admission/grant/projection 门禁与 0091 UoW 已实现；0090/B4 保留。B5C durable cancel、revisioned 0090、历史半提交、`WAITING_APPROVAL`、跨进程 Outbox、Budget 高竞争、online takeover、reconciliation/continuation 和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 verified two-phase cancellation 已实现 shadow path；accepted NODE effect 保留，未授权 effect 被 fence，success/cancel first-writer-wins。生产 verifier/入口、跨进程自动 reconciliation/takeover/continuation、revisioned 0090、历史半提交、统一 `WAITING_APPROVAL`、跨进程 Outbox、Budget 高竞争和 canary 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 

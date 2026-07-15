@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v1.3
+版本：v1.4
 核对日期：2026-07-16
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -33,7 +33,7 @@
 | Internal Agent governed | `WIRED` | Internal production cutover integration | ingress v2 立即编译 V3；Budget、child grant、PRE/POST Review、Verification、Acceptance、Receipt、replay 已贯通；长 Review 的 grant renewal 随 continuation 统一处理 | NE-01 已完成切片 |
 | 全 route universal runtime | `PARTIAL` | Cortex governed/read split + Scheduler/Internal production integrations | Host 四执行路由、Scheduler、Internal 已 governed；`task_progress/recent_turn` 已转只读投影；完整 Operator/Gateway surface matrix 仍需最终验收 | NE-01 |
 | Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
-| 多节点 Durable DAG | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | Coordinator、TaskStore、0090/0091 decisions、worker projection store、B5 contracts/integration | B5A/B5B 已有可选 atomic policy、显式 result、admission/grant/projection fail-close，以及单节点/串行/多 terminal 0091 成功 UoW；0090/B4 failure/re-entry 保留。atomic/bounded 均默认关闭且三处生产 composition OFF。P0：B5C durable cancel。P1：revisioned 0090、历史半提交、跨进程 Outbox、Budget 高竞争、reconciliation/takeover/continuation、production canary 仍缺 | NE-01 B5 |
+| 多节点 Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | Coordinator、TaskStore、0090/0091/0092 decisions、graph cancellation contract/store tests、worker projection store | B5A/B5B 成功封口继续有效；B5C 已有 exact-revision verified internal entry、两阶段 durable intent/fence/final decision、first-writer 和 accepted NODE effect 语义。生产 composition 未注入 verifier，且无 HTTP/UI 入口或跨进程自动 reconciliation/takeover/continuation。revisioned 0090、历史半提交、跨进程 Outbox、Budget 高竞争、统一 Review 与 production canary 仍缺 | NE-01 B5C |
 | Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` + Host/Scheduler/Internal integrations | core ingress 已覆盖；concurrency 未计量，DEGRADE/REVIEW 分支与剩余 Domain/Operator 路径未完整 | NE-01 |
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
@@ -52,6 +52,7 @@
 |---|---|---|---|---|
 | 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
+| 执行巨石拆分 | `MISSING_GATE_RED` | `task_repository.py`、`coordinator.py`、`governed_task_adapter.py` 与 `core_architecture_policy.json` | 当前分别约 12.5k、5.8k、1.7k 行；Task Store 超过既有 4.6k ceiling，Coordinator/adapter 未完成责任分类，mixed-file gate 明确失败。不得通过提高白名单上限伪装完成，继续增加执行能力前先按事务/编排边界拆分 | NE-01 Lane D |
 | Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
 | Workspace ownership | `PARTIAL_D0_PATH_FENCE` | `agent_runtime/workspace_paths.py`、resolver/tool/verification tests | scoped 路径安全已统一；仍缺 per-task durable owner、`runtime_repo` 退役、隔离 worktree、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |

@@ -24,6 +24,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping, NoReturn, Protocol, Sequence
+from urllib.parse import quote
 import uuid
 
 try:
@@ -73,6 +74,15 @@ from host_brain.contracts.agent_runtime.parallel_success import (
     PARALLEL_SUCCESS_SCHEMA_VERSION,
     ParallelSuccessContractError,
     normalize_parallel_success_decision,
+)
+from host_brain.contracts.agent_runtime.graph_cancellation import (
+    CanonicalGraphCancellationDecision,
+    CanonicalGraphCancellationIntent,
+    GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+    GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+    GraphCancellationContractError,
+    normalize_graph_cancellation_decision,
+    normalize_graph_cancellation_intent,
 )
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
@@ -211,6 +221,59 @@ _PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS = frozenset(
         "graph_outbox_id",
         "budget_outbox_id",
         "created_ts_ms",
+    }
+)
+_GRAPH_CANCELLATION_INTENT_REQUIRED_COLUMNS = frozenset(
+    {
+        "intent_ref",
+        "schema_version",
+        "request_id",
+        "request_identity",
+        "source",
+        "reason_code",
+        "graph_id",
+        "graph_revision",
+        "graph_version_before",
+        "graph_version_after",
+        "budget_id",
+        "budget_version_at_request",
+        "payload_json",
+        "payload_sha256",
+        "graph_outbox_id",
+        "status",
+        "status_version",
+        "requested_ts_ms",
+        "finalized_ts_ms",
+    }
+)
+_GRAPH_CANCELLATION_DECISION_REQUIRED_COLUMNS = frozenset(
+    {
+        "decision_ref",
+        "schema_version",
+        "intent_ref",
+        "graph_id",
+        "graph_revision",
+        "graph_version_before",
+        "graph_version_after",
+        "budget_id",
+        "budget_version_before",
+        "budget_version_after",
+        "payload_json",
+        "payload_sha256",
+        "graph_outbox_id",
+        "budget_outbox_id",
+        "created_ts_ms",
+    }
+)
+_GRAPH_CANCELLATION_EFFECT_FENCE_REQUIRED_COLUMNS = frozenset(
+    {
+        "effect_id",
+        "intent_ref",
+        "observed_status",
+        "resolution_status",
+        "observed_status_version",
+        "created_ts_ms",
+        "resolved_ts_ms",
     }
 )
 _DURABLE_REFERENCE_PATTERN = re.compile(
@@ -890,6 +953,49 @@ class DurableTaskStore:
                 f"{missing}",
             )
 
+    def assert_graph_cancellation_ready(self) -> None:
+        """Require the NE-01 B5C graph-cancellation authority journal."""
+
+        conn = self._connect()
+        try:
+            intent_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_graph_cancellation_intent)"
+                ).fetchall()
+            }
+            decision_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_graph_cancellation_decision)"
+                ).fetchall()
+            }
+            effect_fence_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_graph_cancellation_effect_fence)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        missing_intent = sorted(
+            _GRAPH_CANCELLATION_INTENT_REQUIRED_COLUMNS - intent_columns
+        )
+        missing_decision = sorted(
+            _GRAPH_CANCELLATION_DECISION_REQUIRED_COLUMNS - decision_columns
+        )
+        missing_effect_fence = sorted(
+            _GRAPH_CANCELLATION_EFFECT_FENCE_REQUIRED_COLUMNS
+            - effect_fence_columns
+        )
+        if missing_intent or missing_decision or missing_effect_fence:
+            raise TaskStoreError(
+                TASK_STORE_SCHEMA_NOT_READY,
+                "task runtime graph cancellation migration 0092 is not applied: "
+                f"intent={missing_intent}, decision={missing_decision}, "
+                f"effect_fence={missing_effect_fence}",
+            )
+
     def assert_acceptance_effect_intent_ready(self) -> None:
         """Require the GR-06 Acceptance Effect Intent queue schema."""
 
@@ -1173,6 +1279,11 @@ class DurableTaskStore:
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_id,
+                graph_revision=revision,
+            )
             return self._transition_graph_in_transaction(
                 conn,
                 graph_id=graph_id,
@@ -1197,6 +1308,11 @@ class DurableTaskStore:
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
             return self._transition_node_in_transaction(
                 conn,
                 graph_id=graph_id,
@@ -1729,6 +1845,42 @@ class DurableTaskStore:
             )
         return rows[0]
 
+    @staticmethod
+    def _assert_graph_not_cancelling(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+    ) -> None:
+        """Fence new execution work after a durable graph cancellation request.
+
+        Older migration snapshots remain readable; callers that opt into B5C
+        separately require 0092 through ``assert_graph_cancellation_ready``.
+        """
+
+        ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_graph_cancellation_intent'
+            """
+        ).fetchone()
+        if ready is None:
+            return
+        row = conn.execute(
+            """
+            SELECT intent_ref FROM task_runtime_graph_cancellation_intent
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if row is not None:
+            raise TaskStoreError(
+                TASK_STORE_CANCELLATION_CONFLICT,
+                "durable Graph cancellation fences new execution authority: "
+                f"{row['intent_ref']}",
+            )
+
     def promote_retry_due(
         self,
         graph_id: str,
@@ -1743,6 +1895,11 @@ class DurableTaskStore:
         self.assert_dag_scheduling_ready()
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
             graph = self._require_graph(conn, graph_id, graph_revision)
             if str(graph["status"]) != TaskGraphStatus.ACTIVE.value:
                 raise TaskStoreError(
@@ -1888,6 +2045,11 @@ class DurableTaskStore:
         lease_id = f"lease::{uuid.uuid4().hex}"
         heartbeat_id = f"heartbeat::{uuid.uuid4().hex}"
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
             graph = self._require_graph(conn, graph_id, graph_revision)
             if str(graph["status"]) != TaskGraphStatus.ACTIVE.value:
                 raise TaskStoreError(
@@ -2438,6 +2600,11 @@ class DurableTaskStore:
         ts_ms = self._now()
         with self._transaction() as conn:
             attempt = self._require_attempt(conn, attempt_id)
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=str(attempt["graph_id"]),
+                graph_revision=int(attempt["graph_revision"]),
+            )
             existing_retry_usage = conn.execute(
                 """
                 SELECT * FROM task_runtime_budget_usage
@@ -3849,6 +4016,11 @@ class DurableTaskStore:
             )
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
             node = self._require_node(conn, graph_id, graph_revision, node_id)
             self._require_version(node, expected_node_version, subject=f"TaskNode {node_id}")
             if str(node["status"]) != TaskNodeStatus.READY.value:
@@ -3971,6 +4143,11 @@ class DurableTaskStore:
         heartbeat_id = f"heartbeat::{uuid.uuid4().hex}"
         with self._transaction() as conn:
             attempt = self._require_attempt(conn, attempt_id)
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=str(attempt["graph_id"]),
+                graph_revision=int(attempt["graph_revision"]),
+            )
             self._require_version(
                 attempt,
                 expected_attempt_version,
@@ -4950,6 +5127,11 @@ class DurableTaskStore:
                 fencing_token=fencing_token,
                 now_ts_ms=ts_ms,
             )
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=str(attempt["graph_id"]),
+                graph_revision=int(attempt["graph_revision"]),
+            )
             self._assert_attempt_operation_identity(
                 attempt,
                 business_scope=scope,
@@ -5050,6 +5232,12 @@ class DurableTaskStore:
         with self._transaction() as conn:
             row = self._require_operation_reservation(conn, reservation_id)
             self._operation_record(row)
+            bound_attempt = self._require_attempt(conn, str(row["attempt_id"]))
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=str(bound_attempt["graph_id"]),
+                graph_revision=int(bound_attempt["graph_revision"]),
+            )
             recovery_reason = self._operation_recovery_reason(conn, row, ts_ms)
             if recovery_reason is not None:
                 self._mark_operation_recovery_required(
@@ -5357,6 +5545,13 @@ class DurableTaskStore:
 
             original_attempt_ref = str(row["attempt_id"] or "").strip() or None
             if recovery_action is IdempotencyRecoveryAction.REACQUIRE:
+                if original_attempt_ref is not None:
+                    original_attempt = self._require_attempt(conn, original_attempt_ref)
+                    self._assert_graph_not_cancelling(
+                        conn,
+                        graph_id=str(original_attempt["graph_id"]),
+                        graph_revision=int(original_attempt["graph_revision"]),
+                    )
                 attempt, lease = self._assert_attempt_lease_binding(
                     conn,
                     attempt_id=str(attempt_id or ""),
@@ -5470,6 +5665,12 @@ class DurableTaskStore:
         reservation = BudgetReservation.from_mapping(reservation.to_dict())
         ts_ms = self._now()
         with self._transaction() as conn:
+            if graph_id is not None and graph_revision is not None:
+                self._assert_graph_not_cancelling(
+                    conn,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                )
             if attempt_id is not None:
                 self._require_attempt(conn, attempt_id)
             consumed = reservation.consumed.to_dict()
@@ -5524,6 +5725,12 @@ class DurableTaskStore:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_budget(conn, budget_id)
+            if row["graph_id"] is not None and row["graph_revision"] is not None:
+                self._assert_graph_not_cancelling(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             target = validate_budget_transition(str(row["status"]), target_status)
             cursor = conn.execute(
@@ -5548,6 +5755,1628 @@ class DurableTaskStore:
                 expected_attempt_id=(str(row["attempt_id"]) if row["attempt_id"] is not None else None),
             )
             return self._budget_record(self._require_budget(conn, budget_id))
+
+    def get_graph_cancellation_intent(self, intent_ref: str) -> dict[str, Any]:
+        """Return one integrity-checked graph cancellation intent."""
+
+        self.assert_graph_cancellation_ready()
+        reference = str(intent_ref or "").strip()
+        if not reference:
+            raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_intent WHERE intent_ref = ?",
+                (reference,),
+            ).fetchone()
+            if row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"graph cancellation intent not found: {reference}",
+                )
+            return self._validated_graph_cancellation_intent_record(conn, row)
+        finally:
+            conn.close()
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> dict[str, Any] | None:
+        self.assert_graph_cancellation_ready()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph_cancellation_intent
+                WHERE graph_id = ? AND graph_revision = ?
+                """,
+                (str(graph_id), int(revision)),
+            ).fetchone()
+            return (
+                self._validated_graph_cancellation_intent_record(conn, row)
+                if row is not None
+                else None
+            )
+        finally:
+            conn.close()
+
+    def _validated_graph_cancellation_intent_record(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> dict[str, Any]:
+        """Validate terminal authority, including signed operation evidence."""
+
+        record = _graph_cancellation_intent_record(row)
+        if str(record["status"]) != "FINALIZED":
+            return record
+        decision_row = conn.execute(
+            """
+            SELECT * FROM task_runtime_graph_cancellation_decision
+            WHERE intent_ref = ?
+            """,
+            (str(record["intent_ref"]),),
+        ).fetchone()
+        if decision_row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "finalized cancellation intent is missing its decision",
+            )
+        decision = _graph_cancellation_decision_record(decision_row)
+        _assert_graph_cancellation_decision_bindings(
+            conn,
+            decision,
+            evidence_refs_builder=self._graph_cancellation_evidence_refs,
+        )
+        return record
+
+    def list_pending_graph_cancellations(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Enumerate REQUESTED intents for startup/re-entry continuation."""
+
+        self.assert_graph_cancellation_ready()
+        size = max(1, min(int(limit), 500))
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph_cancellation_intent
+                WHERE status = 'REQUESTED'
+                ORDER BY requested_ts_ms, graph_id, graph_revision
+                LIMIT ?
+                """,
+                (size,),
+            ).fetchall()
+            return [_graph_cancellation_intent_record(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_graph_cancellation_decision(self, decision_ref: str) -> dict[str, Any]:
+        self.assert_graph_cancellation_ready()
+        reference = str(decision_ref or "").strip()
+        if not reference:
+            raise TaskStoreError(TASK_STORE_INVALID, "cancellation decision_ref is required")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_decision WHERE decision_ref = ?",
+                (reference,),
+            ).fetchone()
+            if row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"graph cancellation decision not found: {reference}",
+                )
+            record = _graph_cancellation_decision_record(row)
+            _assert_graph_cancellation_decision_bindings(
+                conn,
+                record,
+                evidence_refs_builder=self._graph_cancellation_evidence_refs,
+            )
+            return record
+        finally:
+            conn.close()
+
+    def get_graph_cancellation_decision_for_intent(
+        self,
+        intent_ref: str,
+    ) -> dict[str, Any] | None:
+        self.assert_graph_cancellation_ready()
+        reference = str(intent_ref or "").strip()
+        if not reference:
+            raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph_cancellation_decision
+                WHERE intent_ref = ?
+                """,
+                (reference,),
+            ).fetchone()
+            if row is None:
+                return None
+            record = _graph_cancellation_decision_record(row)
+            _assert_graph_cancellation_decision_bindings(
+                conn,
+                record,
+                evidence_refs_builder=self._graph_cancellation_evidence_refs,
+            )
+            return record
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _cancellation_outbox(
+        *,
+        intent_ref: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        aggregate_version: int,
+        event_type: str,
+        attempt_id: str | None = None,
+    ) -> OutboxMessage:
+        material = (
+            f"{intent_ref}\n{aggregate_type}\n{aggregate_id}\n"
+            f"{aggregate_version}\n{event_type}"
+        )
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+        return OutboxMessage.create(
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            aggregate_version=aggregate_version,
+            event_type=event_type,
+            payload_ref=build_outbox_payload_ref(
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                aggregate_version=aggregate_version,
+            ),
+            idempotency_key=f"graph-cancellation:{digest}",
+            outbox_id=f"outbox::graph-cancellation:{digest}",
+            attempt_id=attempt_id,
+            evidence_refs=(intent_ref,),
+        )
+
+    def request_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        intent_payload: Mapping[str, Any],
+        graph_outbox: OutboxMessage,
+    ) -> dict[str, Any]:
+        """Atomically install the graph-wide cancellation fence.
+
+        ``request_identity`` is bound and digested by the contract, but its
+        authentication remains the caller's authority-boundary responsibility.
+        """
+
+        self.assert_graph_cancellation_ready()
+        graph_ref = str(graph_id or "").strip()
+        budget_ref = str(budget_id or "").strip() or None
+        normalized_states = self._normalize_parallel_node_states(expected_node_states)
+        try:
+            intent = normalize_graph_cancellation_intent(intent_payload)
+        except GraphCancellationContractError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                f"graph cancellation intent is invalid: {exc}",
+            ) from exc
+        reference = str(intent_ref or "").strip()
+        expected_before = {
+            node_id: {"status": status, "status_version": version}
+            for node_id, (status, version) in normalized_states.items()
+        }
+        if (
+            not graph_ref
+            or int(revision) < 1
+            or intent.intent_ref != reference
+            or intent.payload["graph_id"] != graph_ref
+            or intent.payload["graph_revision"] != int(revision)
+            or intent.payload["graph_status_version_before"] != int(expected_graph_version)
+            or intent.payload["budget_id"] != budget_ref
+            or intent.payload["budget_status_version_before"] != expected_budget_version
+            or intent.payload["node_states_before"] != expected_before
+            or intent.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or reference not in set(graph_outbox.evidence_refs)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "graph cancellation intent does not bind the requested mutation",
+            )
+
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph_cancellation_intent
+                WHERE graph_id = ? AND graph_revision = ? OR intent_ref = ? OR request_id = ?
+                ORDER BY intent_ref LIMIT 1
+                """,
+                (graph_ref, int(revision), reference, intent.payload["request_id"]),
+            ).fetchone()
+            if existing is not None:
+                record = _graph_cancellation_intent_record(existing)
+                if (
+                    record["intent_ref"] != reference
+                    or record["payload_json"] != intent.payload_json
+                    or record["payload_sha256"] != intent.payload_sha256
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_CANCELLATION_CONFLICT,
+                        "graph cancellation request identity or snapshot drifted",
+                    )
+                graph = self._require_graph(conn, graph_ref, int(revision))
+                node_rows = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node
+                    WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+                    """,
+                    (graph_ref, int(revision)),
+                ).fetchall()
+                if str(record["status"]) == "FINALIZED":
+                    decision_row = conn.execute(
+                        """
+                        SELECT * FROM task_runtime_graph_cancellation_decision
+                        WHERE intent_ref = ?
+                        """,
+                        (reference,),
+                    ).fetchone()
+                    if decision_row is None:
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "finalized cancellation replay is missing its decision",
+                        )
+                    decision_record = _graph_cancellation_decision_record(decision_row)
+                    _assert_graph_cancellation_decision_bindings(
+                        conn,
+                        decision_record,
+                        evidence_refs_builder=self._graph_cancellation_evidence_refs,
+                    )
+                    self._assert_parallel_node_states(
+                        node_rows,
+                        {
+                            node_id: (state["status"], state["status_version"])
+                            for node_id, state in decision_record["payload"][
+                                "node_states_after"
+                            ].items()
+                        },
+                        graph_id=graph_ref,
+                        revision=int(revision),
+                    )
+                    if str(graph["status"]) != "CANCELLED":
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "finalized cancellation replay Graph is not CANCELLED",
+                        )
+                    self._assert_mutation_outbox_replay(
+                        conn,
+                        graph_outbox,
+                        expected_aggregate=(
+                            "TASK_GRAPH",
+                            graph_ref,
+                            int(record["graph_version_after"]),
+                        ),
+                        expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
+                        expected_attempt_id=None,
+                    )
+                    budget = (
+                        self._budget_record(self._require_budget(conn, budget_ref))
+                        if budget_ref is not None
+                        else None
+                    )
+                    return {
+                        "graph": _graph_record(graph, node_rows),
+                        "budget": budget,
+                        "nodes": tuple(_node_record(row) for row in node_rows),
+                        "intent": record,
+                        "decision": decision_record,
+                        "replayed": True,
+                    }
+                request_after = intent.payload["node_states_after"]
+                for node_row in node_rows:
+                    node_id = str(node_row["node_id"])
+                    expected = request_after.get(node_id)
+                    actual = {
+                        "status": str(node_row["status"]),
+                        "status_version": int(node_row["status_version"]),
+                    }
+                    allowed = [expected]
+                    if expected is not None and expected["status"] == "CANCEL_REQUESTED":
+                        allowed.append(
+                            {
+                                "status": "CANCELLED",
+                                "status_version": expected["status_version"] + 1,
+                            }
+                        )
+                    if actual not in allowed:
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            f"cancellation replay Node drifted: {node_id}",
+                        )
+                if (
+                    str(graph["status"]) != "BLOCKED"
+                    or int(graph["status_version"]) != int(record["graph_version_after"])
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "cancellation replay Graph state drifted",
+                    )
+                self._assert_mutation_outbox_replay(
+                    conn,
+                    graph_outbox,
+                    expected_aggregate=(
+                        "TASK_GRAPH",
+                        graph_ref,
+                        int(record["graph_version_after"]),
+                    ),
+                    expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
+                    expected_attempt_id=None,
+                )
+                budget = (
+                    self._budget_record(self._require_budget(conn, budget_ref))
+                    if budget_ref is not None
+                    else None
+                )
+                active_lease = conn.execute(
+                    """
+                    SELECT lease.lease_id FROM task_runtime_lease AS lease
+                    JOIN task_runtime_attempt AS attempt
+                      ON attempt.attempt_id = lease.attempt_id
+                    WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                      AND lease.status = 'ACTIVE' LIMIT 1
+                    """,
+                    (graph_ref, int(revision)),
+                ).fetchone()
+                reserved_operation = conn.execute(
+                    """
+                    SELECT reservation.reservation_id
+                    FROM task_runtime_idempotency_reservation AS reservation
+                    JOIN task_runtime_attempt AS attempt
+                      ON attempt.attempt_id = reservation.attempt_id
+                    WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                      AND reservation.status = 'RESERVED' LIMIT 1
+                    """,
+                    (graph_ref, int(revision)),
+                ).fetchone()
+                unfenced_attempt = conn.execute(
+                    """
+                    SELECT attempt_id FROM task_runtime_attempt
+                    WHERE graph_id = ? AND graph_revision = ?
+                      AND status IN ('CREATED','LEASED','RUNNING','RECOVERABLE')
+                    LIMIT 1
+                    """,
+                    (graph_ref, int(revision)),
+                ).fetchone()
+                prefix = (
+                    f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/"
+                )
+                live_review = conn.execute(
+                    """
+                    SELECT review_id FROM agent_runtime_review
+                    WHERE task_graph_id = ?
+                      AND substr(subject_ref, 1, length(?)) = ?
+                      AND status IN ('PENDING','APPROVED') LIMIT 1
+                    """,
+                    (graph_ref, prefix, prefix),
+                ).fetchone()
+                live_token = conn.execute(
+                    """
+                    SELECT token.token_digest
+                    FROM agent_runtime_review_token AS token
+                    JOIN agent_runtime_review AS review
+                      ON review.review_id = token.review_id
+                    WHERE review.task_graph_id = ?
+                      AND substr(review.subject_ref, 1, length(?)) = ?
+                      AND token.state = 'AVAILABLE' LIMIT 1
+                    """,
+                    (graph_ref, prefix, prefix),
+                ).fetchone()
+                unfenced_effect = conn.execute(
+                    """
+                    SELECT effect.effect_id
+                    FROM task_runtime_acceptance_effect_intent AS effect
+                    JOIN task_runtime_node AS node
+                      ON node.graph_id = effect.graph_id
+                     AND node.graph_revision = effect.graph_revision
+                     AND node.node_id = effect.node_id
+                    JOIN task_runtime_attempt AS attempt
+                      ON attempt.attempt_id = effect.attempt_id
+                    LEFT JOIN task_runtime_graph_cancellation_effect_fence AS fence
+                      ON fence.effect_id = effect.effect_id
+                     AND fence.intent_ref = ?
+                    WHERE effect.graph_id = ? AND effect.graph_revision = ?
+                      AND NOT (
+                        effect.commit_scope = 'NODE'
+                        AND node.status = 'ACCEPTED'
+                        AND attempt.status = 'SUCCEEDED'
+                      )
+                      AND fence.effect_id IS NULL
+                    LIMIT 1
+                    """,
+                    (reference, graph_ref, int(revision)),
+                ).fetchone()
+                if any(
+                    value is not None
+                    for value in (
+                        active_lease,
+                        reserved_operation,
+                        unfenced_attempt,
+                        live_review,
+                        live_token,
+                        unfenced_effect,
+                    )
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "cancellation request replay lost a worker/operation/review/effect fence",
+                    )
+                return {
+                    "graph": _graph_record(graph, node_rows),
+                    "budget": budget,
+                    "nodes": tuple(_node_record(row) for row in node_rows),
+                    "intent": record,
+                    "replayed": True,
+                }
+
+            success_row = conn.execute(
+                """
+                SELECT decision_ref FROM task_runtime_parallel_success_decision
+                WHERE graph_id = ? AND graph_revision = ?
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            if success_row is not None:
+                raise TaskStoreError(
+                    TASK_STORE_CANCELLATION_CONFLICT,
+                    "completed Graph success authority wins the cancellation race",
+                )
+            graph = self._require_graph(conn, graph_ref, int(revision))
+            self._require_version(
+                graph,
+                expected_graph_version,
+                subject=f"TaskGraph {graph_ref}@{int(revision)}",
+            )
+            if str(graph["status"]) != intent.payload["graph_status_before"]:
+                raise TaskStoreError(
+                    TASK_STORE_CAS_CONFLICT,
+                    "cancellation Graph source state drifted",
+                )
+            node_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_node
+                WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            self._assert_parallel_node_states(
+                node_rows,
+                normalized_states,
+                graph_id=graph_ref,
+                revision=int(revision),
+            )
+            budget_row = None
+            if budget_ref is not None:
+                budget_row = self._require_budget(conn, budget_ref)
+                self._require_version(
+                    budget_row,
+                    int(expected_budget_version),
+                    subject=f"BudgetReservation {budget_ref}",
+                )
+                if (
+                    str(budget_row["graph_id"] or "") != graph_ref
+                    or int(budget_row["graph_revision"] or 0) != int(revision)
+                    or budget_row["node_id"] is not None
+                    or budget_row["attempt_id"] is not None
+                    or str(budget_row["status"]) != intent.payload["budget_status_before"]
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_INVALID,
+                        "cancellation Budget is not the expected shared Graph reservation",
+                    )
+
+            graph_after_version = int(expected_graph_version) + 1
+            graph_payload = _graph_record(graph, node_rows)["graph"]
+            graph_payload["status"] = "BLOCKED"
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_graph
+                SET status = 'BLOCKED', status_version = status_version + 1,
+                    graph_json = ?, updated_ts_ms = ?
+                WHERE graph_id = ? AND revision = ? AND status_version = ?
+                  AND status IN ('CREATED', 'ACTIVE', 'BLOCKED')
+                """,
+                (
+                    _dumps(graph_payload),
+                    ts_ms,
+                    graph_ref,
+                    int(revision),
+                    int(expected_graph_version),
+                ),
+            )
+            self._require_cas(cursor, subject=f"TaskGraph {graph_ref}@{revision}")
+            expected_graph_event = "TASK_GRAPH_CANCELLATION_REQUESTED"
+            self._insert_outbox(
+                conn,
+                graph_outbox,
+                ts_ms=ts_ms,
+                expected_aggregate=("TASK_GRAPH", graph_ref, graph_after_version),
+                expected_event_type=expected_graph_event,
+                expected_attempt_id=None,
+            )
+
+            for row in node_rows:
+                node_id = str(row["node_id"])
+                target = intent.payload["node_states_after"][node_id]
+                if (
+                    str(row["status"]) == target["status"]
+                    and int(row["status_version"]) == target["status_version"]
+                ):
+                    continue
+                node_payload = _validated_node_payload(row)
+                node_payload["status"] = target["status"]
+                node_payload["status_version"] = target["status_version"]
+                retry_reset = (
+                    ", retry_not_before_ms = NULL"
+                    if "retry_not_before_ms" in row.keys()
+                    else ""
+                )
+                cursor = conn.execute(
+                    f"""
+                    UPDATE task_runtime_node
+                    SET status = ?, status_version = status_version + 1,
+                        node_json = ?, cancellation_requested_ts_ms = ?,
+                        updated_ts_ms = ? {retry_reset}
+                    WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+                      AND status_version = ?
+                    """,
+                    (
+                        target["status"],
+                        _dumps(node_payload),
+                        ts_ms,
+                        ts_ms,
+                        graph_ref,
+                        int(revision),
+                        node_id,
+                        int(row["status_version"]),
+                    ),
+                )
+                self._require_cas(cursor, subject=f"TaskNode {node_id}")
+                node_outbox = self._cancellation_outbox(
+                    intent_ref=reference,
+                    aggregate_type="TASK_NODE",
+                    aggregate_id=f"{graph_ref}@{int(revision)}/{node_id}",
+                    aggregate_version=int(target["status_version"]),
+                    event_type=f"TASK_NODE_{target['status']}",
+                )
+                self._insert_outbox(
+                    conn,
+                    node_outbox,
+                    ts_ms=ts_ms,
+                    expected_aggregate=(
+                        "TASK_NODE",
+                        f"{graph_ref}@{int(revision)}/{node_id}",
+                        int(target["status_version"]),
+                    ),
+                    expected_event_type=f"TASK_NODE_{target['status']}",
+                    expected_attempt_id=None,
+                )
+
+            attempts = conn.execute(
+                """
+                SELECT * FROM task_runtime_attempt
+                WHERE graph_id = ? AND graph_revision = ?
+                  AND status IN ('CREATED','LEASED','RUNNING','RECOVERABLE','CANCEL_REQUESTED')
+                ORDER BY attempt_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            for attempt in attempts:
+                if str(attempt["status"]) != "CANCEL_REQUESTED":
+                    version = int(attempt["status_version"]) + 1
+                    cursor = conn.execute(
+                        """
+                        UPDATE task_runtime_attempt
+                        SET status = 'CANCEL_REQUESTED', owner_id = NULL,
+                            status_version = status_version + 1, updated_ts_ms = ?
+                        WHERE attempt_id = ? AND status_version = ?
+                          AND status IN ('CREATED','LEASED','RUNNING','RECOVERABLE')
+                        """,
+                        (ts_ms, str(attempt["attempt_id"]), int(attempt["status_version"])),
+                    )
+                    self._require_cas(cursor, subject=f"Attempt {attempt['attempt_id']}")
+                    attempt_outbox = self._cancellation_outbox(
+                        intent_ref=reference,
+                        aggregate_type="TASK_ATTEMPT",
+                        aggregate_id=str(attempt["attempt_id"]),
+                        aggregate_version=version,
+                        event_type="TASK_ATTEMPT_CANCEL_REQUESTED",
+                        attempt_id=str(attempt["attempt_id"]),
+                    )
+                    self._insert_outbox(
+                        conn,
+                        attempt_outbox,
+                        ts_ms=ts_ms,
+                        expected_aggregate=("TASK_ATTEMPT", str(attempt["attempt_id"]), version),
+                        expected_event_type="TASK_ATTEMPT_CANCEL_REQUESTED",
+                        expected_attempt_id=str(attempt["attempt_id"]),
+                    )
+                leases = conn.execute(
+                    "SELECT * FROM task_runtime_lease WHERE attempt_id = ? AND status = 'ACTIVE'",
+                    (str(attempt["attempt_id"]),),
+                ).fetchall()
+                for lease in leases:
+                    version = int(lease["status_version"]) + 1
+                    cursor = conn.execute(
+                        """
+                        UPDATE task_runtime_lease
+                        SET status = 'CANCELLED', released_ts_ms = ?,
+                            status_version = status_version + 1
+                        WHERE lease_id = ? AND status = 'ACTIVE' AND status_version = ?
+                        """,
+                        (ts_ms, str(lease["lease_id"]), int(lease["status_version"])),
+                    )
+                    self._require_cas(cursor, subject=f"Lease {lease['lease_id']}")
+                    lease_outbox = self._cancellation_outbox(
+                        intent_ref=reference,
+                        aggregate_type="TASK_LEASE",
+                        aggregate_id=str(lease["lease_id"]),
+                        aggregate_version=version,
+                        event_type="TASK_LEASE_CANCELLED",
+                        attempt_id=str(attempt["attempt_id"]),
+                    )
+                    self._insert_outbox(
+                        conn,
+                        lease_outbox,
+                        ts_ms=ts_ms,
+                        expected_aggregate=("TASK_LEASE", str(lease["lease_id"]), version),
+                        expected_event_type="TASK_LEASE_CANCELLED",
+                        expected_attempt_id=str(attempt["attempt_id"]),
+                    )
+                reservations = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_idempotency_reservation
+                    WHERE attempt_id = ? AND status = 'RESERVED'
+                    """,
+                    (str(attempt["attempt_id"]),),
+                ).fetchall()
+                for reservation in reservations:
+                    self._mark_operation_recovery_required(
+                        conn,
+                        reservation,
+                        reason_code="GRAPH_CANCEL_REQUESTED",
+                        ts_ms=ts_ms,
+                    )
+
+            # Review approval/resume authority is revoked in the same UoW.
+            # APPROVED->CANCELLED is a deliberate B5C contract expansion; an
+            # AVAILABLE token can no longer resume a cancelled Graph.
+            review_subject_prefix = (
+                f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/"
+            )
+            review_rows = conn.execute(
+                """
+                SELECT * FROM agent_runtime_review
+                WHERE task_graph_id = ?
+                  AND substr(subject_ref, 1, length(?)) = ?
+                  AND status IN ('PENDING', 'APPROVED')
+                ORDER BY review_id
+                """,
+                (graph_ref, review_subject_prefix, review_subject_prefix),
+            ).fetchall()
+            for review in review_rows:
+                review_payload = _loads_object(
+                    review["review_json"], field_name="review_json"
+                )
+                review_payload["status"] = "CANCELLED"
+                cursor = conn.execute(
+                    """
+                    UPDATE agent_runtime_review
+                    SET status = 'CANCELLED', status_version = status_version + 1,
+                        review_json = ?, updated_ts_ms = ?
+                    WHERE review_id = ? AND status_version = ?
+                      AND status IN ('PENDING', 'APPROVED')
+                    """,
+                    (
+                        _dumps(review_payload),
+                        ts_ms,
+                        str(review["review_id"]),
+                        int(review["status_version"]),
+                    ),
+                )
+                self._require_cas(cursor, subject=f"ReviewItem {review['review_id']}")
+                conn.execute(
+                    """
+                    UPDATE agent_runtime_review_token
+                    SET state = 'REVOKED', updated_ts_ms = ?
+                    WHERE review_id = ? AND state = 'AVAILABLE'
+                    """,
+                    (ts_ms, str(review["review_id"])),
+                )
+
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph_cancellation_intent(
+                    intent_ref, schema_version, request_id, request_identity,
+                    source, reason_code, graph_id, graph_revision,
+                    graph_version_before, graph_version_after, budget_id,
+                    budget_version_at_request, payload_json, payload_sha256,
+                    graph_outbox_id, status, status_version,
+                    requested_ts_ms, finalized_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REQUESTED', 0, ?, NULL)
+                """,
+                (
+                    reference,
+                    GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+                    intent.payload["request_id"],
+                    intent.payload["request_identity"],
+                    intent.payload["source"],
+                    intent.payload["reason_code"],
+                    graph_ref,
+                    int(revision),
+                    int(expected_graph_version),
+                    graph_after_version,
+                    budget_ref,
+                    expected_budget_version,
+                    intent.payload_json,
+                    intent.payload_sha256,
+                    graph_outbox.outbox_id,
+                    ts_ms,
+                ),
+            )
+            effects = conn.execute(
+                """
+                SELECT effect.effect_id, effect.status, effect.status_version,
+                       effect.commit_scope, node.status AS node_status,
+                       attempt.status AS attempt_status
+                FROM task_runtime_acceptance_effect_intent AS effect
+                JOIN task_runtime_node AS node
+                  ON node.graph_id = effect.graph_id
+                 AND node.graph_revision = effect.graph_revision
+                 AND node.node_id = effect.node_id
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.attempt_id = effect.attempt_id
+                WHERE effect.graph_id = ? AND effect.graph_revision = ?
+                ORDER BY effect.effect_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            resolutions = {
+                "PENDING": "CANCELLED",
+                "CLAIMED": "RECONCILIATION_REQUIRED",
+                "COMMITTED": "COMMITTED_EVIDENCE",
+                "FAILED": "FAILED_EVIDENCE",
+            }
+            for effect in effects:
+                node_effect_authorized = (
+                    str(effect["commit_scope"]) == "NODE"
+                    and str(effect["node_status"]) == "ACCEPTED"
+                    and str(effect["attempt_status"]) == "SUCCEEDED"
+                )
+                if node_effect_authorized:
+                    # Node-scope acceptance authority committed before the
+                    # cancellation and remains independently deliverable.
+                    continue
+                resolution = resolutions[str(effect["status"])]
+                conn.execute(
+                    """
+                    INSERT INTO task_runtime_graph_cancellation_effect_fence(
+                        effect_id, intent_ref, observed_status, resolution_status,
+                        observed_status_version, created_ts_ms, resolved_ts_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(effect["effect_id"]),
+                        reference,
+                        str(effect["status"]),
+                        resolution,
+                        int(effect["status_version"]),
+                        ts_ms,
+                        None if resolution == "RECONCILIATION_REQUIRED" else ts_ms,
+                    ),
+                )
+            updated_graph = self._require_graph(conn, graph_ref, int(revision))
+            updated_nodes = conn.execute(
+                """
+                SELECT * FROM task_runtime_node
+                WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            intent_row = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_intent WHERE intent_ref = ?",
+                (reference,),
+            ).fetchone()
+            return {
+                "graph": _graph_record(updated_graph, updated_nodes),
+                "budget": self._budget_record(budget_row) if budget_row is not None else None,
+                "nodes": tuple(_node_record(row) for row in updated_nodes),
+                "intent": _graph_cancellation_intent_record(intent_row),
+                "replayed": False,
+            }
+
+    def _graph_cancellation_evidence_refs(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        intent_ref: str,
+        graph_id: str,
+        revision: int,
+    ) -> tuple[str, ...]:
+        refs: set[str] = {str(intent_ref)}
+        operations = conn.execute(
+            """
+            SELECT reservation.*
+            FROM task_runtime_idempotency_reservation AS reservation
+            JOIN task_runtime_attempt AS attempt
+              ON attempt.attempt_id = reservation.attempt_id
+            WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+            ORDER BY reservation.reservation_id
+            """,
+            (str(graph_id), int(revision)),
+        ).fetchall()
+        for row in operations:
+            operation = self._operation_record(row)
+            durable = next(
+                (
+                    str(operation[key])
+                    for key in ("receipt_ref", "reconciliation_proof_ref")
+                    if operation.get(key) is not None
+                    and _DURABLE_REFERENCE_PATTERN.fullmatch(str(operation[key]))
+                ),
+                None,
+            )
+            if durable is not None:
+                refs.add(durable)
+            else:
+                material = _dumps(
+                    {
+                        "reservation_id": str(operation["reservation_id"]),
+                        "status": str(operation["status"]),
+                        "status_version": int(operation["status_version"]),
+                    }
+                )
+                refs.add(
+                    "taskcancel-operation://sha256/"
+                    + hashlib.sha256(material.encode("utf-8")).hexdigest()
+                )
+        effect_rows = conn.execute(
+            """
+            SELECT effect.effect_id, effect.status, effect.status_version,
+                   fence.resolution_status
+            FROM task_runtime_acceptance_effect_intent AS effect
+            LEFT JOIN task_runtime_graph_cancellation_effect_fence AS fence
+              ON fence.effect_id = effect.effect_id AND fence.intent_ref = ?
+            WHERE effect.graph_id = ? AND effect.graph_revision = ?
+            ORDER BY effect.effect_id
+            """,
+            (str(intent_ref), str(graph_id), int(revision)),
+        ).fetchall()
+        for row in effect_rows:
+            refs.add(str(row["effect_id"]))
+            if row["resolution_status"] is None:
+                # Authorized NODE effects remain deliverable after Graph
+                # cancellation; bind only their immutable effect identity.
+                continue
+            material = _dumps(
+                {
+                    "effect_id": str(row["effect_id"]),
+                    "status": str(row["status"]),
+                    "status_version": int(row["status_version"]),
+                    "resolution_status": row["resolution_status"],
+                }
+            )
+            refs.add(
+                "taskcancel-effect://sha256/"
+                + hashlib.sha256(material.encode("utf-8")).hexdigest()
+            )
+        prefix = f"task-node://{quote(graph_id, safe='')}/{int(revision)}/"
+        reviews = conn.execute(
+            """
+            SELECT review_id, status, status_version, token_ref
+            FROM agent_runtime_review
+            WHERE task_graph_id = ? AND substr(subject_ref, 1, length(?)) = ?
+            ORDER BY review_id
+            """,
+            (str(graph_id), prefix, prefix),
+        ).fetchall()
+        for row in reviews:
+            material = _dumps(
+                {
+                    "review_id": str(row["review_id"]),
+                    "status": str(row["status"]),
+                    "status_version": int(row["status_version"]),
+                }
+            )
+            refs.add(
+                "taskcancel-review://sha256/"
+                + hashlib.sha256(material.encode("utf-8")).hexdigest()
+            )
+            token_ref = str(row["token_ref"] or "").strip()
+            if _DURABLE_REFERENCE_PATTERN.fullmatch(token_ref):
+                refs.add(token_ref)
+        return tuple(sorted(refs))
+
+    def advance_graph_cancellation(self, intent_ref: str) -> dict[str, Any]:
+        """Converge one requested Graph after local child cancellation/join."""
+
+        self.assert_graph_cancellation_ready()
+        reference = str(intent_ref or "").strip()
+        if not reference:
+            raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
+        ts_ms = self._now()
+        cancelled_attempts: list[str] = []
+        pending_attempts: list[str] = []
+        pending_operations: list[str] = []
+        pending_effects: list[str] = []
+        with self._transaction() as conn:
+            intent_row = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_intent WHERE intent_ref = ?",
+                (reference,),
+            ).fetchone()
+            if intent_row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"graph cancellation intent not found: {reference}",
+                )
+            intent = _graph_cancellation_intent_record(intent_row)
+            graph_ref = str(intent["graph_id"])
+            revision = int(intent["graph_revision"])
+            if str(intent["status"]) == "FINALIZED":
+                return {
+                    "intent": intent,
+                    "cancelled_attempt_ids": (),
+                    "pending_attempt_ids": (),
+                    "pending_operation_ids": (),
+                    "pending_effect_ids": (),
+                    "reconciliation_evidence_refs": self._graph_cancellation_evidence_refs(
+                        conn,
+                        intent_ref=reference,
+                        graph_id=graph_ref,
+                        revision=revision,
+                    ),
+                    "ready_to_finalize": True,
+                    "replayed": True,
+                }
+            attempts = conn.execute(
+                """
+                SELECT * FROM task_runtime_attempt
+                WHERE graph_id = ? AND graph_revision = ?
+                  AND status = 'CANCEL_REQUESTED'
+                ORDER BY attempt_id
+                """,
+                (graph_ref, revision),
+            ).fetchall()
+            for attempt in attempts:
+                attempt_id = str(attempt["attempt_id"])
+                active_lease = conn.execute(
+                    "SELECT lease_id FROM task_runtime_lease WHERE attempt_id = ? AND status = 'ACTIVE'",
+                    (attempt_id,),
+                ).fetchone()
+                unresolved = conn.execute(
+                    """
+                    SELECT reservation_id FROM task_runtime_idempotency_reservation
+                    WHERE attempt_id = ? AND status IN ('RESERVED','RECOVERY_REQUIRED')
+                    ORDER BY reservation_id
+                    """,
+                    (attempt_id,),
+                ).fetchall()
+                if active_lease is not None or unresolved:
+                    pending_attempts.append(attempt_id)
+                    pending_operations.extend(str(row["reservation_id"]) for row in unresolved)
+                    continue
+                version = int(attempt["status_version"]) + 1
+                cursor = conn.execute(
+                    """
+                    UPDATE task_runtime_attempt
+                    SET status = 'CANCELLED', owner_id = NULL,
+                        status_version = status_version + 1,
+                        completed_ts_ms = ?, updated_ts_ms = ?
+                    WHERE attempt_id = ? AND status = 'CANCEL_REQUESTED'
+                      AND status_version = ?
+                    """,
+                    (ts_ms, ts_ms, attempt_id, int(attempt["status_version"])),
+                )
+                self._require_cas(cursor, subject=f"Attempt {attempt_id}")
+                outbox = self._cancellation_outbox(
+                    intent_ref=reference,
+                    aggregate_type="TASK_ATTEMPT",
+                    aggregate_id=attempt_id,
+                    aggregate_version=version,
+                    event_type="TASK_ATTEMPT_CANCELLED",
+                    attempt_id=attempt_id,
+                )
+                self._insert_outbox(
+                    conn,
+                    outbox,
+                    ts_ms=ts_ms,
+                    expected_aggregate=("TASK_ATTEMPT", attempt_id, version),
+                    expected_event_type="TASK_ATTEMPT_CANCELLED",
+                    expected_attempt_id=attempt_id,
+                )
+                cancelled_attempts.append(attempt_id)
+            fences = conn.execute(
+                """
+                SELECT fence.*, effect.status AS current_status
+                FROM task_runtime_graph_cancellation_effect_fence AS fence
+                JOIN task_runtime_acceptance_effect_intent AS effect
+                  ON effect.effect_id = fence.effect_id
+                WHERE fence.intent_ref = ?
+                  AND fence.resolution_status = 'RECONCILIATION_REQUIRED'
+                ORDER BY fence.effect_id
+                """,
+                (reference,),
+            ).fetchall()
+            for fence in fences:
+                current = str(fence["current_status"])
+                if current in {"COMMITTED", "FAILED"}:
+                    resolution = (
+                        "COMMITTED_EVIDENCE" if current == "COMMITTED" else "FAILED_EVIDENCE"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE task_runtime_graph_cancellation_effect_fence
+                        SET resolution_status = ?, resolved_ts_ms = ?
+                        WHERE effect_id = ? AND intent_ref = ?
+                          AND resolution_status = 'RECONCILIATION_REQUIRED'
+                        """,
+                        (resolution, ts_ms, str(fence["effect_id"]), reference),
+                    )
+                else:
+                    pending_effects.append(str(fence["effect_id"]))
+            evidence_refs = self._graph_cancellation_evidence_refs(
+                conn,
+                intent_ref=reference,
+                graph_id=graph_ref,
+                revision=revision,
+            )
+            return {
+                "intent": intent,
+                "cancelled_attempt_ids": tuple(cancelled_attempts),
+                "pending_attempt_ids": tuple(sorted(set(pending_attempts))),
+                "pending_operation_ids": tuple(sorted(set(pending_operations))),
+                "pending_effect_ids": tuple(sorted(set(pending_effects))),
+                "reconciliation_evidence_refs": evidence_refs,
+                "ready_to_finalize": not (
+                    pending_attempts or pending_operations or pending_effects
+                ),
+                "replayed": not cancelled_attempts,
+            }
+
+    def finalize_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: OutboxMessage,
+        budget_outbox: OutboxMessage | None,
+    ) -> dict[str, Any]:
+        """Atomically finalize a stable cancellation and its shared Budget."""
+
+        self.assert_graph_cancellation_ready()
+        graph_ref = str(graph_id or "").strip()
+        budget_ref = str(budget_id or "").strip() or None
+        intent_reference = str(intent_ref or "").strip()
+        decision_reference = str(decision_ref or "").strip()
+        normalized_states = self._normalize_parallel_node_states(expected_node_states)
+        try:
+            decision = normalize_graph_cancellation_decision(decision_payload)
+        except GraphCancellationContractError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                f"graph cancellation decision is invalid: {exc}",
+            ) from exc
+        expected_before = {
+            node_id: {"status": status, "status_version": version}
+            for node_id, (status, version) in normalized_states.items()
+        }
+        if (
+            not graph_ref
+            or int(revision) < 1
+            or decision.decision_ref != decision_reference
+            or decision.payload["intent_ref"] != intent_reference
+            or decision.payload["graph_id"] != graph_ref
+            or decision.payload["graph_revision"] != int(revision)
+            or decision.payload["graph_status_version_before"] != int(expected_graph_version)
+            or decision.payload["budget_id"] != budget_ref
+            or decision.payload["budget_status_version_before"] != expected_budget_version
+            or decision.payload["node_states_before"] != expected_before
+            or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or decision.payload["budget_outbox_id"]
+            != (budget_outbox.outbox_id if budget_outbox is not None else None)
+            or decision_reference not in set(graph_outbox.evidence_refs)
+            or intent_reference not in set(graph_outbox.evidence_refs)
+            or decision.payload["request_identity"]
+            not in set(graph_outbox.evidence_refs)
+            or (
+                budget_outbox is not None
+                and (
+                    decision_reference not in set(budget_outbox.evidence_refs)
+                    or intent_reference not in set(budget_outbox.evidence_refs)
+                    or decision.payload["request_identity"]
+                    not in set(budget_outbox.evidence_refs)
+                )
+            )
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "graph cancellation decision does not bind the final mutation",
+            )
+
+        ts_ms = self._now()
+        with self._transaction() as conn:
+            intent_row = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_intent WHERE intent_ref = ?",
+                (intent_reference,),
+            ).fetchone()
+            if intent_row is None:
+                raise TaskStoreError(
+                    TASK_STORE_NOT_FOUND,
+                    f"graph cancellation intent not found: {intent_reference}",
+                )
+            intent = _graph_cancellation_intent_record(intent_row)
+            if (
+                intent["graph_id"] != graph_ref
+                or intent["graph_revision"] != int(revision)
+                or intent["payload"]["request_id"] != decision.payload["request_id"]
+                or intent["payload"]["request_identity"]
+                != decision.payload["request_identity"]
+                or intent["budget_id"] != budget_ref
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_CANCELLATION_CONFLICT,
+                    "cancellation decision conflicts with its durable intent",
+                )
+            graph = self._require_graph(conn, graph_ref, int(revision))
+            node_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_node
+                WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            budget_row = self._require_budget(conn, budget_ref) if budget_ref is not None else None
+            existing_decision = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph_cancellation_decision
+                WHERE intent_ref = ? OR decision_ref = ?
+                ORDER BY decision_ref LIMIT 1
+                """,
+                (intent_reference, decision_reference),
+            ).fetchone()
+            if existing_decision is not None or str(intent["status"]) == "FINALIZED":
+                if existing_decision is None:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "finalized cancellation intent is missing its decision",
+                    )
+                record = _graph_cancellation_decision_record(existing_decision)
+                if (
+                    record["decision_ref"] != decision_reference
+                    or record["payload_json"] != decision.payload_json
+                    or record["payload_sha256"] != decision.payload_sha256
+                    or str(graph["status"]) != "CANCELLED"
+                    or int(graph["status_version"]) != int(expected_graph_version) + 1
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "canonical cancellation decision replay drifted",
+                    )
+                self._assert_parallel_node_states(
+                    node_rows,
+                    {
+                        node_id: (state["status"], state["status_version"])
+                        for node_id, state in decision.payload["node_states_after"].items()
+                    },
+                    graph_id=graph_ref,
+                    revision=int(revision),
+                )
+                self._assert_mutation_outbox_replay(
+                    conn,
+                    graph_outbox,
+                    expected_aggregate=(
+                        "TASK_GRAPH",
+                        graph_ref,
+                        int(expected_graph_version) + 1,
+                    ),
+                    expected_event_type="TASK_GRAPH_CANCELLED",
+                    expected_attempt_id=None,
+                )
+                if budget_ref is not None:
+                    if budget_row is None:
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "cancellation replay is missing its Budget",
+                        )
+                    budget_changed = (
+                        decision.payload["budget_status_before"]
+                        != decision.payload["budget_target_status"]
+                    )
+                    expected_budget_after = int(expected_budget_version) + int(
+                        budget_changed
+                    )
+                    if (
+                        str(budget_row["status"])
+                        != decision.payload["budget_target_status"]
+                        or int(budget_row["status_version"]) != expected_budget_after
+                    ):
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "cancellation replay Budget state drifted",
+                        )
+                    if budget_changed:
+                        if budget_outbox is None:
+                            raise TaskStoreError(
+                                TASK_STORE_DURABLE_DATA_INVALID,
+                                "cancellation replay is missing its Budget Outbox",
+                            )
+                        self._assert_mutation_outbox_replay(
+                            conn,
+                            budget_outbox,
+                            expected_aggregate=(
+                                "BUDGET_RESERVATION",
+                                budget_ref,
+                                expected_budget_after,
+                            ),
+                            expected_event_type=(
+                                f"BUDGET_RESERVATION_{decision.payload['budget_target_status']}"
+                            ),
+                            expected_attempt_id=None,
+                        )
+                replay_evidence = self._graph_cancellation_evidence_refs(
+                    conn,
+                    intent_ref=intent_reference,
+                    graph_id=graph_ref,
+                    revision=int(revision),
+                )
+                if list(replay_evidence) != decision.payload[
+                    "reconciliation_evidence_refs"
+                ]:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "cancellation replay reconciliation evidence drifted",
+                    )
+                return {
+                    "graph": _graph_record(graph, node_rows),
+                    "budget": self._budget_record(budget_row) if budget_row is not None else None,
+                    "nodes": tuple(_node_record(row) for row in node_rows),
+                    "intent": intent,
+                    "decision": record,
+                    "replayed": True,
+                }
+
+            self._require_version(
+                graph,
+                expected_graph_version,
+                subject=f"TaskGraph {graph_ref}@{int(revision)}",
+            )
+            if str(graph["status"]) != "BLOCKED":
+                raise TaskStoreError(
+                    TASK_STORE_CANCELLATION_CONFLICT,
+                    "cancellation finalization requires its BLOCKED Graph epoch",
+                )
+            self._assert_parallel_node_states(
+                node_rows,
+                normalized_states,
+                graph_id=graph_ref,
+                revision=int(revision),
+            )
+            success_row = conn.execute(
+                """
+                SELECT decision_ref FROM task_runtime_parallel_success_decision
+                WHERE graph_id = ? AND graph_revision = ?
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            if success_row is not None:
+                raise TaskStoreError(
+                    TASK_STORE_CANCELLATION_CONFLICT,
+                    "completed Graph success authority wins the cancellation race",
+                )
+            active_attempt = conn.execute(
+                """
+                SELECT attempt_id FROM task_runtime_attempt
+                WHERE graph_id = ? AND graph_revision = ?
+                  AND status IN ('CREATED','LEASED','RUNNING','RECOVERABLE','CANCEL_REQUESTED')
+                LIMIT 1
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            active_lease = conn.execute(
+                """
+                SELECT lease.lease_id FROM task_runtime_lease AS lease
+                JOIN task_runtime_attempt AS attempt ON attempt.attempt_id = lease.attempt_id
+                WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                  AND lease.status = 'ACTIVE' LIMIT 1
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            unresolved_operation = conn.execute(
+                """
+                SELECT reservation.reservation_id
+                FROM task_runtime_idempotency_reservation AS reservation
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.attempt_id = reservation.attempt_id
+                WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                  AND reservation.status IN ('RESERVED','RECOVERY_REQUIRED')
+                LIMIT 1
+                """,
+                (graph_ref, int(revision)),
+            ).fetchone()
+            uncertain_effect = conn.execute(
+                """
+                SELECT effect_id FROM task_runtime_graph_cancellation_effect_fence
+                WHERE intent_ref = ? AND resolution_status = 'RECONCILIATION_REQUIRED'
+                LIMIT 1
+                """,
+                (intent_reference,),
+            ).fetchone()
+            live_review = conn.execute(
+                """
+                SELECT review_id FROM agent_runtime_review
+                WHERE task_graph_id = ?
+                  AND substr(subject_ref, 1, length(?)) = ?
+                  AND status IN ('PENDING','APPROVED') LIMIT 1
+                """,
+                (
+                    graph_ref,
+                    f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/",
+                    f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/",
+                ),
+            ).fetchone()
+            live_token = conn.execute(
+                """
+                SELECT token.token_digest
+                FROM agent_runtime_review_token AS token
+                JOIN agent_runtime_review AS review ON review.review_id = token.review_id
+                WHERE review.task_graph_id = ?
+                  AND substr(review.subject_ref, 1, length(?)) = ?
+                  AND token.state = 'AVAILABLE' LIMIT 1
+                """,
+                (
+                    graph_ref,
+                    f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/",
+                    f"task-node://{quote(graph_ref, safe='')}/{int(revision)}/",
+                ),
+            ).fetchone()
+            if any(
+                item is not None
+                for item in (
+                    active_attempt,
+                    active_lease,
+                    unresolved_operation,
+                    uncertain_effect,
+                    live_review,
+                    live_token,
+                )
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_OWNERSHIP_CONFLICT,
+                    "cancellation awaits stable Attempts/Leases/operations/effects/reviews",
+                )
+            reconciliation_evidence = self._graph_cancellation_evidence_refs(
+                conn,
+                intent_ref=intent_reference,
+                graph_id=graph_ref,
+                revision=int(revision),
+            )
+            manifest_evidence = {
+                decision.decision_ref,
+                intent_reference,
+                str(decision.payload["request_identity"]),
+            }
+            if (
+                decision.payload["reconciliation_evidence_refs"]
+                != list(reconciliation_evidence)
+                or not manifest_evidence.issubset(
+                    set(graph_outbox.evidence_refs)
+                )
+                or (
+                    budget_outbox is not None
+                    and not manifest_evidence.issubset(
+                        set(budget_outbox.evidence_refs)
+                    )
+                )
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "cancellation decision/outboxes omit manifest authority evidence",
+                )
+
+            for row in node_rows:
+                node_id = str(row["node_id"])
+                target = decision.payload["node_states_after"][node_id]
+                if target["status"] == str(row["status"]):
+                    continue
+                node_payload = _validated_node_payload(row)
+                node_payload["status"] = target["status"]
+                node_payload["status_version"] = target["status_version"]
+                cursor = conn.execute(
+                    """
+                    UPDATE task_runtime_node
+                    SET status = 'CANCELLED', status_version = status_version + 1,
+                        node_json = ?, updated_ts_ms = ?
+                    WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+                      AND status = 'CANCEL_REQUESTED' AND status_version = ?
+                    """,
+                    (
+                        _dumps(node_payload),
+                        ts_ms,
+                        graph_ref,
+                        int(revision),
+                        node_id,
+                        int(row["status_version"]),
+                    ),
+                )
+                self._require_cas(cursor, subject=f"TaskNode {node_id}")
+                node_outbox = self._cancellation_outbox(
+                    intent_ref=intent_reference,
+                    aggregate_type="TASK_NODE",
+                    aggregate_id=f"{graph_ref}@{int(revision)}/{node_id}",
+                    aggregate_version=int(target["status_version"]),
+                    event_type="TASK_NODE_CANCELLED",
+                )
+                self._insert_outbox(
+                    conn,
+                    node_outbox,
+                    ts_ms=ts_ms,
+                    expected_aggregate=(
+                        "TASK_NODE",
+                        f"{graph_ref}@{int(revision)}/{node_id}",
+                        int(target["status_version"]),
+                    ),
+                    expected_event_type="TASK_NODE_CANCELLED",
+                    expected_attempt_id=None,
+                )
+
+            if budget_row is not None:
+                self._require_version(
+                    budget_row,
+                    int(expected_budget_version),
+                    subject=f"BudgetReservation {budget_ref}",
+                )
+                if (
+                    str(budget_row["graph_id"] or "") != graph_ref
+                    or int(budget_row["graph_revision"] or 0) != int(revision)
+                    or str(budget_row["status"]) != decision.payload["budget_status_before"]
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_CAS_CONFLICT,
+                        "cancellation Budget snapshot drifted",
+                    )
+                budget_target = str(decision.payload["budget_target_status"])
+                if budget_target != str(budget_row["status"]):
+                    if budget_outbox is None:
+                        raise TaskStoreError(
+                            TASK_STORE_INVALID,
+                            "Budget transition requires a cancellation Outbox",
+                        )
+                    validate_budget_transition(str(budget_row["status"]), budget_target)
+                    cursor = conn.execute(
+                        """
+                        UPDATE task_runtime_budget_reservation
+                        SET status = ?, status_version = status_version + 1,
+                            updated_ts_ms = ?
+                        WHERE budget_id = ? AND status_version = ? AND status = ?
+                        """,
+                        (
+                            budget_target,
+                            ts_ms,
+                            budget_ref,
+                            int(expected_budget_version),
+                            str(budget_row["status"]),
+                        ),
+                    )
+                    self._require_cas(cursor, subject=f"BudgetReservation {budget_ref}")
+                    self._insert_outbox(
+                        conn,
+                        budget_outbox,
+                        ts_ms=ts_ms,
+                        expected_aggregate=(
+                            "BUDGET_RESERVATION",
+                            budget_ref,
+                            int(expected_budget_version) + 1,
+                        ),
+                        expected_event_type=f"BUDGET_RESERVATION_{budget_target}",
+                        expected_attempt_id=None,
+                    )
+            completed_graph = self._transition_graph_in_transaction(
+                conn,
+                graph_id=graph_ref,
+                revision=int(revision),
+                expected_version=int(expected_graph_version),
+                target_status=TaskGraphStatus.CANCELLED,
+                outbox=graph_outbox,
+                ts_ms=ts_ms,
+            )
+            budget_version_after = (
+                None
+                if budget_row is None
+                else int(expected_budget_version)
+                + (
+                    0
+                    if decision.payload["budget_status_before"]
+                    == decision.payload["budget_target_status"]
+                    else 1
+                )
+            )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph_cancellation_decision(
+                    decision_ref, schema_version, intent_ref, graph_id,
+                    graph_revision, graph_version_before, graph_version_after,
+                    budget_id, budget_version_before, budget_version_after,
+                    payload_json, payload_sha256, graph_outbox_id,
+                    budget_outbox_id, created_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision_reference,
+                    GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+                    intent_reference,
+                    graph_ref,
+                    int(revision),
+                    int(expected_graph_version),
+                    int(expected_graph_version) + 1,
+                    budget_ref,
+                    expected_budget_version,
+                    budget_version_after,
+                    decision.payload_json,
+                    decision.payload_sha256,
+                    graph_outbox.outbox_id,
+                    budget_outbox.outbox_id if budget_outbox is not None else None,
+                    ts_ms,
+                ),
+            )
+            cursor = conn.execute(
+                """
+                UPDATE task_runtime_graph_cancellation_intent
+                SET status = 'FINALIZED', status_version = status_version + 1,
+                    finalized_ts_ms = ?
+                WHERE intent_ref = ? AND status = 'REQUESTED' AND status_version = 0
+                """,
+                (ts_ms, intent_reference),
+            )
+            self._require_cas(cursor, subject=f"CancellationIntent {intent_reference}")
+            final_nodes = conn.execute(
+                """
+                SELECT * FROM task_runtime_node
+                WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            final_intent = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_intent WHERE intent_ref = ?",
+                (intent_reference,),
+            ).fetchone()
+            final_decision = conn.execute(
+                "SELECT * FROM task_runtime_graph_cancellation_decision WHERE decision_ref = ?",
+                (decision_reference,),
+            ).fetchone()
+            return {
+                "graph": completed_graph,
+                "budget": (
+                    self._budget_record(self._require_budget(conn, budget_ref))
+                    if budget_ref is not None
+                    else None
+                ),
+                "nodes": tuple(_node_record(row) for row in final_nodes),
+                "intent": _graph_cancellation_intent_record(final_intent),
+                "decision": _graph_cancellation_decision_record(final_decision),
+                "replayed": False,
+            }
 
     def get_parallel_settlement_decision(self, decision_ref: str) -> dict[str, Any]:
         """Resolve and integrity-check one canonical parallel decision."""
@@ -5849,6 +7678,11 @@ class DurableTaskStore:
 
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=revision,
+            )
             node_rows = conn.execute(
                 """
                 SELECT * FROM task_runtime_node
@@ -6232,6 +8066,11 @@ class DurableTaskStore:
         ts_ms = self._now()
 
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=int(revision),
+            )
             node_rows = conn.execute(
                 """
                 SELECT * FROM task_runtime_node
@@ -6979,6 +8818,12 @@ class DurableTaskStore:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_budget(conn, budget_id)
+            if row["graph_id"] is not None and row["graph_revision"] is not None:
+                self._assert_graph_not_cancelling(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:
                 raise TaskStoreError(
@@ -7091,6 +8936,11 @@ class DurableTaskStore:
         ts_ms = self._now()
 
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+            )
             existing = conn.execute(
                 """
                 SELECT * FROM task_runtime_budget_usage
@@ -7330,6 +9180,11 @@ class DurableTaskStore:
         )
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=spec.graph_id,
+                graph_revision=spec.graph_revision,
+            )
             return self._stage_acceptance_effect_intent_in_transaction(
                 conn,
                 spec,
@@ -7372,6 +9227,11 @@ class DurableTaskStore:
                 )
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=revision,
+            )
             current_node = self._require_node(
                 conn,
                 graph_ref,
@@ -7483,6 +9343,11 @@ class DurableTaskStore:
                 )
         ts_ms = self._now()
         with self._transaction() as conn:
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+            )
             node_rows = conn.execute(
                 """
                 SELECT * FROM task_runtime_node
@@ -7960,6 +9825,19 @@ class DurableTaskStore:
         expires_ts_ms = ts_ms + lease_duration
         with self._transaction() as conn:
             if selected_effect is not None:
+                cancellation_fence = conn.execute(
+                    """
+                    SELECT resolution_status
+                    FROM task_runtime_graph_cancellation_effect_fence
+                    WHERE effect_id = ?
+                    """,
+                    (selected_effect,),
+                ).fetchone()
+                if cancellation_fence is not None:
+                    raise TaskStoreError(
+                        TASK_STORE_CANCELLATION_CONFLICT,
+                        f"acceptance effect is fenced by Graph cancellation: {selected_effect}",
+                    )
                 existing_claim = conn.execute(
                     """
                     SELECT * FROM task_runtime_acceptance_effect_intent
@@ -8008,6 +9886,10 @@ class DurableTaskStore:
                     OR
                     (effect.commit_scope = 'GRAPH' AND graph_row.status = 'COMPLETED')
                   )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM task_runtime_graph_cancellation_effect_fence AS cancel_fence
+                    WHERE cancel_fence.effect_id = effect.effect_id
+                  )
                 """
                 + selected_clause
                 + " ORDER BY effect.created_ts_ms, effect.effect_id LIMIT 1",
@@ -8024,6 +9906,10 @@ class DurableTaskStore:
                     status_version = status_version + 1,
                     reason_code = NULL, last_error = NULL, updated_ts_ms = ?
                 WHERE effect_id = ? AND status_version = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM task_runtime_graph_cancellation_effect_fence AS cancel_fence
+                    WHERE cancel_fence.effect_id = task_runtime_acceptance_effect_intent.effect_id
+                  )
                   AND (
                     (status = 'PENDING' AND available_ts_ms <= ?)
                     OR
@@ -8121,6 +10007,15 @@ class DurableTaskStore:
             committed = _acceptance_effect_record(
                 self._require_acceptance_effect_intent(conn, effect_ref)
             )
+            conn.execute(
+                """
+                UPDATE task_runtime_graph_cancellation_effect_fence
+                SET resolution_status = 'COMMITTED_EVIDENCE', resolved_ts_ms = ?
+                WHERE effect_id = ?
+                  AND resolution_status = 'RECONCILIATION_REQUIRED'
+                """,
+                (ts_ms, effect_ref),
+            )
             committed["replayed"] = False
             return committed
 
@@ -8198,6 +10093,15 @@ class DurableTaskStore:
             failed = _acceptance_effect_record(
                 self._require_acceptance_effect_intent(conn, effect_ref)
             )
+            conn.execute(
+                """
+                UPDATE task_runtime_graph_cancellation_effect_fence
+                SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
+                WHERE effect_id = ?
+                  AND resolution_status = 'RECONCILIATION_REQUIRED'
+                """,
+                (ts_ms, effect_ref),
+            )
             failed["replayed"] = False
             return failed
 
@@ -8243,6 +10147,19 @@ class DurableTaskStore:
         available_ts_ms = ts_ms + retry_delay
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            cancellation_fence = conn.execute(
+                """
+                SELECT resolution_status
+                FROM task_runtime_graph_cancellation_effect_fence
+                WHERE effect_id = ?
+                """,
+                (effect_ref,),
+            ).fetchone()
+            if cancellation_fence is not None:
+                raise TaskStoreError(
+                    TASK_STORE_CANCELLATION_CONFLICT,
+                    f"cancelled Graph effect cannot be rescheduled: {effect_ref}",
+                )
             self._assert_acceptance_effect_claim(
                 row,
                 owner_id=owner,
@@ -8544,6 +10461,11 @@ class DurableTaskStore:
         conn: sqlite3.Connection,
         attempt: sqlite3.Row,
     ) -> None:
+        self._assert_graph_not_cancelling(
+            conn,
+            graph_id=str(attempt["graph_id"]),
+            graph_revision=int(attempt["graph_revision"]),
+        )
         node = self._require_node(
             conn,
             str(attempt["graph_id"]),
@@ -9747,6 +11669,294 @@ def _acceptance_effect_record(
     record["payload"] = payload
     record["replayed"] = False
     return record
+
+
+def _graph_cancellation_intent_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    record = dict(row)
+    try:
+        payload = _loads_object(
+            str(record.get("payload_json") or ""),
+            field_name="task_runtime_graph_cancellation_intent.payload_json",
+        )
+        intent = normalize_graph_cancellation_intent(payload)
+    except (TaskStoreError, GraphCancellationContractError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable graph cancellation intent is invalid: {exc}",
+        ) from exc
+    budget_version = record.get("budget_version_at_request")
+    expected = {
+        "intent_ref": intent.intent_ref,
+        "schema_version": GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+        "request_id": intent.payload["request_id"],
+        "request_identity": intent.payload["request_identity"],
+        "source": intent.payload["source"],
+        "reason_code": intent.payload["reason_code"],
+        "graph_id": intent.payload["graph_id"],
+        "graph_revision": intent.payload["graph_revision"],
+        "graph_version_before": intent.payload["graph_status_version_before"],
+        "graph_version_after": intent.payload["graph_status_version_before"] + 1,
+        "budget_id": intent.payload["budget_id"],
+        "budget_version_at_request": intent.payload["budget_status_version_before"],
+        "payload_sha256": intent.payload_sha256,
+        "graph_outbox_id": intent.payload["graph_outbox_id"],
+    }
+    actual = {
+        "intent_ref": str(record.get("intent_ref") or ""),
+        "schema_version": str(record.get("schema_version") or ""),
+        "request_id": str(record.get("request_id") or ""),
+        "request_identity": str(record.get("request_identity") or ""),
+        "source": str(record.get("source") or ""),
+        "reason_code": str(record.get("reason_code") or ""),
+        "graph_id": str(record.get("graph_id") or ""),
+        "graph_revision": int(record.get("graph_revision") or 0),
+        "graph_version_before": int(record.get("graph_version_before") or 0),
+        "graph_version_after": int(record.get("graph_version_after") or 0),
+        "budget_id": str(record.get("budget_id") or "").strip() or None,
+        "budget_version_at_request": (
+            int(budget_version) if budget_version is not None else None
+        ),
+        "payload_sha256": str(record.get("payload_sha256") or ""),
+        "graph_outbox_id": str(record.get("graph_outbox_id") or ""),
+    }
+    status = str(record.get("status") or "")
+    status_version = int(record.get("status_version") or 0)
+    if (
+        str(record.get("payload_json") or "") != intent.payload_json
+        or actual != expected
+        or (status, status_version) not in {("REQUESTED", 0), ("FINALIZED", 1)}
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable graph cancellation intent binding drifted",
+        )
+    record["payload"] = intent.payload
+    record["payload_json"] = intent.payload_json
+    record["payload_sha256"] = intent.payload_sha256
+    record["budget_id"] = actual["budget_id"]
+    record["budget_version_at_request"] = actual["budget_version_at_request"]
+    return record
+
+
+def _graph_cancellation_decision_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    record = dict(row)
+    try:
+        payload = _loads_object(
+            str(record.get("payload_json") or ""),
+            field_name="task_runtime_graph_cancellation_decision.payload_json",
+        )
+        decision = normalize_graph_cancellation_decision(payload)
+    except (TaskStoreError, GraphCancellationContractError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            f"durable graph cancellation decision is invalid: {exc}",
+        ) from exc
+    budget_before = decision.payload["budget_status_version_before"]
+    budget_changed = (
+        decision.payload["budget_status_before"]
+        != decision.payload["budget_target_status"]
+    )
+    expected = {
+        "decision_ref": decision.decision_ref,
+        "schema_version": GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+        "intent_ref": decision.payload["intent_ref"],
+        "graph_id": decision.payload["graph_id"],
+        "graph_revision": decision.payload["graph_revision"],
+        "graph_version_before": decision.payload["graph_status_version_before"],
+        "graph_version_after": decision.payload["graph_status_version_before"] + 1,
+        "budget_id": decision.payload["budget_id"],
+        "budget_version_before": budget_before,
+        "budget_version_after": (
+            None if budget_before is None else budget_before + int(budget_changed)
+        ),
+        "payload_sha256": decision.payload_sha256,
+        "graph_outbox_id": decision.payload["graph_outbox_id"],
+        "budget_outbox_id": decision.payload["budget_outbox_id"],
+    }
+    actual = {
+        "decision_ref": str(record.get("decision_ref") or ""),
+        "schema_version": str(record.get("schema_version") or ""),
+        "intent_ref": str(record.get("intent_ref") or ""),
+        "graph_id": str(record.get("graph_id") or ""),
+        "graph_revision": int(record.get("graph_revision") or 0),
+        "graph_version_before": int(record.get("graph_version_before") or 0),
+        "graph_version_after": int(record.get("graph_version_after") or 0),
+        "budget_id": str(record.get("budget_id") or "").strip() or None,
+        "budget_version_before": (
+            int(record["budget_version_before"])
+            if record.get("budget_version_before") is not None
+            else None
+        ),
+        "budget_version_after": (
+            int(record["budget_version_after"])
+            if record.get("budget_version_after") is not None
+            else None
+        ),
+        "payload_sha256": str(record.get("payload_sha256") or ""),
+        "graph_outbox_id": str(record.get("graph_outbox_id") or ""),
+        "budget_outbox_id": str(record.get("budget_outbox_id") or "").strip() or None,
+    }
+    if str(record.get("payload_json") or "") != decision.payload_json or actual != expected:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable graph cancellation decision binding drifted",
+        )
+    record["payload"] = decision.payload
+    record["payload_json"] = decision.payload_json
+    record["payload_sha256"] = decision.payload_sha256
+    record["budget_id"] = actual["budget_id"]
+    record["budget_version_before"] = actual["budget_version_before"]
+    record["budget_version_after"] = actual["budget_version_after"]
+    record["budget_outbox_id"] = actual["budget_outbox_id"]
+    return record
+
+
+def _assert_graph_cancellation_decision_bindings(
+    conn: sqlite3.Connection,
+    record: Mapping[str, Any],
+    *,
+    evidence_refs_builder: Callable[..., tuple[str, ...]],
+) -> None:
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation decision payload is missing",
+        )
+    graph_id = str(record["graph_id"])
+    revision = int(record["graph_revision"])
+    intent = conn.execute(
+        """
+        SELECT * FROM task_runtime_graph_cancellation_intent
+        WHERE intent_ref = ? AND graph_id = ? AND graph_revision = ?
+        """,
+        (str(record["intent_ref"]), graph_id, revision),
+    ).fetchone()
+    graph = conn.execute(
+        "SELECT * FROM task_runtime_graph WHERE graph_id = ? AND revision = ?",
+        (graph_id, revision),
+    ).fetchone()
+    nodes = conn.execute(
+        """
+        SELECT node_id, status, status_version FROM task_runtime_node
+        WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+        """,
+        (graph_id, revision),
+    ).fetchall()
+    if intent is None or graph is None:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation decision is missing its intent or terminal Graph",
+        )
+    intent_record = _graph_cancellation_intent_record(intent)
+    if (
+        str(intent_record["status"]) != "FINALIZED"
+        or int(intent_record["status_version"]) != 1
+        or str(graph["status"]) != "CANCELLED"
+        or int(graph["status_version"]) != int(record["graph_version_after"])
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation terminal intent/Graph binding drifted",
+        )
+    actual_states = {
+        str(row["node_id"]): {
+            "status": str(row["status"]),
+            "status_version": int(row["status_version"]),
+        }
+        for row in nodes
+    }
+    if actual_states != payload["node_states_after"]:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation terminal Node snapshot drifted",
+        )
+    budget_id = record.get("budget_id")
+    if budget_id is not None:
+        budget = conn.execute(
+            "SELECT * FROM task_runtime_budget_reservation WHERE budget_id = ?",
+            (str(budget_id),),
+        ).fetchone()
+        if (
+            budget is None
+            or str(budget["graph_id"] or "") != graph_id
+            or int(budget["graph_revision"] or 0) != revision
+            or str(budget["status"]) != payload["budget_target_status"]
+            or int(budget["status_version"]) != int(record["budget_version_after"])
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "cancellation terminal Budget binding drifted",
+            )
+    graph_outbox_row = conn.execute(
+        "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
+        (str(record["graph_outbox_id"]),),
+    ).fetchone()
+    budget_outbox_row = (
+        conn.execute(
+            "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
+            (str(record["budget_outbox_id"]),),
+        ).fetchone()
+        if record.get("budget_outbox_id") is not None
+        else None
+    )
+    if graph_outbox_row is None:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation terminal Graph Outbox is missing",
+        )
+    graph_outbox = _outbox_record(graph_outbox_row)
+    required_evidence = {
+        str(record["decision_ref"]),
+        str(record["intent_ref"]),
+        str(payload["request_identity"]),
+    }
+    if (
+        graph_outbox["aggregate_type"] != "TASK_GRAPH"
+        or graph_outbox["aggregate_id"] != graph_id
+        or int(graph_outbox["aggregate_version"]) != int(record["graph_version_after"])
+        or graph_outbox["event_type"] != "TASK_GRAPH_CANCELLED"
+        or not required_evidence.issubset(set(graph_outbox["evidence_refs"]))
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation terminal Graph Outbox binding drifted",
+        )
+    if record.get("budget_outbox_id") is not None:
+        if budget_outbox_row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "cancellation terminal Budget Outbox is missing",
+            )
+        budget_outbox = _outbox_record(budget_outbox_row)
+        if (
+            budget_outbox["aggregate_type"] != "BUDGET_RESERVATION"
+            or budget_outbox["aggregate_id"] != str(budget_id)
+            or int(budget_outbox["aggregate_version"])
+            != int(record["budget_version_after"])
+            or budget_outbox["event_type"]
+            != f"BUDGET_RESERVATION_{payload['budget_target_status']}"
+            or not required_evidence.issubset(set(budget_outbox["evidence_refs"]))
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "cancellation terminal Budget Outbox binding drifted",
+            )
+    evidence = evidence_refs_builder(
+        conn,
+        intent_ref=str(record["intent_ref"]),
+        graph_id=graph_id,
+        revision=revision,
+    )
+    if list(evidence) != payload["reconciliation_evidence_refs"]:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "cancellation reconciliation evidence drifted",
+        )
 
 
 def _parallel_success_decision_record(

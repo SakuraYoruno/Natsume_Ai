@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.5
+版本：v5.6
 核对日期：2026-07-16
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | 可选 `ATOMIC_GRAPH_SUCCESS_V1` 持久冻结显式结果 authority；独立 atomic/bounded 开关均默认关闭，三处生产 composition 未启用。0091 单 UoW 已覆盖单节点、串行与多 terminal 成功，结果只取 canonical result projection。0090/B4 保留；B5C、revisioned 0090、跨进程 Outbox、自动接管/续跑和 canary 未闭环 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 已封口整图成功；0092 新增 exact-revision verified internal cancellation、两阶段 intent/fence/reconciliation/final decision 和 first-writer 竞争语义。accepted NODE effect 继续 delivery，未授权 effect 被 fence。生产 composition 未注入 verifier，且无 HTTP/UI 入口、跨进程自动 reconciliation/takeover/continuation 或 canary |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -100,7 +100,7 @@ B0 的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定�
 
 普通或重试耗尽的 pre-reservation resolver failure 现在调用 `DurableTaskStore.fail_running_attempt_bundle`：在同一个 `BEGIN IMMEDIATE` 中把 Attempt、Node、Graph、Lease 分别落为 `FAILED`、`FAILED`、`FAILED/BLOCKED`、`RELEASED`，并生成四条同时绑定 attempt 与错误证据的 Outbox。相同调用在提交响应丢失后可精确重放；旧 fence、版本/证据/Outbox 漂移或该 attempt 已存在任意 operation reservation 时一律拒绝。Budget finalize 仍发生在 bundle 之外，因此它不是 Attempt/Node/Graph/Lease/Budget 五者全原子的终态事务。
 
-operation reservation 建立后，Coordinator 会创建 `DurableExecutionHeartbeat`。后台循环严格先续 Lease、再续 Reservation，Worker 的每个流事件和最终结果都经过 checkpoint；停止并 join 心跳后才允许使用最新 Reservation version 执行 COMMIT。Lease 与 Reservation 续租均写版本化 Outbox，并支持同参调用在“事务已提交但响应丢失”时精确重放。任何续租失败、版本漂移或心跳生命周期异常都会产生 `RECOVERY_REQUIRED` 收据，Coordinator 不会 COMMIT Worker 结果。这个语义只建立 fail-closed 保护，不会在同一进程内自动 takeover 或即时完成 reconciliation。
+operation reservation 建立后，Coordinator 会创建 `DurableExecutionHeartbeat`。后台循环严格先续 Lease、再续 Reservation，Worker 的每个流事件和最终结果都经过 checkpoint；停止并 join 心跳后才允许使用最新 Reservation version 执行 COMMIT。Lease 与 Reservation 续租均写版本化 Outbox，并支持同参调用在“事务已提交但响应丢失”时精确重放。任何续租失败、版本漂移、worker 自发取消或心跳生命周期异常都会产生 `RECOVERY_REQUIRED` 收据，Coordinator 不会 COMMIT Worker 结果；bounded fan-out 会立即停批并 join siblings，被中断的 sibling 可留下 `RUNNING` recovery obligation，后续重入继续返回既有 `RECOVERY_REQUIRED`。这个语义只建立 fail-closed 保护，不会在同一进程内自动 takeover 或即时完成 reconciliation。
 
 Coordinator 现在有两个独立实验能力：`atomic_graph_success_enabled` 决定进程是否能执行 frozen atomic policy，`bounded_fanout_enabled` 决定 scheduler 多节点批次是否实际并发；二者构造默认值均为 `false`，Host、Scheduler、Internal 三处生产 composition 均未传入启用值。Application 在 `repository.admit` 前检查 atomic capability、node-grant service 与 parent grant，任一缺失即拒绝且不写 durable admission。Coordinator 再要求 `node_grant_refs` 精确覆盖整个 admitted Graph。atomic 图即使是单节点或顺序执行也使用 deferred child + outer terminal authority；terminal-leaf 实际并行还必须另开 bounded fan-out。progress buffer/控制槽的反压语义保持 B4 合同。
 
@@ -120,7 +120,13 @@ B5 terminal success 不复用 0090 的 failure decision。每个 Accepted 节点
 
 历史 marker 校验存在一个真实 schema 边界：旧 TaskGraph Outbox 只有 `aggregate_id=graph_id`，没有 `graph_revision`。因此完整扫描 `taskbatch` marker 的缺 decision row/错绑只在该 graph ID 仅一个 revision 时安全；多 revision 读取仍会对返回 decision row 的 digest、Outbox、Attempt、usage 做精确校验，但不能完整判断其他 revision 历史 marker 是否缺行。要封闭此缺口，需要 revisioned TaskGraph Outbox aggregate identity。
 
-该路径仍不能默认启用。B5A/B5B 只补齐持久 atomic policy、显式结果 authority 与受门禁保护的全成功边界；B4 的 0090 failure/review/Budget/crash-re-entry 决策语义没有被替换。范围不包含历史已半提交状态；`WAITING_APPROVAL` 仍走独立 pre-review 专线。B5C durable cancel fence、revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、自动 takeover/continuation 与 production canary 仍未完成。
+B5C 在其上新增迁移 0092 和两阶段 Graph cancellation。Application 的内部入口必须通过 authority verifier 将 request、principal、source、reason 绑定到 exact durable Graph revision；当前生产 composition 没有注入 verifier，也没有 HTTP/UI 暴露，所以默认 fail closed。Store phase 1 先持久化 intent，将 Graph 置为 `BLOCKED`，再取消/围栏 Node、Attempt、Lease、Review/token、operation 与未授权 effect；Coordinator 只有在该提交后才 cancel/join 本进程 child/heartbeat。execute re-entry 可从 durable intent 继续 advance/finalize，本地 task registry 不构成 authority。
+
+final cancellation 只有在 active ownership 与 operation/effect/review 不确定性全部 reconciliation 后才以一个 UoW 提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 和 canonical decision。operation reconciliation proof 在动态 evidence 构造和终态 getter 中都会重验结构、digest、key 与签名；同 revision 的 Review create/approve/resume 在事务内被 0092 intent fence。`ACCEPTED` Node + `SUCCEEDED` Attempt 已确认的 NODE effect 保留 delivery authority；其他 NODE effect 与未完成 Graph 的 GRAPH effect 被 fence。0091 success 与 0092 cancellation first-writer-wins；请求响应丢失只允许四字段 authority 完全一致的 exact replay，publisher 故障不会阻止 durable intent 后的本地 cancel/join。基础设施 shutdown/disconnect cancellation 不会自动写成业务取消。
+
+该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，但生产 authority provider/受控入口/canary 与跨进程自动 reconciliation/takeover/continuation 未完成。B4/0090、B5/0091 语义继续有效；revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、历史半提交和统一 `WAITING_APPROVAL` 仍是缺口。
+
+执行层的代码结构门禁也仍为红，而不是“文件大但已通过”：`task_repository.py` 当前约 12.5k 行，超过策略中既有 4.6k ceiling；`coordinator.py` 约 5.8k 行、`governed_task_adapter.py` 约 1.7k 行，均仍未形成可通过 mixed-file gate 的责任边界。后续不得通过提高 allowlist 上限封板，必须先按持久化事务族与编排阶段拆分，再继续生产接线。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
@@ -128,10 +134,10 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 仍缺：
 
-- B5 terminal success 仍是 production-off shadow；持久 policy、独立 atomic/bounded 开关、admission/grant/projection 门禁和 0091 成功 UoW 已实现，但三处生产 composition/canary 未启用；
+- B5C durable cancellation 仍是 production-off shadow；0092、verified internal entry、两阶段 fence/final decision 已实现，但生产 verifier/入口/canary 未接线；
 - 历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态仍待 reconciliation；`WAITING_APPROVAL` 仍非统一 optional-attempt observation；
 - legacy TaskGraph Outbox 缺 `graph_revision`，多 revision 的完整 `taskbatch` marker 历史扫描仍待 revisioned Outbox identity；
-- 取消没有 durable cancel fence，进程崩溃后的回收仍依赖 TTL/startup recovery；
+- execute re-entry 可继续既有 durable cancellation intent，但没有跨进程自动 scanner/worker 去完成 reconciliation、takeover 与 continuation；
 - 同进程共享 publisher 已串行，跨进程 Outbox drain 仍缺 durable claim/CAS 或单 writer；
 - 生产 resolver 尚未把现实瞬态准备故障映射到显式 marker；promotion 与 claim 也不是同一决策事务；
 - Budget 并发 CAS 仍有固定重试上限与 `ALREADY_EXCEEDED` 语义缺口；reservation 后 worker/commit 失败的即时 reconciliation 也未闭环；
@@ -261,7 +267,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 实现 B5C durable cancel request/fence/journal，并证明取消与 0091 success mutation 的竞争在 crash/re-entry 后仍 fail closed；完成故障矩阵后才考虑生产 canary。
+1. 为 B5C 注入生产 authority provider 与受控入口，实现跨进程 pending-intent scanner/worker、reconciliation/takeover/continuation，并完成取消与 0091 success 竞争的生产故障矩阵；此前不启用 canary。
 2. 将历史 `BLOCKED + failure Node` / `FAILED + ACTIVE Budget` 半提交修复归入 reconciliation，并把 `WAITING_APPROVAL` 收敛为统一 optional-attempt observation。
 3. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程 publisher 实例锁不能替代该 authority。
 4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，收敛 Budget CAS/`ALREADY_EXCEEDED` 并发语义，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。

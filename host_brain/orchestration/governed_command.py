@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import AsyncIterator, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
 
@@ -19,7 +20,26 @@ from host_brain.task_runtime.coordinator import (
     GovernedRuntimeError,
     GovernedTaskCoordinator,
 )
+from host_brain.task_runtime.errors import (
+    GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+    GOVERNED_CANCELLATION_AUTHORITY_REQUIRED,
+)
 from host_brain.task_runtime.ports import CommandRepositoryPort
+
+
+class GraphCancellationAuthorityVerifierPort(Protocol):
+    """Verify one graph-bound durable cancellation authority reference."""
+
+    def verify_graph_cancellation(
+        self,
+        *,
+        request_id: str,
+        request_identity: str,
+        source: str,
+        reason_code: str,
+        graph_id: str,
+        graph_revision: int,
+    ) -> Mapping[str, Any]: ...
 
 
 class GovernedCommandApplication:
@@ -31,10 +51,12 @@ class GovernedCommandApplication:
         command_repository: CommandRepositoryPort,
         coordinator: GovernedTaskCoordinator,
         node_grant_service: Any | None = None,
+        cancellation_authority_verifier: GraphCancellationAuthorityVerifierPort | None = None,
     ) -> None:
         self._commands = command_repository
         self._coordinator = coordinator
         self._node_grants = node_grant_service
+        self._cancellation_authority = cancellation_authority_verifier
 
     async def execute(
         self,
@@ -97,6 +119,151 @@ class GovernedCommandApplication:
             )
         async for event in self._coordinator.execute_stream(**execution_kwargs):
             yield event
+
+    async def request_graph_cancellation(
+        self,
+        *,
+        command_id: str,
+        graph_id: str,
+        graph_revision: int,
+        request_id: str,
+        request_identity: str,
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Request a graph-wide cancellation through a verified internal boundary.
+
+        This method deliberately has no HTTP/UI exposure.  Its verifier must
+        bind the durable authority reference to the exact cancellation request
+        and Graph revision before the Task Store can install an intent fence.
+        """
+
+        command_ref = str(command_id or "").strip()
+        if not command_ref:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "graph cancellation requires an existing durable command_id",
+            )
+        getter = getattr(self._commands, "get", None)
+        if not callable(getter):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "command repository cannot resolve an existing cancellation target",
+            )
+        record_raw = getter(command_ref)
+        if inspect.isawaitable(record_raw):
+            record_raw = await record_raw
+        if not isinstance(record_raw, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "graph cancellation target was not durably admitted",
+            )
+        record = dict(record_raw)
+        persisted_command = record.get("command")
+        persisted_work_order = record.get("work_order")
+        persisted_assignment = record.get("assignment")
+        persisted_graph = record.get("graph")
+        if (
+            not isinstance(persisted_command, HostCommand)
+            or persisted_command.command_id != command_ref
+            or not isinstance(persisted_assignment, ExecutorAssignment)
+            or persisted_graph is None
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "durable cancellation target is incomplete",
+            )
+        self._require_graph(persisted_graph, require_admission_state=False)
+        durable_graph_id = str(getattr(persisted_graph, "graph_id", "") or "").strip()
+        durable_revision = getattr(persisted_graph, "revision", None)
+        if (
+            not isinstance(graph_revision, int)
+            or isinstance(graph_revision, bool)
+            or not isinstance(durable_revision, int)
+            or isinstance(durable_revision, bool)
+            or str(graph_id or "").strip() != durable_graph_id
+            or graph_revision != durable_revision
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "graph cancellation target differs from durable admission",
+            )
+
+        verifier = self._cancellation_authority
+        if verifier is None:
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_REQUIRED,
+                "graph cancellation has no composed authority verifier",
+            )
+        normalized = {
+            "request_id": str(request_id or "").strip(),
+            "request_identity": str(request_identity or "").strip(),
+            "source": str(source or "").strip().upper(),
+            "reason_code": str(reason_code or "").strip().upper(),
+            "graph_id": durable_graph_id,
+            "graph_revision": graph_revision,
+        }
+        if (
+            not normalized["request_id"]
+            or not normalized["request_identity"]
+            or not normalized["source"]
+            or not normalized["reason_code"]
+            or not durable_graph_id
+            or graph_revision < 1
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "graph cancellation authority input is incomplete",
+            )
+        try:
+            verified_raw = verifier.verify_graph_cancellation(**normalized)
+            if inspect.isawaitable(verified_raw):
+                verified_raw = await verified_raw
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "graph cancellation authority verification failed",
+            ) from exc
+        if not isinstance(verified_raw, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "graph cancellation verifier returned no durable binding",
+            )
+        verified = dict(verified_raw)
+        verified_binding = {
+            "request_id": str(verified.get("request_id") or "").strip(),
+            "request_identity": str(
+                verified.get("request_identity") or verified.get("authority_ref") or ""
+            ).strip(),
+            "source": str(verified.get("source") or "").strip().upper(),
+            "reason_code": str(verified.get("reason_code") or "").strip().upper(),
+            "graph_id": str(verified.get("graph_id") or "").strip(),
+            "graph_revision": verified.get("graph_revision"),
+        }
+        principal_id = str(verified.get("principal_id") or "").strip()
+        if verified_binding != normalized or not principal_id:
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "verified cancellation authority drifted from its Graph binding",
+            )
+
+        admitted = AdmittedExecution.from_contracts(
+            command=persisted_command,
+            assignment=persisted_assignment,
+            graph=persisted_graph,
+            replayed=True,
+        )
+        return await self._coordinator.request_graph_cancellation(
+            admitted=admitted,
+            command=persisted_command,
+            work_order=persisted_work_order,
+            request_id=normalized["request_id"],
+            request_identity=normalized["request_identity"],
+            source=normalized["source"],
+            reason_code=normalized["reason_code"],
+        )
 
     async def _admit(
         self,
@@ -258,4 +425,7 @@ class GovernedCommandApplication:
                 ) from exc
 
 
-__all__ = ["GovernedCommandApplication"]
+__all__ = [
+    "GovernedCommandApplication",
+    "GraphCancellationAuthorityVerifierPort",
+]

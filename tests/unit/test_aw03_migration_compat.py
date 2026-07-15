@@ -158,11 +158,11 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 91
-    assert upgraded.summary["applied_count"] == 8
+    assert upgraded.summary["current_version"] == 92
+    assert upgraded.summary["applied_count"] == 9
     assert (
         upgraded.records[-1].migration_id
-        == "0091_task_runtime_parallel_success_decision"
+        == "0092_task_runtime_graph_cancellation"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -222,9 +222,9 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
     assert [record.migration_id for record in repaired.records[-3:]] == [
-        "0089_task_runtime_dag_scheduling",
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
+        "0092_task_runtime_graph_cancellation",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -306,11 +306,12 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 91
-    assert upgraded.summary["applied_count"] == 2
-    assert [record.migration_id for record in upgraded.records[-2:]] == [
+    assert upgraded.summary["current_version"] == 92
+    assert upgraded.summary["applied_count"] == 3
+    assert [record.migration_id for record in upgraded.records[-3:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
+        "0092_task_runtime_graph_cancellation",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -348,8 +349,8 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("DROP TABLE task_runtime_parallel_success_decision")
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 91")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 91")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 91")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 91")
         conn.execute(
             """
             INSERT INTO task_runtime_graph(
@@ -379,11 +380,11 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 91
-    assert upgraded.summary["applied_count"] == 1
+    assert upgraded.summary["current_version"] == 92
+    assert upgraded.summary["applied_count"] == 2
     assert (
         upgraded.records[-1].migration_id
-        == "0091_task_runtime_parallel_success_decision"
+        == "0092_task_runtime_graph_cancellation"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(

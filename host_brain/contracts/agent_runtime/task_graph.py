@@ -108,12 +108,22 @@ _NODE_TRANSITIONS: dict[TaskNodeStatus, frozenset[TaskNodeStatus]] = {
             TaskNodeStatus.CANCEL_REQUESTED,
         }
     ),
-    TaskNodeStatus.EXECUTED: frozenset({TaskNodeStatus.VERIFYING}),
+    TaskNodeStatus.EXECUTED: frozenset(
+        {TaskNodeStatus.VERIFYING, TaskNodeStatus.CANCEL_REQUESTED}
+    ),
     TaskNodeStatus.VERIFYING: frozenset(
-        {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}
+        {
+            TaskNodeStatus.VERIFIED,
+            TaskNodeStatus.VERIFICATION_FAILED,
+            TaskNodeStatus.CANCEL_REQUESTED,
+        }
     ),
     TaskNodeStatus.VERIFIED: frozenset(
-        {TaskNodeStatus.ACCEPTED, TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW}
+        {
+            TaskNodeStatus.ACCEPTED,
+            TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW,
+            TaskNodeStatus.CANCEL_REQUESTED,
+        }
     ),
     TaskNodeStatus.VERIFICATION_FAILED: frozenset(),
     TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW: frozenset(

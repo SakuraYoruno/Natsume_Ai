@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v8.2
+版本：v8.3
 维护日期：2026-07-16
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`。显式 `result_node_id` 与持久可选 `ATOMIC_GRAPH_SUCCESS_V1` 冻结成功语义；独立 atomic/bounded 开关均默认关闭，三处生产 composition 未启用。0091 单 UoW 提交 `Graph COMPLETED + Budget CONSUMED + 两条 Outbox + 全图 effect intents + success decision`，结果来自显式结果节点的 canonical projection。0090/B4 失败语义保留；B5C durable cancel、revisioned 0090、多进程 Outbox、自动接管/续跑和 canary 未完成。
+- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision verified internal entry、durable intent/fence、reconciliation gate 与 final cancellation decision。accepted NODE effect 继续交付，未授权 effect 被 fence，取消与成功 first-writer-wins。生产 composition 尚未注入 verifier，也无 HTTP/UI 入口或跨进程自动 reconciliation/takeover/continuation；atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

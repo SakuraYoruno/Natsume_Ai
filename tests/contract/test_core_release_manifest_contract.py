@@ -31,8 +31,13 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
 
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
-    assert manifest["migration_head"].endswith("0089_task_runtime_dag_scheduling.sql")
+    assert manifest["migration_head"].endswith(
+        "0092_task_runtime_graph_cancellation.sql"
+    )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0092_task_runtime_graph_cancellation.sql" in migration_files
+    assert "host_brain/audit/migrations/0091_task_runtime_parallel_success_decision.sql" in migration_files
+    assert "host_brain/audit/migrations/0090_task_runtime_parallel_settlement_decision.sql" in migration_files
     assert "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql" in migration_files
     assert "host_brain/audit/migrations/0088_host_command_graph_revision.sql" in migration_files
     assert "host_brain/audit/migrations/0087_task_runtime_acceptance_effect_intent.sql" in migration_files

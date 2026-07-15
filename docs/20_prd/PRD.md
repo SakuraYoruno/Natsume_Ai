@@ -3,7 +3,7 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.1
+版本：v4.2
 日期：2026-07-16
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
@@ -153,6 +153,9 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - token、tool、time、concurrency、retry 和 model cost 必须可预留、计量、阻断和回放。
 - 依赖已满足节点可有界并发；循环依赖必须阻断，禁止忽略依赖继续执行。
 - atomic completion policy 下的全节点 Accepted fan-in 必须以单一 durable 决策原子绑定 Graph 完成、Budget 消费、状态 Outbox 与整图副作用意图；并发节点只能贡献证据，公开结果与整图副作用只能来自显式结果节点的已验收投影。生产进程不支持该 policy 时必须在 durable admission 前拒绝。
+- 业务取消必须来自已验证且绑定 exact Graph revision 的用户、Operator 或系统策略 authority；持久 cancellation intent 必须先于任何本进程 task/heartbeat 中断，客户端断开、shutdown 或任意 `CancelledError` 不得自行成为业务取消事实。
+- 取消采用两阶段和 first-writer-wins：第一阶段持久化 intent、Graph/Node/Attempt/Lease/Review/operation/effect fence，第二阶段只在所有 active 或不确定事实完成 reconciliation 后原子提交 Graph/Budget/Outbox/cancellation decision。取消 intent 后禁止产生新的 claim、charge、未授权 COMMIT 或 0091 success；已先提交的终局成功不得被取消覆盖。
+- 已由 `ACCEPTED` Node 与 `SUCCEEDED` Attempt 确认的 NODE effect 是既成 acceptance authority，取消后仍可继续可靠派发；未验收 NODE effect 和未完成 Graph 的 GRAPH effect 必须被 fence。`RESERVED/RECOVERY_REQUIRED` operation 或不确定 effect 必须阻断 final cancellation，直至产生可审计 reconciliation evidence。
 
 ### FR-NLE-003：验证、Review 与回放
 

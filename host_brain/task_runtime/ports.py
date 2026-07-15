@@ -14,6 +14,8 @@ from typing import Any, Protocol
 class CommandRepositoryPort(Protocol):
     """Atomically admit a command and its frozen graph/assignment."""
 
+    def get(self, command_id: str) -> Mapping[str, Any] | None: ...
+
     def admit(
         self,
         command: Any,
@@ -36,6 +38,8 @@ class TaskStorePort(Protocol):
 
     def assert_parallel_success_decision_ready(self) -> None: ...
 
+    def assert_graph_cancellation_ready(self) -> None: ...
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
@@ -43,6 +47,27 @@ class TaskStorePort(Protocol):
     def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def list_pending_graph_cancellations(
+        self,
+        *,
+        limit: int = 100,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
+    def get_graph_cancellation_decision(self, decision_ref: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_decision_for_intent(
+        self,
+        intent_ref: str,
+    ) -> Mapping[str, Any] | None: ...
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
 
@@ -54,6 +79,41 @@ class TaskStorePort(Protocol):
         expected_version: int,
         target_status: str,
         outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def request_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        intent_payload: Mapping[str, Any],
+        graph_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def advance_graph_cancellation(
+        self,
+        intent_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def finalize_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: Any,
+        budget_outbox: Any | None,
     ) -> Mapping[str, Any]: ...
 
     def transition_node(

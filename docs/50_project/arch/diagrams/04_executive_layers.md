@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.5
+版本：v3.6
 核对日期：2026-07-16
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
@@ -121,4 +121,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`：可选 atomic policy、显式 result、pre-admission capability/grant、canonical projection 与 0091 单 UoW 已有 shadow 证据；atomic/bounded 和三处生产 composition 均 OFF。0090/B4 保留；下一步是 B5C durable cancel、revisioned 0090、多进程 Outbox、takeover/continuation 与 production canary，不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 verified two-phase cancellation 已有 shadow 证据，accepted NODE effect 保留、未授权 effect 被 fence，success/cancel first-writer-wins。生产 composition 尚未注入 cancellation verifier，也无 HTTP/UI 或跨进程自动 reconciliation/takeover/continuation；atomic/bounded/cancellation 均 OFF。下一步是生产 authority 接线、pending-intent worker、revisioned 0090、多进程 Outbox 与 canary，不能宣称 Lane B 或完整架构完成。

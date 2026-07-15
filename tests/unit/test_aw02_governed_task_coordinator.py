@@ -103,6 +103,17 @@ class _FakeTaskStore:
     def assert_parallel_settlement_decision_ready(self) -> None:
         return None
 
+    def assert_graph_cancellation_ready(self) -> None:
+        return None
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> None:
+        del graph_id, revision
+        return None
+
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
         return dict(self.graph)
 
@@ -671,6 +682,68 @@ async def test_resolver_cancellation_is_not_converted_to_terminal_failure() -> N
     assert "node:FAILED" not in calls
     assert "graph:FAILED" not in calls
     assert "operation:RESERVED" not in calls
+
+
+@pytest.mark.asyncio
+async def test_worker_self_cancellation_enters_durable_recovery_without_graph_intent() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    class _SelfCancellingWorker:
+        @staticmethod
+        async def execute_stream(**kwargs: Any):
+            del kwargs
+            raise asyncio.CancelledError
+            if False:
+                yield {}
+
+    class _SelfCancellingResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            return _SelfCancellingWorker()
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_SelfCancellingResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert (
+        receipt["projection"]["worker_failure_reason_code"]
+        == "GOVERNED_WORKER_SELF_CANCELLED"
+    )
+    assert store.reservation is not None
+    assert store.reservation["status"] == "RESERVED"
+    assert list(store.attempts.values())[-1]["status"] == "RUNNING"
+    assert store.get_graph_cancellation_for_graph(graph.graph_id, graph.revision) is None
+    assert "attempt:FAILED" not in calls
+    assert "node:FAILED" not in calls
+    assert "graph:FAILED" not in calls
 
 
 @pytest.mark.asyncio

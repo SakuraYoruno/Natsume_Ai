@@ -40,6 +40,9 @@ from .errors import (
     GOVERNED_ASSIGNMENT_CONFLICT,
     GOVERNED_BUDGET_EXCEEDED,
     GOVERNED_BUDGET_STATE_CONFLICT,
+    GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+    GOVERNED_GRAPH_CANCELLATION_PENDING,
+    GOVERNED_GRAPH_CANCELLED,
     GOVERNED_DURABLE_STATE_CONFLICT,
     GOVERNED_EXECUTION_IN_PROGRESS,
     GOVERNED_OPERATION_RECOVERY_REQUIRED,
@@ -50,6 +53,7 @@ from .errors import (
     GOVERNED_VERIFICATION_FAILED,
     GOVERNED_WORKER_COMMIT_INVALID,
     GOVERNED_WORKER_FAILED,
+    GOVERNED_WORKER_SELF_CANCELLED,
     GovernedRuntimeError,
     RetryableWorkerPreparationError,
 )
@@ -85,6 +89,13 @@ from host_brain.contracts.agent_runtime.parallel_settlement import (
 from host_brain.contracts.agent_runtime.parallel_success import (
     ParallelSuccessContractError,
     normalize_parallel_success_decision,
+)
+from host_brain.contracts.agent_runtime.graph_cancellation import (
+    GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+    GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+    GraphCancellationContractError,
+    normalize_graph_cancellation_decision,
+    normalize_graph_cancellation_intent,
 )
 
 
@@ -237,6 +248,11 @@ class GovernedTaskCoordinator:
         self._operation_ttl_ms = int(operation_ttl_ms)
         self._publish_limit = max(1, int(publish_limit))
         self._outbox_publish_lock = asyncio.Lock()
+        # Process-local task handles only accelerate an already-durable graph
+        # cancellation request.  They are never consulted as cancellation
+        # authority and may be empty after restart or in another process.
+        self._execution_registry_lock = asyncio.Lock()
+        self._execution_tasks: dict[tuple[str, int], set[asyncio.Task[Any]]] = {}
         self._budgets = DurableBudgetRuntime(task_store=task_store, outbox_factory=outbox_factory)
 
     def supports_completion_policy(self, value: str | None) -> bool:
@@ -252,6 +268,762 @@ class GovernedTaskCoordinator:
             and self._acceptance_effects_enabled
             and self._projection_reader is not None
         )
+
+    async def _cancel_local_graph_tasks(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        intent_ref: str,
+    ) -> tuple[str, ...]:
+        """Cancel and join local executors after the durable intent exists.
+
+        An empty registry is normal after restart or when a different process
+        owns the execution.  Durable Store fences, rather than this registry,
+        prevent any later claim, Budget charge, operation COMMIT, or success
+        settlement.
+        """
+
+        current = asyncio.current_task()
+        graph_key = (str(graph_id), int(graph_revision))
+        async with self._execution_registry_lock:
+            tasks = tuple(
+                task
+                for task in self._execution_tasks.get(graph_key, ())
+                if task is not current and not task.done()
+            )
+        if not tasks:
+            return ()
+        for task in tasks:
+            task.cancel(f"durable graph cancellation: {intent_ref}")
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=min(5.0, max(0.1, self._lease_ttl_ms / 1000.0)),
+        )
+        if done:
+            await asyncio.gather(*done, return_exceptions=True)
+        return tuple(sorted(task.get_name() for task in pending))
+
+    async def request_graph_cancellation(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        command: HostCommand,
+        work_order: Any,
+        request_id: str,
+        request_identity: str,
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Install durable cancellation authority before touching local tasks."""
+
+        admitted.validate()
+        if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "cancellation command differs from durable admission",
+            )
+        await _maybe_await(self._store.assert_graph_cancellation_ready())
+        existing = await _maybe_await(
+            self._store.get_graph_cancellation_for_graph(
+                admitted.graph_id,
+                admitted.graph_revision,
+            )
+        )
+        cancellation: Mapping[str, Any]
+        cancellation_replayed = False
+        if existing is None:
+            graph = _mapping(
+                await _maybe_await(
+                    self._store.get_graph(admitted.graph_id, admitted.graph_revision)
+                ),
+                field_name="cancellation Graph",
+            )
+            nodes = await self._cancellation_nodes(admitted, graph=graph)
+            graph_status = _status(graph)
+            if graph_status not in {"CREATED", "ACTIVE", "BLOCKED"}:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"TaskGraph cannot be cancelled from {graph_status}",
+                )
+            budget_record = await self._cancellation_budget_record(admitted)
+            node_states_before = _cancellation_node_states(nodes)
+            node_states_after = _cancellation_requested_node_states(node_states_before)
+            graph_version = _version(graph)
+            graph_outbox_seed = self._outbox(
+                admitted,
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=admitted.graph_id,
+                aggregate_version=graph_version + 1,
+                event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
+            )
+            try:
+                intent = normalize_graph_cancellation_intent(
+                    {
+                        "schema_version": GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+                        "request_id": str(request_id or "").strip(),
+                        "request_identity": str(request_identity or "").strip(),
+                        "source": str(source or "").strip().upper(),
+                        "reason_code": str(reason_code or "").strip().upper(),
+                        "graph_id": admitted.graph_id,
+                        "graph_revision": admitted.graph_revision,
+                        "graph_status_before": graph_status,
+                        "graph_status_version_before": graph_version,
+                        "graph_target_status": "BLOCKED",
+                        "budget_id": (
+                            _required_record_text(budget_record, "budget_id")
+                            if budget_record is not None
+                            else None
+                        ),
+                        "budget_status_before": (
+                            _status(budget_record) if budget_record is not None else None
+                        ),
+                        "budget_status_version_before": (
+                            _version(budget_record) if budget_record is not None else None
+                        ),
+                        "node_states_before": node_states_before,
+                        "node_states_after": node_states_after,
+                        "graph_outbox_id": graph_outbox_seed.outbox_id,
+                    }
+                )
+            except GraphCancellationContractError as exc:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"graph cancellation intent is invalid: {exc}",
+                ) from exc
+            graph_outbox = self._outbox(
+                admitted,
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=admitted.graph_id,
+                aggregate_version=graph_version + 1,
+                event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
+                evidence_refs=(intent.intent_ref, intent.payload["request_identity"]),
+            )
+            arguments = {
+                "budget_id": intent.payload["budget_id"],
+                "expected_graph_version": graph_version,
+                "expected_budget_version": intent.payload[
+                    "budget_status_version_before"
+                ],
+                "expected_node_states": node_states_before,
+                "intent_ref": intent.intent_ref,
+                "intent_payload": intent.payload,
+                "graph_outbox": graph_outbox,
+            }
+            try:
+                requested_raw = await _maybe_await(
+                    self._store.request_graph_cancellation(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                        **arguments,
+                    )
+                )
+            except Exception as first_exc:
+                try:
+                    requested_raw = await _maybe_await(
+                        self._store.request_graph_cancellation(
+                            admitted.graph_id,
+                            admitted.graph_revision,
+                            **arguments,
+                        )
+                    )
+                except Exception as replay_exc:
+                    durable = await _maybe_await(
+                        self._store.get_graph_cancellation_for_graph(
+                            admitted.graph_id,
+                            admitted.graph_revision,
+                        )
+                    )
+                    if not isinstance(durable, Mapping) or _text(
+                        durable.get("intent_ref")
+                    ) != intent.intent_ref:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "graph cancellation intent could not be committed or exactly replayed",
+                        ) from replay_exc
+                    cancellation = dict(durable)
+                    cancellation_replayed = True
+                else:
+                    _logger.warning(
+                        "Replayed committed graph cancellation intent",
+                        extra={
+                            "graph_id": admitted.graph_id,
+                            "graph_revision": admitted.graph_revision,
+                            "intent_ref": intent.intent_ref,
+                            "first_exception_type": type(first_exc).__name__,
+                        },
+                    )
+                    requested = _mapping(
+                        requested_raw,
+                        field_name="graph cancellation request",
+                    )
+                    cancellation = _mapping(
+                        requested.get("intent"),
+                        field_name="graph cancellation intent",
+                    )
+                    cancellation_replayed = requested.get("replayed") is True
+            else:
+                requested = _mapping(
+                    requested_raw,
+                    field_name="graph cancellation request",
+                )
+                cancellation = _mapping(
+                    requested.get("intent"),
+                    field_name="graph cancellation intent",
+                )
+                cancellation_replayed = requested.get("replayed") is True
+        else:
+            cancellation = _mapping(
+                existing,
+                field_name="existing graph cancellation intent",
+            )
+            cancellation_replayed = True
+
+        intent = self._validated_graph_cancellation_intent(admitted, cancellation)
+        requested_binding = {
+            "request_id": str(request_id or "").strip(),
+            "request_identity": str(request_identity or "").strip(),
+            "source": str(source or "").strip().upper(),
+            "reason_code": str(reason_code or "").strip().upper(),
+        }
+        durable_binding = {
+            key: intent.payload[key]
+            for key in (
+                "request_id",
+                "request_identity",
+                "source",
+                "reason_code",
+            )
+        }
+        if durable_binding != requested_binding:
+            raise GovernedRuntimeError(
+                GOVERNED_CANCELLATION_AUTHORITY_INVALID,
+                "graph cancellation replay authority differs from its durable intent",
+            )
+        local_pending: tuple[str, ...] = ()
+        try:
+            await self._publish_outbox()
+        finally:
+            # Once the durable intent exists, Outbox transport health must not
+            # keep local workers running behind an already-installed fence.
+            # The publish exception still propagates after every local task
+            # has received cancellation and the bounded join has completed.
+            local_pending = await self._cancel_local_graph_tasks(
+                graph_id=admitted.graph_id,
+                graph_revision=admitted.graph_revision,
+                intent_ref=intent.intent_ref,
+            )
+        return await self._continue_graph_cancellation(
+            admitted=admitted,
+            command=command,
+            work_order=work_order,
+            cancellation=cancellation,
+            local_pending=local_pending,
+            replayed=cancellation_replayed,
+        )
+
+    def _validated_graph_cancellation_intent(
+        self,
+        admitted: AdmittedExecution,
+        record: Mapping[str, Any],
+    ) -> Any:
+        try:
+            intent = normalize_graph_cancellation_intent(
+                _mapping(record.get("payload"), field_name="cancellation intent payload")
+            )
+        except (GraphCancellationContractError, GovernedRuntimeError) as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"durable graph cancellation intent is invalid: {exc}",
+            ) from exc
+        if (
+            _text(record.get("intent_ref")) != intent.intent_ref
+            or intent.payload["graph_id"] != admitted.graph_id
+            or intent.payload["graph_revision"] != admitted.graph_revision
+            or _status(record) not in {"REQUESTED", "FINALIZED"}
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable graph cancellation identity drifted",
+            )
+        return intent
+
+    async def _cancellation_nodes(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        graph: Mapping[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        nodes: dict[str, dict[str, Any]] = {}
+        for binding in admitted.nodes:
+            node_admission = admitted.for_node(binding.node_id)
+            node = _mapping(
+                await _maybe_await(
+                    self._store.get_node(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                        binding.node_id,
+                    )
+                ),
+                field_name=f"cancellation TaskNode {binding.node_id}",
+            )
+            self._assert_durable_identity(node_admission, graph=graph, node=node)
+            nodes[binding.node_id] = node
+        return nodes
+
+    async def _cancellation_budget_record(
+        self,
+        admitted: AdmittedExecution,
+    ) -> dict[str, Any] | None:
+        snapshot = _mapping(
+            await _maybe_await(
+                self._store.read_scheduler_snapshot(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                )
+            ),
+            field_name="cancellation scheduler snapshot",
+        )
+        raw_budgets = snapshot.get("budgets")
+        if not isinstance(raw_budgets, list):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "cancellation scheduler snapshot has no Budget list",
+            )
+        budgets = [dict(item) for item in raw_budgets if isinstance(item, Mapping)]
+        if len(budgets) > 1:
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "TaskGraph cancellation found multiple shared Budgets",
+            )
+        if not budgets:
+            return None
+        budget = budgets[0]
+        if (
+            _text(budget.get("graph_id")) != admitted.graph_id
+            or int(budget.get("graph_revision") or 0) != admitted.graph_revision
+            or budget.get("node_id") is not None
+            or budget.get("attempt_id") is not None
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "cancellation Budget is not bound to the admitted Graph revision",
+            )
+        return budget
+
+    async def _continue_graph_cancellation(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        command: HostCommand,
+        work_order: Any,
+        cancellation: Mapping[str, Any],
+        local_pending: Sequence[str] = (),
+        replayed: bool = False,
+    ) -> dict[str, Any]:
+        del command, work_order
+        intent = self._validated_graph_cancellation_intent(admitted, cancellation)
+        intent_record = dict(cancellation)
+        reconciliation_evidence_refs: tuple[str, ...] = ()
+        if _status(intent_record) == "FINALIZED":
+            decision_record = await self._cancellation_decision_for_intent(
+                admitted,
+                intent_ref=intent.intent_ref,
+            )
+            return await self._graph_cancellation_terminal_event(
+                admitted=admitted,
+                intent_record=intent_record,
+                decision_record=decision_record,
+                local_pending=local_pending,
+                replayed=True,
+            )
+
+        if not local_pending:
+            try:
+                advanced_raw = await _maybe_await(
+                    self._store.advance_graph_cancellation(intent.intent_ref)
+                )
+            except Exception as exc:
+                if _exception_reason(exc, "") not in {
+                    _TASK_STORE_OWNERSHIP_CONFLICT,
+                    "TASK_STORE_CANCELLATION_CONFLICT",
+                }:
+                    raise
+                return await self._graph_cancellation_terminal_event(
+                    admitted=admitted,
+                    intent_record=intent_record,
+                    decision_record=None,
+                    replayed=replayed,
+                )
+            else:
+                if isinstance(advanced_raw, Mapping):
+                    advanced_intent = advanced_raw.get("intent")
+                    if isinstance(advanced_intent, Mapping):
+                        intent_record = dict(advanced_intent)
+                        intent = self._validated_graph_cancellation_intent(
+                            admitted,
+                            intent_record,
+                        )
+                    raw_evidence = advanced_raw.get("reconciliation_evidence_refs")
+                    if isinstance(raw_evidence, (list, tuple)):
+                        reconciliation_evidence_refs = tuple(
+                            dict.fromkeys(
+                                _text(item) for item in raw_evidence if _text(item)
+                            )
+                        )
+                    if advanced_raw.get("ready_to_finalize") is not True:
+                        await self._publish_outbox()
+                        return await self._graph_cancellation_terminal_event(
+                            admitted=admitted,
+                            intent_record=intent_record,
+                            decision_record=None,
+                            replayed=replayed,
+                        )
+                else:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "graph cancellation continuation returned no durable result",
+                    )
+                await self._publish_outbox()
+
+        refreshed = await _maybe_await(
+            self._store.get_graph_cancellation_for_graph(
+                admitted.graph_id,
+                admitted.graph_revision,
+            )
+        )
+        if not isinstance(refreshed, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable cancellation intent disappeared during continuation",
+            )
+        intent_record = dict(refreshed)
+        intent = self._validated_graph_cancellation_intent(admitted, intent_record)
+        if _status(intent_record) == "FINALIZED":
+            decision_record = await self._cancellation_decision_for_intent(
+                admitted,
+                intent_ref=intent.intent_ref,
+            )
+            return await self._graph_cancellation_terminal_event(
+                admitted=admitted,
+                intent_record=intent_record,
+                decision_record=decision_record,
+                local_pending=local_pending,
+                replayed=True,
+            )
+        if local_pending:
+            return await self._graph_cancellation_terminal_event(
+                admitted=admitted,
+                intent_record=intent_record,
+                decision_record=None,
+                local_pending=local_pending,
+                replayed=replayed,
+            )
+
+        graph = _mapping(
+            await _maybe_await(
+                self._store.get_graph(admitted.graph_id, admitted.graph_revision)
+            ),
+            field_name="cancellation final Graph",
+        )
+        nodes = await self._cancellation_nodes(admitted, graph=graph)
+        budget_record = await self._cancellation_budget_record(admitted)
+        node_states_before = _cancellation_node_states(nodes)
+        try:
+            node_states_after = _cancellation_final_node_states(node_states_before)
+        except GovernedRuntimeError:
+            return await self._graph_cancellation_terminal_event(
+                admitted=admitted,
+                intent_record=intent_record,
+                decision_record=None,
+                replayed=replayed,
+            )
+        if _status(graph) != "BLOCKED":
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "requested graph cancellation lost its BLOCKED fence",
+            )
+        graph_version = _version(graph)
+        budget_id = (
+            _required_record_text(budget_record, "budget_id")
+            if budget_record is not None
+            else None
+        )
+        budget_status = _status(budget_record) if budget_record is not None else None
+        budget_version = _version(budget_record) if budget_record is not None else None
+        budget_target = _cancellation_budget_target(budget_status)
+        graph_outbox_seed = self._outbox(
+            admitted,
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=admitted.graph_id,
+            aggregate_version=graph_version + 1,
+            event_type="TASK_GRAPH_CANCELLED",
+        )
+        budget_outbox_seed = None
+        if budget_id is not None and budget_status != budget_target:
+            budget_outbox_seed = self._outbox(
+                admitted,
+                aggregate_type="BUDGET_RESERVATION",
+                aggregate_id=budget_id,
+                aggregate_version=int(budget_version) + 1,
+                event_type=f"BUDGET_RESERVATION_{budget_target}",
+            )
+        try:
+            decision = normalize_graph_cancellation_decision(
+                {
+                    "schema_version": GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+                    "intent_ref": intent.intent_ref,
+                    "request_id": intent.payload["request_id"],
+                    "request_identity": intent.payload["request_identity"],
+                    "graph_id": admitted.graph_id,
+                    "graph_revision": admitted.graph_revision,
+                    "graph_status_before": "BLOCKED",
+                    "graph_status_version_before": graph_version,
+                    "graph_target_status": "CANCELLED",
+                    "budget_id": budget_id,
+                    "budget_status_before": budget_status,
+                    "budget_status_version_before": budget_version,
+                    "budget_target_status": budget_target,
+                    "node_states_before": node_states_before,
+                    "node_states_after": node_states_after,
+                    "reconciliation_evidence_refs": list(
+                        reconciliation_evidence_refs
+                    ),
+                    "graph_outbox_id": graph_outbox_seed.outbox_id,
+                    "budget_outbox_id": (
+                        budget_outbox_seed.outbox_id
+                        if budget_outbox_seed is not None
+                        else None
+                    ),
+                }
+            )
+        except GraphCancellationContractError as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"graph cancellation decision is invalid: {exc}",
+            ) from exc
+        evidence_refs = tuple(
+            dict.fromkeys(
+                (
+                    decision.decision_ref,
+                    intent.intent_ref,
+                    intent.payload["request_identity"],
+                )
+            )
+        )
+        graph_outbox = self._outbox(
+            admitted,
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=admitted.graph_id,
+            aggregate_version=graph_version + 1,
+            event_type="TASK_GRAPH_CANCELLED",
+            evidence_refs=evidence_refs,
+        )
+        budget_outbox = None
+        if budget_outbox_seed is not None and budget_id is not None:
+            budget_outbox = self._outbox(
+                admitted,
+                aggregate_type="BUDGET_RESERVATION",
+                aggregate_id=budget_id,
+                aggregate_version=int(budget_version) + 1,
+                event_type=f"BUDGET_RESERVATION_{budget_target}",
+                evidence_refs=evidence_refs,
+            )
+        arguments = {
+            "budget_id": budget_id,
+            "expected_graph_version": graph_version,
+            "expected_budget_version": budget_version,
+            "expected_node_states": node_states_before,
+            "intent_ref": intent.intent_ref,
+            "decision_ref": decision.decision_ref,
+            "decision_payload": decision.payload,
+            "graph_outbox": graph_outbox,
+            "budget_outbox": budget_outbox,
+        }
+        try:
+            finalized_raw = await _maybe_await(
+                self._store.finalize_graph_cancellation(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    **arguments,
+                )
+            )
+        except Exception as first_exc:
+            reason = _exception_reason(first_exc, "")
+            if reason == _TASK_STORE_OWNERSHIP_CONFLICT:
+                return await self._graph_cancellation_terminal_event(
+                    admitted=admitted,
+                    intent_record=intent_record,
+                    decision_record=None,
+                    replayed=replayed,
+                )
+            try:
+                finalized_raw = await _maybe_await(
+                    self._store.finalize_graph_cancellation(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                        **arguments,
+                    )
+                )
+            except Exception as replay_exc:
+                latest = await _maybe_await(
+                    self._store.get_graph_cancellation_for_graph(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                    )
+                )
+                if not isinstance(latest, Mapping) or _status(latest) != "FINALIZED":
+                    if _exception_reason(replay_exc, "") == _TASK_STORE_OWNERSHIP_CONFLICT:
+                        return await self._graph_cancellation_terminal_event(
+                            admitted=admitted,
+                            intent_record=intent_record,
+                            decision_record=None,
+                            replayed=replayed,
+                        )
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "graph cancellation could not be finalized or exactly replayed",
+                    ) from replay_exc
+                final_intent = dict(latest)
+                final_decision = await self._cancellation_decision_for_intent(
+                    admitted,
+                    intent_ref=intent.intent_ref,
+                )
+                await self._publish_outbox()
+                return await self._graph_cancellation_terminal_event(
+                    admitted=admitted,
+                    intent_record=final_intent,
+                    decision_record=final_decision,
+                    replayed=True,
+                )
+        finalized = _mapping(finalized_raw, field_name="final graph cancellation")
+        final_intent = _mapping(
+            finalized.get("intent"),
+            field_name="final graph cancellation intent",
+        )
+        final_decision = _mapping(
+            finalized.get("decision"),
+            field_name="final graph cancellation decision",
+        )
+        self._validated_graph_cancellation_intent(admitted, final_intent)
+        await self._publish_outbox()
+        return await self._graph_cancellation_terminal_event(
+            admitted=admitted,
+            intent_record=final_intent,
+            decision_record=final_decision,
+            replayed=(replayed or finalized.get("replayed") is True),
+        )
+
+    async def _cancellation_decision_for_intent(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        intent_ref: str,
+    ) -> dict[str, Any]:
+        raw = await _maybe_await(
+            self._store.get_graph_cancellation_decision_for_intent(intent_ref)
+        )
+        if not isinstance(raw, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "finalized cancellation intent has no canonical decision",
+            )
+        record = dict(raw)
+        try:
+            decision = normalize_graph_cancellation_decision(
+                _mapping(record.get("payload"), field_name="cancellation decision payload")
+            )
+        except (GraphCancellationContractError, GovernedRuntimeError) as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"durable graph cancellation decision is invalid: {exc}",
+            ) from exc
+        if (
+            _text(record.get("decision_ref")) != decision.decision_ref
+            or decision.payload["intent_ref"] != intent_ref
+            or decision.payload["graph_id"] != admitted.graph_id
+            or decision.payload["graph_revision"] != admitted.graph_revision
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable graph cancellation decision identity drifted",
+            )
+        return record
+
+    async def _graph_cancellation_terminal_event(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        intent_record: Mapping[str, Any],
+        decision_record: Mapping[str, Any] | None,
+        local_pending: Sequence[str] = (),
+        replayed: bool,
+    ) -> dict[str, Any]:
+        intent = self._validated_graph_cancellation_intent(admitted, intent_record)
+        finalized = decision_record is not None
+        decision_ref = None
+        payload_digest = _text(intent_record.get("payload_sha256")) or None
+        if decision_record is not None:
+            decision = normalize_graph_cancellation_decision(
+                _mapping(
+                    decision_record.get("payload"),
+                    field_name="terminal cancellation decision payload",
+                )
+            )
+            decision_ref = decision.decision_ref
+            payload_digest = _text(decision_record.get("payload_sha256")) or None
+        selected = admitted.for_node(
+            admitted.result_node_id or admitted.nodes[-1].node_id
+        )
+        attempts = await self._attempts_for_node(selected)
+        latest = attempts[-1] if attempts else None
+        attempt_id = (
+            _required_record_text(latest, "attempt_id")
+            if latest is not None
+            else _attempt_id(selected, attempt_no=1)
+        )
+        budget = await self._cancellation_budget_record(admitted)
+        projection: dict[str, Any] = {
+            "graph_cancellation": {
+                "status": "FINALIZED" if finalized else "REQUESTED",
+                "graph_status": "CANCELLED" if finalized else "BLOCKED",
+                "intent_ref": intent.intent_ref,
+                "decision_ref": decision_ref,
+                "request_id": intent.payload["request_id"],
+                "request_identity": intent.payload["request_identity"],
+                "source": intent.payload["source"],
+                "reason_code": intent.payload["reason_code"],
+                "local_pending_tasks": list(local_pending),
+            },
+            "budget": _cancellation_budget_projection(budget),
+        }
+        evidence_refs = tuple(
+            item
+            for item in (
+                intent.intent_ref,
+                decision_ref,
+                intent.payload["request_identity"],
+            )
+            if item
+        )
+        receipt = self._receipt(
+            selected,
+            attempt_id=attempt_id,
+            receipt_ref=decision_ref or intent.intent_ref,
+            payload_digest=payload_digest,
+            status="CANCELLED" if finalized else "CANCEL_REQUESTED",
+            verification_status="NOT_RUN",
+            accepted=False,
+            replayed=bool(replayed),
+            reason_code=(
+                GOVERNED_GRAPH_CANCELLED
+                if finalized
+                else GOVERNED_GRAPH_CANCELLATION_PENDING
+            ),
+            evidence_refs=evidence_refs,
+            projection=projection,
+        )
+        return self._terminal_event(receipt)
 
     async def execute(
         self,
@@ -286,6 +1058,37 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
+        current_task = asyncio.current_task()
+        graph_key = (admitted.graph_id, admitted.graph_revision)
+        if current_task is not None:
+            async with self._execution_registry_lock:
+                self._execution_tasks.setdefault(graph_key, set()).add(current_task)
+        try:
+            async for event in self._execute_stream_impl(
+                admitted=admitted,
+                command=command,
+                work_order=work_order,
+                node_grant_refs=node_grant_refs,
+            ):
+                yield event
+        finally:
+            if current_task is not None:
+                async with self._execution_registry_lock:
+                    active = self._execution_tasks.get(graph_key)
+                    if active is not None:
+                        active.discard(current_task)
+                        if not active:
+                            self._execution_tasks.pop(graph_key, None)
+
+    async def _execute_stream_impl(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        command: HostCommand,
+        work_order: Any,
+        node_grant_refs: Mapping[str, str] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
             raise GovernedRuntimeError(
                 GOVERNED_ADMISSION_INVALID,
@@ -307,8 +1110,25 @@ class GovernedTaskCoordinator:
             )
         await _maybe_await(self._store.assert_dag_scheduling_ready())
         await _maybe_await(self._store.assert_parallel_settlement_decision_ready())
+        await _maybe_await(self._store.assert_graph_cancellation_ready())
         if parallel_success_enabled:
             await _maybe_await(self._store.assert_parallel_success_decision_ready())
+        cancellation = await _maybe_await(
+            self._store.get_graph_cancellation_for_graph(
+                admitted.graph_id,
+                admitted.graph_revision,
+            )
+        )
+        if cancellation is not None:
+            terminal_event = await self._continue_graph_cancellation(
+                admitted=admitted,
+                command=command,
+                work_order=work_order,
+                cancellation=cancellation,
+                replayed=True,
+            )
+            yield terminal_event
+            return
         budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
 
         while True:
@@ -1137,6 +1957,18 @@ class GovernedTaskCoordinator:
                         remaining -= 1
                         if kind == "terminal":
                             terminals[node_id] = dict(payload)
+                            receipt = payload.get("execution_receipt")
+                            if (
+                                isinstance(receipt, Mapping)
+                                and _text(receipt.get("status")).upper()
+                                == "RECOVERY_REQUIRED"
+                            ):
+                                # A durable recovery outcome cannot safely wait
+                                # for a blocked sibling. Stop this process-local
+                                # batch, join siblings, and let durable state
+                                # drive the next takeover or re-entry.
+                                stop_batch = True
+                                break
                             continue
                         error = payload
                         if not isinstance(error, BaseException):
@@ -1168,6 +2000,8 @@ class GovernedTaskCoordinator:
                 for binding in claimable:
                     terminal_event = terminals.get(binding.node_id)
                     if terminal_event is None:
+                        if stop_batch:
+                            continue
                         raise GovernedRuntimeError(
                             GOVERNED_DURABLE_STATE_CONFLICT,
                             f"TaskNode {binding.node_id} lost its parallel terminal projection",
@@ -3149,6 +3983,20 @@ class GovernedTaskCoordinator:
             except BaseException as exc:
                 heartbeat_error = exc
 
+        if isinstance(worker_error, asyncio.CancelledError):
+            executing_task = asyncio.current_task()
+            if executing_task is not None and executing_task.cancelling() == 0:
+                # A worker that raises CancelledError itself does not own the
+                # caller/task lifecycle.  Treat it as a worker interruption so
+                # it follows the durable post-reservation recovery path.  A
+                # real task cancellation (disconnect, shutdown, or an already
+                # persisted graph cancellation) keeps propagating unchanged.
+                worker_error = GovernedRuntimeError(
+                    GOVERNED_WORKER_SELF_CANCELLED,
+                    "worker cancelled itself without a caller cancellation request",
+                )
+            else:
+                raise worker_error
         if worker_error is not None and not isinstance(worker_error, Exception):
             raise worker_error
         if heartbeat_error is not None and not isinstance(heartbeat_error, Exception):
@@ -3241,6 +4089,29 @@ class GovernedTaskCoordinator:
                 yield self._terminal_event(receipt)
                 return
             worker_failure_reason = _exception_reason(exc, GOVERNED_WORKER_FAILED)
+            if worker_failure_reason == GOVERNED_WORKER_SELF_CANCELLED:
+                # The reservation may already represent an external side
+                # effect.  A worker cannot convert its own interruption into
+                # graph/business cancellation authority, and it also cannot
+                # safely declare the operation failed.  Leave the durable
+                # Attempt/Lease/reservation for normal recovery fencing.
+                await self._publish_outbox(best_effort=True)
+                receipt = self._receipt(
+                    admitted,
+                    attempt_id=attempt_id,
+                    status="RECOVERY_REQUIRED",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    evidence_refs=(charge.evidence_ref,),
+                    projection={
+                        "worker_failure_reason_code": worker_failure_reason,
+                        "reservation_status": "RESERVED",
+                        "budget": budget.execution_payload(),
+                    },
+                )
+                yield self._terminal_event(receipt)
+                return
             await self._mark_worker_failure(
                 admitted,
                 attempt_id=attempt_id,
@@ -4622,6 +5493,134 @@ def _review_evidence_refs(gate: TaskNodeReviewGate) -> tuple[str, ...]:
     if _text(gate.checkpoint_id):
         refs.append(_text(gate.checkpoint_id))
     return tuple(dict.fromkeys(refs))
+
+
+_CANCELLATION_TERMINAL_NODE_STATUSES = frozenset(
+    {"ACCEPTED", "FAILED", "VERIFICATION_FAILED", "CANCELLED"}
+)
+_CANCELLATION_DIRECT_NODE_STATUSES = frozenset(
+    {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW", "RETRY_PENDING"}
+)
+_CANCELLATION_REQUEST_NODE_STATUSES = frozenset(
+    {
+        "CREATED",
+        "BLOCKED",
+        "READY",
+        "LEASED",
+        "RUNNING",
+        "EXECUTED",
+        "VERIFYING",
+        "VERIFIED",
+    }
+)
+
+
+def _cancellation_node_states(
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if not nodes:
+        raise GovernedRuntimeError(
+            GOVERNED_DURABLE_STATE_CONFLICT,
+            "graph cancellation has no TaskNode snapshot",
+        )
+    return {
+        node_id: {
+            "status": _status(nodes[node_id]),
+            "status_version": _version(nodes[node_id]),
+        }
+        for node_id in sorted(nodes)
+    }
+
+
+def _cancellation_requested_node_states(
+    before: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    after: dict[str, dict[str, Any]] = {}
+    for node_id in sorted(before):
+        state = before[node_id]
+        status = _text(state.get("status")).upper()
+        version = int(state.get("status_version") or 0)
+        if status in _CANCELLATION_TERMINAL_NODE_STATUSES or status == "CANCEL_REQUESTED":
+            after[node_id] = {"status": status, "status_version": version}
+        elif status in _CANCELLATION_DIRECT_NODE_STATUSES:
+            after[node_id] = {
+                "status": "CANCELLED",
+                "status_version": version + 1,
+            }
+        elif status in _CANCELLATION_REQUEST_NODE_STATUSES:
+            after[node_id] = {
+                "status": "CANCEL_REQUESTED",
+                "status_version": version + 1,
+            }
+        else:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"TaskNode {node_id} cannot enter graph cancellation from {status}",
+            )
+    return after
+
+
+def _cancellation_final_node_states(
+    before: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    after: dict[str, dict[str, Any]] = {}
+    for node_id in sorted(before):
+        state = before[node_id]
+        status = _text(state.get("status")).upper()
+        version = int(state.get("status_version") or 0)
+        if status == "CANCEL_REQUESTED":
+            after[node_id] = {
+                "status": "CANCELLED",
+                "status_version": version + 1,
+            }
+        elif status in _CANCELLATION_TERMINAL_NODE_STATUSES:
+            after[node_id] = {"status": status, "status_version": version}
+        else:
+            raise GovernedRuntimeError(
+                GOVERNED_GRAPH_CANCELLATION_PENDING,
+                f"TaskNode {node_id} cancellation has not converged from {status}",
+            )
+    return after
+
+
+def _cancellation_budget_target(status: str | None) -> str | None:
+    if status is None:
+        return None
+    normalized = _text(status).upper()
+    targets = {
+        "PENDING": "CANCELLED",
+        "ACTIVE": "RELEASED",
+        "EXCEEDED": "RELEASED",
+        "RELEASED": "RELEASED",
+    }
+    target = targets.get(normalized)
+    if target is None:
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_STATE_CONFLICT,
+            f"Budget cannot follow graph cancellation from {normalized}",
+        )
+    return target
+
+
+def _cancellation_budget_projection(
+    budget: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if budget is None:
+        return None
+    return {
+        key: budget.get(key)
+        for key in (
+            "budget_id",
+            "scope",
+            "status",
+            "status_version",
+            "limits",
+            "consumed",
+            "remaining",
+            "exceeded_dimensions",
+        )
+        if key in budget
+    }
 
 
 def _canonical_parallel_outcome_reason_code(status: str) -> str | None:

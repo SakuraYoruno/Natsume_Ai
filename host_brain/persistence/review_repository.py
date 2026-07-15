@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping
+from urllib.parse import unquote
 
 from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
@@ -38,6 +39,7 @@ REVIEW_TOKEN_EXPIRED = "REVIEW_TOKEN_EXPIRED"
 REVIEW_TOKEN_SUBJECT_MISMATCH = "REVIEW_TOKEN_SUBJECT_MISMATCH"
 REVIEW_RESUME_ALREADY_CONSUMED = "REVIEW_RESUME_ALREADY_CONSUMED"
 REVIEW_CHECKPOINT_REQUIRED = "REVIEW_CHECKPOINT_REQUIRED"
+REVIEW_GRAPH_CANCELLATION_CONFLICT = "REVIEW_GRAPH_CANCELLATION_CONFLICT"
 
 REVIEW_STORE_TABLES = frozenset(
     {
@@ -83,9 +85,15 @@ _DURABLE_REFERENCE_PATTERN = re.compile(
     r"^[a-z][a-z0-9+.-]{1,31}://"
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
 )
+_TASK_NODE_SUBJECT_PATTERN = re.compile(
+    r"^task-node://(?P<graph_id>[^/?#]+)/"
+    r"(?P<graph_revision>[1-9][0-9]*)/"
+    r"(?P<node_id>[^/?#]+)(?:\?[^#]*)?$"
+)
 
 __all__ = [
     "REVIEW_CHECKPOINT_REQUIRED",
+    "REVIEW_GRAPH_CANCELLATION_CONFLICT",
     "REVIEW_RESUME_ALREADY_CONSUMED",
     "REVIEW_STATUS_CONFLICT",
     "REVIEW_STORE_INVALID",
@@ -150,6 +158,17 @@ def _durable_ref(value: Any, *, field_name: str, required: bool = True) -> str |
     return text
 
 
+def _task_node_graph_revision(value: Any) -> tuple[str, int] | None:
+    match = _TASK_NODE_SUBJECT_PATTERN.fullmatch(_text(value))
+    if match is None:
+        return None
+    graph_id = unquote(match.group("graph_id"))
+    node_id = unquote(match.group("node_id"))
+    if not graph_id or not node_id:
+        return None
+    return graph_id, int(match.group("graph_revision"))
+
+
 class ReviewStore:
     """SQLite-backed durable review store with token-bound one-time resume."""
 
@@ -201,6 +220,51 @@ class ReviewStore:
 
     def _now(self) -> int:
         return int(self._clock())
+
+    @staticmethod
+    def _assert_task_node_not_cancelling(
+        conn: sqlite3.Connection,
+        *,
+        subject_ref: str,
+    ) -> None:
+        """Fence exact TaskNode review authority after Graph cancellation.
+
+        ReviewStore predates migration 0092, so historical databases containing
+        only the 0055 review tables remain valid.  When 0092 is present, this
+        check runs inside the caller's ``BEGIN IMMEDIATE`` transaction.  It
+        therefore serializes against the cancellation writer: a Review write
+        that wins first is revoked by 0092, while a cancellation that wins
+        first prevents any later create, approve, or resume authority.
+        """
+
+        binding = _task_node_graph_revision(subject_ref)
+        if binding is None:
+            return
+        cancellation_table = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_graph_cancellation_intent'
+            """
+        ).fetchone()
+        if cancellation_table is None:
+            return
+        graph_id, graph_revision = binding
+        cancellation = conn.execute(
+            """
+            SELECT intent_ref
+            FROM task_runtime_graph_cancellation_intent
+            WHERE graph_id = ? AND graph_revision = ?
+            LIMIT 1
+            """,
+            (graph_id, graph_revision),
+        ).fetchone()
+        if cancellation is not None:
+            raise ReviewStoreError(
+                REVIEW_GRAPH_CANCELLATION_CONFLICT,
+                "TaskGraph cancellation permanently fences ReviewItem authority "
+                f"for {graph_id}@{graph_revision}",
+            )
 
     def assert_schema_ready(self) -> None:
         if not self.db_path.exists():
@@ -255,6 +319,10 @@ class ReviewStore:
         if int(item.expires_at) <= ts_ms:
             raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem expires_at is already expired")
         with self._transaction() as conn:
+            self._assert_task_node_not_cancelling(
+                conn,
+                subject_ref=item.subject_ref,
+            )
             conn.execute(
                 """
                 INSERT INTO agent_runtime_review(
@@ -372,6 +440,10 @@ class ReviewStore:
         with self._transaction() as conn:
             row = self._require_review(conn, review_id)
             item = self._item_from_row(row)
+            self._assert_task_node_not_cancelling(
+                conn,
+                subject_ref=item.subject_ref,
+            )
             self._raise_if_subject_mismatch(
                 item,
                 expected_subject_ref=expected_subject_ref,
@@ -493,6 +565,10 @@ class ReviewStore:
         with self._transaction() as conn:
             row = self._require_review(conn, review_id)
             item = self._item_from_row(row)
+            self._assert_task_node_not_cancelling(
+                conn,
+                subject_ref=item.subject_ref,
+            )
             token_row = conn.execute(
                 "SELECT * FROM agent_runtime_review_token WHERE token_digest = ?",
                 (token_digest,),
@@ -731,6 +807,7 @@ class ReviewStore:
 
 __all__ = [
     "REVIEW_CHECKPOINT_REQUIRED",
+    "REVIEW_GRAPH_CANCELLATION_CONFLICT",
     "REVIEW_RESUME_ALREADY_CONSUMED",
     "REVIEW_STATUS_CONFLICT",
     "REVIEW_STORE_INVALID",

@@ -3,7 +3,7 @@
 
 # Natsume AI 稳定工程合同
 
-版本：v4.1
+版本：v4.2
 日期：2026-07-16
 文档类型：`STABLE_ENGINEERING_CONTRACT / NO_EXECUTION_STATUS`
 
@@ -137,6 +137,17 @@ Ingress
 - 所有依赖已满足节点可有界 fan-out；fan-in 在依赖全部 Accepted 后推进。
 - atomic success 与 bounded fan-out 使用独立、默认关闭的进程能力开关。atomic policy 必须在 repository admission 前验证 runtime capability、acceptance-effects writer、durable projection reader、node-grant service、parent grant 与显式 `result_node_id`；不满足即 fail closed。terminal-leaf 实际并发还必须另行启用 bounded fan-out，不能从 policy 或图形状推断开关。
 - cancel、timeout、crash、lease expiry 和 process restart 不得重复已确认副作用。
+
+### 3.4.1 Durable cancellation
+
+- Application 取消入口必须先由 `GraphCancellationAuthorityVerifierPort` 验证 request、principal/source/reason 与 exact `graph_id + revision`；没有 verifier、绑定漂移或无法解析既有 durable admission 时 fail closed。该内部入口在生产接线完成前不得暴露为 HTTP/UI API。
+- 取消是两阶段 Graph authority。`request_graph_cancellation` 在一个 Store UoW 中写入 canonical intent，将 Graph 推入 `BLOCKED`，并为非终态 Node、active Attempt/Lease、Review/resume token、operation 与未授权 effect 建立取消或 reconciliation 状态；只有 durable intent 返回后，Coordinator 才能 cancel/join 本进程 child 与 heartbeat，Outbox publisher 异常不得阻止该本地停工。已有 intent 仅允许 `request_id/request_identity/source/reason_code` 四字段完全相同的 replay。完整 reconciliation evidence 由 canonical decision 摘要绑定，operation proof 在封口与 getter 中完整验签；终态 Outbox 只保留 decision、intent、request identity 三个稳定 manifest authority ref，不展开可增长的证据清单。
+- 本地 task registry 只用于加速 join，不是 authority。重启或另一进程只能依据 0092 intent/decision、Graph/Node/Attempt/Lease/operation/effect/review durable facts推进；不能因本进程没有 task handle 就假定取消已经完成。
+- `advance_graph_cancellation` 只能在 ownership 已稳定后推进 `CANCEL_REQUESTED`；`RESERVED/RECOVERY_REQUIRED` operation、待对账 effect、active Attempt/Lease 或 live Review/token 均阻断 finalization。`finalize_graph_cancellation` 必须在单一 UoW 中提交 Graph `CANCELLED`、Budget `RELEASED/CANCELLED`、Outbox、evidence 和 canonical decision。
+- `ReviewStore` 的 create/approve/resume 必须在自身 `BEGIN IMMEDIATE` 内检查 exact `task-node://graph/revision/node` 是否已有 0092 intent；Graph/Node URI 段统一使用 canonical percent-encoding，TaskStore 撤销、live 查询和 evidence 查询必须复用同一编码口径。同 revision 存在 intent 时 fail closed，Review 先提交则由随后取消事务撤销。不得用 Graph ID 前缀误伤相邻 revision。
+- NODE effect 若绑定 `ACCEPTED` Node 与 `SUCCEEDED` Attempt，视为已提交的 acceptance authority，取消后继续派发/重试；其他 NODE effect 与未完成 Graph 的 GRAPH effect 必须被 fence。final Graph 取消不等待已验收 effect 的外部 delivery 完成。
+- 0091 success 和 0092 cancellation 采用 first-writer-wins：已存在 terminal success 时拒绝取消，已存在 cancellation intent 时禁止新成功/claim/charge/未授权 COMMIT。request 与 finalize 的响应丢失只能 exact replay；advance 必须从当前 durable facts 幂等收敛，任意 identity、version、snapshot、Outbox 或 evidence 漂移均 fail closed。
+- 调用方断开、进程 shutdown 等基础设施 `CancelledError` 原样传播；worker 自发取消转为 `RECOVERY_REQUIRED`，bounded fan-out supervisor 必须立即停批并 cancel/join 未完成 siblings，Graph 保持 `ACTIVE` 等待 durable recovery。两者都不能绕过 verified authority 建立业务取消。
 
 ### 3.5 Budget
 

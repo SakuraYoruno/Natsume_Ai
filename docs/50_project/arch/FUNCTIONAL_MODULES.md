@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v1.3
+版本：v1.4
 核对日期：2026-07-16
 代码基线：`2b84ae9ad`
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -80,7 +80,7 @@
 | Runtime Contracts | WorkOrder、TaskGraph、Budget、Review、Verification、Acceptance 数据合同 | [`contracts/agent_runtime/`](../../../host_brain/contracts/agent_runtime)、[`natsume_contracts/task/v1.py`](../../../natsume_contracts/task/v1.py) | 标准库与纯类型 | app、persistence、provider 实现 | `WIRED`；TaskGraph v1 可选扩展包含 result/completion policy，legacy 多 sink 无 result，atomic policy 必须显式结果；Host/Scheduler/Internal canonical admission 用 V3 |
 | Orchestration | HostCommand admission、Governor grant 解析、计划图编译、revision 和 node grant | [`orchestration/governed_command.py`](../../../host_brain/orchestration/governed_command.py)、[`orchestration/planning_graph_compiler.py`](../../../host_brain/orchestration/planning_graph_compiler.py)、[`orchestration/node_grants.py`](../../../host_brain/orchestration/node_grants.py) | contracts、repository ports、PlanningSearch result | 领域 worker 实现、外部副作用 | Host 主链 `WIRED`；失败重规划和所有入口统一性仍 `PARTIAL` |
 | Governed Host Adapter | 把 `chat/skill/delegate/plan` 编译为 HostCommand + `WorkOrderV3` + immutable graph | [`app/governed_task_adapter.py`](../../../host_brain/app/governed_task_adapter.py) | Orchestration、Task Runtime、route worker | 执行期二次规划 | `WIRED`；是当前 Host canonical vertical slice |
-| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/heartbeat.py`](../../../host_brain/task_runtime/heartbeat.py)、[`task_runtime/dag_scheduler.py`](../../../host_brain/task_runtime/dag_scheduler.py)、[`task_runtime/budget_runtime.py`](../../../host_brain/task_runtime/budget_runtime.py)、[`task_runtime/review_runtime.py`](../../../host_brain/task_runtime/review_runtime.py) | Task repository ports、worker/verifier/acceptance ports | 路由意图识别、计划搜索 | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`；独立 atomic/bounded 开关均默认关闭，三处生产 composition OFF。0091 单 UoW 和 canonical result projection 已覆盖单节点/串行/多 terminal；0090/B4 保留。B5C durable cancel、revisioned 0090、跨进程 Outbox、Budget 高竞争、takeover/continuation/canary 未闭环 |
+| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents、两阶段 Graph cancellation | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`contracts/agent_runtime/graph_cancellation.py`](../../../host_brain/contracts/agent_runtime/graph_cancellation.py)、[`persistence/task_repository.py`](../../../host_brain/persistence/task_repository.py)、[`task_runtime/heartbeat.py`](../../../host_brain/task_runtime/heartbeat.py)、[`task_runtime/dag_scheduler.py`](../../../host_brain/task_runtime/dag_scheduler.py) | Task repository ports、worker/verifier/acceptance/cancellation-authority ports | 路由意图识别、计划搜索、未经验证的业务取消 | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`；0091 成功 UoW 与 0092 intent/fence/final decision 已有。生产 verifier/入口、跨进程自动 reconciliation/takeover/continuation、revisioned 0090、Outbox/Budget 高竞争和 canary 未闭环 |
 | Scheduler | 定义、occurrence、时钟、lease、模式/资源策略和定时 worker registry | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py) | Secure Ingress、Governor、Task Runtime、Scheduler Repository | 自建第二套 Task 状态机 | `WIRED`；Clock/Manual occurrence 已贯通 V3/Budget/child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent Runtime | 认证后的内部 Agent WorkOrder、结果持久化和 Review API | [`app/internal_task_runtime.py`](../../../host_brain/app/internal_task_runtime.py)、[`app/internal_agent_ingress.py`](../../../host_brain/app/internal_agent_ingress.py) | Secure Ingress、Agent Executor、Task Runtime | 绕过 HostCommand 权限 lineage | `WIRED`；边界 v2 编译 V3，完整 child grant、Budget、PRE/POST Review、Verification、Acceptance、Receipt 与 replay 已验证 |
 | Read Projection / Executive Guard | `task_progress`、`recent_turn` 的只读投影与 retired fail-close guard | [`agent_runtime/read_routes.py`](../../../host_brain/agent_runtime/read_routes.py)、[`executive_runtime/runtime.py`](../../../host_brain/executive_runtime/runtime.py) | Durable Task/Conversation projection | Task/Attempt、worker、状态写入 | `WIRED / RETIRED`；Executive 无生产入口，legacy SkillDag 执行和内存 registry 已删除 |
@@ -190,7 +190,9 @@ HTTP Chat / ASR / Gateway
 
 Task composition 在开放运行时前依次完成 migration、`task_store.recover_startup`、publisher 构造与 recovery outbox 发布；任一恢复异常 fail closed。ASGI 把逻辑 owner 派生为当前 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner。执行中 heartbeat 已续租 Lease/Reservation 并阻断失去所有权后的 COMMIT，但启动门禁和心跳都不会自动续跑 recoverable attempt，也不等价于在线 takeover 或即时 reconciliation 已完成。
 
-Coordinator 的 `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 均默认 `false`，Host/Scheduler/Internal 生产 composition 未启用。atomic policy 在 repository admission 前检查 runtime capability、node-grant service 与 parent grant；Coordinator 只接收 exact node-grant map。全节点 Accepted 后，0091 UoW 使用重算 digest并绑定 command/request/route/target/grant 的 canonical worker projection，只有显式 result 生成 effects 与公开结果；completed replay 不重编 effects，双响应丢失重读 terminal authority。0090/B4 的 live/re-entry、Budget、failure/review 语义保持。B5C durable cancel、revisioned 0090、reconciliation/continuation 和生产 canary 未完成。
+Coordinator 的 `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 均默认 `false`，Host/Scheduler/Internal 生产 composition 未启用。atomic policy 在 repository admission 前检查 runtime capability、node-grant service 与 parent grant；Coordinator 只接收 exact node-grant map。全节点 Accepted 后，0091 UoW 使用重算 digest并绑定 command/request/route/target/grant 的 canonical worker projection，只有显式 result 生成 effects 与公开结果；completed replay 不重编 effects，双响应丢失重读 terminal authority。0090/B4 的 live/re-entry、Budget、failure/review 语义保持。
+
+B5C 由 0092、`graph_cancellation.py`、TaskStore 与 Coordinator 共同拥有：内部 Application 入口先验证 exact Graph revision authority；phase 1 持久化 intent/fence 后才中断本地 child，phase 2 在 active ownership 和 operation/effect/review 全部对账后提交 Graph/Budget/Outbox/decision。accepted NODE effect 继续交付，其余未授权 effect 被 fence，0091 success 与 cancel first-writer-wins。该入口尚未注入生产 verifier、没有 HTTP/UI 暴露，也没有跨进程自动 reconciliation/takeover/continuation，因此模块状态是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
 
 ### 6.2 定时任务和内部 Agent
 
@@ -291,7 +293,7 @@ Composition Root 只负责把两侧构造并连接
 | P1 | 长时间 Review 的 child-grant renewal/derivation 尚未统一 | 等待超过 grant TTL 后的自动 continuation 仍缺明确授权时机 | Governed Execution |
 | P1 | Persona candidate 尚未进入统一 proposal/Review/版本激活 | 旧直写虽已封口，但人格长期演化仍不可用 | Persona Evolution Authority |
 | P1 | B5 terminal success 尚未 production canary | shadow 已覆盖单节点、串行、多 terminal、篡改与响应丢失；atomic/bounded 和三处生产 composition 必须保持关闭 | Governed Execution |
-| P0 | B5C durable cancel 与 takeover/continuation/reconciliation 未完成 | 进程内取消能 join child/heartbeat，但 crash 后只有 TTL/startup recovery，不能自动接管或续跑 | Governed Execution |
+| P0 | B5C 生产 authority 接线与跨进程 takeover/continuation/reconciliation 未完成 | durable intent/fence 与 execute re-entry 已有，但生产 verifier/受控入口和自动 pending-intent worker 尚缺，不能自动跨进程收敛 | Governed Execution |
 | P1 | Outbox publisher 只有同进程实例锁 | Host/Internal/Scheduler 共享实例的 drain 已串行，但多进程仍没有 durable Outbox claim/CAS 或单 writer | Durable Outbox Authority |
 | P1 | Budget CAS 高竞争语义未收敛 | 固定重试上限与 `ALREADY_EXCEEDED` 在 concurrency > 4 时仍不能作为完整生产合同 | Governed Execution |
 | P1 | 全局 ProcessServiceContainer 和 accessor 仍存在 | 资源归属、测试隔离和进程边界不清 | Composition Kernel |

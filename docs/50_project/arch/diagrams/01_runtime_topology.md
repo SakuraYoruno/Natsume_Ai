@@ -3,7 +3,7 @@
 
 # 图 01：当前运行拓扑
 
-版本：v2.4
+版本：v2.5
 核对日期：2026-07-16
 
 ## 拓扑
@@ -82,6 +82,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。B5 atomic success 是 `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`：持久 policy、显式 result、admission/grant/projection 门禁和 0091 UoW 已有对抗证据，但 atomic/bounded 及 Host/Scheduler/Internal 三处生产 composition 均 OFF。0090/B4 保留；B5C durable cancel、revisioned 0090、多进程 Outbox、reconciliation/takeover/continuation 与 canary 未闭环。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 两阶段 cancellation 已有证据；取消仅有 exact-revision verified internal boundary，生产 composition 未注入 verifier，也无 HTTP/UI 或跨进程自动 reconciliation/takeover/continuation。atomic、bounded、cancellation 与 Host/Scheduler/Internal 生产开关均 OFF；revisioned 0090、多进程 Outbox 与 canary 未闭环。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

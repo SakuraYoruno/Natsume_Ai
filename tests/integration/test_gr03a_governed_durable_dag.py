@@ -1001,9 +1001,10 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
     assert first_receipt["projection"]["reservation_status"] == "RESERVED"
 
     store = DurableTaskStore(db_path, clock=lambda: NOW)
-    assert store.get_node("graph-gr03a", 1, "left")["status"] == "ACCEPTED"
+    assert store.get_node("graph-gr03a", 1, "left")["status"] == "RUNNING"
     assert store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
     assert store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
+    assert "left" in probe.cancelled_nodes
     snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
     assert snapshot["budgets"][0]["status"] == "ACTIVE"
     durable_command = HostCommandRepository(db_path, clock=lambda: NOW).get(
@@ -3223,8 +3224,8 @@ async def test_ne01_parallel_self_cancellation_reaches_supervisor_without_hang(
         ),
     )
 
-    async def consume() -> None:
-        _ = [
+    async def consume() -> list[dict[str, Any]]:
+        return [
             event
             async for event in app.execute_stream(
                 command=contracts[0],
@@ -3234,10 +3235,13 @@ async def test_ne01_parallel_self_cancellation_reaches_supervisor_without_hang(
             )
         ]
 
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(consume(), timeout=3.0)
+    events = await asyncio.wait_for(consume(), timeout=3.0)
     await asyncio.sleep(0)
 
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert receipt["accepted"] is False
     assert probe.entered_nodes == {"left", "right"}
     assert probe.cancelled_nodes == {"left", "right"}
     assert probe.active == 0
@@ -3255,6 +3259,27 @@ async def test_ne01_parallel_self_cancellation_reaches_supervisor_without_hang(
             WHERE event_type = 'OPERATION_COMMITTED'
             """
         ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT status FROM task_runtime_graph WHERE graph_id = ? AND revision = ?",
+            ("graph-gr03a", 1),
+        ).fetchone()[0] == "ACTIVE"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_graph_cancellation_intent"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT status FROM task_runtime_attempt WHERE node_id = ?",
+            ("left",),
+        ).fetchone()[0] == "RUNNING"
+        assert conn.execute(
+            """
+            SELECT reservation.status
+            FROM task_runtime_idempotency_reservation AS reservation
+            JOIN task_runtime_attempt AS attempt
+              ON attempt.attempt_id = reservation.attempt_id
+            WHERE attempt.node_id = ?
+            """,
+            ("left",),
+        ).fetchone()[0] == "RESERVED"
 
 
 @pytest.mark.asyncio

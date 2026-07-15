@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v1.3
+版本：v1.4
 核对日期：2026-07-16
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -129,15 +129,19 @@ flowchart TB
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
-`PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` 在 B4 之上增加持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1` 和显式 sink `result_node_id`。缺省继续 legacy；legacy 多 sink 不声明 result。`PlanningGraphCompiler` 默认 legacy，只有显式请求或重规划继承才 atomic。Coordinator 的 `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 独立且默认 `false`，Host、Scheduler、Internal 三处生产 composition 均 OFF。Application 在 repository admission 前检查 atomic capability、node-grant service 与 parent grant，Coordinator 只接收 exact node-grant map；atomic 图可顺序执行并由 outer 封口，terminal-leaf 实际并行还需 bounded 开关。
+`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 在 B4 之上保留 B5A/B5B 的持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id` 和 0091 atomic success；atomic/bounded 两个能力开关独立且默认 `false`，Host、Scheduler、Internal 三处生产 composition 均 OFF。
 
-运行入口先验证 `0090` decision schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
+运行入口先验证 `0090` settlement 与 `0092` cancellation schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
 
 0090/B4 继续从 durable Node、Attempt、Reservation、BudgetUsage 重建 failure/review/Budget canonical v2 decision。全节点 Accepted 时，B5 对每个 frozen worker projection 重算 canonical digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式 result projection 编译整图 effects 和公开结果。`complete_parallel_graph_success()` 在单 UoW 中提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、全图 effect intents 与 0091 decision。completed replay 只读 0091、不重编 effects；两次响应丢失后重读 terminal authority。
 
+B5C 以迁移 0092 建立 canonical cancellation intent/decision/effect fence。Application 只提供无 HTTP/UI 暴露的内部入口，并要求 authority verifier 将 request、principal、source、reason 精确绑定既有 durable Graph revision；当前生产 composition 没有注入该 verifier。phase 1 UoW 先写 intent、Graph `BLOCKED` 及 Node/Attempt/Lease/Review/token/operation/effect fence，提交后 Coordinator 才 cancel/join 本进程 child 与 heartbeat。execute re-entry 能读取 durable intent 并继续 advance/finalize；本地 task handle 不拥有取消 authority。
+
+phase 2 只在 active ownership 与 operation/effect/review 不确定性全部 reconciliation 后提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 和 canonical decision。`ACCEPTED` Node + `SUCCEEDED` Attempt 对应的 NODE effect 已拥有 acceptance authority，取消后继续 delivery；其余 NODE effect 与未完成 Graph 的 GRAPH effect被 fence。0091 success 与 0092 cancellation first-writer-wins，请求与封口响应丢失 exact replay；shutdown/disconnect 不自动变成业务取消。
+
 完整历史 `taskbatch` marker 缺行/错绑扫描只在 single-revision graph ID 上安全。legacy TaskGraph Outbox 没有 `graph_revision`，multi-revision 时不能可靠把同一 graph ID 下的历史 marker 分配到 revision；此时读取仍对返回 decision row 自身做 digest/Outbox/Attempt/usage 精确校验。revisioned TaskGraph Outbox identity 是尚未完成的结构边界。
 
-这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。单节点、串行、多 terminal 完成顺序、projection 篡改、flag/grant admission、restart 与双响应丢失已有对抗验证；但 B5C durable cancel、revisioned 0090、历史半提交修复、`WAITING_APPROVAL` 统一、跨进程 Outbox、Budget 高竞争、online takeover、自动 continuation 与 production canary 均未完成。
+这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。B5C 合同、0092 Store、Coordinator re-entry 与 verified internal boundary 已有定向证据，但生产 verifier/受控入口/canary、跨进程自动 reconciliation/online takeover/continuation 尚未完成；revisioned 0090、历史半提交修复、统一 `WAITING_APPROVAL`、跨进程 Outbox 与 Budget 高竞争也仍是缺口。
 
 ### 3.5 模型与能力执行层
 
@@ -332,7 +336,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | 可选 atomic policy、显式 result、admission/grant/projection fail-close 与 0091 成功 UoW 已有 shadow 证据；atomic/bounded 和三处生产 composition 均 OFF。0090/B4 保留；B5C、revisioned 0090、跨进程 Outbox、Budget 高竞争、takeover/continuation/canary 未接线 |
+| TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 atomic success 与 0092 两阶段 cancellation 已有 shadow 证据；verified entry 尚未注入生产 verifier，无 HTTP/UI 和跨进程自动 reconciliation/takeover/continuation。atomic/bounded/cancellation 及三处生产 composition 均 OFF；revisioned 0090、Outbox/Budget 高竞争与 canary 未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
