@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -531,6 +532,51 @@ async def test_dag_schema_is_checked_before_budget_mutation() -> None:
 
     assert calls == ["schema:rejected"]
     assert store.budget is None
+
+
+@pytest.mark.asyncio
+async def test_resolver_cancellation_is_not_converted_to_terminal_failure() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    class _CancelledResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            raise asyncio.CancelledError
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_CancelledResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert "attempt:FAILED" not in calls
+    assert "node:FAILED" not in calls
+    assert "graph:FAILED" not in calls
+    assert "operation:RESERVED" not in calls
 
 
 @pytest.mark.asyncio

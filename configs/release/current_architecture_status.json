@@ -45,6 +45,7 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
+      "stage": "PARTIAL_B1_SAFE_RETRY",
       "implemented": [
         "durable admission",
         "dependency progression",
@@ -59,6 +60,12 @@
         "ACTIVE graph and budget guards for retry scheduling/promotion",
         "cancellation of RETRY_PENDING backoff nodes",
         "ACTIVE budget concurrency fence at claim time",
+        "Coordinator entry into schedule_retry only for explicit pre-reservation RetryableWorkerPreparationError",
+        "atomic retry_count BudgetUsage plus Budget, Attempt, Node, Lease, graph-block and outbox mutation",
+        "retry budget exhaustion fail-closed and reservation-after-failure non-retry integration evidence",
+        "exact committed schedule_retry replay after response loss with strict Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outbox validation and no duplicate retry charge",
+        "resolver cancellation propagates without conversion into an ordinary terminal worker failure",
+        "fail-closed startup ordering from migration through task_store.recover_startup and recovery-outbox publication before runtime activation",
         "idempotency reservation",
         "budget",
         "review",
@@ -72,17 +79,22 @@
       "missing": [
         "parallel DAG execution",
         "single transaction for promotion plus claim",
-        "production Coordinator entry into schedule_retry",
-        "automatic worker failure classification and retry-budget consumption",
+        "real production resolver sources that classify proven side-effect-free transient preparation failures",
+        "one atomic multi-aggregate terminal bundle for ordinary resolver failure and final-attempt resolver failure",
         "periodic lease heartbeat and mid-attempt recovery takeover",
         "automatic Review continuation"
       ],
+      "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
+      "startup_recovery_boundary": "Startup is ordered migration -> task_store.recover_startup -> publisher construction -> recovery outbox publication -> later runtime activation. Recovery exceptions fail closed before route activation. This does not provide heartbeat, takeover, reconciliation completion, or automatic continuation.",
       "evidence_refs": [
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "host_brain/persistence/task_repository.py",
         "host_brain/task_runtime/coordinator.py",
+        "host_brain/composition/task_runtime.py",
         "host_brain/audit/migration_compat.py",
         "tests/unit/test_aw03_migration_compat.py",
+        "tests/unit/test_aw02_governed_task_coordinator.py",
+        "tests/unit/test_aw02_task_runtime_composition.py",
         "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },
@@ -138,16 +150,26 @@
       "status": "PARTIAL",
       "global_service_locator": "PRESENT",
       "cleanup_progress": {
-        "container_fields": 61,
-        "mutable_service_references_excluding_locks_and_application_ports": 54,
+        "container_fields": 60,
+        "mutable_service_references_excluding_locks_and_application_ports": 53,
         "retired_zero_consumer_slots": [
           "retrieval_orchestrator",
+          "retrieval_pipeline",
           "context_compressor",
           "episodic_memory_graph",
           "consolidation_trigger",
           "skill_composer"
         ],
-        "retired_get_accessors": 4
+        "retired_get_accessors": 4,
+        "retired_broad_facade_reexports": [
+          "BondDynamicsWriter",
+          "BondStageEngine",
+          "BondUpdateQueue",
+          "IntentDecisionEngine",
+          "MilestoneTracker",
+          "SharedMemoryIndex",
+          "get_capability_forge_token_service"
+        ]
       },
       "evidence_refs": [
         "host_brain/composition/process_service_container.py",

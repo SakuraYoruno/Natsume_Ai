@@ -13,6 +13,7 @@ from .worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
 )
+from .errors import RetryableWorkerPreparationError
 
 from .coordinator import (
     AdmittedExecution,
@@ -34,6 +35,7 @@ __all__ = [
     "GovernedExecutionReceipt",
     "GovernedRuntimeError",
     "GovernedTaskCoordinator",
+    "RetryableWorkerPreparationError",
     "WorkerBudgetUsage",
     "WorkerBudgetUsageError",
     "build_worker_budget_usage",

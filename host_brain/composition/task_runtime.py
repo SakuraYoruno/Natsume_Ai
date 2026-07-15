@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import hashlib
 import inspect
+import itertools
 import os
 from pathlib import Path
 import threading
 from typing import Any
+import uuid
 
-from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore, RecoveryReport
 from host_brain.audit.migration_runner import (
     MigrationBatchResult,
     SQLiteMigrationRunner,
@@ -98,6 +101,11 @@ RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 
 
+_PROCESS_BOOT_ID = uuid.uuid4().hex
+_CONTAINER_CONSTRUCTION_SEQUENCE = itertools.count(1)
+_CONTAINER_CONSTRUCTION_SEQUENCE_LOCK = threading.Lock()
+
+
 _INFRASTRUCTURE_ORDER = (
     "migration_runner",
     "task_store",
@@ -121,6 +129,8 @@ class ProcessTaskRuntimeContainer:
     migration_runner: SQLiteMigrationRunner
     migration_result: MigrationBatchResult
     task_store: DurableTaskStore
+    recovery_id: str
+    recovery_report: RecoveryReport
     review_store: ReviewStore
     worker_projection_store: WorkerProjectionStore
     command_repository: HostCommandRepository
@@ -427,6 +437,20 @@ def _path_identity(value: str) -> str:
     return os.path.normcase(os.path.normpath(value))
 
 
+def _next_startup_recovery_id(*, canonical_db_path: str) -> str:
+    """Return one opaque, boot-scoped identity for this construction attempt."""
+
+    with _CONTAINER_CONSTRUCTION_SEQUENCE_LOCK:
+        construction_sequence = next(_CONTAINER_CONSTRUCTION_SEQUENCE)
+    path_digest = hashlib.sha256(
+        _path_identity(canonical_db_path).encode("utf-8")
+    ).hexdigest()[:16]
+    return (
+        f"task-runtime-startup::{os.getpid()}::{_PROCESS_BOOT_ID}::"
+        f"{construction_sequence}::{path_digest}"
+    )
+
+
 def _run_canonical_migrations(
     migration_runner: SQLiteMigrationRunner,
     *,
@@ -497,6 +521,8 @@ def build_process_task_runtime_container(
 
         task_store = task_store_builder(canonical)
         constructed.append(("task_store", task_store))
+        recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
+        recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         review_store = review_store_builder(canonical)
         constructed.append(("review_store", review_store))
         worker_projection_store = worker_projection_store_builder(canonical)
@@ -544,6 +570,8 @@ def build_process_task_runtime_container(
         migration_runner=migration_runner,
         migration_result=migration_result,
         task_store=task_store,
+        recovery_id=recovery_id,
+        recovery_report=recovery_report,
         review_store=review_store,
         worker_projection_store=worker_projection_store,
         command_repository=command_repository,

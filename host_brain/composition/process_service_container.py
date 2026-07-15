@@ -33,7 +33,6 @@ class ProcessServiceContainer:
     episodic_store: Any = None
     life_memory_store: Any = None
     memory_service_container: Any = None
-    retrieval_pipeline: Any = None
     obs_metrics_collector: Any = None
     graph_runtime: Any = None
     routing_matrix: Any = None

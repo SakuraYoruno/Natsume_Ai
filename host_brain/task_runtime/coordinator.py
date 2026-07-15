@@ -43,6 +43,7 @@ from .errors import (
     GOVERNED_WORKER_COMMIT_INVALID,
     GOVERNED_WORKER_FAILED,
     GovernedRuntimeError,
+    RetryableWorkerPreparationError,
 )
 from .dag_scheduler import (
     DagNodeScheduleCandidate,
@@ -861,6 +862,229 @@ class GovernedTaskCoordinator:
             yield self._terminal_event(receipt)
             return
 
+        # This is the only automatic retry boundary.  Worker resolution is a
+        # side-effect-free preparation step and no operation reservation exists
+        # yet.  After reserve_operation() succeeds, every exception follows the
+        # terminal/reconciliation path and is never passed to schedule_retry().
+        try:
+            worker = self._workers.resolve(
+                executor=admitted.executor,
+                worker_route=admitted.worker_route,
+            )
+        except RetryableWorkerPreparationError as exc:
+            reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
+            if not _retry_attempt_available(node, attempt_no=attempt_no):
+                await self._mark_worker_failure(
+                    admitted,
+                    attempt_id=attempt_id,
+                    fencing_token=fencing_token,
+                    reason_code=reason_code,
+                )
+                budget = await self._budgets.finalize(
+                    budget,
+                    target_status=BudgetReservationStatus.RELEASED,
+                )
+                receipt = self._receipt(
+                    admitted,
+                    attempt_id=attempt_id,
+                    status="FAILED",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    reason_code=reason_code,
+                    projection={"budget": budget.execution_payload()},
+                )
+                yield self._terminal_event(receipt)
+                return
+
+            error_ref = "taskerror://" + hashlib.sha256(
+                f"{attempt_id}\n{reason_code}".encode("utf-8")
+            ).hexdigest()
+            expected_retry_usage_id = _retry_usage_id(
+                budget_id=budget.budget_id,
+                attempt_id=attempt_id,
+            )
+            retry_arguments = {
+                "budget_id": budget.budget_id,
+                "owner_id": self._owner_id,
+                "fencing_token": fencing_token,
+                "expected_attempt_version": _version(attempt),
+                "error_ref": error_ref,
+                "outbox": self._outbox(
+                    admitted,
+                    aggregate_type="TASK_ATTEMPT",
+                    aggregate_id=attempt_id,
+                    aggregate_version=_version(attempt) + 1,
+                    event_type="TASK_ATTEMPT_FAILED",
+                    attempt_id=attempt_id,
+                    evidence_refs=(error_ref, expected_retry_usage_id),
+                ),
+            }
+            try:
+                retry_raw = await _maybe_await(
+                    self._store.schedule_retry(attempt_id, **retry_arguments)
+                )
+            except Exception as first_exc:
+                # The first call may have committed before its response was
+                # lost.  schedule_retry() therefore provides exact replay for
+                # the same deterministic retry decision.  One immediate
+                # replay also covers a transient failure before BEGIN/COMMIT.
+                try:
+                    retry_raw = await _maybe_await(
+                        self._store.schedule_retry(attempt_id, **retry_arguments)
+                    )
+                except Exception as replay_exc:
+                    current_attempt = await _maybe_await(
+                        self._store.get_attempt(attempt_id)
+                    )
+                    if _status(current_attempt) != "RUNNING":
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "durable retry decision could not be exactly replayed",
+                        ) from replay_exc
+                    await self._mark_worker_failure(
+                        admitted,
+                        attempt_id=attempt_id,
+                        fencing_token=fencing_token,
+                        reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
+                        evidence_refs=(error_ref,),
+                    )
+                    budget = await self._budgets.finalize(
+                        budget,
+                        target_status=BudgetReservationStatus.RELEASED,
+                    )
+                    receipt = self._receipt(
+                        admitted,
+                        attempt_id=attempt_id,
+                        status="FAILED",
+                        verification_status="NOT_RUN",
+                        accepted=False,
+                        reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
+                        evidence_refs=(error_ref,),
+                        projection={
+                            "budget": budget.execution_payload(),
+                            "retry_schedule_error": _exception_reason(
+                                first_exc,
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                            ),
+                        },
+                    )
+                    yield self._terminal_event(receipt)
+                    return
+            retry = _mapping(retry_raw, field_name="atomic retry schedule")
+            retry_budget = _mapping(
+                retry.get("budget"),
+                field_name="atomic retry schedule budget",
+            )
+            budget = budget.refreshed(retry_budget)
+            retry_accepted = retry.get("accepted")
+            if not isinstance(retry_accepted, bool):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "atomic retry schedule has no boolean accepted outcome",
+                )
+            retry_usage_id = _required_record_text(retry, "retry_usage_id")
+            if retry_usage_id != expected_retry_usage_id:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "atomic retry schedule returned a different BudgetUsage identity",
+                )
+            retry_evidence = (error_ref, retry_usage_id)
+            if retry_accepted:
+                retry_node = _mapping(
+                    retry.get("node"),
+                    field_name="atomic retry schedule node",
+                )
+                retry_not_before_ms = _record_non_negative_int(
+                    retry,
+                    "retry_not_before_ms",
+                )
+                if _status(retry_node) != "RETRY_PENDING" or budget.status != "ACTIVE":
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "accepted retry did not persist RETRY_PENDING with ACTIVE budget",
+                    )
+                await self._publish_outbox()
+                receipt = self._receipt(
+                    admitted,
+                    attempt_id=attempt_id,
+                    status="RETRY_PENDING",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    reason_code=GOVERNED_EXECUTION_IN_PROGRESS,
+                    evidence_refs=retry_evidence,
+                    projection={
+                        "retry_not_before_ms": retry_not_before_ms,
+                        "retry_usage_id": retry_usage_id,
+                        "budget": budget.execution_payload(),
+                    },
+                )
+                yield self._terminal_event(receipt)
+                return
+
+            retry_graph = _mapping(
+                retry.get("graph"),
+                field_name="atomic retry schedule graph",
+            )
+            retry_node = _mapping(
+                retry.get("node"),
+                field_name="atomic retry schedule node",
+            )
+            if (
+                budget.status != "EXCEEDED"
+                or _status(retry_graph) != "BLOCKED"
+                or _status(retry_node) != "FAILED"
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "retry budget rejection did not fail closed",
+                )
+            budget = await self._budgets.finalize(
+                budget,
+                target_status=BudgetReservationStatus.RELEASED,
+            )
+            await self._publish_outbox()
+            receipt = self._receipt(
+                admitted,
+                attempt_id=attempt_id,
+                status="BUDGET_BLOCKED",
+                verification_status="NOT_RUN",
+                accepted=False,
+                reason_code=GOVERNED_BUDGET_EXCEEDED,
+                evidence_refs=retry_evidence,
+                projection={
+                    "retry_usage_id": retry_usage_id,
+                    "exceeded_dimensions": list(
+                        retry.get("exceeded_dimensions") or ()
+                    ),
+                    "budget": budget.execution_payload(),
+                },
+            )
+            yield self._terminal_event(receipt)
+            return
+        except Exception as exc:
+            reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
+            await self._mark_worker_failure(
+                admitted,
+                attempt_id=attempt_id,
+                fencing_token=fencing_token,
+                reason_code=reason_code,
+            )
+            budget = await self._budgets.finalize(
+                budget,
+                target_status=BudgetReservationStatus.RELEASED,
+            )
+            receipt = self._receipt(
+                admitted,
+                attempt_id=attempt_id,
+                status="FAILED",
+                verification_status="NOT_RUN",
+                accepted=False,
+                reason_code=reason_code,
+                projection={"budget": budget.execution_payload()},
+            )
+            yield self._terminal_event(receipt)
+            return
+
         reserved_raw = await _maybe_await(
             self._store.reserve_operation(
                 reservation_id=admitted.reservation_id,
@@ -948,10 +1172,6 @@ class GovernedTaskCoordinator:
         worker_started_ns = time.monotonic_ns()
         try:
             commit_count = 0
-            worker = self._workers.resolve(
-                executor=admitted.executor,
-                worker_route=admitted.worker_route,
-            )
             async for raw_event in _worker_event_stream(
                 worker,
                 command=command,
@@ -2066,6 +2286,36 @@ def _reservation_result(value: Any) -> tuple[bool, dict[str, Any]]:
             "reserve_operation returned an invalid result",
         )
     return acquired, dict(reservation)
+
+
+def _retry_attempt_available(
+    node: Mapping[str, Any],
+    *,
+    attempt_no: int,
+) -> bool:
+    payload = node.get("node")
+    retry_policy = payload.get("retry_policy") if isinstance(payload, Mapping) else None
+    max_attempts = retry_policy.get("max_attempts") if isinstance(retry_policy, Mapping) else None
+    if (
+        isinstance(attempt_no, bool)
+        or not isinstance(attempt_no, int)
+        or attempt_no < 1
+        or isinstance(max_attempts, bool)
+        or not isinstance(max_attempts, int)
+        or max_attempts < 1
+    ):
+        raise GovernedRuntimeError(
+            GOVERNED_DURABLE_STATE_CONFLICT,
+            "durable TaskNode has an invalid retry attempt policy",
+        )
+    return attempt_no < max_attempts
+
+
+def _retry_usage_id(*, budget_id: str, attempt_id: str) -> str:
+    digest = hashlib.sha256(
+        f"{_text(budget_id)}\n{_text(attempt_id)}\nretry".encode("utf-8")
+    ).hexdigest()
+    return f"budget-usage://{digest}"
 
 
 def _attempt_id(admitted: AdmittedExecution, *, attempt_no: int) -> str:

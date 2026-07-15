@@ -118,4 +118,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。B1 store/coordinator 子集已接 durable decision/claim 与既有 deadline 的到期 continuation，但生产失败尚未进入 retry；NE-01 仍需完成 retry budget、真正并行、heartbeat/takeover、显式 composition 与最终 route matrix 验收。Executive 退役不能替代这些剩余条件。
+Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。`PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget、提交响应丢失 exact replay 与 fail-closed 启动 recovery gate，resolver cancellation 不转普通失败；built-in resolver 尚无 marker source。NE-01 仍需完成普通/末次 resolver failure 原子 terminal bundle、现实失败分类、真正并行、heartbeat/takeover、自动 continuation、显式 composition 与最终 route matrix 验收。Executive 退役不能替代这些剩余条件。

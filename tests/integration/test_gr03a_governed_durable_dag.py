@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -37,6 +38,7 @@ from host_brain.task_runtime import (
     AdmittedExecution,
     GovernedRuntimeError,
     GovernedTaskCoordinator,
+    RetryableWorkerPreparationError,
 )
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from natsume_contracts.task.v1 import (
@@ -193,6 +195,23 @@ class _Resolver:
         return self._worker
 
 
+class _RetryOnceResolver:
+    def __init__(self, calls: list[str]) -> None:
+        self._worker = _Worker(calls, set())
+        self.resolve_count = 0
+
+    def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+        assert executor == "canonical"
+        assert worker_route.startswith("worker:")
+        self.resolve_count += 1
+        if self.resolve_count == 1:
+            raise RetryableWorkerPreparationError(
+                "WORKER_PREPARATION_TRANSIENT",
+                "worker registry is warming before operation reservation",
+            )
+        return self._worker
+
+
 class _Verifier:
     def verify(
         self,
@@ -256,13 +275,18 @@ def _coordinator(
     review_runtime: TaskNodeReviewRuntime | None = None,
     acceptance_decision: str = "ACCEPT",
     clock: Any = None,
+    worker_resolver: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
         task_store=DurableTaskStore(db_path, clock=resolved_clock),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
-        worker_resolver=_Resolver(calls, fail_nodes),
+        worker_resolver=(
+            worker_resolver
+            if worker_resolver is not None
+            else _Resolver(calls, fail_nodes)
+        ),
         verifier=_Verifier(),
         acceptance=_Acceptance(acceptance_decision),
         review_runtime=review_runtime,
@@ -277,6 +301,7 @@ def _runtime_outbox(
     event_type: str,
     *,
     attempt_id: str | None = None,
+    evidence_refs: tuple[str, ...] = (),
 ) -> OutboxMessage:
     discriminator = hashlib.sha256(
         f"{aggregate_type}\n{aggregate_id}\n{aggregate_version}\n{event_type}".encode()
@@ -292,6 +317,7 @@ def _runtime_outbox(
         idempotency_key=f"gr03a-runtime:{discriminator}",
         outbox_id=f"outbox::gr03a-runtime::{discriminator}",
         attempt_id=attempt_id,
+        evidence_refs=evidence_refs,
     )
 
 
@@ -791,24 +817,80 @@ async def test_ne01_b1_retry_deadline_and_attempt_sequence_survive_reopen(
             attempt_id=attempt_id,
         ),
     )
+    retry_error_ref = "taskerror://gr03a/pre-side-effect"
+    retry_usage_id = "budget-usage://" + hashlib.sha256(
+        f"{budget.budget_id}\n{attempt_id}\nretry".encode("utf-8")
+    ).hexdigest()
+    retry_outbox = _runtime_outbox(
+        "TASK_ATTEMPT",
+        attempt_id,
+        running_attempt["status_version"] + 1,
+        "TASK_ATTEMPT_FAILED",
+        attempt_id=attempt_id,
+        evidence_refs=(retry_error_ref, retry_usage_id),
+    )
     retry = store.schedule_retry(
         attempt_id,
+        budget_id=budget.budget_id,
         owner_id="gr03a-worker",
         fencing_token=claim["lease"]["fencing_token"],
         expected_attempt_version=running_attempt["status_version"],
-        error_ref="taskerror://gr03a/pre-side-effect",
-        outbox=_runtime_outbox(
-            "TASK_ATTEMPT",
-            attempt_id,
-            running_attempt["status_version"] + 1,
-            "TASK_ATTEMPT_FAILED",
-            attempt_id=attempt_id,
-        ),
+        error_ref=retry_error_ref,
+        outbox=retry_outbox,
     )
     assert running_node["status"] == "RUNNING"
+    assert retry["replayed"] is False
     assert retry["node"]["status"] == "RETRY_PENDING"
     assert retry["retry_not_before_ms"] == NOW + 100
     assert retry["lease"]["status"] == "RELEASED"
+    with sqlite3.connect(db_path) as conn:
+        before_replay_counts = conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM task_runtime_budget_usage),
+                (SELECT COUNT(*) FROM task_runtime_outbox)
+            """
+        ).fetchone()
+
+    exact_replay = DurableTaskStore(db_path, clock=clock).schedule_retry(
+        attempt_id,
+        budget_id=budget.budget_id,
+        owner_id="gr03a-worker",
+        fencing_token=claim["lease"]["fencing_token"],
+        expected_attempt_version=running_attempt["status_version"],
+        error_ref=retry_error_ref,
+        outbox=retry_outbox,
+    )
+    assert exact_replay == {**retry, "replayed": True}
+    with sqlite3.connect(db_path) as conn:
+        after_replay_counts = conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM task_runtime_budget_usage),
+                (SELECT COUNT(*) FROM task_runtime_outbox)
+            """
+        ).fetchone()
+    assert after_replay_counts == before_replay_counts
+    drift_error_ref = "taskerror://gr03a/different-failure"
+    drift_outbox = _runtime_outbox(
+        "TASK_ATTEMPT",
+        attempt_id,
+        running_attempt["status_version"] + 1,
+        "TASK_ATTEMPT_FAILED",
+        attempt_id=attempt_id,
+        evidence_refs=(drift_error_ref, retry_usage_id),
+    )
+    with pytest.raises(TaskStoreError) as drift:
+        store.schedule_retry(
+            attempt_id,
+            budget_id=budget.budget_id,
+            owner_id="gr03a-worker",
+            fencing_token=claim["lease"]["fencing_token"],
+            expected_attempt_version=running_attempt["status_version"],
+            error_ref=drift_error_ref,
+            outbox=drift_outbox,
+        )
+    assert drift.value.reason_code == TASK_STORE_CAS_CONFLICT
 
     replay = HostCommandRepository(db_path, clock=clock).admit(
         command,
@@ -856,6 +938,338 @@ async def test_ne01_b1_retry_deadline_and_attempt_sequence_survive_reopen(
     assert reopened.get_node(graph.graph_id, graph.revision, "root")[
         "retry_not_before_ms"
     ] is None
+
+
+@pytest.mark.parametrize("lose_retry_response", (False, True))
+@pytest.mark.asyncio
+async def test_ne01_b2_coordinator_safe_retry_charges_budget_and_runs_attempt_two(
+    tmp_path: Path,
+    lose_retry_response: bool,
+) -> None:
+    class _Clock:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __call__(self) -> int:
+            return self.value
+
+    clock = _Clock(NOW)
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 100},
+            ),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=clock).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    resolver = _RetryOnceResolver(calls)
+    runtime = _coordinator(
+        db_path,
+        calls,
+        clock=clock,
+        worker_resolver=resolver,
+    )
+    schedule_retry_calls = 0
+    if lose_retry_response:
+        committed_schedule_retry = runtime._store.schedule_retry  # noqa: SLF001
+
+        def lose_first_committed_response(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            nonlocal schedule_retry_calls
+            schedule_retry_calls += 1
+            result = committed_schedule_retry(*args, **kwargs)
+            if schedule_retry_calls == 1:
+                raise TimeoutError("simulated response loss after retry commit")
+            return result
+
+        runtime._store.schedule_retry = lose_first_committed_response  # type: ignore[method-assign]  # noqa: SLF001
+    first_events = [
+        event
+        async for event in runtime.execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    first_receipt = first_events[-1]["execution_receipt"]
+    assert first_receipt["status"] == "RETRY_PENDING"
+    assert first_receipt["reason_code"] == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert resolver.resolve_count == 1
+    assert calls == []
+    assert schedule_retry_calls == (2 if lose_retry_response else 0)
+
+    after_first = DurableTaskStore(db_path, clock=clock).read_scheduler_snapshot(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert [(row["attempt_no"], row["status"]) for row in after_first["attempts"]] == [
+        (1, "FAILED"),
+    ]
+    assert after_first["graph_record"]["nodes"][0]["status"] == "RETRY_PENDING"
+    assert after_first["budgets"][0]["status"] == "ACTIVE"
+    assert after_first["budgets"][0]["consumed"]["retry_count"] == 1
+    retry_usages = [
+        row for row in after_first["budget_usage"] if row["charge_kind"] == "RETRY"
+    ]
+    assert len(retry_usages) == 1
+    assert retry_usages[0]["accepted"] is True
+    assert retry_usages[0]["delta"]["retry_count"] == 1
+    with sqlite3.connect(db_path) as conn:
+        attempt_one_reservations = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ?
+            """,
+            (after_first["attempts"][0]["attempt_id"],),
+        ).fetchone()[0]
+        retry_outboxes = conn.execute(
+            """
+            SELECT event_type, evidence_refs_json
+            FROM task_runtime_outbox
+            WHERE attempt_id = ? AND event_type IN (
+                'BUDGET_CONSUMED', 'TASK_ATTEMPT_FAILED',
+                'TASK_NODE_RETRY_PENDING', 'TASK_LEASE_RELEASED'
+            )
+            ORDER BY event_type
+            """,
+            (after_first["attempts"][0]["attempt_id"],),
+        ).fetchall()
+    assert attempt_one_reservations == 0
+    retry_outboxes = [
+        row
+        for row in retry_outboxes
+        if row[0] != "BUDGET_CONSUMED"
+        or retry_usages[0]["usage_id"] in json.loads(row[1])
+    ]
+    assert [row[0] for row in retry_outboxes] == [
+        "BUDGET_CONSUMED",
+        "TASK_ATTEMPT_FAILED",
+        "TASK_LEASE_RELEASED",
+        "TASK_NODE_RETRY_PENDING",
+    ]
+    retry_evidence = {
+        row[0]: tuple(json.loads(row[1])) for row in retry_outboxes
+    }
+    assert retry_usages[0]["usage_id"] in retry_evidence["BUDGET_CONSUMED"]
+    assert set(retry_evidence.values()) == {
+        tuple(retry_evidence["BUDGET_CONSUMED"])
+    }
+
+    clock.value = NOW + 99
+    with pytest.raises(GovernedRuntimeError) as waiting:
+        _ = [
+            event
+            async for event in _coordinator(
+                db_path,
+                calls,
+                clock=clock,
+                worker_resolver=resolver,
+            ).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+    assert waiting.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert resolver.resolve_count == 1
+
+    clock.value = NOW + 100
+    final_events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            calls,
+            clock=clock,
+            worker_resolver=resolver,
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    assert final_events[-1]["execution_receipt"]["accepted"] is True
+    assert resolver.resolve_count == 2
+    assert calls == ["root"]
+
+    final_snapshot = DurableTaskStore(db_path, clock=clock).read_scheduler_snapshot(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert [(row["attempt_no"], row["status"]) for row in final_snapshot["attempts"]] == [
+        (1, "FAILED"),
+        (2, "SUCCEEDED"),
+    ]
+    assert final_snapshot["budgets"][0]["status"] == "CONSUMED"
+    assert final_snapshot["budgets"][0]["consumed"]["retry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ne01_b2_retry_budget_exhaustion_fails_closed_before_reservation(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
+            ),
+        ),
+    )
+    work_order = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(work_order.budget_policy.limits, retry_count=0),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    resolver = _RetryOnceResolver(calls)
+    events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            calls,
+            worker_resolver=resolver,
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["reason_code"] == "GOVERNED_BUDGET_EXCEEDED"
+    assert resolver.resolve_count == 1
+    assert calls == []
+
+    snapshot = DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert snapshot["graph_record"]["status"] == "BLOCKED"
+    assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert [(row["attempt_no"], row["status"]) for row in snapshot["attempts"]] == [
+        (1, "FAILED"),
+    ]
+    assert snapshot["active_leases"] == []
+    budget = snapshot["budgets"][0]
+    assert budget["status"] == "RELEASED"
+    assert budget["consumed"]["retry_count"] == 0
+    assert budget["attempted_consumed"]["retry_count"] == 1
+    assert budget["exceeded_dimensions"] == ["retry_count"]
+    retry_usages = [
+        row for row in snapshot["budget_usage"] if row["charge_kind"] == "RETRY"
+    ]
+    assert len(retry_usages) == 1
+    assert retry_usages[0]["accepted"] is False
+    assert retry_usages[0]["reason_code"] == "TASK_STORE_BUDGET_EXCEEDED"
+    with sqlite3.connect(db_path) as conn:
+        reservation_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_idempotency_reservation"
+        ).fetchone()[0]
+        graph_blocked_outbox = conn.execute(
+            """
+            SELECT attempt_id, evidence_refs_json
+            FROM task_runtime_outbox
+            WHERE aggregate_type = 'TASK_GRAPH'
+              AND event_type = 'TASK_GRAPH_BLOCKED'
+            """
+        ).fetchone()
+    assert reservation_count == 0
+    assert graph_blocked_outbox is not None
+    assert graph_blocked_outbox[0] == snapshot["attempts"][0]["attempt_id"]
+    assert retry_usages[0]["usage_id"] in json.loads(graph_blocked_outbox[1])
+
+
+@pytest.mark.asyncio
+async def test_ne01_b2_post_reservation_worker_failure_is_never_auto_retried(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
+            ),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            calls,
+            fail_nodes={"root"},
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    assert events[-1]["execution_receipt"]["status"] == "FAILED"
+    assert calls == ["root"]
+    snapshot = DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert snapshot["graph_record"]["status"] == "FAILED"
+    assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert [(row["attempt_no"], row["status"]) for row in snapshot["attempts"]] == [
+        (1, "FAILED"),
+    ]
+    assert not any(row["charge_kind"] == "RETRY" for row in snapshot["budget_usage"])
+    with sqlite3.connect(db_path) as conn:
+        reservations = conn.execute(
+            """
+            SELECT attempt_id, status
+            FROM task_runtime_idempotency_reservation
+            ORDER BY reservation_id
+            """
+        ).fetchall()
+    assert reservations == [(snapshot["attempts"][0]["attempt_id"], "RESERVED")]
 
 
 @pytest.mark.asyncio

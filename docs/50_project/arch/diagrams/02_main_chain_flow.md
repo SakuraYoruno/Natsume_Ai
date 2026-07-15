@@ -103,8 +103,9 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. B1 store/coordinator 子集已接 decision、原子 claim、到期 promotion、store retry deadline/cancel 和 concurrency fence；生产失败尚未进入 retry，真正并行、retry budget、heartbeat/takeover 与 Review continuation 尚未完成。
+3. `PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget/attempt 2、提交响应丢失 exact replay 与 resolver cancellation 传播；built-in resolver 尚无 marker source，普通/末次 resolver failure 原子 terminal bundle、真正并行、heartbeat/takeover 与 Review continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
+5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；这不代表自动 continuation 或 takeover 已完成。
 
 ## 代码锚点
 

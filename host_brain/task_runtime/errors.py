@@ -22,6 +22,23 @@ GOVERNED_REVIEW_REQUIRED = "GOVERNED_REVIEW_REQUIRED"
 GOVERNED_REVIEW_DENIED = "GOVERNED_REVIEW_DENIED"
 
 
+class RetryableWorkerPreparationError(RuntimeError):
+    """Explicit transient failure before any operation reservation exists.
+
+    Only worker resolution/preparation may raise this marker.  Once an
+    operation reservation has been created, the coordinator never interprets
+    an exception as retryable because the external side-effect boundary may
+    already have been crossed.
+    """
+
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = (
+            str(reason_code or "").strip() or GOVERNED_WORKER_FAILED
+        )
+        self.detail = str(detail or "").strip() or "worker preparation failed"
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+
 class GovernedRuntimeError(RuntimeError):
     """Fail-closed runtime error with a stable public reason code."""
 
@@ -53,4 +70,5 @@ __all__ = [
     "GOVERNED_WORKER_COMMIT_INVALID",
     "GOVERNED_WORKER_FAILED",
     "GovernedRuntimeError",
+    "RetryableWorkerPreparationError",
 ]

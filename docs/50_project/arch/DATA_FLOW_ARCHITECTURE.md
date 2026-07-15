@@ -72,7 +72,7 @@ flowchart TD
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 store/coordinator 子集已让 Coordinator 消费 B0，并接入原子 claim、到期 promotion 与预算并发门禁。retry deadline/attempt 2 目前是 store 级 primitive，生产失败尚未进入该路径，执行仍顺序且自动 retry/recovery 未完整。
+- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 已接原子 claim/promotion，并把显式 retryable preparation failure 限定在 operation reservation 之前。该 contract path 会原子写 retry_count BudgetUsage 与 retry 状态，超限 fail closed；提交响应丢失时只在 Attempt/Node/Lease/Graph/Budget/BudgetUsage/Outbox 精确一致后 replay，避免重复扣费。当前生产 resolver 尚无现实 marker 来源，执行仍顺序且 recovery 未完整。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 
@@ -208,7 +208,9 @@ claim runnable node
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
 | DAG 并发 | claim 有 durable concurrency fence，但 coordinator 当前仍串行执行 selected nodes | `NOT_IMPLEMENTED` |
-| Retry/backoff | Store 可持久化已显式判定安全的副作用前失败，Coordinator 可对已存在的 deadline 到期重开 attempt 2；生产异常尚未调用该 Store primitive，自动分类、reservation reconciliation 与 retry budget 未接 | `PARTIAL_B1_STORE` |
+| Retry/backoff | Coordinator 仅对 reservation 前显式 marker 调用 `schedule_retry`；retry_count、Budget、Attempt/Node/Lease/Outbox 同事务提交，到期可重开 attempt 2，超限原子阻断；提交响应丢失 exact replay 不重复扣费，resolver cancellation 原样传播。生产 resolver 尚无现实 marker 来源，普通/末次 resolver failure 的原子 terminal bundle与 reconciliation 也未完成 | `PARTIAL_B1_SAFE_RETRY` |
+
+启动恢复数据流为 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation；恢复抛错会在 admission 可用前 fail closed。该顺序只持久化并发布恢复判定，不会自动 continuation，也没有补齐 heartbeat/takeover。
 
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
@@ -451,7 +453,7 @@ All ingress sources
 
 从当前流程到目标流程的必要变更是：
 
-1. 在 B1 store/coordinator 子集上先接通生产失败 → safe retry + retry budget，再实现真正并行 fan-out、promotion+claim 单事务、周期 heartbeat 与 mid-attempt takeover。
+1. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，再实现真正并行 fan-out、promotion+claim 单事务、周期 heartbeat 与 mid-attempt takeover。
 2. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation，并明确长时间等待后的 child-grant renewal/derivation。
 3. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
 4. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。

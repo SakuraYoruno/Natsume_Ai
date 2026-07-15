@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_repository import DurableTaskStore, RecoveryReport
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import (
@@ -89,6 +89,27 @@ class _OutboxPublisher(_Closeable):
         }
 
 
+class _TaskStore(_Closeable):
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        recovery_error: Exception | None = None,
+    ) -> None:
+        super().__init__("task-store", events)
+        self.recovery_error = recovery_error
+
+    def recover_startup(self, *, recovery_id: str) -> RecoveryReport:
+        self.events.append(f"task-store:recover:{recovery_id}")
+        if self.recovery_error is not None:
+            raise self.recovery_error
+        return RecoveryReport(
+            recovery_id=recovery_id,
+            recovered_attempt_ids=(),
+            expired_lease_ids=(),
+        )
+
+
 def _build_fake_container(
     tmp_path: Path,
     events: list[str],
@@ -104,10 +125,10 @@ def _build_fake_container(
         events.append("migration:build")
         return _MigrationRunner(events)
 
-    def build_store(db_path: str) -> _Closeable:
+    def build_store(db_path: str) -> _TaskStore:
         assert db_path == str(path.resolve())
         events.append("task-store:build")
-        return _Closeable("task-store", events)
+        return _TaskStore(events)
 
     def build_repository(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
@@ -176,6 +197,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "migration:build",
         "migration:apply:startup::task-runtime",
         "task-store:build",
+        f"task-store:recover:{container.recovery_id}",
         "review-store:build",
         "worker-projection-store:build",
         "repository:build",
@@ -193,6 +215,13 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     )
     assert container.outbox_publisher.task_store is container.task_store
     assert container.outbox_publisher.event_store is container.event_store
+    assert container.recovery_report.recovery_id == container.recovery_id
+    recovery_id_parts = container.recovery_id.split("::")
+    assert recovery_id_parts[0] == "task-runtime-startup"
+    assert recovery_id_parts[1] == str(container.owner_process_id)
+    assert len(recovery_id_parts[2]) == 32
+    assert int(recovery_id_parts[3]) > 0
+    assert len(recovery_id_parts[4]) == 16
     assert container.startup_publish_result["status"] == "OK"
 
     asyncio.run(container.aclose())
@@ -225,15 +254,51 @@ def test_migration_failure_is_fail_closed_and_rolls_back_runner(
     ]
 
 
+def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    path = tmp_path / "canonical.sqlite3"
+
+    def build_store(_path: str) -> _TaskStore:
+        events.append("task-store:build")
+        return _TaskStore(events, recovery_error=OSError("private platform detail"))
+
+    with pytest.raises(TaskRuntimeContainerConstructionError) as caught:
+        build_process_task_runtime_container(
+            ledger=_Ledger(path),
+            canonical_db_path=path,
+            migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
+            task_store_builder=build_store,
+            review_store_builder=lambda _path: pytest.fail(
+                "review construction must not run after recovery failure"
+            ),
+            outbox_publisher_builder=lambda **_kwargs: pytest.fail(
+                "publisher construction must not run after recovery failure"
+            ),
+        )
+
+    assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
+    assert "private platform detail" not in caught.value.detail
+    assert caught.value.rollback_failures == ()
+    assert len(events) == 5
+    assert events[:2] == [
+        "migration:apply:startup::task-runtime",
+        "task-store:build",
+    ]
+    assert events[2].startswith("task-store:recover:task-runtime-startup::")
+    assert events[3:] == ["task-store:close", "migration:close"]
+
+
 def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     tmp_path: Path,
 ) -> None:
     events: list[str] = []
     path = tmp_path / "canonical.sqlite3"
 
-    def build_store(_path: str) -> _Closeable:
+    def build_store(_path: str) -> _TaskStore:
         events.append("task-store:build")
-        return _Closeable("task-store", events)
+        return _TaskStore(events)
 
     def fail_repository(_path: str) -> Any:
         events.append("repository:build")
@@ -261,9 +326,12 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert caught.value.rollback_failures == ()
     assert "unstable platform detail" not in caught.value.detail
-    assert events == [
+    assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
+    ]
+    assert events[2].startswith("task-store:recover:task-runtime-startup::")
+    assert events[3:] == [
         "review-store:build",
         "worker-projection-store:build",
         "repository:build",
@@ -404,6 +472,8 @@ def test_real_sqlite_adapters_share_the_migrated_canonical_ledger(
             ledger.canonical_db_path
         )
         assert container.migration_result.success
+        assert container.recovery_report.recovery_id == container.recovery_id
+        assert container.recovery_report.recovered_count == 0
         assert container.startup_publish_result["status"] == "OK"
 
         asyncio.run(container.aclose())

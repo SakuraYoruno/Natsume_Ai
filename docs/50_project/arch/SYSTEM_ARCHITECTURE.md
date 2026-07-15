@@ -125,7 +125,7 @@ flowchart TB
 
 执行器只接收冻结节点输入和 node-bound grant。任何失败后的计划变化都应生成新 graph revision，不能在 worker 内静默修改原图。
 
-当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。B1 store/coordinator 子集在 TaskStore 中原子 claim READY node（Attempt、Node、Lease、初始 Heartbeat、Outbox），并持久化 store 级 retry deadline/attempt 2 与预算并发门禁；Coordinator 能晋升已存在的到期 retry，claim 提交响应丢失时可 exact replay。生产异常尚未调用 `schedule_retry`，仍未完成真正并行 fan-out、retry budget、周期 heartbeat、mid-attempt takeover 和自动 Review continuation。
+当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。`PARTIAL_B1_SAFE_RETRY` 在原子 claim/promotion 上增加了唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。当前 Host/Scheduler/Internal built-in resolver 都没有现实 marker source，普通/最后一次 resolver failure 也没有多聚合原子 terminal bundle；现实故障分类、真正并行 fan-out、周期 heartbeat、mid-attempt takeover 和自动 Review continuation仍未完成。
 
 ### 3.5 模型与能力执行层
 
@@ -181,7 +181,9 @@ host_brain.__main__
 
 `host_brain/composition/task_runtime.py::ProcessTaskRuntimeContainer` 已显式拥有 TaskStore、ReviewStore、CommandRepository、EventStore 和 lifecycle，是当前较清晰的 composition 范例。
 
-但整个 Host 尚未完成显式对象图迁移：首轮已静态证明并删除 5 个零消费者槽位和 4 个 accessor，当前仍有 61 个 container 字段；排除 6 个 lock 与 `application_ports` 端口束后是 54 个可变服务引用。`process_services.py` 与 `process_runtime_services.py` 继续暴露大量全局 accessor，部分 `host_brain.app` 文件仍同时承担 adapter 和 service factory。新代码不应继续扩大这条 Service Locator 路径。
+它的启动门禁已固定为 migration → `task_store.recover_startup` → publisher 构造 → recovery outbox publish → 稍后 runtime activation；恢复异常会终止容器构造并阻止路由开放。这里没有宣称 recoverable attempt 已自动 continuation，也没有补齐 heartbeat 或 takeover。
+
+但整个 Host 尚未完成显式对象图迁移：两轮已静态证明并删除 6 个零消费者槽位和 4 个死 accessor，第二轮另收掉 7 个宽泛重导出及测试 reset 残留；当前仍有 60 个 container 字段，排除 6 个 lock 与 `application_ports` 端口束后是 53 个可变服务引用。`process_services.py` 与 `process_runtime_services.py` 继续暴露大量全局 accessor，部分 `host_brain.app` 文件仍同时承担 adapter 和 service factory。新代码不应继续扩大这条 Service Locator 路径。
 
 ## 5. Command 与 Task 架构
 
@@ -318,7 +320,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + B1 store/coordinator subset | 生产失败进入 safe retry、真正并行、retry budget/分类、heartbeat/takeover、Review continuation 尚未接线 |
+| TaskGraph revision + `PARTIAL_B1_SAFE_RETRY` | built-in resolver 尚无 marker source；真正并行、现实失败分类、heartbeat/takeover、Review continuation 尚未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

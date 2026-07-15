@@ -12,11 +12,11 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL_B1_STORE` | Coordinator 已消费 B0，原子 claim、到期 promotion、预算并发门禁与 store 级 retry deadline/attempt 2 已接；生产失败尚未调用 `schedule_retry`，真正并行、retry budget、heartbeat/takeover、Review continuation 未闭环 |
+| Durable Task Runtime | `PARTIAL_B1_SAFE_RETRY` | B1 durable claim/promotion 与 safe-retry exact replay 已接；Coordinator 只对 operation reservation 前显式标记的 retryable preparation failure 调用 `schedule_retry`，retry_count 与 Attempt/Node/Lease/Outbox 同事务落盘且超限 fail closed。当前生产 resolver 尚无现实异常源抛该 marker；真正并行、现实失败分类、heartbeat/takeover、Review continuation 未闭环 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
-| 显式 Composition | `INCOMPLETE` | 已删除首批 5 个零消费者全局槽位和 4 个 accessor；排除 6 个 lock 与 `application_ports` 端口束后仍有 54 个可变服务引用，尚未形成 Host/Obs/Worker 显式 scopes |
+| 显式 Composition | `INCOMPLETE` | 两批已删除 6 个零消费者全局槽位、4 个死 accessor，并收掉第二批 7 个宽泛重导出；排除 6 个 lock 与 `application_ports` 端口束后仍有 53 个可变服务引用，尚未形成 Host/Obs/Worker 显式 scopes |
 | Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
 | Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |
@@ -107,6 +107,8 @@ request
 ```
 
 当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；Executive 的生产入口、SkillDag 执行和内存任务 registry 已删除。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。
+
+Durable 启动门禁当前按 `migration → task_store.recover_startup → 构造 publisher → 发布 recovery outbox → 稍后激活 runtime` 执行；恢复步骤抛错会在路由开放前 fail closed。`schedule_retry` 提交后若仅丢失响应，同一确定性调用会严格核对 Attempt、Node、Lease、Graph、Budget、BudgetUsage 及关联 Outbox 后返回原决定，不会重复扣减 retry budget；任何状态漂移都会拒绝伪造 replay。resolver 的 `CancelledError` 会原样向上传播，不会被普通失败分支吞掉。这里仍不包含周期 heartbeat、takeover、自动 continuation；普通 resolver 失败和最后一次 resolver 失败的多聚合 terminal 写入也尚未合并为单事务。
 
 ### Planning Search
 

@@ -40,7 +40,6 @@ def _reset_dependency_singletons() -> None:
     dep.get_process_service_container().bond_stage_engine = None
     dep.get_process_service_container().bond_update_queue = None
     dep.get_process_service_container().episodic_store = None
-    dep.get_process_service_container().retrieval_pipeline = None
     dep.get_process_service_container().obs_metrics_collector = None
     dep.get_process_service_container().graph_runtime = None
 

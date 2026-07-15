@@ -152,6 +152,7 @@ class TaskStorePort(Protocol):
         self,
         attempt_id: str,
         *,
+        budget_id: str,
         owner_id: str,
         fencing_token: int,
         expected_attempt_version: int,
@@ -288,6 +289,13 @@ class GovernedWorkerPort(Protocol):
 
 
 class GovernedWorkerResolverPort(Protocol):
+    """Side-effect-free worker preparation before operation reservation.
+
+    A resolver may raise ``RetryableWorkerPreparationError`` to explicitly
+    classify a transient pre-operation failure.  Returning a worker closes
+    this retry boundary; execution occurs only after durable reservation.
+    """
+
     def resolve(self, *, executor: str, worker_route: str) -> GovernedWorkerPort: ...
 
 
