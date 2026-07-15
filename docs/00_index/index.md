@@ -3,8 +3,8 @@
 
 # 00_index 文档导航索引
 
-版本：v1.1
-维护日期：2026-07-10
+版本：v1.2
+维护日期：2026-07-14
 标签：当前事实
 
 本文是文档入口总览：先读 `00_DOCMAP.md`，再从那里进入白皮书/PRD/DevSpec 体系。
@@ -17,4 +17,5 @@
 ## 关键文件
 - `00_DOCMAP.md`
 - `../50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`：完整目标架构、边界、最终 Gate 与 M48～M57 路线图。
-- `../30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`：完整架构重构正式 CODEX 执行入口（TASK-0461～0622）。
+- `../30_devspec/NATSUME_AI_UNIVERSAL_GOVERNED_PLANNING_EXECUTION_20260714.md`：当前正式 CODEX 执行入口（GR-00～GR-06）。
+- `../30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`：Core Infrastructure 历史合同与 Full Architecture 封板纠错。

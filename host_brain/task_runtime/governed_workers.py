@@ -1,0 +1,499 @@
+"""Frozen chat/delegate workers for the canonical governed Task Runtime.
+
+These wrappers consume one already-planned TaskNode.  They cannot select a
+route, inspect search alternatives, mutate a graph, or invoke a planner.  A
+terminal public projection must be durably staged before the coordinator can
+observe the single COMMIT event.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass, field
+import hashlib
+import json
+from typing import Any, Protocol
+from urllib.parse import unquote
+
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
+from host_brain.task_runtime.worker_budget_usage import (
+    WorkerBudgetUsage,
+    WorkerBudgetUsageError,
+)
+from natsume_contracts.task import HostCommand
+
+
+GOVERNED_NODE_INPUT_INVALID = "GOVERNED_NODE_INPUT_INVALID"
+GOVERNED_NODE_GRANT_INVALID = "GOVERNED_NODE_GRANT_INVALID"
+GOVERNED_NODE_COMMIT_INVALID = "GOVERNED_NODE_COMMIT_INVALID"
+GOVERNED_NODE_PROJECTION_FAILED = "GOVERNED_NODE_PROJECTION_FAILED"
+
+
+class GovernedNodeWorkerError(RuntimeError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = str(reason_code or GOVERNED_NODE_INPUT_INVALID)
+        self.detail = str(detail or "governed node worker failed")
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenNodeInput:
+    command_id: str
+    request_id: str
+    session_id: str
+    principal_id: str
+    work_order_id: str
+    root_work_order_id: str
+    graph_id: str
+    graph_revision: int
+    node_id: str
+    attempt_id: str
+    route: str
+    target_id: str
+    objective: str
+    input_refs: tuple[str, ...]
+    _input_pack_json: str = field(repr=False)
+    node_grant_ref: str
+    parent_grant_ref: str
+
+    @property
+    def input_pack(self) -> Mapping[str, Any]:
+        """Return a fresh projection so an executor cannot mutate frozen input."""
+
+        loaded = json.loads(self._input_pack_json)
+        return dict(loaded) if isinstance(loaded, Mapping) else {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "request_id": self.request_id,
+            "session_id": self.session_id,
+            "principal_id": self.principal_id,
+            "work_order_id": self.work_order_id,
+            "root_work_order_id": self.root_work_order_id,
+            "graph_id": self.graph_id,
+            "graph_revision": self.graph_revision,
+            "node_id": self.node_id,
+            "attempt_id": self.attempt_id,
+            "route": self.route,
+            "target_id": self.target_id,
+            "objective": self.objective,
+            "input_refs": list(self.input_refs),
+            "input_pack": dict(self.input_pack),
+            "node_grant_ref": self.node_grant_ref,
+            "parent_grant_ref": self.parent_grant_ref,
+        }
+
+
+class FrozenRouteExecutorPort(Protocol):
+    def execute_stream(self, frozen: FrozenNodeInput) -> AsyncIterator[Mapping[str, Any]]: ...
+
+
+class NodeGrantVerifierPort(Protocol):
+    def verify(
+        self,
+        *,
+        grant_ref: str,
+        parent_grant_ref: str,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+        graph_id: str,
+        graph_revision: int,
+        root_work_order_id: str,
+        node_id: str,
+        route: str,
+        target_id: str,
+    ) -> Any: ...
+
+
+class WorkerProjectionWriterPort(Protocol):
+    def stage(self, *, projection_id: str, projection: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+
+class GovernedFrozenNodeWorker:
+    """Execute one frozen node and durably stage its only terminal projection."""
+
+    def __init__(
+        self,
+        *,
+        route_kind: str,
+        executor: FrozenRouteExecutorPort,
+        node_grants: NodeGrantVerifierPort,
+        projections: WorkerProjectionWriterPort,
+    ) -> None:
+        kind = str(route_kind or "").strip().lower()
+        if kind not in {"chat", "delegate"}:
+            raise ValueError("route_kind must be chat or delegate")
+        if not callable(getattr(executor, "execute_stream", None)):
+            raise ValueError("executor.execute_stream is required")
+        if not callable(getattr(node_grants, "verify", None)):
+            raise ValueError("node_grants.verify is required")
+        if not callable(getattr(projections, "stage", None)):
+            raise ValueError("projections.stage is required")
+        self._route_kind = kind
+        self._executor = executor
+        self._node_grants = node_grants
+        self._projections = projections
+
+    async def execute_stream(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        execution_context: Mapping[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        frozen = _freeze_node_input(
+            command=command,
+            work_order=work_order,
+            execution_context=execution_context,
+            expected_route_kind=self._route_kind,
+        )
+        verified = self._node_grants.verify(
+            grant_ref=frozen.node_grant_ref,
+            parent_grant_ref=frozen.parent_grant_ref,
+            request_id=frozen.request_id,
+            session_id=frozen.session_id,
+            principal_id=frozen.principal_id,
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            root_work_order_id=frozen.root_work_order_id,
+            node_id=frozen.node_id,
+            route=frozen.route,
+            target_id=frozen.target_id,
+        )
+        _assert_verified_grant(verified, frozen=frozen)
+
+        terminal: dict[str, Any] | None = None
+        terminal_count = 0
+        buffered_event_count = 0
+        async for raw in self._executor.execute_stream(frozen):
+            event = dict(raw) if isinstance(raw, Mapping) else {}
+            if bool(event.get("done")) or str(event.get("phase") or "").strip().upper() == "COMMIT":
+                terminal_count += 1
+                terminal = event
+                continue
+            # A worker is still speculative until Verification and Acceptance
+            # commit.  Streaming its deltas here would expose user-visible or
+            # externally actionable output before the governed decision.  The
+            # accepted terminal projection is the only public worker output.
+            buffered_event_count += 1
+        if terminal_count != 1 or terminal is None:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                f"frozen executor must emit exactly one terminal event, got {terminal_count}",
+            )
+        _assert_terminal(terminal, frozen=frozen)
+        normalized = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": str(terminal.get("decision") or "").strip().upper(),
+            "reason_code": str(terminal.get("reason_code") or "").strip() or None,
+            "command_id": frozen.command_id,
+            "request_id": frozen.request_id,
+            "narrative": str(terminal.get("narrative") or "").strip(),
+            "route_type": frozen.route,
+            "target_id": frozen.target_id,
+            "graph_id": frozen.graph_id,
+            "graph_revision": frozen.graph_revision,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "node_grant_ref": frozen.node_grant_ref,
+            "audit_refs": _safe_audit_refs(terminal.get("audit_refs")),
+        }
+        acceptance_effect_intents = _safe_acceptance_effect_intents(
+            terminal.get("acceptance_effect_intents")
+        )
+        if acceptance_effect_intents:
+            normalized["acceptance_effect_intents"] = acceptance_effect_intents
+        raw_budget_usage = terminal.get("budget_usage")
+        if raw_budget_usage is not None:
+            try:
+                budget_usage = WorkerBudgetUsage.from_payload(
+                    raw_budget_usage if isinstance(raw_budget_usage, Mapping) else {}
+                )
+            except WorkerBudgetUsageError as exc:
+                raise GovernedNodeWorkerError(
+                    GOVERNED_NODE_COMMIT_INVALID,
+                    f"frozen executor returned invalid budget usage: {exc}",
+                ) from exc
+            normalized["budget_usage"] = budget_usage.to_payload()
+        normalized["audit_refs"]["buffered_pre_acceptance_events"] = buffered_event_count
+        payload_digest = _sha256_json(normalized)
+        projection_id = (
+            f"worker-projection://{_ref(frozen.graph_id)}/{frozen.graph_revision}/"
+            f"{_ref(frozen.node_id)}/{_ref(frozen.attempt_id)}/{payload_digest}"
+        )
+        record = self._projections.stage(
+            projection_id=projection_id,
+            projection={
+                **normalized,
+                "projection_id": projection_id,
+                "payload_digest": f"sha256:{payload_digest}",
+                "schema_version": "Natsume.task_runtime.worker_projection.v1",
+            },
+        )
+        durable = dict(record) if isinstance(record, Mapping) else {}
+        if (
+            str(durable.get("projection_id") or "") != projection_id
+            or str(durable.get("payload_digest") or "") != f"sha256:{payload_digest}"
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "projection writer did not return the exact durable projection",
+            )
+        yield {
+            **normalized,
+            "receipt_ref": projection_id,
+            "audit_refs": {
+                **normalized["audit_refs"],
+                "path": "governed_task_runtime:frozen_node",
+                "worker_projection_ref": projection_id,
+                "node_grant_ref": frozen.node_grant_ref,
+            },
+        }
+
+
+def _freeze_node_input(
+    *,
+    command: HostCommand,
+    work_order: WorkOrderV3,
+    execution_context: Mapping[str, Any],
+    expected_route_kind: str,
+) -> FrozenNodeInput:
+    if not isinstance(command, HostCommand) or not isinstance(work_order, WorkOrderV3):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "HostCommand and explicit WorkOrderV3 are required",
+        )
+    work_order.validate()
+    context = dict(execution_context or {})
+    graph_id = _required(context.get("graph_id"), "graph_id")
+    node_id = _required(context.get("node_id"), "node_id")
+    attempt_id = _required(context.get("attempt_id"), "attempt_id")
+    route_value = _required(context.get("worker_route"), "worker_route")
+    route = GovernedWorkerRoute.parse(route_value)
+    if route.kind != expected_route_kind or not route.target_id:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            f"worker expected {expected_route_kind}:target route, got {route_value}",
+        )
+    try:
+        revision = int(context.get("graph_revision"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "graph_revision must be an integer",
+        ) from exc
+    if (
+        revision < 1
+        or graph_id != work_order.task_graph_id
+        or revision != work_order.graph_revision
+        or _required(context.get("work_order_id"), "work_order_id") != work_order.work_order_id
+        or _required(context.get("command_id"), "command_id") != command.command_id
+        or command.graph_id != graph_id
+        or command.graph_revision != revision
+        or command.root_work_order_id != work_order.root_work_order_id
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "command/work-order/execution graph lineage differs",
+        )
+    binding = _node_binding(work_order, node_id=node_id)
+    if (
+        str(binding.get("worker_route") or "").strip().lower() != route.kind
+        or str(binding.get("target_id") or "").strip() != route.target_id
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "frozen node route differs from WorkOrder planning lineage",
+        )
+    grant_ref = _required(context.get("node_grant_ref"), "node_grant_ref")
+    parent_ref = _required(work_order.approval_ref, "work_order.approval_ref")
+    if grant_ref == parent_ref:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_GRANT_INVALID,
+            "node execution cannot reuse the parent governor grant",
+        )
+    raw_refs = context.get("node_input_refs")
+    input_refs = tuple(
+        dict.fromkeys(
+            str(value or "").strip()
+            for value in (raw_refs if isinstance(raw_refs, Sequence) and not isinstance(raw_refs, str) else ())
+            if str(value or "").strip()
+        )
+    )
+    return FrozenNodeInput(
+        command_id=command.command_id,
+        request_id=command.request_id,
+        session_id=command.session_id,
+        principal_id=command.principal_id,
+        work_order_id=work_order.work_order_id,
+        root_work_order_id=work_order.root_work_order_id,
+        graph_id=graph_id,
+        graph_revision=revision,
+        node_id=node_id,
+        attempt_id=attempt_id,
+        route=route.kind,
+        target_id=route.target_id,
+        objective=_required(binding.get("objective"), "node binding objective"),
+        input_refs=input_refs,
+        _input_pack_json=json.dumps(
+            _json_copy(work_order.input_pack),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
+        node_grant_ref=grant_ref,
+        parent_grant_ref=parent_ref,
+    )
+
+
+def _node_binding(work_order: WorkOrderV3, *, node_id: str) -> dict[str, Any]:
+    lineage = work_order.metadata.get("planning_lineage")
+    lineage_map = dict(lineage) if isinstance(lineage, Mapping) else {}
+    raw = lineage_map.get("node_bindings")
+    rows = list(raw) if isinstance(raw, list) else []
+    matches = [dict(row) for row in rows if isinstance(row, Mapping) and str(row.get("node_id") or "") == node_id]
+    if len(matches) != 1:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            f"WorkOrder requires exactly one frozen binding for node {node_id}",
+        )
+    return matches[0]
+
+
+def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:
+    if isinstance(value, Mapping):
+        verified = dict(value)
+    else:
+        projector = getattr(value, "to_dict", None)
+        projected = projector() if callable(projector) else None
+        verified = dict(projected) if isinstance(projected, Mapping) else {}
+    expected = {
+        "grant_ref": frozen.node_grant_ref,
+        "parent_grant_ref": frozen.parent_grant_ref,
+        "graph_id": frozen.graph_id,
+        "graph_revision": frozen.graph_revision,
+        "root_work_order_id": frozen.root_work_order_id,
+        "node_id": frozen.node_id,
+        "route": frozen.route,
+        "target_id": frozen.target_id,
+    }
+    actual = {key: verified.get(key) for key in expected}
+    if actual != expected:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_GRANT_INVALID,
+            "node grant verifier did not return the exact frozen authority binding",
+        )
+
+
+def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> None:
+    decision = str(event.get("decision") or "").strip().upper()
+    narrative = str(event.get("narrative") or "").strip()
+    supplied_route = str(event.get("route_type") or frozen.route).strip().lower()
+    supplied_target = str(event.get("target_id") or frozen.target_id).strip()
+    if decision not in {"APPROVE", "REJECT"} or not narrative:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "terminal event requires APPROVE/REJECT and non-empty narrative",
+        )
+    if supplied_route != frozen.route or supplied_target != frozen.target_id:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "frozen executor attempted to change node route or target",
+        )
+
+
+def _safe_audit_refs(value: Any) -> dict[str, Any]:
+    raw = dict(value) if isinstance(value, Mapping) else {}
+    return {
+        str(key): _json_copy(child)
+        for key, child in raw.items()
+        if str(key).strip() and "token" not in str(key).lower() and "secret" not in str(key).lower()
+    }
+
+
+def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
+    if value in (None, (), []):
+        return []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "acceptance_effect_intents must be a sequence",
+        )
+    intents: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "acceptance effect intent must be a mapping",
+            )
+        effect_type = str(raw.get("effect_type") or "").strip()
+        commit_scope = str(raw.get("commit_scope") or "").strip().upper()
+        payload = raw.get("payload")
+        if (
+            effect_type != "life.foreground_completed"
+            or commit_scope != "NODE"
+            or not isinstance(payload, Mapping)
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "frozen route emitted an unsupported acceptance effect",
+            )
+        intents.append(
+            {
+                "effect_type": effect_type,
+                "commit_scope": commit_scope,
+                "payload": _json_copy(payload),
+            }
+        )
+    return intents
+
+
+def _required(value: Any, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            f"{field_name} is required",
+        )
+    return text
+
+
+def _sha256_json(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _json_copy(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "frozen worker input/projection must be JSON-safe",
+        ) from exc
+
+
+def _ref(value: str) -> str:
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:24]
+
+
+__all__ = [
+    "FrozenNodeInput",
+    "GOVERNED_NODE_COMMIT_INVALID",
+    "GOVERNED_NODE_GRANT_INVALID",
+    "GOVERNED_NODE_INPUT_INVALID",
+    "GOVERNED_NODE_PROJECTION_FAILED",
+    "GovernedFrozenNodeWorker",
+    "GovernedNodeWorkerError",
+]

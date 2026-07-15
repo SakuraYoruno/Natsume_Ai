@@ -35,7 +35,7 @@ class ProductionProviderConfigurationError(ProviderAdapterError):
 ProviderPayloadCallable = Callable[[Mapping[str, Any]], Any]
 CredentialResolver = Callable[[str], str | None]
 BaseUrlResolver = Callable[[str], str | None]
-SingleAttemptTransport = Callable[..., str]
+SingleAttemptTransport = Callable[..., str | Mapping[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +167,7 @@ class VaultBackedSingleAttemptAdapter:
                 f"provider credential unavailable: {self._provider}"
             )
         provider_name = "openai" if self._provider == "openai_compatible" else self._provider
-        content = await asyncio.to_thread(
+        raw_response = await asyncio.to_thread(
             self._transport,
             provider_name=provider_name,
             model_id=request.target.model_id,
@@ -179,7 +179,25 @@ class VaultBackedSingleAttemptAdapter:
             base_url_override=self._base_url_resolver(self._provider),
             feature_key=f"model_attempt:{request.scene_type.lower()}",
         )
-        return ProviderResponse(content=str(content or ""))
+        if isinstance(raw_response, Mapping):
+            usage = raw_response.get("usage")
+            metadata = raw_response.get("metadata")
+            return ProviderResponse(
+                content=str(
+                    raw_response.get("content")
+                    or raw_response.get("text")
+                    or raw_response.get("output")
+                    or ""
+                ),
+                finish_reason=(
+                    str(raw_response.get("finish_reason"))
+                    if raw_response.get("finish_reason") is not None
+                    else None
+                ),
+                usage=dict(usage) if isinstance(usage, Mapping) else {},
+                metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
+            )
+        return ProviderResponse(content=str(raw_response or ""))
 
     def stream(self, request: ProviderAttemptRequest):
         return self._stream(request)

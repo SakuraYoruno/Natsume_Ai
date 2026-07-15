@@ -864,8 +864,10 @@ async def _unified_chat_sse_generator(
         _tb_str = _tb.format_exc()
         metrics.inc_error()
         _logger.error(
-            "unified chat SSE generator failed",
-            extra={"request_id": request_id, "error": str(exc), "traceback": _tb_str},
+            "unified chat SSE generator failed request_id=%s error=%s\n%s",
+            request_id,
+            exc,
+            _tb_str,
         )
         yield _sse({
             "phase": "COMMIT",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -11,9 +11,10 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.orchestration import GovernedCommandApplication
-from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime import GovernedRuntimeError, GovernedTaskCoordinator
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
     HostCommandSurface,
@@ -47,8 +48,22 @@ class _ReservationResult:
     reservation: dict[str, Any]
 
 
+@dataclass
+class _BudgetResult:
+    accepted: bool
+    reservation: dict[str, Any]
+    exceeded_dimensions: tuple[str, ...] = ()
+    replayed: bool = False
+
+
 class _FakeTaskStore:
-    def __init__(self, graph: TaskGraph, calls: list[str]) -> None:
+    def __init__(
+        self,
+        graph: TaskGraph,
+        calls: list[str],
+        *,
+        reservation_acquired: bool = True,
+    ) -> None:
         node = graph.nodes[0]
         self.calls = calls
         self.graph = {
@@ -69,6 +84,12 @@ class _FakeTaskStore:
         }
         self.attempts: dict[str, dict[str, Any]] = {}
         self.reservation: dict[str, Any] | None = None
+        self.budget: dict[str, Any] | None = None
+        self.budget_usage: dict[str, _BudgetResult] = {}
+        self.reservation_acquired = bool(reservation_acquired)
+
+    def assert_budget_usage_ready(self) -> None:
+        return None
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
         return dict(self.graph)
@@ -85,7 +106,62 @@ class _FakeTaskStore:
         return dict(self.reservation)
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
-        return {"attempts": [dict(item) for item in self.attempts.values()]}
+        return {
+            "attempts": [dict(item) for item in self.attempts.values()],
+            "budgets": [dict(self.budget)] if self.budget else [],
+        }
+
+    def create_budget_reservation(self, reservation: Any, **kwargs: Any) -> dict[str, Any]:
+        self.budget = {
+            **reservation.to_dict(),
+            "graph_id": kwargs["graph_id"],
+            "graph_revision": kwargs["graph_revision"],
+            "node_id": None,
+            "attempt_id": None,
+            "attempted_consumed": reservation.consumed.to_dict(),
+            "exceeded_dimensions": [],
+        }
+        return dict(self.budget)
+
+    def transition_budget(self, budget_id: str, *, expected_version: int, target_status: str, outbox: Any) -> dict[str, Any]:
+        assert self.budget is not None and expected_version == self.budget["status_version"]
+        self.budget["status"] = target_status
+        self.budget["status_version"] += 1
+        return dict(self.budget)
+
+    def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
+        if self.budget is None:
+            raise _NotFound(budget_id)
+        remaining = {
+            key: self.budget["reserved"][key] - self.budget["consumed"][key]
+            for key in self.budget["reserved"]
+        }
+        return {**self.budget, "remaining": remaining, "balanced": True}
+
+    def consume_budget_once(self, budget_id: str, **kwargs: Any) -> _BudgetResult:
+        usage_id = kwargs["usage_id"]
+        if usage_id in self.budget_usage:
+            prior = self.budget_usage[usage_id]
+            return _BudgetResult(prior.accepted, dict(self.budget or {}), replayed=True)
+        assert self.budget is not None
+        delta = kwargs["delta"].to_dict()
+        attempted = {
+            key: self.budget["consumed"][key] + delta[key]
+            for key in self.budget["consumed"]
+        }
+        dimensions = tuple(
+            key for key, value in attempted.items() if value > self.budget["reserved"][key]
+        )
+        accepted = not dimensions
+        if accepted:
+            self.budget["consumed"] = attempted
+        else:
+            self.budget["status"] = "EXCEEDED"
+            self.budget["exceeded_dimensions"] = list(dimensions)
+        self.budget["status_version"] += 1
+        result = _BudgetResult(accepted, dict(self.budget), dimensions)
+        self.budget_usage[usage_id] = result
+        return result
 
     def transition_graph(self, graph_id: str, revision: int, *, expected_version: int, target_status: str, outbox: Any) -> dict[str, Any]:
         assert expected_version == self.graph["status_version"]
@@ -145,11 +221,11 @@ class _FakeTaskStore:
         self.reservation = {
             "reservation_id": kwargs["reservation_id"],
             "attempt_id": kwargs["attempt_id"],
-            "status": "RESERVED",
+            "status": "RESERVED" if self.reservation_acquired else "RECOVERY_REQUIRED",
             "status_version": 0,
             "receipt_ref": None,
         }
-        return _ReservationResult(True, dict(self.reservation))
+        return _ReservationResult(self.reservation_acquired, dict(self.reservation))
 
     def transition_attempt(
         self,
@@ -268,12 +344,27 @@ class _Acceptance:
 
 
 def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
-    work_order = AgentWorkOrder(
+    work_order = WorkOrderV3(
         work_order_id="wo-governed-1",
         domain="research",
         run_mode="research",
         objective="execute one governed command",
         workspace={"strategy": "temp_workspace"},
+        root_work_order_id="wo-governed-1",
+        task_graph_id="graph-governed-1",
+        task_node_id="node-one",
+        graph_revision=1,
+        budget_policy=BudgetPolicy(
+            scope="work-order:wo-governed-1",
+            limits=BudgetAmount(
+                token_count=10_000,
+                tool_call_count=10,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=3,
+                model_cost_micros=1_000_000,
+            ),
+        ),
     )
     graph = TaskGraph(
         graph_id="graph-governed-1",
@@ -330,8 +421,13 @@ def _application(
     calls: list[str],
     verification_status: str,
     acceptance_decision: str = "ACCEPT",
+    reservation_acquired: bool = True,
 ) -> GovernedCommandApplication:
-    store = _FakeTaskStore(graph, calls)
+    store = _FakeTaskStore(
+        graph,
+        calls,
+        reservation_acquired=reservation_acquired,
+    )
     coordinator = GovernedTaskCoordinator(
         task_store=store,
         outbox_publisher=_Publisher(calls),
@@ -342,6 +438,39 @@ def _application(
         owner_id="worker-one",
     )
     return GovernedCommandApplication(command_repository=_Repository(), coordinator=coordinator)
+
+
+@pytest.mark.asyncio
+async def test_operation_collision_closes_attempt_lease_budget_and_blocks_graph() -> None:
+    command, work_order, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
+    calls: list[str] = []
+    app = _application(
+        graph=graph,
+        calls=calls,
+        verification_status="PASS",
+        reservation_acquired=False,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["TERMINAL"]
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert receipt["accepted"] is False
+    assert "worker:canonical" not in calls
+    assert "attempt:FAILED" in calls
+    assert "node:FAILED" in calls
+    assert "graph:BLOCKED" in calls
+    assert calls[-1] == "publish:200"
 
 
 @pytest.mark.asyncio
@@ -369,6 +498,27 @@ async def test_canonical_assignment_drives_full_durable_happy_path_and_single_co
     assert calls[-2:] == ["graph:COMPLETED", "publish:200"]
     assert "resolve:canonical:executive_runtime" in calls
     assert "worker:canonical" in calls
+
+
+@pytest.mark.asyncio
+async def test_missing_budget_policy_fails_before_worker_or_task_mutation() -> None:
+    command, work_order, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
+    calls: list[str] = []
+    app = _application(graph=graph, calls=calls, verification_status="PASS")
+
+    with pytest.raises(GovernedRuntimeError) as error:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=replace(work_order, budget_policy=None),
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert error.value.reason_code == "GOVERNED_BUDGET_POLICY_REQUIRED"
+    assert calls == []
 
 
 @pytest.mark.asyncio

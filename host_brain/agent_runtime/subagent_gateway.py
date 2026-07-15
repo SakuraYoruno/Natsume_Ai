@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Sequence
 from collections.abc import Mapping
+from threading import Lock
 import uuid
 
 from host_brain.agent_runtime.runtime_texts import (
@@ -22,6 +23,7 @@ class _SubAgentGatewayAdapter:
         timeout_ms: int,
         base_url_override: str | None,
         application_ports: AgentRuntimeApplicationPorts,
+        request_id: str | None = None,
     ) -> None:
         # Provider/model arguments remain accepted as a compatibility shape for
         # the existing sub-agent composition call.  They are intentionally not
@@ -30,6 +32,9 @@ class _SubAgentGatewayAdapter:
         self._model_id = str(model_id or "").strip() or "default"
         self._timeout_ms = max(1_000, int(timeout_ms or 30_000))
         self._application_ports = application_ports
+        self._request_id = str(request_id or "").strip()
+        self._request_index = 0
+        self._request_lock = Lock()
         # Never retain secrets or provider endpoints on the compatibility port.
         del api_key, base_url_override
 
@@ -52,7 +57,7 @@ class _SubAgentGatewayAdapter:
         )
         result = ports.model_attempt_service().complete_sync(
             ModelAttemptRequest(
-                request_id=f"subagent-{uuid.uuid4().hex}",
+                request_id=self._next_request_id(),
                 scene_type="SUBAGENT",
                 cognitive_tier="B",
                 prompt=prompt_ref,
@@ -73,12 +78,21 @@ class _SubAgentGatewayAdapter:
             "model": trace["final_model"],
         }
 
+    def _next_request_id(self) -> str:
+        if not self._request_id:
+            return f"subagent-{uuid.uuid4().hex}"
+        with self._request_lock:
+            self._request_index += 1
+            index = self._request_index
+        return f"{self._request_id}:subagent-model:{index}"
+
 
 def _build_subagent_gateway_from_runtime(
     llm_runtime: Mapping[str, Any],
     *,
     application_ports: AgentRuntimeApplicationPorts,
     adapter_class: type[Any] | None = None,
+    request_id: str | None = None,
 ) -> Any | None:
     try:
         timeout_ms = int(llm_runtime.get("timeout_ms") or 30_000)
@@ -90,6 +104,7 @@ def _build_subagent_gateway_from_runtime(
             timeout_ms=timeout_ms,
             base_url_override=None,
             application_ports=application_ports,
+            request_id=request_id,
         )
     except Exception as exc:
         _logger.debug("sub-agent gateway adapter unavailable: %s", exc)

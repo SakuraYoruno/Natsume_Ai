@@ -2,15 +2,41 @@
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 import contextlib
 import inspect
 import os
+from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 import pytest
 
-from host_brain.app.process_service_wiring import configure_process_service_ports
+
+_PYTEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="natsume-pytest-runtime-"))
+_PYTEST_CANONICAL_DB = _PYTEST_RUNTIME_ROOT / "audit.sqlite3"
+_PYTEST_DB_ENV_NAMES = (
+    "NATSUME_AUDIT_DB",
+    "HOST_AUDIT_SQLITE_PATH",
+    "HOST_AUDIT_DB_PATH",
+    "AUDIT_DB_PATH",
+)
+
+
+def _bind_pytest_persistence_env() -> None:
+    for name in _PYTEST_DB_ENV_NAMES:
+        os.environ[name] = str(_PYTEST_CANONICAL_DB)
+
+
+_bind_pytest_persistence_env()
+atexit.register(shutil.rmtree, _PYTEST_RUNTIME_ROOT, ignore_errors=True)
+
+# Import the application composition only after the test-owned persistence
+# environment exists. Importing ``host_brain.app`` may otherwise cache the
+# developer .env database before pytest can isolate it.
+from host_brain.app.process_service_wiring import configure_process_service_ports  # noqa: E402
 
 configure_process_service_ports()
 
@@ -190,6 +216,13 @@ def _reset_host_brain_singletons():
 
     env_snapshot = dict(os.environ)
     _reset_host_brain_runtime_state()
+    # Test-module collection is allowed to import configuration helpers, but
+    # it must never redirect the actual test execution back to a developer DB.
+    _bind_pytest_persistence_env()
+    # Some architecture/static-scan contracts reload the process composition
+    # modules.  Rebind the application-owned ports after every reset so later
+    # tests never inherit a freshly reloaded, unconfigured container.
+    configure_process_service_ports()
     from host_brain.observability.degradation_state import (
         DegradationStateMachine,
         set_global_degradation_state_machine,

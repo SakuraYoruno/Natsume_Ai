@@ -104,16 +104,21 @@ def build_gateway_progress_reply_text(
     session_id: str,
     payload: dict[str, Any],
     exclude_request_id: str | None = None,
+    task_status_projection: Any,
 ) -> tuple[str, str, dict[str, Any] | None]:
     """构建进度回复文本，返回 (reply_text, reason, summary)。"""
     from host_brain.app.surface_reply_preprocessor import render_quick_gateway_progress_text  # noqa: PLC0415
-    from host_brain.composition.process_services import get_runtime_task_registry  # noqa: PLC0415
 
     person_id = str(payload.get("person_id") or "").strip()
     summary = None
     if person_id:
-        summary = get_runtime_task_registry().summarize_for_chat(
+        summary = task_status_projection.summarize_for_chat(
             person_id=person_id,
+            session_id=session_id,
+            exclude_request_id=exclude_request_id,
+        )
+    elif session_id:
+        summary = task_status_projection.summarize_for_session(
             session_id=session_id,
             exclude_request_id=exclude_request_id,
         )

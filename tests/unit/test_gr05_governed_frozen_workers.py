@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.task_runtime.governed_workers import (
+    GOVERNED_NODE_COMMIT_INVALID,
+    GOVERNED_NODE_GRANT_INVALID,
+    GovernedFrozenNodeWorker,
+    GovernedNodeWorkerError,
+)
+from natsume_contracts.task import HostCommandSurface, build_host_command
+
+
+class _GrantVerifier:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def verify(self, **kwargs):  # noqa: ANN003
+        self.calls.append(dict(kwargs))
+        return {"verified": True, **kwargs}
+
+
+class _ProjectionStore:
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+
+    def stage(self, *, projection_id: str, projection):  # noqa: ANN001
+        payload = dict(projection)
+        existing = self.rows.get(projection_id)
+        if existing is not None and existing != payload:
+            raise AssertionError("projection replay drift")
+        self.rows[projection_id] = payload
+        return payload
+
+
+class _Executor:
+    def __init__(self, terminal: dict[str, Any]) -> None:
+        self.terminal = terminal
+        self.inputs = []
+
+    async def execute_stream(self, frozen):  # noqa: ANN001
+        self.inputs.append(frozen)
+        yield {"phase": "DELTA", "done": False, "delta": "working"}
+        yield dict(self.terminal)
+
+
+def _contracts(route: str = "chat", target: str = "surface_reply"):
+    graph_id = "graph-governed-workers"
+    work_order_id = "wo-governed-workers"
+    node_id = "node-governed-workers"
+    order = WorkOrderV3(
+        work_order_id=work_order_id,
+        domain="chat" if route == "chat" else "research",
+        run_mode="worker",
+        objective="frozen objective",
+        input_pack={"user_message": "hello"},
+        metadata={
+            "planning_lineage": {
+                "graph_id": graph_id,
+                "root_work_order_id": work_order_id,
+                "revision": 1,
+                "node_bindings": [
+                    {
+                        "node_id": node_id,
+                        "worker_route": route,
+                        "target_id": target,
+                        "objective": "answer from frozen input",
+                    }
+                ],
+            }
+        },
+        root_work_order_id=work_order_id,
+        task_graph_id=graph_id,
+        task_node_id=node_id,
+        graph_revision=1,
+        budget_policy=BudgetPolicy(scope="worker-test", limits=BudgetAmount(time_ms=1000, concurrency=1)),
+        business_idempotency_scope="worker-test",
+        operation_fingerprint="sha256:" + "a" * 64,
+        approval_ref="governor-grant://parent",
+        review_ref="review-waiver://worker-test",
+    )
+    command = build_host_command(
+        surface=HostCommandSurface.CHAT,
+        request_id="request-workers",
+        session_id="session-workers",
+        principal_id="principal-workers",
+        input_ref="input://sha256/" + "1" * 64,
+        input_sha256="sha256:" + "1" * 64,
+        governor_grant_ref=order.approval_ref,
+        root_work_order_id=work_order_id,
+        graph_id=graph_id,
+        graph_revision=1,
+        route_type=route,
+        target_id=target,
+        business_scope=order.business_idempotency_scope,
+        operation_fingerprint=order.operation_fingerprint,
+        created_at_ms=100,
+    )
+    context = {
+        "command_id": command.command_id,
+        "work_order_id": work_order_id,
+        "graph_id": graph_id,
+        "graph_revision": 1,
+        "node_id": node_id,
+        "attempt_id": "attempt-workers-1",
+        "worker_route": f"{route}:{target}",
+        "node_input_refs": ["artifact://input/one"],
+        "node_grant_ref": "governor-grant://child/node",
+    }
+    return command, order, context
+
+
+@pytest.mark.asyncio
+async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_commit() -> None:
+    command, order, context = _contracts()
+    grants = _GrantVerifier()
+    projections = _ProjectionStore()
+    executor = _Executor(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "hello from frozen chat",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "acceptance_effect_intents": [
+                {
+                    "effect_type": "life.foreground_completed",
+                    "commit_scope": "NODE",
+                    "payload": {"command_type": "foreground_completed"},
+                }
+            ],
+        }
+    )
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=executor,
+        node_grants=grants,
+        projections=projections,
+    )
+
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=context,
+        )
+    ]
+
+    assert len(events) == 1
+    terminal = events[0]
+    assert terminal["route_type"] == "chat"
+    assert terminal["target_id"] == "surface_reply"
+    assert terminal["receipt_ref"] in projections.rows
+    assert projections.rows[terminal["receipt_ref"]]["narrative"] == "hello from frozen chat"
+    assert terminal["acceptance_effect_intents"][0]["effect_type"] == "life.foreground_completed"
+    assert terminal["audit_refs"]["buffered_pre_acceptance_events"] == 1
+    assert executor.inputs[0].objective == "answer from frozen input"
+    assert executor.inputs[0].input_refs == ("artifact://input/one",)
+    assert grants.calls[0]["grant_ref"] == "governor-grant://child/node"
+    mutated_pack = dict(executor.inputs[0].input_pack)
+    mutated_pack["user_message"] = "tampered"
+    assert executor.inputs[0].input_pack["user_message"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_delegate_worker_rejects_executor_reroute_before_projection() -> None:
+    command, order, context = _contracts(route="delegate", target="research_agent")
+    projections = _ProjectionStore()
+    worker = GovernedFrozenNodeWorker(
+        route_kind="delegate",
+        executor=_Executor(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "result",
+                "route_type": "delegate",
+                "target_id": "different_agent",
+            }
+        ),
+        node_grants=_GrantVerifier(),
+        projections=projections,
+    )
+
+    with pytest.raises(GovernedNodeWorkerError) as raised:
+        _ = [
+            event
+            async for event in worker.execute_stream(
+                command=command,
+                work_order=order,
+                execution_context=context,
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_NODE_COMMIT_INVALID
+    assert projections.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_parent_grant_cannot_be_reused_as_node_grant() -> None:
+    command, order, context = _contracts()
+    context["node_grant_ref"] = order.approval_ref
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=_Executor({}),
+        node_grants=_GrantVerifier(),
+        projections=_ProjectionStore(),
+    )
+
+    with pytest.raises(GovernedNodeWorkerError) as raised:
+        _ = [
+            event
+            async for event in worker.execute_stream(
+                command=command,
+                work_order=order,
+                execution_context=context,
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_NODE_GRANT_INVALID

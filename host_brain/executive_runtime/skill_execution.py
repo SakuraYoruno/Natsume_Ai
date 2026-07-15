@@ -21,8 +21,8 @@ def _build_task_progress_sub_context(
     session_id: str,
     person_id: str,
 ) -> SimpleNamespace:
-    registry = ports.get_runtime_task_registry()
-    summary = registry.summarize_for_chat(
+    projection = ports.get_task_status_projection()
+    summary = projection.summarize_for_chat(
         person_id=person_id,
         session_id=session_id,
         exclude_request_id=request_id,
@@ -61,6 +61,61 @@ def _extract_skill_args(intent_draft: dict[str, Any], request_body: Any, user_me
         "text": user_message,
         "user_message": user_message,
     }
+
+
+def _governed_node_grant_error(
+    value: Mapping[str, Any] | None,
+    *,
+    execution_context: Mapping[str, Any],
+    request_id: str,
+    session_id: str,
+    skill_id: str,
+    intent_id: str,
+) -> str | None:
+    grant = dict(value) if isinstance(value, Mapping) else {}
+    context = dict(execution_context or {})
+    try:
+        revision = int(context.get("graph_revision") or 0)
+        grant_revision = int(grant.get("graph_revision") or 0)
+        expires_at_ms = int(grant.get("expires_at_ms") or 0)
+        fencing_token = int(context.get("fencing_token") or 0)
+    except (TypeError, ValueError):
+        return "GOVERNED_NODE_GRANT_INVALID"
+    expected = {
+        "grant_ref": str(context.get("node_grant_ref") or "").strip(),
+        "parent_grant_ref": str(context.get("parent_grant_ref") or "").strip(),
+        "request_id": str(request_id or "").strip(),
+        "session_id": str(session_id or "").strip(),
+        "principal_id": str(context.get("principal_id") or "").strip(),
+        "graph_id": str(context.get("graph_id") or "").strip(),
+        "root_work_order_id": str(context.get("work_order_id") or "").strip(),
+        "node_id": str(context.get("node_id") or "").strip(),
+        "route": "skill",
+        "target_id": str(skill_id or "").strip(),
+        "intent_id": str(intent_id or "").strip(),
+        "action_kind": str(skill_id or "").strip(),
+        "token_subject": str(skill_id or "").strip(),
+    }
+    actual = {key: str(grant.get(key) or "").strip() for key in expected}
+    required_runtime = (
+        "command_id",
+        "attempt_id",
+        "lease_id",
+        "lease_owner_id",
+        "reservation_id",
+        "business_scope",
+        "operation_fingerprint",
+    )
+    if (
+        actual != expected
+        or revision < 1
+        or grant_revision != revision
+        or expires_at_ms <= int(time.time() * 1000)
+        or any(not str(context.get(key) or "").strip() for key in required_runtime)
+        or fencing_token < 1
+    ):
+        return "GOVERNED_NODE_GRANT_INVALID"
+    return None
 
 
 def _merge_plan_node_args(
@@ -252,6 +307,8 @@ def _execute_skill(
     model_attempt_service_override: Any | None = None,
     production_authority_verifier: Any | None = None,
     governed_execution_context: Mapping[str, Any] | None = None,
+    execution_args_override: Mapping[str, Any] | None = None,
+    verified_node_grant: Mapping[str, Any] | None = None,
 ) -> _ExecutionOutcome:
     started = time.time()
     if skill_registry is None:
@@ -264,6 +321,21 @@ def _execute_skill(
     approval_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("approval_token_ref"))
     confirm_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("confirm_token_ref"))
     execution_intent_id = _normalize_text(intent_id) or f"intent::{request_id}::{skill_id}"
+    governed_node_verified = False
+    if governed_execution_context is not None:
+        grant_error = _governed_node_grant_error(
+            verified_node_grant,
+            execution_context=governed_execution_context,
+            request_id=request_id,
+            session_id=session_id,
+            skill_id=skill_id,
+            intent_id=execution_intent_id,
+        )
+        if grant_error:
+            raise PermissionError(grant_error)
+        governed_node_verified = True
+        if bool(skill_meta.require_confirm):
+            raise PermissionError("GOVERNED_DURABLE_CONFIRM_REVIEW_REQUIRED")
 
     if _normalize_text(dict(governor_result or {}).get("decision"), lower=True) not in {"", "approve"}:
         error_text = _normalize_text(governor_result.get("reason_code")) or "GOVERNOR_REJECTED"
@@ -296,7 +368,7 @@ def _execute_skill(
 
     action_arbiter_decision: dict[str, Any] | None = None
     token_service = None
-    if _action_arbiter_execution_enabled():
+    if _action_arbiter_execution_enabled() and not governed_node_verified:
         envelope = dict(intent_draft or {})
         bound_intent_id = _normalize_text(envelope.get("id") or envelope.get("intent_id"))
         bound_session_id = _normalize_text(envelope.get("session_id"))
@@ -312,7 +384,7 @@ def _execute_skill(
         elif bound_seq < 0:
             authority_error = "ARBITER_INTENT_SEQ_INVALID"
 
-        if not authority_error:
+        if not authority_error and not governed_node_verified:
             from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL  # noqa: PLC0415
 
             if token_service_override is None:
@@ -425,7 +497,11 @@ def _execute_skill(
                 },
             )
 
-    args = _extract_skill_args(intent_draft, request_body, task_text)
+    args = (
+        dict(execution_args_override)
+        if execution_args_override is not None
+        else _extract_skill_args(intent_draft, request_body, task_text)
+    )
     if is_agent_runtime_skill(skill_id):
         if governed_execution_context is not None:
             # The admitted Host command owns the root WorkOrder identity.  A

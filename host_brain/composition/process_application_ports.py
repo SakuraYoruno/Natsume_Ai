@@ -18,10 +18,10 @@ class ProcessApplicationPorts:
     mode_transition_service: Callable[[], Any]
     model_credential_resolver: Callable[[str], str | None]
     model_base_url_resolver: Callable[[str], str | None]
-    model_transport: Callable[..., str]
+    model_transport: Callable[..., str | dict[str, Any]]
     graph_handler_bindings: Callable[[], Sequence[GraphHandlerBinding]]
     multimodal_observer_factory: Factory
-    runtime_task_registry_factory: Factory
+    legacy_runtime_task_registry_factory: Factory
     capability_gap_telemetry_factory: Factory
     capability_forge_service_factory: Factory
     routing_matrix_factory: Factory

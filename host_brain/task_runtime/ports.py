@@ -24,9 +24,11 @@ class CommandRepositoryPort(Protocol):
 
 
 class TaskStorePort(Protocol):
-    """Subset of ``DurableTaskStore`` required by the one-node coordinator."""
+    """Subset of ``DurableTaskStore`` required by the DAG coordinator."""
 
     def get_graph(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
+
+    def assert_budget_usage_ready(self) -> None: ...
 
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
@@ -57,6 +59,49 @@ class TaskStorePort(Protocol):
         outbox: Any,
         verification_result: Mapping[str, Any] | Any | None = None,
         acceptance_judgement: Mapping[str, Any] | Any | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def transition_node_and_stage_acceptance_effects(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        effect_intents: Sequence[Mapping[str, Any] | Any],
+    ) -> Mapping[str, Any]: ...
+
+    def transition_graph_and_stage_acceptance_effects(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        expected_version: int,
+        outbox: Any,
+        effect_intents: Sequence[Mapping[str, Any] | Any],
+    ) -> Mapping[str, Any]: ...
+
+    def reschedule_acceptance_effect_intent(
+        self,
+        effect_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        reason_code: str,
+        detail: str,
+        delay_ms: int,
+    ) -> Mapping[str, Any]: ...
+
+    def request_cancel_node(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
     ) -> Mapping[str, Any]: ...
 
     def create_attempt(
@@ -121,6 +166,43 @@ class TaskStorePort(Protocol):
         receipt_ref: str,
         outbox: Any,
     ) -> Mapping[str, Any]: ...
+
+    def create_budget_reservation(
+        self,
+        reservation: Any,
+        *,
+        graph_id: str | None,
+        graph_revision: int | None,
+        node_id: str | None,
+        attempt_id: str | None,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def transition_budget(
+        self,
+        budget_id: str,
+        *,
+        expected_version: int,
+        target_status: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def consume_budget_once(
+        self,
+        budget_id: str,
+        *,
+        usage_id: str,
+        charge_kind: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        delta: Any,
+        expected_version: int,
+        outbox: Any,
+    ) -> Any: ...
+
+    def reconcile_budget(self, budget_id: str) -> Mapping[str, Any]: ...
 
 
 class RuntimeOutboxPublisherPort(Protocol):

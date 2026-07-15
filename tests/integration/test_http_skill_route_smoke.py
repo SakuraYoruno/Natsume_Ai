@@ -68,6 +68,20 @@ def _parse_sse_events(response) -> list[dict[str, Any]]:
     return events
 
 
+def _governed_commit(events: list[dict[str, Any]]) -> dict[str, Any]:
+    assert not any(event.get("phase") == "EXECUTIVE_ROUTE" for event in events)
+    commits = [event for event in events if event.get("phase") == "COMMIT"]
+    assert commits
+    commit = commits[-1]
+    assert commit.get("governed") is True
+    receipt = dict(commit.get("execution_receipt") or {})
+    assert receipt.get("status") == "ACCEPTED"
+    assert receipt.get("accepted") is True
+    assert receipt.get("graph_id")
+    assert receipt.get("attempt_id")
+    return commit
+
+
 def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQLiteLedger]:
     db_path = canonical_root / "host-canonical.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -112,6 +126,7 @@ def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQL
     )
 
     client = TestClient(host_api.app, raise_server_exceptions=False)
+    client.__enter__()
     client.__dict__["_skill_smoke_stack"] = stack
     client.__dict__["_skill_smoke_ledger"] = ledger
     client.__dict__["_previous_capability_composition"] = previous_composition
@@ -119,6 +134,7 @@ def _build_client(monkeypatch, *, canonical_root: Path) -> tuple[TestClient, SQL
 
 
 def _close_client(client: TestClient, ledger: SQLiteLedger) -> None:
+    client.__exit__(None, None, None)
     stack = client.__dict__.pop("_skill_smoke_stack", None)
     if stack is not None:
         stack.close()
@@ -151,12 +167,10 @@ def test_http_chat_route_executes_direct_skill(monkeypatch, tmp_path: Path) -> N
         assert "text/event-stream" in str(response.headers.get("content-type", "")).lower()
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "session_summary"
-        assert route_event["reason_code"] == "intent_draft:skill"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "session_summary"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
 
@@ -183,12 +197,10 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "session_summary"
-        assert route_event["reason_code"] == "intent_draft:skill"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "session_summary"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
 
@@ -230,11 +242,10 @@ def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch, tmp_
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "agent_worker"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "agent_worker"
         assert commit_event["decision"] == "APPROVE"
         assert "print('fixed')" in str(commit_event.get("narrative") or "")
         assert captured["payload"]["tool"] == "codex_runtime"
@@ -281,11 +292,10 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "agent_inspect"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "agent_inspect"
         assert commit_event["decision"] == "APPROVE"
         assert "dedupe_by_frequency" in str(commit_event.get("narrative") or "")
         work_order = captured["payload"]["work_order"]
@@ -324,10 +334,10 @@ def test_http_chat_route_infers_agent_self_heal_task(monkeypatch, tmp_path: Path
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "agent_self_heal"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "agent_self_heal"
         work_order = captured["payload"]["work_order"]
         assert work_order["domain"] == "immune"
         assert work_order["run_mode"] == "self_heal"
@@ -367,12 +377,10 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "session_summary"
-        assert route_event["reason_code"] == "intent_draft:skill"
+        assert commit_event["route_type"] == "skill"
+        assert commit_event["target_id"] == "session_summary"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
 
@@ -402,12 +410,9 @@ def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "plan"
-        assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "intent_draft:plan"
+        assert commit_event["execution_receipt"]["graph_revision"] == 1
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")
@@ -463,12 +468,9 @@ def test_http_chat_route_executes_skill_plan(monkeypatch, tmp_path: Path) -> Non
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "plan"
-        assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "intent_draft:plan"
+        assert commit_event["execution_receipt"]["graph_revision"] == 1
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")
@@ -543,11 +545,9 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "plan"
-        assert route_event["target_id"] == "skill_dag"
+        assert commit_event["execution_receipt"]["graph_revision"] == 1
         assert commit_event["decision"] == "APPROVE"
         worker_payload = next(payload for payload in captured if "work_order" in payload)
         assert worker_payload["work_order"]["workspace"] == {"strategy": "runtime_repo"}
@@ -618,12 +618,9 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch, tmp_
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
-        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+        commit_event = _governed_commit(events)
 
-        assert route_event["route_type"] == "plan"
-        assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "intent_draft:plan"
+        assert commit_event["execution_receipt"]["graph_revision"] == 1
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")

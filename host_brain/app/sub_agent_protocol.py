@@ -375,6 +375,7 @@ class SubAgentDispatcher:
             gateway = _build_subagent_gateway_from_runtime(
                 subagent_runtime,
                 application_ports=AGENT_RUNTIME_PORTS,
+                request_id=req.request_id,
             )
             if gateway is None:
                 return

@@ -129,6 +129,7 @@ def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypat
             prompt_registry=lambda: registry,
             model_attempt_service=lambda: service,
         ),
+        request_id="req-aw05-parent",
     )
 
     result = gateway.complete([{"role": "user", "content": "do bounded work"}])
@@ -140,5 +141,6 @@ def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypat
     assert adapter.requests[0].prompt.prompt_id == SUBAGENT_GATEWAY_PROMPT_ID
     assert adapter.requests[0].prompt.version == AGENT_MODEL_PROMPT_VERSION
     assert adapter.requests[0].scene_type == "SUBAGENT"
+    assert adapter.requests[0].request_id == "req-aw05-parent:subagent-model:1"
     assert not hasattr(gateway, "_api_key")
     assert not hasattr(gateway, "_llm")

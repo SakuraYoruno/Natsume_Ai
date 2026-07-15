@@ -60,6 +60,46 @@ _FORBIDDEN_ROUTE_FIELDS = frozenset(
 )
 
 
+def _known_model_provider(model_id: str) -> str | None:
+    """Return a provider only for model families whose names are unambiguous."""
+
+    model = str(model_id or "").strip().lower()
+    if model.startswith("gemini-"):
+        return "gemini"
+    if model.startswith("deepseek-"):
+        return "deepseek"
+    if model.startswith(("minimax-", "abab", "m1-", "m2-")):
+        return "minimax"
+    if model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
+def _model_matches_provider(*, provider: str, model_id: str) -> bool:
+    model_provider = _known_model_provider(model_id)
+    if model_provider is None:
+        # Private deployments commonly expose opaque aliases.  Unknown names
+        # remain valid; only a positively identified cross-provider family is
+        # rejected.
+        return True
+    if model_provider == provider:
+        return True
+    return model_provider == "openai" and provider in {
+        "openai",
+        "openai_compatible",
+        "codex",
+    }
+
+
+def _configured_model_candidates(*names: str) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    for name in names:
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            candidates.append((name, value))
+    return candidates
+
+
 def _env_token(value: str) -> str:
     return "_".join(
         part
@@ -163,34 +203,39 @@ class ServerRouteCatalog:
         else:
             role_model_names: tuple[str, ...] = ()
             role_timeout_names: tuple[str, ...] = ()
+            provider_role_model_name = ""
             default_timeout = 15_000
             lane = "default"
             route_target = "cloud"
             if scene.startswith("CHAT_SURFACE"):
                 role_model_names = ("HOST_SURFACE_REPLY_MODEL_ID", "HOST_CHAT_AGENT_MODEL_ID")
+                provider_role_model_name = (
+                    f"HOST_{_env_token(provider)}_SURFACE_REPLY_MODEL_ID"
+                )
                 role_timeout_names = ("HOST_SURFACE_REPLY_TIMEOUT_MS", "HOST_CHAT_AGENT_TIMEOUT_MS")
                 default_timeout = 30_000
                 lane = "surface_reply"
             elif scene == "SUBAGENT":
                 role_model_names = ("HOST_SUBAGENT_MODEL_ID",)
+                provider_role_model_name = f"HOST_{_env_token(provider)}_SUBAGENT_MODEL_ID"
                 role_timeout_names = ("HOST_SUBAGENT_TIMEOUT_MS",)
                 default_timeout = 30_000
                 lane = "subagent"
             elif scene in {"EXEC_INTENT", "THALAMUS_INTENT"}:
                 role_model_names = ("HOST_EXECUTIVE_ROUTER_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID")
+                provider_role_model_name = (
+                    f"HOST_{_env_token(provider)}_EXECUTIVE_ROUTER_MODEL_ID"
+                )
                 role_timeout_names = ("HOST_EXECUTIVE_ROUTER_TIMEOUT_MS", "HOST_DISPATCH_AGENT_TIMEOUT_MS")
                 default_timeout = 5_000
                 lane = "executive_router"
             elif scene in {"VISION_UI", "VISION_ACTION_PLANNER", "MULTIMODAL"}:
                 role_model_names = ("HOST_VISION_LLM_MODEL_ID",)
+                provider_role_model_name = f"HOST_{_env_token(provider)}_VISION_MODEL_ID"
                 role_timeout_names = ("HOST_VISION_LLM_TIMEOUT_MS",)
                 default_timeout = 20_000
                 lane = "vision"
 
-            explicit_tier_model = _first_env(
-                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_TIER_{_env_token(tier)}_MODEL_ID",
-                f"HOST_MODEL_ROUTE_TIER_{_env_token(tier)}_MODEL_ID",
-            )
             tier_default = _TIER_MODEL_DEFAULTS.get(provider, {}).get(tier, "")
             tier_driven_scene = (
                 scene in {"NATSUME_AGENT", "CHAT", "TRIBE_INTERNAL"}
@@ -201,14 +246,28 @@ class ServerRouteCatalog:
                 if tier_driven_scene
                 else provider_model_override or tier_default or provider_model
             )
-            model_id = (
-                explicit_tier_model
-                or _first_env(
-                    f"HOST_MODEL_ROUTE_SCENE_{scene_token}_MODEL_ID",
-                    *role_model_names,
-                )
-                or provider_fallback
+            candidate_names = (
+                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_TIER_{_env_token(tier)}_MODEL_ID",
+                f"HOST_MODEL_ROUTE_TIER_{_env_token(tier)}_MODEL_ID",
+                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_MODEL_ID",
+                *((provider_role_model_name,) if provider_role_model_name else ()),
+                *role_model_names,
             )
+            model_candidates = _configured_model_candidates(*candidate_names)
+            model_candidates.append(("provider_fallback", provider_fallback))
+            ignored_model_sources: list[str] = []
+            model_id = ""
+            model_selection_source = ""
+            for source, candidate in model_candidates:
+                if _model_matches_provider(provider=provider, model_id=candidate):
+                    model_id = candidate
+                    model_selection_source = source
+                    break
+                ignored_model_sources.append(source)
+            if not model_id:
+                raise ValueError(
+                    f"no provider-compatible model configured for provider={provider} scene={scene}"
+                )
             timeout_ms = _timeout_env(
                 f"HOST_MODEL_ROUTE_SCENE_{scene_token}_TIMEOUT_MS",
                 *role_timeout_names,
@@ -233,6 +292,12 @@ class ServerRouteCatalog:
             "cognitive_tier": tier,
             "generation_parameters": dict(generation),
         }
+        if not local_chat:
+            route["model_selection_source"] = model_selection_source
+            route["route_config_warnings"] = [
+                f"INCOMPATIBLE_MODEL_OVERRIDE_IGNORED:{source}"
+                for source in ignored_model_sources
+            ]
         _assert_secret_free(route)
         return route
 

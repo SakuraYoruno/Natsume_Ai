@@ -22,7 +22,6 @@ class AgentRuntimeApplicationPorts:
     conversation_history: Callable[[], Any]
     life_memory_service: Callable[[], Any]
     audit_ledger: Callable[[], Any]
-    runtime_task_registry: Callable[[], Any]
     prompt_registry: Callable[[], Any]
     model_attempt_service: Callable[[], Any]
     persist_post_process_audit: Callable[..., Awaitable[None]]

@@ -79,7 +79,9 @@ class ArchitectureGateSpec:
 
 # Gate 1-14 never inherit truth from the repository-wide pytest stage.  Each
 # one is bound to a named static result and, where behavior matters, a focused
-# dynamic stage.  Gate 15 is the only aggregate program-acceptance gate.
+# dynamic stage.  Gate 15 aggregates the Core Infrastructure release only;
+# Universal Governed Runtime completeness is evaluated by the separate
+# fail-closed universal_runtime_coverage gate.
 ARCHITECTURE_GATE_SPECS: tuple[ArchitectureGateSpec, ...] = (
     ArchitectureGateSpec(1, "package dependency and Edge boundary", ("edge_standalone",)),
     ArchitectureGateSpec(2, "single composition root and app truth boundary"),
@@ -101,7 +103,7 @@ ARCHITECTURE_GATE_SPECS: tuple[ArchitectureGateSpec, ...] = (
     ),
     ArchitectureGateSpec(
         15,
-        "complete program acceptance",
+        "core infrastructure program acceptance",
         (
             "offline_pytest",
             "contract_schema_contracts",

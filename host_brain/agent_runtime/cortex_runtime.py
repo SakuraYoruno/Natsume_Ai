@@ -9,7 +9,6 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _format_template_text,
     _load_template_mapping,
     _mapping_section,
-    _mapping_text,
     _parse_bool_env,
     _sse,
     _airlock_sanitize_input,
@@ -58,7 +57,6 @@ from host_brain.agent_runtime.postprocess import (
 )
 from host_brain.agent_runtime.runtime_texts import (
     _load_runtime_text_value,
-    _load_runtime_texts_section,
     _logger,
     _resolve_text_render_target_lang,
 )
@@ -129,32 +127,41 @@ async def _cortex_orchestrator_sse_generator_impl(
         platform=getattr(request_body, "reply_channel", None),
         conversation_id=getattr(request_body, "reply_target", None),
     )
+    canonical_route = str((intent_draft or {}).get("route") or "").strip().lower()
+    canonical_governed_route = canonical_route in {"chat", "skill", "delegate", "plan"}
+    governed_supported = bool(
+        governed_command_application is not None
+        and callable(getattr(governed_command_application, "supports", None))
+        and governed_command_application.supports(intent_draft)
+    )
 
-    # Record user turn for conversation history (moved from cortex_orchestrator)
-    try:
-        application_ports.record_user_turn(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            content=str(getattr(request_body, "message", "") or ""),
-            ts_ms=int(time.time() * 1000),
-            lang=str(getattr(request_body, "render_target_lang", None) or "zh").strip().lower() or "zh",
-            metadata={
-                "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
-                "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
-                "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
-                "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
-                "attachments": list(getattr(request_body, "attachments", []) or []),
-                "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
-                "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
-            },
-        )
-    except Exception:
-        pass
+    # Governed requests stage their user turn only after graph Acceptance.  The
+    # legacy writer remains temporarily for non-canonical compatibility routes.
+    if not canonical_governed_route:
+        try:
+            application_ports.record_user_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=str(getattr(request_body, "message", "") or ""),
+                ts_ms=int(time.time() * 1000),
+                lang=str(getattr(request_body, "render_target_lang", None) or "zh").strip().lower() or "zh",
+                metadata={
+                    "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
+                    "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                    "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                    "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                    "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                    "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
+                    "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
+                    "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
+                    "attachments": list(getattr(request_body, "attachments", []) or []),
+                    "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
+                    "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
+                },
+            )
+        except Exception:
+            pass
 
     sanitized_message, airlock_passed = _sanitize_input(user_message)
     if not airlock_passed:
@@ -200,42 +207,38 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
+    if canonical_governed_route and not governed_supported:
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": (
+                    "GOVERNED_RUNTIME_UNAVAILABLE"
+                    if governed_command_application is None
+                    else "GOVERNED_ROUTE_UNSUPPORTED"
+                ),
+                "request_id": request_id,
+            }
+        )
+        return
+
     render_target_lang = _resolve_text_render_target_lang(
         request_body=request_body,
         sanitized_message=sanitized_message,
     )
 
-    if (
-        governed_command_application is not None
-        and callable(getattr(governed_command_application, "supports", None))
-        and governed_command_application.supports(intent_draft)
-    ):
-        async for governed_event in governed_command_application.execute_stream(
-            request_body=request_body,
-            request_id=request_id,
-            session_id=session_id,
-            ts_ms=ts_ms,
-            intent_draft=intent_draft,
-            governor_result=gov,
-            person_id=person_id,
-            sanitized_message=sanitized_message,
-            emotion_context=emotion_context,
-            render_target_lang=render_target_lang,
-            command_authority=dict(command_authority or {}),
-        ):
-            yield _emit_sse(dict(governed_event))
-        return
-
     bond_summary: dict[str, Any] = {}
 
-    with soft_fail("agent_runtime_shared.cortex_conversation_started", fallback=None):
-        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+    if not governed_supported:
+        with soft_fail("agent_runtime_shared.cortex_conversation_started", fallback=None):
+            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
-        get_cortex_agent().emit_conversation_started(
-            user_id=str(person_id or ""),
-            session_id=str(session_id or ""),
-            request_id=str(request_id or ""),
-        )
+            get_cortex_agent().emit_conversation_started(
+                user_id=str(person_id or ""),
+                session_id=str(session_id or ""),
+                request_id=str(request_id or ""),
+            )
 
     contextual_session_answer = _contextual_session_answer(
         request_id=request_id,
@@ -244,7 +247,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         user_message=sanitized_message,
         render_target_lang=render_target_lang,
     )
-    if contextual_session_answer:
+    if contextual_session_answer and not governed_supported:
         narrative = _sanitize_output(str(contextual_session_answer).strip())
         total_latency_ms = int(time.time() * 1000) - ts_ms
         yield _emit_sse(
@@ -302,7 +305,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         user_message=sanitized_message,
         render_target_lang=render_target_lang,
     )
-    if contextual_style_answer:
+    if contextual_style_answer and not governed_supported:
         narrative = _sanitize_output(str(contextual_style_answer).strip())
         total_latency_ms = int(time.time() * 1000) - ts_ms
         yield _emit_sse(
@@ -364,7 +367,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         if get_orchestration_settings().clarification_direct_enabled
         else None
     )
-    if clarification_direct_answer:
+    if clarification_direct_answer and not governed_supported:
         narrative = _sanitize_output(str(clarification_direct_answer).strip())
         total_latency_ms = int(time.time() * 1000) - ts_ms
         yield _emit_sse(
@@ -453,33 +456,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             or relational_topic
             or assistant_followup_fastlane
         )
-
-    try:
-        runtime_task_status_templates = _load_runtime_texts_section(
-            "runtime_task_status",
-            render_target_lang=render_target_lang,
-        )
-        runtime_task_registry = application_ports.runtime_task_registry()
-        if runtime_task_registry.get_by_request_id(request_id) is None:
-            runtime_task_registry.create_task(
-                task_kind="chat_request",
-                target_id="cortex_orchestrator",
-                request_id=request_id,
-                session_id=session_id,
-                person_id=person_id,
-                user_message=sanitized_message,
-                detail=_mapping_text(
-                    runtime_task_status_templates,
-                    "pre_dispatch_detail",
-                ),
-                progress_message=_mapping_text(
-                    runtime_task_status_templates,
-                    "pre_dispatch_progress",
-                ),
-                meta={"stage": "cortex_pre_dispatch"},
-            )
-    except Exception as task_exc:
-        _logger.debug("[%s] cortex_orchestrator runtime task init failed: %s", request_id, task_exc)
 
     retrieval_task: asyncio.Task | None = None
     retrieval_evidence_items: list[dict[str, Any]] = []
@@ -647,6 +623,30 @@ async def _cortex_orchestrator_sse_generator_impl(
         scene_type="CHAT",
     )
     llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
+
+    if governed_supported:
+        async for governed_event in governed_command_application.execute_stream(
+            request_body=request_body,
+            request_id=request_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+            intent_draft=intent_draft,
+            governor_result=gov,
+            person_id=person_id,
+            sanitized_message=sanitized_message,
+            emotion_context=emotion_context,
+            emotion_snapshot=emotion_snapshot,
+            bond_summary=bond_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+            retrieval_summary=retrieval_summary,
+            llm_runtime=llm_runtime,
+            pii_ingress_stats=_pii_ingress_stats,
+            motive_state=retrieval_motive_state,
+            render_target_lang=render_target_lang,
+            command_authority=dict(command_authority or {}),
+        ):
+            yield _emit_sse(dict(governed_event))
+        return
 
     if llm_runtime is not None and not llm_runtime.get("available"):
         fallback_narrative = _load_runtime_text_value(

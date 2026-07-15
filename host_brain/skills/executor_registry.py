@@ -184,9 +184,11 @@ class BoundSkillExecutionAuthority:
 
     __slots__ = (
         "authority_id", "authority_kind", "authority_ref", "executor_id",
-        "skill_id", "request_id", "principal_id", "target_id", "command_id",
+        "skill_id", "request_id", "principal_id", "target_id", "command_target_id", "command_id",
         "work_order_id", "graph_id", "graph_revision", "node_id",
         "attempt_id", "lease_id", "fencing_token", "intent_id", "session_id", "seq",
+        "reservation_id", "node_grant_ref", "parent_grant_ref", "lease_owner_id",
+        "business_scope", "operation_fingerprint",
         "payload_digest", "expires_at_ms", "validated_by", "durable_ledger",
         "durable_db_path", "_seal",
     )
@@ -298,21 +300,35 @@ def bind_validated_skill_authority(
     execution_mode = str(governed.get("execution_mode") or "").strip()
     token_ref = str(approval_token_ref or "").strip()
     work_order_id = ""
+    command_target_id = ""
     graph_id = ""
     graph_revision = 0
     node_id = ""
     lease_id = ""
     fencing_token = 0
+    reservation_id = ""
+    node_grant_ref = ""
+    parent_grant_ref = ""
+    lease_owner_id = ""
+    business_scope = ""
+    operation_fingerprint = ""
     authority_expires_at_ms = int(time.time() * 1000) + max(1, int(ttl_ms))
     canonical_ledger = _canonical_authority_ledger(durable_ledger)
-    if command_id and attempt_id and execution_mode == GOVERNED_PRODUCTION_EXECUTION_MODE:
+    if governed_execution_context is not None:
         governed_request_id = str(governed.get("request_id") or "").strip()
         governed_principal_id = str(governed.get("principal_id") or "").strip()
         governed_target_id = str(governed.get("target_id") or "").strip()
+        command_target_id = str(governed.get("command_target_id") or "").strip()
         work_order_id = str(governed.get("work_order_id") or "").strip()
         graph_id = str(governed.get("graph_id") or "").strip()
         node_id = str(governed.get("node_id") or "").strip()
         lease_id = str(governed.get("lease_id") or "").strip()
+        reservation_id = str(governed.get("reservation_id") or "").strip()
+        node_grant_ref = str(governed.get("node_grant_ref") or "").strip()
+        parent_grant_ref = str(governed.get("parent_grant_ref") or "").strip()
+        lease_owner_id = str(governed.get("lease_owner_id") or "").strip()
+        business_scope = str(governed.get("business_scope") or "").strip()
+        operation_fingerprint = str(governed.get("operation_fingerprint") or "").strip()
         try:
             graph_revision = int(governed.get("graph_revision") or 0)
             fencing_token = int(governed.get("fencing_token") or 0)
@@ -325,9 +341,14 @@ def bind_validated_skill_authority(
             else work_order_id
         )
         if (
-            governed_request_id != request_id
+            execution_mode != GOVERNED_PRODUCTION_EXECUTION_MODE
+            or not command_id
+            or not attempt_id
+            or governed_request_id != request_id
             or governed_principal_id != principal_id
             or governed_target_id != target_id
+            or governed_target_id != skill_id
+            or not command_target_id
             or not work_order_id
             or payload_work_order_id != work_order_id
             or not graph_id
@@ -335,6 +356,14 @@ def bind_validated_skill_authority(
             or not node_id
             or not lease_id
             or fencing_token < 1
+            or not reservation_id
+            or not node_grant_ref
+            or not parent_grant_ref
+            or node_grant_ref == parent_grant_ref
+            or not lease_owner_id
+            or not business_scope
+            or not operation_fingerprint
+            or not str(session_id or "").strip()
         ):
             raise ValueError("governed Task authority identity does not match the dispatch binding")
         authority_kind = "governed_task_attempt"
@@ -364,6 +393,7 @@ def bind_validated_skill_authority(
         "request_id": request_id,
         "principal_id": principal_id,
         "target_id": target_id,
+        "command_target_id": command_target_id,
         "command_id": command_id,
         "work_order_id": work_order_id,
         "graph_id": graph_id,
@@ -372,6 +402,12 @@ def bind_validated_skill_authority(
         "attempt_id": attempt_id,
         "lease_id": lease_id,
         "fencing_token": fencing_token,
+        "reservation_id": reservation_id,
+        "node_grant_ref": node_grant_ref,
+        "parent_grant_ref": parent_grant_ref,
+        "lease_owner_id": lease_owner_id,
+        "business_scope": business_scope,
+        "operation_fingerprint": operation_fingerprint,
         "intent_id": str(intent_id or ""),
         "session_id": str(session_id or ""),
         "seq": int(seq),
@@ -392,6 +428,7 @@ def bind_validated_skill_authority(
     object.__setattr__(authority, "request_id", request_id)
     object.__setattr__(authority, "principal_id", principal_id)
     object.__setattr__(authority, "target_id", target_id)
+    object.__setattr__(authority, "command_target_id", command_target_id)
     object.__setattr__(authority, "command_id", command_id)
     object.__setattr__(authority, "work_order_id", work_order_id)
     object.__setattr__(authority, "graph_id", graph_id)
@@ -400,6 +437,12 @@ def bind_validated_skill_authority(
     object.__setattr__(authority, "attempt_id", attempt_id)
     object.__setattr__(authority, "lease_id", lease_id)
     object.__setattr__(authority, "fencing_token", fencing_token)
+    object.__setattr__(authority, "reservation_id", reservation_id)
+    object.__setattr__(authority, "node_grant_ref", node_grant_ref)
+    object.__setattr__(authority, "parent_grant_ref", parent_grant_ref)
+    object.__setattr__(authority, "lease_owner_id", lease_owner_id)
+    object.__setattr__(authority, "business_scope", business_scope)
+    object.__setattr__(authority, "operation_fingerprint", operation_fingerprint)
     object.__setattr__(authority, "intent_id", str(intent_id or ""))
     object.__setattr__(authority, "session_id", str(session_id or ""))
     object.__setattr__(authority, "seq", int(seq))
@@ -469,6 +512,8 @@ def _authority_error(
         return "SKILL_AUTHORITY_PRINCIPAL_MISMATCH"
     if authority.target_id != str(request.context.get("target_id") or ""):
         return "SKILL_AUTHORITY_TARGET_MISMATCH"
+    if authority.command_target_id != str(request.context.get("command_target_id") or ""):
+        return "SKILL_AUTHORITY_COMMAND_TARGET_MISMATCH"
     if authority.command_id != str(request.context.get("command_id") or ""):
         return "SKILL_AUTHORITY_COMMAND_MISMATCH"
     if authority.work_order_id != str(request.context.get("work_order_id") or ""):
@@ -485,6 +530,20 @@ def _authority_error(
         return "SKILL_AUTHORITY_LEASE_MISMATCH"
     if authority.fencing_token != int(request.context.get("fencing_token") or 0):
         return "SKILL_AUTHORITY_FENCING_MISMATCH"
+    if authority.reservation_id != str(request.context.get("reservation_id") or ""):
+        return "SKILL_AUTHORITY_RESERVATION_MISMATCH"
+    if authority.node_grant_ref != str(request.context.get("node_grant_ref") or ""):
+        return "SKILL_AUTHORITY_NODE_GRANT_MISMATCH"
+    if authority.parent_grant_ref != str(request.context.get("parent_grant_ref") or ""):
+        return "SKILL_AUTHORITY_PARENT_GRANT_MISMATCH"
+    if authority.lease_owner_id != str(request.context.get("lease_owner_id") or ""):
+        return "SKILL_AUTHORITY_LEASE_OWNER_MISMATCH"
+    if authority.business_scope != str(request.context.get("business_scope") or ""):
+        return "SKILL_AUTHORITY_BUSINESS_SCOPE_MISMATCH"
+    if authority.operation_fingerprint != str(
+        request.context.get("operation_fingerprint") or ""
+    ):
+        return "SKILL_AUTHORITY_OPERATION_FINGERPRINT_MISMATCH"
     if authority.payload_digest != _payload_digest(envelope.payload):
         return "SKILL_AUTHORITY_PAYLOAD_MISMATCH"
     if authority.authority_kind not in {"governor_durable_grant", "governed_task_attempt"}:
@@ -502,10 +561,12 @@ def _authority_error(
 def _verify_durable_governed_authority(
     authority: BoundSkillExecutionAuthority,
 ) -> str | None:
-    """Re-resolve the exact HostCommand, Task attempt and Governor grant."""
+    """Re-resolve the exact command, node grant and leased operation claim."""
 
     try:
-        from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
+        from host_brain.orchestration.node_grants import (  # noqa: PLC0415
+            DurableNodeGrantVerifier,
+        )
         from host_brain.persistence.host_command_repository import HostCommandRepository  # noqa: PLC0415
         from host_brain.persistence.task_repository import DurableTaskStore  # noqa: PLC0415
 
@@ -520,12 +581,14 @@ def _verify_durable_governed_authority(
             return "SKILL_DURABLE_COMMAND_MISSING"
         if (
             str(command.get("request_id") or "") != authority.request_id
+            or str(command.get("session_id") or "") != authority.session_id
             or str(command.get("principal_id") or "") != authority.principal_id
-            or str(command.get("target_id") or "") != authority.target_id
+            or str(command.get("target_id") or "") != authority.command_target_id
             or str(command.get("root_work_order_id") or "") != authority.work_order_id
             or str(command.get("graph_id") or "") != authority.graph_id
             or int(command.get("graph_revision") or 0) != authority.graph_revision
-            or str(command.get("route_type") or "").strip().lower() != "skill"
+            or str(command.get("business_scope") or "") != authority.business_scope
+            or str(command.get("governor_grant_ref") or "") != authority.parent_grant_ref
         ):
             return "SKILL_DURABLE_COMMAND_BINDING_MISMATCH"
         task_store = DurableTaskStore(db_path)
@@ -535,6 +598,9 @@ def _verify_durable_governed_authority(
             or int(attempt.get("graph_revision") or 0) != authority.graph_revision
             or str(attempt.get("node_id") or "") != authority.node_id
             or str(attempt.get("status") or "").strip().upper() != "RUNNING"
+            or str(attempt.get("operation_scope") or "") != authority.business_scope
+            or str(attempt.get("operation_fingerprint") or "")
+            != authority.operation_fingerprint
         ):
             return "SKILL_DURABLE_ATTEMPT_BINDING_MISMATCH"
         node = task_store.get_node(
@@ -550,20 +616,54 @@ def _verify_durable_governed_authority(
         ):
             return "SKILL_DURABLE_NODE_BINDING_MISMATCH"
         lease = task_store.get_active_lease(authority.attempt_id)
+        now_value = int(time.time() * 1000)
         if (
             not isinstance(lease, Mapping)
             or str(lease.get("lease_id") or "") != authority.lease_id
             or str(lease.get("attempt_id") or "") != authority.attempt_id
+            or str(lease.get("owner_id") or "") != authority.lease_owner_id
             or int(lease.get("fencing_token") or 0) != authority.fencing_token
             or str(lease.get("status") or "").strip().upper() != "ACTIVE"
-            or int(lease.get("expires_ts_ms") or 0) <= int(time.time() * 1000)
+            or int(lease.get("expires_ts_ms") or 0) <= now_value
         ):
             return "SKILL_DURABLE_LEASE_BINDING_MISMATCH"
-        grant_ref = str(command.get("governor_grant_ref") or "").strip()
-        DurableGovernorGrantResolver(ledger).require(
-            request_id=authority.request_id,
-            expected_ref=grant_ref,
-        )
+        reservation = task_store.get_operation_reservation(authority.reservation_id)
+        if (
+            str(reservation.get("reservation_id") or "") != authority.reservation_id
+            or str(reservation.get("status") or "").strip().upper() != "RESERVED"
+            or int(reservation.get("expires_ts_ms") or 0) <= now_value
+            or str(reservation.get("attempt_id") or "") != authority.attempt_id
+            or str(reservation.get("lease_id") or "") != authority.lease_id
+            or str(reservation.get("owner_id") or "") != authority.lease_owner_id
+            or int(reservation.get("fencing_token") or 0) != authority.fencing_token
+            or str(reservation.get("business_scope") or "") != authority.business_scope
+            or str(reservation.get("operation_fingerprint") or "")
+            != authority.operation_fingerprint
+        ):
+            return "SKILL_DURABLE_OPERATION_BINDING_MISMATCH"
+        try:
+            verified = DurableNodeGrantVerifier(ledger=ledger).verify(
+                grant_ref=authority.node_grant_ref,
+                request_id=authority.request_id,
+                session_id=authority.session_id,
+                principal_id=authority.principal_id,
+                graph_id=authority.graph_id,
+                root_work_order_id=authority.work_order_id,
+                graph_revision=authority.graph_revision,
+                node_id=authority.node_id,
+                route="skill",
+                target_id=authority.target_id,
+                parent_grant_ref=authority.parent_grant_ref,
+            )
+        except Exception:
+            return "SKILL_DURABLE_NODE_GRANT_INVALID"
+        if (
+            str(verified.grant_ref or "") != authority.node_grant_ref
+            or str(verified.parent_grant_ref or "") != authority.parent_grant_ref
+            or str(verified.route or "").strip().lower() != "skill"
+            or str(verified.target_id or "") != authority.target_id
+        ):
+            return "SKILL_DURABLE_NODE_GRANT_BINDING_MISMATCH"
     except Exception:
         return "SKILL_DURABLE_AUTHORITY_INVALID"
     return None
@@ -623,9 +723,16 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
             "capability_attempt_id": request.attempt_id,
             "principal_id": authority.principal_id,
             "target_id": authority.target_id,
+            "command_target_id": authority.command_target_id,
             "session_id": authority.session_id,
             "lease_id": authority.lease_id,
             "fencing_token": authority.fencing_token,
+            "reservation_id": authority.reservation_id,
+            "node_grant_ref": authority.node_grant_ref,
+            "parent_grant_ref": authority.parent_grant_ref,
+            "lease_owner_id": authority.lease_owner_id,
+            "business_scope": authority.business_scope,
+            "operation_fingerprint": authority.operation_fingerprint,
             "expires_at_ms": min(
                 authority.expires_at_ms,
                 int(getattr(grant, "expires_at_ms", authority.expires_at_ms)),
@@ -639,12 +746,19 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
                 "request_id": authority.request_id,
                 "principal_id": authority.principal_id,
                 "target_id": authority.target_id,
+                "command_target_id": authority.command_target_id,
                 "work_order_id": authority.work_order_id,
                 "graph_id": authority.graph_id,
                 "graph_revision": authority.graph_revision,
                 "node_id": authority.node_id,
                 "lease_id": authority.lease_id,
+                "lease_owner_id": authority.lease_owner_id,
                 "fencing_token": authority.fencing_token,
+                "reservation_id": authority.reservation_id,
+                "node_grant_ref": authority.node_grant_ref,
+                "parent_grant_ref": authority.parent_grant_ref,
+                "business_scope": authority.business_scope,
+                "operation_fingerprint": authority.operation_fingerprint,
             }
         payload["_context"] = context
     return _BUILTIN_EXECUTOR_REGISTRY._dispatch_unchecked(payload)
@@ -726,6 +840,7 @@ def dispatch_executor_payload(
                 "authority_kind": getattr(authority, "authority_kind", "missing"),
                 "principal_id": getattr(authority, "principal_id", ""),
                 "target_id": getattr(authority, "target_id", ""),
+                "command_target_id": getattr(authority, "command_target_id", ""),
                 "command_id": getattr(authority, "command_id", ""),
                 "work_order_id": getattr(authority, "work_order_id", ""),
                 "graph_id": getattr(authority, "graph_id", ""),
@@ -734,6 +849,16 @@ def dispatch_executor_payload(
                 "governed_attempt_id": getattr(authority, "attempt_id", ""),
                 "lease_id": getattr(authority, "lease_id", ""),
                 "fencing_token": getattr(authority, "fencing_token", 0),
+                "reservation_id": getattr(authority, "reservation_id", ""),
+                "node_grant_ref": getattr(authority, "node_grant_ref", ""),
+                "parent_grant_ref": getattr(authority, "parent_grant_ref", ""),
+                "lease_owner_id": getattr(authority, "lease_owner_id", ""),
+                "business_scope": getattr(authority, "business_scope", ""),
+                "operation_fingerprint": getattr(
+                    authority,
+                    "operation_fingerprint",
+                    "",
+                ),
             },
             created_at_ms=now_ms,
             deadline_at_ms=now_ms + max(1, int(deadline_ms)),

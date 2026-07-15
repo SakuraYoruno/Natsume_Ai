@@ -651,6 +651,64 @@ def test_surface_without_official_grant_commits_foreground_without_embodiment(
     assert calls[0]["payload"]["projection_intents"][0]["payload"]["gov_decision"] == {}
 
 
+def test_frozen_surface_defers_complete_life_command_until_task_acceptance(
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        delivery_audit,
+        "submit_life_command",
+        lambda **kwargs: calls.append(kwargs) or {"status": "APPLIED"},
+    )
+    result = SimpleNamespace(
+        selected_text="已完成",
+        natsume_emotion_tag="CALM",
+        user_emotion_tag="NEUTRAL",
+        vts_expression_id="calm",
+        observation_codes=(),
+        runtime=SimpleNamespace(emotion_confidence=0.8, generation_trace={}, latency_ms=5),
+        compiled=SimpleNamespace(trace={}),
+    )
+    agent_input = SimpleNamespace(
+        request_id="req-deferred",
+        person_id="person-aw04",
+        session_id="sess-aw04",
+        user_message="执行受治理回复",
+        ts_ms=123,
+        reply_channel="qq",
+        reply_target="conversation-aw04",
+        bond_summary={},
+        llm_runtime={},
+        emotion_context={},
+        emotion_snapshot={},
+        render_policy={},
+        governor_result={},
+        defer_effects_to_task_runtime=True,
+    )
+
+    receipt = surface_main_chain_adapter._submit_surface_foreground_completed(
+        life_command_service=object(),
+        life_snapshot_reader=object(),
+        agent_input=agent_input,
+        result=result,
+        envelope=ReplyEnvelope.final_reply(text="已完成", source="surface_main_chain"),
+        narrative="已完成",
+        trace_stage_meta={},
+        timings_ms={"surface_main_chain_ms": 5},
+        total_latency_ms=5,
+        llm_latency_ms=4,
+    )
+
+    assert calls == []
+    assert receipt["status"] == "DEFERRED_TO_TASK_ACCEPTANCE"
+    assert len(receipt["effect_intents"]) == 1
+    effect = receipt["effect_intents"][0]
+    assert effect["effect_type"] == "life.foreground_completed"
+    assert effect["commit_scope"] == "NODE"
+    assert effect["payload"]["command_id"] == "life::foreground_completed::req-deferred"
+    assert effect["payload"]["payload"]["projection_intents"][0]["target"] == "surface.post_process"
+
+
 def test_app_life_paths_have_no_legacy_mutator_or_surface_create_task() -> None:
     forbidden = (
         "get_life_state",

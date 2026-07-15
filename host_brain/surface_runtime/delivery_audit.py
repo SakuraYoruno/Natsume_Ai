@@ -215,6 +215,7 @@ def _submit_surface_foreground_completed(
         "gov_decision": governor_result,
         "pii_ingress_stats": _safe_mapping(
             getattr(agent_input, "pii_ingress_stats", None)
+            or dict(trace_stage_meta or {}).get("pii_ingress_stats")
         ),
         "pii_egress_stats": _safe_mapping(
             getattr(agent_input, "pii_egress_stats", None)
@@ -308,25 +309,43 @@ def _submit_surface_foreground_completed(
         "projection_intents": projection_intents,
         "deliveries": deliveries,
     }
-    return submit_life_command(
-        service=life_command_service,
-        reader=life_snapshot_reader,
-        command_type="foreground_completed",
-        person_id=person_id,
-        command_id=(
+    command_payload = {
+        "command_type": "foreground_completed",
+        "person_id": person_id,
+        "command_id": (
             f"life::foreground_completed::{request_id or session_id}"
             if request_id or session_id
             else ""
         ),
-        correlation_id=request_id or None,
-        payload=payload,
-        created_at_ms=completed_at_ms,
-        metadata={
+        "correlation_id": request_id or None,
+        "payload": payload,
+        "created_at_ms": completed_at_ms,
+        "metadata": {
             "source": "surface_main_chain",
             "reply_sendable": bool(envelope.sendable),
             "reply_persistable": bool(envelope.persistable),
             "delivery_authorized": delivery_authorization is not None,
         },
+    }
+    if bool(getattr(agent_input, "defer_effects_to_task_runtime", False)):
+        # A frozen governed worker is speculative until Verification and
+        # Acceptance commit.  Return the complete immutable command payload to
+        # the Task Runtime; do not touch Life state or any delivery transport.
+        return {
+            "status": "DEFERRED_TO_TASK_ACCEPTANCE",
+            "reason_code": "TASK_ACCEPTANCE_REQUIRED",
+            "effect_intents": [
+                {
+                    "effect_type": "life.foreground_completed",
+                    "commit_scope": "NODE",
+                    "payload": command_payload,
+                }
+            ],
+        }
+    return submit_life_command(
+        service=life_command_service,
+        reader=life_snapshot_reader,
+        **command_payload,
     )
 
 

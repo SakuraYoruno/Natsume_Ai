@@ -51,6 +51,7 @@ _WORK_ORDER_V3_ADAPTER_FIELDS = frozenset(
 
 
 ALLOWED_AGENT_DOMAINS = {
+    "chat",
     "code",
     "finance",
     "translation",

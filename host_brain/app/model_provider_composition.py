@@ -8,7 +8,12 @@ from urllib.parse import urlparse
 
 from host_brain.app import config as host_config
 from host_brain.core.key_profiles import resolve_secret_from_profiles
-from host_brain.integrations.llm_helpers import _resolve_provider_base_url, invoke_llm_text
+from host_brain.integrations.llm_helpers import (
+    _pop_last_provider_usage,
+    _resolve_provider_base_url,
+    _set_last_provider_usage,
+    invoke_llm_text,
+)
 
 
 class ApplicationModelAttemptServicePort:
@@ -87,8 +92,16 @@ def resolve_model_provider_base_url(provider: str) -> str | None:
     return _resolve_provider_base_url(normalized)
 
 
-def invoke_model_provider_transport(**kwargs: Any) -> str:
-    return invoke_llm_text(**kwargs)
+def invoke_model_provider_transport(**kwargs: Any) -> dict[str, Any]:
+    """Return content together with usage reported by the same provider call."""
+
+    _set_last_provider_usage(None)
+    content = invoke_llm_text(**kwargs)
+    usage = _pop_last_provider_usage()
+    return {
+        "content": content,
+        "usage": dict(usage) if isinstance(usage, dict) else {},
+    }
 
 
 __all__ = [

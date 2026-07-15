@@ -331,9 +331,10 @@ async def _dispatch_to_graph_worker(
         progress_push_task = None
 
         gateway_delivery: dict[str, Any] | None = None
-        if source == "GATEWAY":
+        commit_event = dict(pipeline_result.get("commit_event") or {})
+        governed_delivery = isinstance(commit_event.get("execution_receipt"), dict)
+        if source_upper == "GATEWAY" and not governed_delivery:
             # Phase XV P4：从 pipeline_result 提取情感和 Bond 上下文
-            commit_event = pipeline_result.get("commit_event") or {}
             audit_refs = commit_event.get("audit_refs") or {}
             _emotion_tag = str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper()
             _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
@@ -382,6 +383,8 @@ async def _dispatch_to_graph_worker(
             f"mode={dispatch_mode}",
             f"latency_ms={latency_ms}",
         ]
+        if governed_delivery:
+            detail_parts.append("gateway_delivery_authority=acceptance_effect_outbox")
         if reason_code:
             detail_parts.append(f"reason_code={reason_code}")
         detail_parts.append(f"route_type={route_type}")
@@ -507,6 +510,8 @@ async def _dispatch_to_graph_worker(
         completed_payload["exec_quality_reason_code"] = execution_quality.get("reason_code")
         completed_payload["exec_quality_tags"] = list(execution_quality.get("detail_tags") or [])
         completed_payload["exec_quality_skill_exec_count"] = int(execution_quality.get("skill_exec_count") or 0)
+        if governed_delivery:
+            completed_payload["gateway_delivery_authority"] = "acceptance_effect_outbox"
         if isinstance(deviation_meta, dict):
             completed_payload["deviation_reason"] = deviation_meta.get("reason_code")
             completed_payload["deviation_overlap_ratio"] = deviation_meta.get("overlap_ratio")

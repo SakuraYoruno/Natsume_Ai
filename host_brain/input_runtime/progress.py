@@ -110,13 +110,19 @@ def build_gateway_progress_reply_text(
 ) -> tuple[str, str, dict[str, Any] | None]:
     """构建进度回复文本，返回 (reply_text, reason, summary)。"""
     render_quick_gateway_progress_text = ports.render_quick_gateway_progress_text
-    get_runtime_task_registry = ports.get_runtime_task_registry
+    get_task_status_projection = ports.get_task_status_projection
 
     person_id = str(payload.get("person_id") or "").strip()
+    projection = get_task_status_projection()
     summary = None
     if person_id:
-        summary = get_runtime_task_registry().summarize_for_chat(
+        summary = projection.summarize_for_chat(
             person_id=person_id,
+            session_id=session_id,
+            exclude_request_id=exclude_request_id,
+        )
+    elif session_id:
+        summary = projection.summarize_for_session(
             session_id=session_id,
             exclude_request_id=exclude_request_id,
         )

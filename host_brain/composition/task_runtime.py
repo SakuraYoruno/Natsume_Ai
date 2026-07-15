@@ -27,6 +27,8 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
@@ -87,6 +89,8 @@ class TaskRuntimeContainerConstructionError(TaskRuntimeContainerError):
 MigrationRunnerBuilder = Callable[..., SQLiteMigrationRunner]
 TaskStoreBuilder = Callable[..., DurableTaskStore]
 CommandRepositoryBuilder = Callable[..., HostCommandRepository]
+ReviewStoreBuilder = Callable[..., ReviewStore]
+WorkerProjectionStoreBuilder = Callable[..., WorkerProjectionStore]
 AgentResultRepositoryBuilder = Callable[..., AgentExecutionResultRepository]
 SchedulerDefinitionRepositoryBuilder = Callable[..., SchedulerDefinitionRepository]
 SchedulerResultRepositoryBuilder = Callable[..., SchedulerExecutionResultRepository]
@@ -97,6 +101,8 @@ RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 _INFRASTRUCTURE_ORDER = (
     "migration_runner",
     "task_store",
+    "review_store",
+    "worker_projection_store",
     "command_repository",
     "agent_result_repository",
     "scheduler_definition_repository",
@@ -115,6 +121,8 @@ class ProcessTaskRuntimeContainer:
     migration_runner: SQLiteMigrationRunner
     migration_result: MigrationBatchResult
     task_store: DurableTaskStore
+    review_store: ReviewStore
+    worker_projection_store: WorkerProjectionStore
     command_repository: HostCommandRepository
     agent_result_repository: AgentExecutionResultRepository
     scheduler_definition_repository: SchedulerDefinitionRepository
@@ -438,6 +446,8 @@ def build_process_task_runtime_container(
     startup_outbox_limit: int = 1_000,
     migration_runner_builder: MigrationRunnerBuilder = SQLiteMigrationRunner,
     task_store_builder: TaskStoreBuilder = DurableTaskStore,
+    review_store_builder: ReviewStoreBuilder = ReviewStore,
+    worker_projection_store_builder: WorkerProjectionStoreBuilder = WorkerProjectionStore,
     command_repository_builder: CommandRepositoryBuilder = HostCommandRepository,
     agent_result_repository_builder: AgentResultRepositoryBuilder = (
         AgentExecutionResultRepository
@@ -487,6 +497,10 @@ def build_process_task_runtime_container(
 
         task_store = task_store_builder(canonical)
         constructed.append(("task_store", task_store))
+        review_store = review_store_builder(canonical)
+        constructed.append(("review_store", review_store))
+        worker_projection_store = worker_projection_store_builder(canonical)
+        constructed.append(("worker_projection_store", worker_projection_store))
         command_repository = command_repository_builder(canonical)
         constructed.append(("command_repository", command_repository))
         agent_result_repository = agent_result_repository_builder(canonical)
@@ -530,6 +544,8 @@ def build_process_task_runtime_container(
         migration_runner=migration_runner,
         migration_result=migration_result,
         task_store=task_store,
+        review_store=review_store,
+        worker_projection_store=worker_projection_store,
         command_repository=command_repository,
         agent_result_repository=agent_result_repository,
         scheduler_definition_repository=scheduler_definition_repository,

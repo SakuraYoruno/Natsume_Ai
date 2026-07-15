@@ -34,7 +34,6 @@ from host_brain.composition.process_services import (
     get_life_memory_store,
     get_model_attempt_service,
     get_prompt_registry,
-    get_runtime_task_registry,
 )
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
 
@@ -83,7 +82,6 @@ AGENT_RUNTIME_PORTS = AgentRuntimeApplicationPorts(
         conversation_history=get_conversation_history,
         life_memory_service=get_life_memory_service,
         audit_ledger=get_ledger,
-        runtime_task_registry=get_runtime_task_registry,
         prompt_registry=get_prompt_registry,
         model_attempt_service=get_model_attempt_service,
         persist_post_process_audit=partial(

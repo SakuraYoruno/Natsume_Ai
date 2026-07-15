@@ -147,7 +147,9 @@ async def _prefetch_retrieval_persona_inputs(
         _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
 
     try:
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import (  # noqa: PLC0415
+            compute_runtime_motive_state,
+        )
 
         retrieval_emotion_context = dict(emotion_context or {})
         if mood_state and not str(retrieval_emotion_context.get("mood_state") or "").strip():
@@ -161,7 +163,7 @@ async def _prefetch_retrieval_persona_inputs(
         if resolved_sys_mode:
             runtime_flags["sys_mode"] = resolved_sys_mode
         motive_state_raw = await asyncio.to_thread(
-            get_limbic_agent().compute_runtime_motive_state,
+            compute_runtime_motive_state,
             persona_user_id=person_id,
             current_topic=user_message,
             bond_summary=bond_summary,
