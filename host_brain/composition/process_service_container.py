@@ -58,7 +58,6 @@ class ProcessServiceContainer:
     meta_learning_loop: Any = None
     planning_agent: Any = None
     skill_composer: Any = None
-    legacy_runtime_task_registry: Any = None
     capability_gap_telemetry: Any = None
     capability_forge_service: Any = None
     capability_forge_token_service: Any = None

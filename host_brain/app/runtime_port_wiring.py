@@ -41,7 +41,6 @@ def build_executive_runtime_application_ports() -> "ExecutiveRuntimeApplicationP
         sub_agent_request_factory=SubAgentRequest,
         get_sub_agent_dispatcher=get_sub_agent_dispatcher,
         get_core_settings=get_core_settings,
-        get_legacy_runtime_task_registry=process_services.get_legacy_runtime_task_registry,
         get_task_status_projection=lambda: build_durable_task_status_projection(
             ledger=process_services.get_ledger()
         ),

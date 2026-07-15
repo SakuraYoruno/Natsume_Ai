@@ -1,12 +1,12 @@
 受众：PROJECT
-标题：图 04——Planning、Task Runtime 与 Legacy 边界
+标题：图 04——Planning、Task Runtime 与退役 Executive 边界
 
-# 图 04：Planning、Task Runtime 与 Legacy 边界
+# 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.0
+版本：v3.1
 核对日期：2026-07-15
 
-文件名保留为 `04_executive_layers.md` 以兼容旧链接，但本图不再把 Executive 描述成 canonical 三层主链。当前 authority 是 Governed Runtime；Executive 只承担尚未删除的 compatibility route。
+文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
 
 ## 当前分界
 
@@ -25,22 +25,21 @@ flowchart TD
         HS --> GC --> AD --> TR --> WK --> AC
     end
 
-    subgraph Legacy["Compatibility path — 待退役"]
-        EX["executive_runtime/runtime.py"]
-        SD["legacy SkillDagPlan"]
-        REG["LegacyRuntimeTaskRegistry\nprocess memory"]
-        EX --> SD --> REG
+    subgraph ReadOnly["Read-only / retired boundary"]
+        RP["Durable Task / Conversation projection"]
+        EX["retired Executive fail-close guard"]
     end
 
     INTENT --> ROUTE
     ROUTE -->|"chat/skill/delegate/plan"| HS
-    ROUTE -->|"non-canonical compatibility"| EX
+    ROUTE -->|"task_progress / recent_turn"| RP
+    ROUTE -->|"unknown legacy route"| EX
 
     style Canonical fill:#eefbf1,stroke:#22863a
-    style Legacy fill:#fff3cd,stroke:#b08800
+    style ReadOnly fill:#eefbf1,stroke:#22863a
 ```
 
-`executive_runtime/runtime.py` 会拒绝显式 `chat/skill/delegate/plan` 直接进入 legacy path。只要旧 SkillDag 执行和内存 registry 仍有生产写入，就不能宣布 Executive authority 已完全删除。
+`agent_runtime/cortex_runtime.py` 不再持有 Executive application port。执行 route 只能进入 Governed Runtime，读取 route 只能进入 durable projection，未知 route fail closed。`executive_runtime/runtime.py` 只保留不可达的拒绝边界和孤立 helper。
 
 ## Planning Search 分层
 
@@ -68,22 +67,28 @@ flowchart LR
 | Research | 冻结模拟 fixture | 没有真实来源、模型和 verifier 对照 |
 | Code | 冻结模拟 fixture | 没有真实 worktree、测试和成本对照 |
 
-## Scheduler/Internal 故障位置
+## Scheduler/Internal 分界
 
 ```mermaid
 flowchart LR
-    SCH["Scheduler/Internal trigger"]
+    SCH["Scheduler trigger"]
+    NEW["WorkOrderV3 + Budget + child grant"]
+    OK["Verification + Acceptance + Receipt"]
+    INT["Internal trigger"]
     OLD["AgentWorkOrder"]
     ADMIT["HostCommand admission\nrequires WorkOrderV3 + BudgetPolicy"]
     FAIL["HOST_COMMAND_INVALID"]
 
-    SCH --> OLD --> ADMIT --> FAIL
+    SCH --> NEW --> ADMIT --> OK
+    INT --> OLD --> ADMIT --> FAIL
 
+    style NEW fill:#d7f5df,stroke:#22863a
+    style OK fill:#d7f5df,stroke:#22863a
     style OLD fill:#ffd9d9,stroke:#b31d28
     style FAIL fill:#ffd9d9,stroke:#b31d28
 ```
 
-修复不能通过放宽 admission 接受旧合同完成。正确方向是让 Scheduler/Internal 生成完整 WorkOrderV3、TaskGraph、Budget、node grant、Review 和 receipt lineage。
+Scheduler 已沿正确方向接通。Internal 的修复不能通过放宽 admission 接受旧合同完成，必须生成完整 WorkOrderV3、TaskGraph、Budget、node grant、Review 和 receipt lineage。
 
 ## Graph revision
 
@@ -107,12 +112,12 @@ stateDiagram-v2
 - Host Plan adapter：`host_brain/orchestration/plan_intent_search.py`
 - Graph compiler：`host_brain/orchestration/planning_graph_compiler.py`
 - Replan/recovery：`host_brain/orchestration/planning_recovery.py`、`failure_replan_intent.py`
-- Durable coordinator：`host_brain/task_runtime/coordinator.py`
-- Executive guard/legacy：`host_brain/executive_runtime/runtime.py`、`skill_dag.py`
-- Legacy registry：`host_brain/app/runtime_task_registry.py`
+- Durable coordinator/decision：`host_brain/task_runtime/coordinator.py`、`dag_scheduler.py`
+- Read projections：`host_brain/agent_runtime/read_routes.py`
+- Retired Executive guard：`host_brain/executive_runtime/runtime.py`
 - Scheduler contracts：`host_brain/scheduler/governed_runtime.py`
 - Internal contracts：`host_brain/app/internal_task_runtime.py`
 
-## 目标删除条件
+## 已完成与剩余条件
 
-只有当 compatibility route 已迁移、legacy SkillDag 生产调用为零、LegacyRuntimeTaskRegistry 只剩历史读取或被删除，并且所有入口共享同一 Task lineage 时，Executive 才能从架构图中移除。
+Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零。NE-01 仍需让 Internal 等剩余执行入口共享同一 Task lineage，并把 B0 调度合同接入真实 durable 并发/retry/recovery；Executive 退役不能替代这些剩余条件。

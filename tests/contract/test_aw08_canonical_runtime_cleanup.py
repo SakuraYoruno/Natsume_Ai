@@ -6,7 +6,7 @@ from pathlib import Path
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter, RuntimeExecutor
 from host_brain.app.settings.core import CoreSettings
-from host_brain.executive_runtime.conversation_execution import _execute_skill_dag
+from host_brain.executive_runtime import conversation_execution
 from host_brain.executive_runtime.ports import ExecutiveRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -82,10 +82,8 @@ def test_legacy_plan_graph_runtime_flag_and_resolver_are_deleted() -> None:
                 violations.append(f"{path.relative_to(ROOT)}:{marker}")
     assert violations == []
 
-    execution_source = inspect.getsource(_execute_skill_dag)
-    assert "return await _execute_explicit_skill_dag(" in execution_source
-    for marker in ("resolve(", "shadow", "fallback", "replan"):
-        assert marker not in execution_source.lower()
+    assert not hasattr(conversation_execution, "_execute_skill_dag")
+    assert not hasattr(conversation_execution, "_execute_explicit_skill_dag")
 
 
 def test_retired_plan_graph_adapter_and_prompt_contract_are_deleted() -> None:

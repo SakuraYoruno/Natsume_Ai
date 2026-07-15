@@ -477,8 +477,6 @@ from host_brain.composition.process_runtime_services import (
     get_reflection_chain,
     get_routing_matrix,
     get_runtime_capability_registry,
-    get_legacy_runtime_task_registry,
-    get_runtime_task_registry,
     get_semantic_recaller,
     get_shared_memory_index,
     get_skill_composer,

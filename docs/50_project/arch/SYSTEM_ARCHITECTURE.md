@@ -116,6 +116,7 @@ flowchart TB
 主要代码：
 
 - `host_brain/task_runtime/coordinator.py`：节点推进、worker 调度、Verification 和 Acceptance。
+- `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
 - `host_brain/task_runtime/budget_runtime.py`：预算预留、计量和结算。
 - `host_brain/task_runtime/review_runtime.py`：PRE/POST Review 与 continuation 材料。
 - `host_brain/task_runtime/acceptance_effects.py`：Acceptance effect intent 构造。
@@ -124,7 +125,7 @@ flowchart TB
 
 执行器只接收冻结节点输入和 node-bound grant。任何失败后的计划变化都应生成新 graph revision，不能在 worker 内静默修改原图。
 
-当前 coordinator 可以处理多节点依赖推进，但还没有完整消费并发、runtime retry/backoff 和自动 Review continuation；这些限制属于当前事实，不应由架构图掩盖。
+当前 coordinator 可以处理多节点依赖推进；B0 已统一 `{max_attempts, retry_backoff_ms}` 并冻结无副作用调度决策，但还没有把它接入 durable 原子 claim，也没有完整消费并发、runtime retry/backoff、startup recovery 和自动 Review continuation。
 
 ### 3.5 模型与能力执行层
 
@@ -218,13 +219,13 @@ flowchart LR
 | Acceptance | 是否接纳结果并允许副作用 | 决定 effect intent |
 | Receipt | 外部或持久副作用实际发生了什么 | 不可变证据 |
 
-Scheduler/Internal 当前失败的根因不是“没有 Runtime 类”，而是它们仍构造 `AgentWorkOrder`，而 Host admission 已只接受 `WorkOrderV3 + BudgetPolicy`。修复必须统一合同和完整 lineage，不能加兼容绕过。
+Scheduler 已统一为 `WorkOrderV3 + BudgetPolicy`，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 当前失败的根因不是“没有 Runtime 类”，而是仍构造 `AgentWorkOrder`；修复必须统一合同和完整 lineage，不能加兼容绕过。
 
 ## 6. 状态与数据 authority
 
 | 状态域 | 当前主要 authority | 读模型/衍生层 | 关键约束 |
 |---|---|---|---|
-| Command / Graph / Attempt | `HostCommandRepository`、`DurableTaskStore` | Task runtime projection | Legacy registry 不能成为第二真相 |
+| Command / Graph / Attempt | `HostCommandRepository`、`DurableTaskStore` | Task runtime projection | 已删除进程内 registry；禁止重新引入第二真相 |
 | Governor / Grant | canonical audit ledger 与 grant resolver | Operator/trace projection | token 必须绑定 scope 和 subject |
 | Model invocation | `ModelAttemptService` 及持久记录 | 用量和健康投影 | provider 返回缺失时不得伪造精确成本 |
 | Capability execution | Capability Broker journal/receipt | maturity scorecard | maturity 投影本身不是执行 authority |
@@ -310,14 +311,14 @@ flowchart LR
 
 ## 11. 当前过渡边界
 
-系统同时存在新主干与待退役兼容层：
+系统仍处于迁移期，但 Executive 执行兼容层和内存任务真相已经退役：
 
 | 新主干 | 待退役/修复 |
 |---|---|
-| Governed Host canonical routes | Executive compatibility routes |
-| Durable TaskStore | `LegacyRuntimeTaskRegistry` 写入 |
-| WorkOrderV3 + BudgetPolicy | Scheduler/Internal `AgentWorkOrder` |
-| TaskGraph revision | Legacy `SkillDagPlan` |
+| Governed Host canonical routes + durable read projections | Internal/领域兼容入口尚未全部迁移 |
+| Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
+| WorkOrderV3 + BudgetPolicy | Internal `AgentWorkOrder` |
+| TaskGraph revision + B0 DAG decision | 生产并发/retry/backoff/recovery 尚未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

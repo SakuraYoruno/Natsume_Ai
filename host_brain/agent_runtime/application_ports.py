@@ -24,8 +24,8 @@ class AgentRuntimeApplicationPorts:
     audit_ledger: Callable[[], Any]
     prompt_registry: Callable[[], Any]
     model_attempt_service: Callable[[], Any]
+    task_status_projection: Callable[[], Any]
     persist_post_process_audit: Callable[..., Awaitable[None]]
-    executive_router_sse_generator: Callable[..., Any]
 
 
 __all__ = [

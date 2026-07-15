@@ -5,17 +5,19 @@
 
 Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但通用智能规划、统一 Scheduler/Internal 执行、人格安全演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
+本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但 Internal 执行、真实 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
 
 ## 当前状态
 
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL` | Graph、Attempt、Lease、Budget、Review、Verification、Acceptance 已有；并发、retry/backoff 和自动 continuation 未闭环 |
-| Scheduler / Internal Agent | `BROKEN` | 仍生成旧 WorkOrder，不能通过当前 admission 合同 |
+| Durable Task Runtime | `PARTIAL` | B0 调度/retry 合同已冻结；生产并发、retry/backoff、恢复和自动 continuation 未闭环 |
+| Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
+| Internal Agent | `BROKEN` | 仍生成旧 WorkOrder，不能通过当前 admission 合同 |
+| Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
 | Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
-| Persona 演化 | `UNSAFE_DIRECT_WRITERS` | 仍有路径可绕过 proposal、Review、版本激活和 rollback 直接改 trait |
+| Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |
 
 权威入口：
@@ -67,7 +69,7 @@ flowchart LR
     EDGE --> UI
 ```
 
-图中是生产主干的方向，不表示每条入口都已完全接线。Scheduler/Internal 的 admission、旧 Executive compatibility path 和部分后台 writer 仍是明确缺口，详见差距矩阵。
+图中是生产主干的方向，不表示每条入口都已完全接线。Scheduler 已接通；Internal admission、DAG 生产并发/恢复、全局 composition 和长期演化 pipeline 仍是明确缺口，详见差距矩阵。
 
 ## 运行面
 
@@ -103,7 +105,7 @@ request
   → effect receipts and read-only projections
 ```
 
-当前 `chat`、`skill`、`delegate`、`plan` 进入这条主链。`task_progress`、`recent_turn` 等 compatibility route 仍可能进入旧 Executive；Scheduler 和 Internal Agent 尚未满足新 admission 合同。
+当前 `chat`、`skill`、`delegate`、`plan` 和 Scheduler 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；Executive 的生产入口、SkillDag 执行和内存任务 registry 已删除。Internal Agent 尚未满足新 admission 合同。
 
 ### Planning Search
 

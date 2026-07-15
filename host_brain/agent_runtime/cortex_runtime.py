@@ -65,6 +65,7 @@ from host_brain.persona.session_hooks import (
     _resolve_selection_followup_retrieval_timeout_seconds,
 )
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from host_brain.agent_runtime.read_routes import build_read_projection
 
 
 async def _cortex_orchestrator_sse_generator_impl(
@@ -129,39 +130,14 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
     canonical_route = str((intent_draft or {}).get("route") or "").strip().lower()
     canonical_governed_route = canonical_route in {"chat", "skill", "delegate", "plan"}
+    canonical_read_route = canonical_route in {"task_progress", "recent_turn"}
     governed_supported = bool(
         governed_command_application is not None
         and callable(getattr(governed_command_application, "supports", None))
         and governed_command_application.supports(intent_draft)
     )
 
-    # Governed requests stage their user turn only after graph Acceptance.  The
-    # legacy writer remains temporarily for non-canonical compatibility routes.
-    if not canonical_governed_route:
-        try:
-            application_ports.record_user_turn(
-                request_id=request_id,
-                session_id=session_id,
-                person_id=person_id,
-                content=str(getattr(request_body, "message", "") or ""),
-                ts_ms=int(time.time() * 1000),
-                lang=str(getattr(request_body, "render_target_lang", None) or "zh").strip().lower() or "zh",
-                metadata={
-                    "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
-                    "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                    "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                    "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                    "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                    "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
-                    "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
-                    "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
-                    "attachments": list(getattr(request_body, "attachments", []) or []),
-                    "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
-                    "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
-                },
-            )
-        except Exception:
-            pass
+    read_user_turn_result: Mapping[str, Any] = {}
 
     sanitized_message, airlock_passed = _sanitize_input(user_message)
     if not airlock_passed:
@@ -223,10 +199,170 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
+    if not canonical_governed_route and not canonical_read_route:
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "RUNTIME_ROUTE_UNSUPPORTED",
+                "request_id": request_id,
+            }
+        )
+        return
+
     render_target_lang = _resolve_text_render_target_lang(
         request_body=request_body,
         sanitized_message=sanitized_message,
     )
+
+    if canonical_read_route:
+        # Governed requests stage their user turn only after graph Acceptance.
+        # Projection routes have no Task, so they persist visible turns after
+        # Airlock and Governor approval and before exposing a reply.
+        try:
+            read_user_turn_result = application_ports.record_user_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=sanitized_message,
+                ts_ms=int(time.time() * 1000),
+                lang=render_target_lang,
+                metadata={
+                    "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
+                    "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                    "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                    "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                    "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                    "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
+                    "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
+                    "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
+                    "attachments": list(getattr(request_body, "attachments", []) or []),
+                    "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
+                    "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
+                    "route": canonical_route,
+                },
+            )
+        except Exception as exc:
+            read_user_turn_result = {
+                "status": "DEGRADED",
+                "reason_code": type(exc).__name__,
+            }
+        user_turn_status = str(read_user_turn_result.get("status") or "").strip().upper()
+        user_turn_reason = str(read_user_turn_result.get("reason_code") or "").strip().upper()
+        if user_turn_status != "OK" and not (
+            user_turn_status == "SKIPPED"
+            and user_turn_reason in {"DUPLICATE_CONVERSATION_TURN", "DUPLICATE_COMMAND"}
+        ):
+            yield _emit_sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": "READ_ROUTE_USER_TURN_NOT_DURABLE",
+                    "request_id": request_id,
+                }
+            )
+            return
+        try:
+            task_projection = (
+                application_ports.task_status_projection()
+                if canonical_route == "task_progress"
+                else None
+            )
+            conversation_history = (
+                application_ports.conversation_history()
+                if canonical_route == "recent_turn"
+                else None
+            )
+            read_result = build_read_projection(
+                route=canonical_route,
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_message=sanitized_message,
+                task_status_projection=task_projection,
+                conversation_history=conversation_history,
+            )
+        except Exception as exc:
+            _logger.warning("[%s] read projection unavailable: %s", request_id, exc)
+            yield _emit_sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": "READ_PROJECTION_UNAVAILABLE",
+                    "request_id": request_id,
+                }
+            )
+            return
+        if not read_result.available:
+            yield _emit_sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": read_result.reason_code,
+                    "request_id": request_id,
+                    "narrative": _sanitize_output(read_result.narrative),
+                    "read_projection": dict(read_result.evidence),
+                }
+            )
+            return
+        narrative = _sanitize_output(read_result.narrative)
+        try:
+            assistant_turn_result = application_ports.record_assistant_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=narrative,
+                ts_ms=int(time.time() * 1000),
+                lang=render_target_lang,
+                metadata={
+                    "message_kind": "final_reply",
+                    "reply_source": "durable_read_projection",
+                    "route": canonical_route,
+                    "reason_code": read_result.reason_code,
+                },
+            )
+        except Exception as exc:
+            assistant_turn_result = {
+                "status": "DEGRADED",
+                "reason_code": type(exc).__name__,
+            }
+        assistant_status = str(assistant_turn_result.get("status") or "").strip().upper()
+        assistant_reason = str(assistant_turn_result.get("reason_code") or "").strip().upper()
+        if assistant_status != "OK" and not (
+            assistant_status == "SKIPPED"
+            and assistant_reason in {"DUPLICATE_CONVERSATION_TURN", "DUPLICATE_COMMAND"}
+        ):
+            yield _emit_sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": "READ_ROUTE_ASSISTANT_TURN_NOT_DURABLE",
+                    "request_id": request_id,
+                }
+            )
+            return
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "reason_code": read_result.reason_code,
+                "request_id": request_id,
+                "narrative": narrative,
+                "read_projection": dict(read_result.evidence),
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": f"cortex_orchestrator:{canonical_route}_projection",
+                    "latency_ms": max(0, int(time.time() * 1000) - ts_ms),
+                },
+            }
+        )
+        return
 
     bond_summary: dict[str, Any] = {}
 
@@ -700,37 +836,4 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    executive_router_sse_generator = application_ports.executive_router_sse_generator
-
-    _logger.info(
-        "[%s] cortex_orchestrator stage_summary prefetch_ms=%s retrieval_wait_ms=%s prompt_filter_ms=%s "
-        "llm_runtime_resolve_ms=%s request_to_executive_ms=%s",
-        request_id,
-        prefetch_persona_inputs_ms,
-        retrieval_wait_ms,
-        prompt_filter_ms,
-        llm_runtime_resolve_ms,
-        max(0, int(time.time() * 1000) - orchestrator_started_ms),
-    )
-
-    async for event in executive_router_sse_generator(
-        request_body=request_body,
-        request_id=request_id,
-        session_id=session_id,
-        ts_ms=ts_ms,
-        intent_draft=intent_draft,
-        emotion_context=emotion_context,
-        emotion_snapshot=emotion_snapshot,
-        governor_result=gov,
-        intent_id=intent_id,
-        metrics=metrics,
-        person_id=person_id,
-        sanitized_message=sanitized_message,
-        bond_summary=bond_summary,
-        retrieval_evidence_items=retrieval_evidence_items,
-        retrieval_summary=retrieval_summary,
-        render_target_lang=render_target_lang,
-        llm_runtime=llm_runtime,
-        pii_ingress_stats=_pii_ingress_stats,
-    ):
-        yield event
+    raise RuntimeError("CORTEX_RUNTIME_ROUTE_NOT_TERMINATED")

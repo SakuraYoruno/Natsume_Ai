@@ -41,7 +41,7 @@ def _candidate(candidate_id: str) -> SearchCandidate:
             "acceptance_criteria": [f"{candidate_id} verified"],
             "input_refs": [f"artifact://input/{candidate_id}"],
             "output_contract": {"type": "result", "required": ["receipt_ref"]},
-            "retry_policy": {"max_attempts": 2, "backoff_ms": 0},
+            "retry_policy": {"max_attempts": 2, "retry_backoff_ms": 0},
             "risk_level": 2,
             "capability_requirements": [f"capability-{candidate_id}"],
             "domain": "code",

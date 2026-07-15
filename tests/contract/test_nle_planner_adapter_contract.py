@@ -155,6 +155,10 @@ def test_t_nle_05_preserves_sequential_parallel_and_mixed_dependencies(
         graph_node = next(item for item in adapted.task_graph.nodes if item.node_id == node.node_id)
         assert graph_node.dependencies == node.dependencies
         assert graph_node.route == f"{node.route_type}:{node.target_id}"
+        assert graph_node.retry_policy == {
+            "max_attempts": 1,
+            "retry_backoff_ms": 0,
+        }
         assert set(node.dependency_refs).issubset(set(graph_node.input_refs))
 
 
@@ -178,6 +182,25 @@ def test_t_nle_05_ready_siblings_parallel_unless_source_explicitly_disables_it()
 
     assert parallel.execution_batches == (("a",), ("b", "c"))
     assert serial.execution_batches == (("a",), ("b",), ("c",))
+
+
+def test_t_nle_05_skill_dag_retry_limit_maps_to_canonical_attempt_policy() -> None:
+    source = replace(
+        _node("retrying"),
+        retry_limit=2,
+        retry_backoff_ms=250,
+    )
+
+    adapted = adapt_skill_dag_plan(_dag(source), identity=_identity())
+
+    assert adapted.node("retrying").retry_policy == {
+        "max_attempts": 3,
+        "retry_backoff_ms": 250,
+    }
+    assert adapted.task_graph.nodes[0].retry_policy == {
+        "max_attempts": 3,
+        "retry_backoff_ms": 250,
+    }
 
 
 def test_t_nle_05_set_dependencies_are_deterministic() -> None:
@@ -232,6 +255,10 @@ def test_t_nle_05_planning_agent_scaffold_ref_and_ready_siblings_are_preserved()
     assert adapted.node("step-2").input_refs == (
         "artifact://planner-context/planning-source/steps/1",
     )
+    assert adapted.node("step-2").retry_policy == {
+        "max_attempts": 1,
+        "retry_backoff_ms": 0,
+    }
 
 
 def test_t_nle_05_planning_agent_non_executable_dependency_fails_closed() -> None:

@@ -36,7 +36,7 @@ def _payload(candidate_id: str, **overrides: Any) -> dict[str, Any]:
             "type": "planning_step_result",
             "required": ["evidence_ref"],
         },
-        "retry_policy": {"max_attempts": 2, "backoff_ms": 10},
+        "retry_policy": {"max_attempts": 2, "retry_backoff_ms": 10},
         "risk_level": 2,
         "capability_requirements": [f"capability-{candidate_id}"],
         "domain": "code",
@@ -127,6 +127,10 @@ def test_gr04_compilation_is_deterministic_linear_and_admission_ready() -> None:
     assert graph.nodes[1].dependencies == (graph.nodes[0].node_id,)
     assert graph.nodes[1].status is TaskNodeStatus.BLOCKED
     assert graph.nodes[0].route == "skill:worker-collect"
+    assert graph.nodes[0].retry_policy == {
+        "max_attempts": 2,
+        "retry_backoff_ms": 10,
+    }
     assert any(
         ref.endswith(f"/revisions/1/nodes/{graph.nodes[0].node_id}")
         for ref in graph.nodes[1].input_refs
@@ -143,6 +147,18 @@ def test_gr04_compilation_is_deterministic_linear_and_admission_ready() -> None:
     assert order.review_ref == "review://gr04/root"
     assert order.operation_fingerprint.startswith("sha256:")
     assert len(order.operation_fingerprint) == 71
+
+
+def test_gr04_compiler_rejects_legacy_retry_backoff_alias() -> None:
+    candidate = _candidate(
+        "legacy-retry",
+        retry_policy={"max_attempts": 2, "backoff_ms": 10},
+    )
+
+    with pytest.raises(ContractViolation) as error:
+        PlanningGraphCompiler().compile(_result(candidate))
+
+    assert "unsupported fields: backoff_ms" in error.value.detail
 
 
 def test_gr04_explicit_candidate_dependencies_compile_parallel_dag() -> None:

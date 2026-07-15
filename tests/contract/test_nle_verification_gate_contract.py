@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 from typing import Any
@@ -116,6 +117,85 @@ def test_t_nle_08_workspace_escape_returns_structured_error(tmp_path: Path) -> N
     assert result["status"] == "ERROR"
     assert result["reason_code"] == VERIFICATION_WORKSPACE_ESCAPE
     assert result["checks"][0]["reason_code"] == VERIFICATION_WORKSPACE_ESCAPE
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        r"C:\outside.py",
+        r"C:outside.py",
+        r"\\server\share\outside.py",
+        r"\\?\C:\outside.py",
+        "NUL.py",
+        "CONIN$",
+    ],
+)
+def test_t_nle_08_cross_platform_unsafe_paths_never_reach_runner(
+    tmp_path: Path,
+    unsafe_path: str,
+) -> None:
+    runner = FakeRunner()
+    result = VerificationPolicy(runner=runner).run(
+        {"required": True, "commands": [["python", "-m", "pytest", unsafe_path]]},
+        workspace=tmp_path,
+        request_id="req-unsafe-path",
+        intent_id="intent-unsafe-path",
+        work_order_id="wo-required",
+    )
+
+    assert result["status"] == "ERROR"
+    assert result["reason_code"] == VERIFICATION_WORKSPACE_ESCAPE
+    assert runner.calls == []
+
+
+def test_t_nle_08_absolute_workspace_internal_cwd_is_rejected(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    result = VerificationPolicy(runner=runner).run(
+        {
+            "required": True,
+            "cwd": str(tmp_path),
+            "commands": [["python", "-m", "pytest", "--version"]],
+        },
+        workspace=tmp_path,
+        request_id="req-absolute-cwd",
+        intent_id="intent-absolute-cwd",
+        work_order_id="wo-required",
+    )
+
+    assert result["status"] == "ERROR"
+    assert result["reason_code"] == VERIFICATION_WORKSPACE_ESCAPE
+    assert runner.calls == []
+
+
+def test_t_nle_08_workspace_link_escape_never_reaches_runner(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    link = tmp_path / "escape"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        if os.name != "nt":
+            pytest.skip(f"directory symlinks are unavailable on this platform: {exc}")
+        junction = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(outside)],
+            capture_output=True,
+            check=False,
+        )
+        if junction.returncode != 0:
+            pytest.skip(f"directory links are unavailable on this platform: {exc}")
+    runner = FakeRunner()
+
+    result = VerificationPolicy(runner=runner).run(
+        {"required": True, "commands": [["python", "-m", "pytest", "escape/test_sample.py"]]},
+        workspace=tmp_path,
+        request_id="req-link-escape",
+        intent_id="intent-link-escape",
+        work_order_id="wo-required",
+    )
+
+    assert result["status"] == "ERROR"
+    assert result["reason_code"] == VERIFICATION_WORKSPACE_ESCAPE
+    assert runner.calls == []
 
 
 def test_t_nle_08_allowed_command_uses_safe_runner_and_schema(tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ def test_all_four_routes_are_complete_without_claiming_full_architecture() -> No
     assert set(report.route_statuses.values()) == {"COMPLETE"}
     assert report.missing_route_controls == {}
     assert report.missing_architecture_controls == (
+        "native_multi_node_task_graph",
         "composition_without_global_service_locator",
     )
 

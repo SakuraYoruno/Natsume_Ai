@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.1
+版本：v5.2
 核对日期：2026-07-15
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -18,8 +18,9 @@
 |---|---|---|
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在 |
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
-| Scheduler / Internal Agent | `BROKEN` | 仍提交 `AgentWorkOrder`，但 admission 已强制 `WorkOrderV3 + BudgetPolicy` |
-| 原生多节点 Durable TaskGraph | `PARTIAL` | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance 已有；节点并发和 retry/backoff 未消费 |
+| Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
+| Internal Agent | `BROKEN` | 仍提交 `AgentWorkOrder`，但 admission 已强制 `WorkOrderV3 + BudgetPolicy` |
+| 原生多节点 Durable TaskGraph | `PARTIAL` | 依赖推进及执行资产已有；B0 已冻结稳定 fan-out/fan-in/retry 决策和 canonical retry policy，但尚未接入生产 Coordinator/Store |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -77,14 +78,13 @@ Chat / Host Input / Gateway
 
 `chat`、`skill`、`delegate`、`plan` 被 Cortex 识别为 canonical governed route。它们不能回退到 Executive：`host_brain/executive_runtime/runtime.py` 对这四种 route 直接拒绝。
 
-### 3.2 未闭环范围
+### 3.2 Read route 与退役边界
 
-1. `task_progress`、`recent_turn` 仍可进入 Executive compatibility path。
-2. Executive 仍能创建和执行 legacy `SkillDagPlan`，并写入进程内 `LegacyRuntimeTaskRegistry`。
-3. Scheduler 与 Internal Agent 虽随 Host lifecycle 启动，但构造的仍是 `AgentWorkOrder`：
-   - `host_brain/scheduler/governed_runtime.py::_build_contracts`
-   - `host_brain/app/internal_task_runtime.py::_build_contracts`
-4. `HostCommandRepository._normalize_admission()` 只接受带显式 `BudgetPolicy` 的 `WorkOrderV3`，因此上述两路首个真实任务会以 `HOST_COMMAND_INVALID` 失败。
+`task_progress` 直接读取 `DurableTaskStatusProjection`，`recent_turn` 直接读取 durable conversation window；两者只产生已持久化的可见对话结果，不创建 Task、Attempt 或第二套执行 authority。未知 legacy route 在 Cortex 以 `RUNTIME_ROUTE_UNSUPPORTED` fail closed。
+
+Executive 已从生产 Cortex application ports 删除。旧 `_execute_explicit_skill_dag`、进程内任务 registry、factory、accessor 和相关生产写入均已删除；`executive_runtime/runtime.py` 只保留拒绝边界与孤立 helper，不再是生产路由器。
+
+Scheduler 已修复并有真实任务证据。仍未闭环的是 Internal Agent：`host_brain/app/internal_task_runtime.py::_build_contracts` 仍生成 `AgentWorkOrder`，首个真实 admission 会被 `HostCommandRepository` 拒绝。
 
 ## 4. TaskGraph、预算、Review 与副作用
 
@@ -92,11 +92,13 @@ Chat / Host Input / Gateway
 
 当前 coordinator 能持久化多节点图、阻断未知依赖和环、推进 `BLOCKED → READY`、创建 Attempt/Lease/Reservation，并在 Verification 与 Acceptance 后完成节点。
 
+B0 新增的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定选择 READY、依赖满足、retry due/waiting 节点，严格 fan-in，并受 concurrency/occupied slots 限制。所有 TaskNode 生产者已统一使用 `{max_attempts, retry_backoff_ms}`；这只是合同冻结，不代表生产并发或 retry 已接线。
+
 仍缺：
 
 - claimable 节点当前串行执行，没有 DAG 级 fan-out 并发；
 - 已有 attempt 后不会创建下一 attempt，`retry_policy.max_attempts` 与 backoff 没有成为运行时行为；
-- Scheduler/Internal 修复 WorkOrder 后仍需补 node-bound child grant、Budget 与 Review composition。
+- 仍缺原子 node claim、Lease heartbeat/startup recovery、持久 retry deadline、自动 Review continuation 和跨进程并发额度。
 
 ### 4.2 Budget
 
@@ -107,7 +109,7 @@ Chat / Host Input / Gateway
 - provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；
 - concurrency 字段没有运行时 charge；
 - 超限后的 `DEGRADE`、`REVIEW` 尚未形成完整分支，当前核心路径主要阻断；
-- Scheduler/Internal 尚未进入这条可用主链。
+- Scheduler 已进入该主链；Internal Agent 尚未进入。
 
 ### 4.3 Review/Resume
 
@@ -168,7 +170,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | 状态域 | 当前权威写入/存储 | 备注 |
 |---|---|---|
 | Host command / Task / Attempt | `HostCommandRepository`、`DurableTaskStore` | canonical 四路线权威 |
-| Scheduler | `SchedulerDefinitionRepository` 等 | 持久层存在，governed execution admission 仍坏 |
+| Scheduler | Scheduler repositories + Durable Task Runtime | occurrence 与 Task lineage 均持久化，真实 governed execution 已接通 |
 | Review | `ReviewStore` | token 持久化，continuation 非自动 |
 | Runtime Event / Outbox | canonical SQLite journal/outbox | 关键事件与投影可恢复 |
 | Model invocation | `ModelAttemptService` | 统一 route/attempt/trace 主干 |
@@ -177,7 +179,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | Memory / Canon | typed repositories + governed apply | projection/cache 不应成为 writer |
 | Edge physical effect | Edge actuator + durable receipt | 真实硬件完整验收仍受环境限制 |
 | Operator read | `QueryProjectionStore` | Query Plane 以 projection 为主 |
-| Legacy task compatibility | `LegacyRuntimeTaskRegistry` | 仍由 Executive 写入，待删除 |
+| Task/recent read routes | Durable Task projection + conversation history | 只读，不创建平行任务状态 |
 
 ## 7. Composition 现状
 
@@ -186,9 +188,9 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 但全局对象图尚未收敛：
 
 - `host_brain/composition/process_service_container.py` 在模块级创建 `_PROCESS_SERVICE_CONTAINER`；
-- container 约有 61 个可变 service 槽位；
-- `process_services.py` 与 `process_runtime_services.py` 暴露约 63 个 `get_*()` accessor；
-- 约 79 个生产 Python 文件直接或间接依赖该 locator；
+- container 仍有约 60 个可变 service 槽位；
+- `process_services.py` 与 `process_runtime_services.py` 仍暴露数十个 `get_*()` accessor；
+- 数十个生产 Python 文件仍直接或间接依赖该 locator；
 - `host_brain.app` 仍承担部分真实 service factory 和 wiring。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
@@ -209,7 +211,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | Knowledge OS | Memory、Retrieval、Canon、Markdown KB | 缺统一 provenance、版本、过期、冲突与 Decision Record 生命周期 |
 | Identity | `release/identity_snapshot.py` | snapshot/diff/review/rollback 合同存在；gate 默认关闭，未形成真实 migration executor |
 | Runtime Guardian | health、degradation、heartbeat、service catalog | degradation/recovery evidence 已接部分生产链；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与 SLO owner 不完整 |
-| Workspace Isolation | `agent_runtime/workspace_policy.py` | 有执行器接线，但仍允许任意 path/`runtime_repo`，字符串前缀边界存在误判风险；不是 OS/tenant/worktree 强隔离 |
+| Workspace Isolation | `agent_runtime/workspace_paths.py`、`agent_runtime/workspace_policy.py` | D0 canonical resolver 已封闭受管文件 I/O/list、截图、Verification cwd/argv 与 git cwd 的绝对路径、遍历、同前缀兄弟目录和已解析 link 逃逸；仍允许任意 workspace path/`runtime_repo`，无 durable owner，也不是 OS/tenant/worktree 强隔离；校验到打开之间仍有 handle-level TOCTOU 风险 |
 
 ## 9. 仓库边界
 
@@ -220,12 +222,11 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 修复 Scheduler/Internal 的 `WorkOrderV3 + Budget + node grant + Review` admission。
-2. 为 Durable DAG 实现真实 retry/backoff、并发调度与自动 continuation。
-3. 删除 Executive SkillDag 与 `LegacyRuntimeTaskRegistry` 的剩余生产写入。
-4. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
-5. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
-6. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
-7. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
+1. 修复 Internal Agent 的 `WorkOrderV3 + Budget + node grant + Review` admission。
+2. 把 B0 调度决策接入 Durable Store/Coordinator，实现原子 claim、真实 retry/backoff、并发、恢复与自动 continuation。
+3. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
+4. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
+5. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
+6. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
 
 这些缺口的唯一活动执行顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。

@@ -29,15 +29,15 @@
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
 | Host 四路线 governed | `WIRED` | `cortex_runtime.py`、`governed_task_adapter.py`、GR-06 live receipt | 只覆盖 `chat/skill/delegate/plan` | NE-01 守卫回归 |
-| Scheduler governed | `BROKEN` | `scheduler/governed_runtime.py::_build_contracts` | 仍构造 `AgentWorkOrder`；admission 要求 `WorkOrderV3 + BudgetPolicy` | NE-01 |
-| Internal Agent governed | `BROKEN` | `app/internal_task_runtime.py::_build_contracts` | 同上；且缺 node-bound grant/Review/Budget composition | NE-01 |
-| 全 route universal runtime | `PARTIAL` | Cortex route split | `task_progress/recent_turn` 仍进 Executive | NE-01 |
-| Executive authority 退役 | `PARTIAL` | canonical route fail closed | legacy SkillDag 仍执行、仍写内存 registry | NE-01 |
-| 多节点 Durable DAG | `PARTIAL` | `task_runtime/coordinator.py` | 依赖/Attempt/Lease 已有；无并发，retry/backoff 不消费 | NE-01 |
+| Scheduler governed | `WIRED` | Scheduler production cutover integration | `WorkOrderV3`、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 | NE-01 已完成切片 |
+| Internal Agent governed | `BROKEN` | `app/internal_task_runtime.py::_build_contracts` | 仍构造 `AgentWorkOrder`，且缺 node-bound grant/Review/Budget composition | NE-01 |
+| 全 route universal runtime | `PARTIAL` | Cortex governed/read split | Host 四执行路由已 governed；`task_progress/recent_turn` 已转只读投影；Internal 与完整 Operator/Gateway surface matrix 仍未闭环 | NE-01 |
+| Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
+| 多节点 Durable DAG | `PARTIAL` | `task_runtime/coordinator.py`、`dag_scheduler.py` | B0 决策和 retry 合同已冻结；未接原子 claim、真实并发/retry/backoff/恢复/continuation | NE-01 |
 | Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` | concurrency 未计量；DEGRADE/REVIEW 分支不完整；非 Host 未覆盖 | NE-01 |
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
-| 单一任务真相 | `PARTIAL` | Durable projection | `LegacyRuntimeTaskRegistry` 仍被 Executive 写入 | NE-01 |
+| 单一任务真相 | `WIRED` | Durable Task projection + registry absence contract | 进程内 registry 与 accessor 已删除；read route 不创建任务 | NE-01 已完成切片 |
 | Persona 演化单一 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 运行时拒绝、`T-PERSONA-FENCE-01` 全仓扫描、无副作用候选回归 | legacy writer 已归零；proposal、shadow、Review、版本激活与 rollback 替代链尚未实现 | NE-01 围栏已完成；NE-06 全量替换 |
 | 通用 PlanningSearch 算法 | `WIRED` | `host_brain/planning_search/` | 内核可用，但不代表领域规划收益 | NE-02 |
 | Host 候选方案生成 | `MISSING` | `plan_intent_search.py` | 只重排上游已批准步骤，不生成竞争路径 | NE-02 |
@@ -51,9 +51,9 @@
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
 | 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
-| 无全局 Service Locator | `MISSING` | `process_service_container.py`、`process_*services.py` | 约 61 个槽位、63 个 accessor、79 个依赖文件 | NE-01 |
+| 无全局 Service Locator | `MISSING` | `process_service_container.py`、`process_*services.py` | legacy task 槽位/accessor 已删，但仍约 60 个槽位和数十个 accessor/依赖文件 | NE-01 |
 | Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
-| Workspace ownership | `PARTIAL` | `agent_runtime/workspace_policy.py` | 局部路径检查，不是 per-task/workspace/tenant 强隔离 | NE-01 |
+| Workspace ownership | `PARTIAL_D0_PATH_FENCE` | `agent_runtime/workspace_paths.py`、resolver/tool/verification tests | scoped 路径安全已统一；仍缺 per-task durable owner、`runtime_repo` 退役、隔离 worktree、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |
 
 ## 4. 数字生命与长期演化
@@ -90,7 +90,8 @@
 ```text
 Core Infrastructure                         HISTORICAL_PASS / REUSABLE
 Host chat-skill-delegate-plan runtime        WIRED
-Scheduler/Internal governed runtime          BROKEN
+Scheduler governed runtime                   WIRED
+Internal governed runtime                    BROKEN
 Universal execution scope                    PARTIAL
 Persona evolution authority                  CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
 Generic planning kernel                      AVAILABLE

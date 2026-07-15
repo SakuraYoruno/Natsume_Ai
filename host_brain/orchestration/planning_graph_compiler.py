@@ -31,6 +31,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
+    normalize_task_retry_policy,
     validate_task_graph_admission_state,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -584,18 +585,10 @@ def _validate_node_payload(payload: Mapping[str, Any], *, index: int) -> None:
             CONTRACT_FIELD_INVALID,
             f"selected_path[{index}] output_contract must be a non-empty object",
         )
-    retry_policy = payload.get("retry_policy")
-    if not isinstance(retry_policy, Mapping) or not retry_policy:
-        raise ContractViolation(
-            CONTRACT_FIELD_INVALID,
-            f"selected_path[{index}] retry_policy must be a non-empty object",
-        )
-    max_attempts = retry_policy.get("max_attempts")
-    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
-        raise ContractViolation(
-            CONTRACT_FIELD_INVALID,
-            f"selected_path[{index}] retry_policy.max_attempts must be an integer >= 1",
-        )
+    normalize_task_retry_policy(
+        payload.get("retry_policy"),
+        field_name=f"selected_path[{index}].retry_policy",
+    )
     risk_level = payload.get("risk_level")
     if isinstance(risk_level, bool) or not isinstance(risk_level, int) or not 1 <= risk_level <= 5:
         raise ContractViolation(
@@ -795,7 +788,10 @@ def _compile_node(
         route=f"{route}:{quote(target_id, safe='')}",
         input_refs=input_refs,
         output_contract=deepcopy(dict(payload["output_contract"])),
-        retry_policy=deepcopy(dict(payload["retry_policy"])),
+        retry_policy=normalize_task_retry_policy(
+            payload["retry_policy"],
+            field_name="selected_path.retry_policy",
+        ),
         risk_level=int(payload["risk_level"]),
         acceptance_criteria=_required_text_list(
             payload.get("acceptance_criteria"),

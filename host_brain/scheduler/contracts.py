@@ -15,6 +15,9 @@ import json
 import re
 from typing import Any
 
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.task_graph import normalize_task_retry_policy
+
 
 SCHEDULER_OCCURRENCE_SCHEMA_VERSION = "Natsume.scheduler.occurrence.v1"
 SCHEDULER_DEFINITION_SCHEMA_VERSION = "Natsume.scheduler.definition.v1"
@@ -296,13 +299,20 @@ class SchedulerDefinitionSnapshot:
         if raw is None:
             trigger = self.definition.get("trigger_config")
             raw = dict(trigger).get("retry_policy") if isinstance(trigger, Mapping) else None
-        policy = _finite_mapping(raw or {"max_attempts": 1}, "retry_policy")
-        attempts = _positive_int(policy.get("max_attempts", 1), "retry_policy.max_attempts")
-        backoff = _non_negative_int(
-            policy.get("retry_backoff_ms", policy.get("base_delay_ms", 0)),
-            "retry_policy.retry_backoff_ms",
+        policy = _finite_mapping(
+            raw if raw is not None else {"max_attempts": 1},
+            "retry_policy",
         )
-        return {**policy, "max_attempts": attempts, "retry_backoff_ms": backoff}
+        try:
+            return normalize_task_retry_policy(
+                policy,
+                field_name="retry_policy",
+            )
+        except ContractViolation as exc:
+            raise SchedulerContractError(
+                SCHEDULER_DEFINITION_INVALID,
+                exc.detail,
+            ) from exc
 
     @property
     def intent_template(self) -> dict[str, Any]:

@@ -68,7 +68,7 @@ flowchart TD
 
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
-- Scheduler/Internal Agent：`BROKEN`。
+- Scheduler：`WIRED`；Internal Agent：`BROKEN`。
 - Durable DAG：`PARTIAL`。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。

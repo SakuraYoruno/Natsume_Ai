@@ -175,6 +175,7 @@ def build_process_scheduler_container(
     *,
     task_runtime_container: Any,
     ledger: Any,
+    token_service: Any,
     evaluator: SecureIngressAuthorityEvaluator,
     claim_result_store: Any,
     intent_engine: Any,
@@ -215,6 +216,7 @@ def build_process_scheduler_container(
     runtime = build_governed_scheduler_runtime(
         task_runtime_container=task_runtime_container,
         ledger=ledger,
+        token_service=token_service,
         result_repository=results,
         runtime_router=runtime_router,
         worker_registry=workers,

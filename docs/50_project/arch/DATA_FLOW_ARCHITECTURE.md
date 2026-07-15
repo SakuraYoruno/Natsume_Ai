@@ -57,24 +57,25 @@ flowchart TD
     Effects --> Conversation["Conversation / Life / Memory"]
     Effects --> Delivery["Gateway / Edge 副作用"]
 
-    Scheduler["Scheduler"] --> LegacyWO["AgentWorkOrder"]
-    Internal["Internal Agent"] --> LegacyWO
+    Scheduler["Scheduler"] --> SchedulerWO["WorkOrderV3 + Budget + child grant"]
+    SchedulerWO --> Admission
+    Internal["Internal Agent"] --> LegacyWO["AgentWorkOrder"]
     LegacyWO -. admission 拒绝 .-> Reject["HOST_COMMAND_INVALID"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     classDef broken fill:#fde2e2,stroke:#b42318,color:#3d0b08;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Worker,VA,Receipt,Effects wired;
+    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Worker,VA,Receipt,Effects,Scheduler,SchedulerWO wired;
     class Plan,Runtime,Conversation,Delivery partial;
-    class Scheduler,Internal,LegacyWO,Reject broken;
+    class Internal,LegacyWO,Reject broken;
 ```
 
 上图的核心结论是：
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance，但多节点仍串行 claim，retry/backoff 未成为完整运行时行为。
-- Scheduler 和 Internal Agent 不是“待补测试”，而是当前真实合同不匹配的 `BROKEN` 路径。
+- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B0 已冻结纯调度/retry 合同，但尚未接入生产 claim，retry/backoff 仍不是完整运行时行为。
+- Scheduler 已修复并通过真实 occurrence；Internal Agent 仍是合同不匹配的 `BROKEN` 路径。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 
 ## 3. 入口与路由分流
@@ -96,7 +97,7 @@ normalized request
 1. Governor 未批准不进入 worker。
 2. Governed Runtime 不可用或不支持 route 时，返回 `GOVERNED_RUNTIME_UNAVAILABLE` / `GOVERNED_ROUTE_UNSUPPORTED`，不回退 Executive。
 
-canonical route 不会在 graph Acceptance 之前写入 user turn。`task_progress` 和 `recent_turn` 仍属于 compatibility/fast path，不应被当作四路已统一的证据。
+canonical route 不会在 graph Acceptance 之前写入 user turn。`task_progress` 和 `recent_turn` 是独立的 durable projection/read route：Governor 批准后持久化可见对话轮次，直接读取 Task 或 conversation projection，不创建 Task/Attempt，也不进入 Executive。
 
 ### 3.2 Gateway / Host Input 入口
 
@@ -110,9 +111,10 @@ Gateway 的 intake ack 只表示“已持久接收”。Gateway 只在 Host 返�
 |---|---|---:|---|---|
 | Host Chat/API | Cortex | 是 | `WIRED` | 仅四条 canonical route |
 | Gateway | durable inbox → Host Input | 是 | `WIRED` | 可能提交时间不明的请求进 uncertain DLQ，不盲目重试 |
-| Scheduler | governed scheduler adapter | 否 | `BROKEN` | 仍产生 `AgentWorkOrder` |
+| Scheduler | governed scheduler adapter | 是 | `WIRED` | Clock/Manual occurrence，完整 child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent | internal task adapter | 否 | `BROKEN` | 仍产生 `AgentWorkOrder` |
-| Executive compatibility | `task_progress` / `recent_turn` / legacy DAG | 否 | `PARTIAL_LEGACY` | 仍有第二套执行和内存 task truth |
+| Read projection | `task_progress` / `recent_turn` | 否 | `WIRED_READ_ONLY` | 读取 durable projection，不拥有任务状态 |
+| Executive | retired guard | 否 | `RETIRED` | 无生产调用、无 SkillDag 执行、无内存 registry |
 
 ## 4. Host 四路 Governed Runtime
 
@@ -143,7 +145,7 @@ frozen chat execution
 
 Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加载授权，再执行 frozen governed skill。之后它记录 governed skill execution，校验 durable receipt projection，并返回 worker commit 和可计量 budget usage。
 
-这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。但 Executive 的 legacy `SkillDagPlan` 还在，所以不能扩大为“全仓库只剩一套 skill execution truth”。
+这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行和进程内 registry 已删除；后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
 
 ### 4.3 Delegate
 
@@ -205,26 +207,29 @@ claim runnable node
 | Budget | Host 四路有预留、计量和结算 | `PARTIAL` |
 | Review | 能进入 PRE/POST waiting 状态 | `PARTIAL` |
 | Resume | token/checkpoint durable，但消费 token 后不会自动重调度原图 | `PARTIAL` |
+| B0 调度决策 | 稳定 READY/fan-in/retry due 选择与 canonical retry policy | `WIRED_CONTRACT_ONLY` |
 | DAG 并发 | coordinator 当前串行 claim runnable nodes | `NOT_IMPLEMENTED` |
 | Retry/backoff | graph 合同有字段，运行时没有完整创建后续 attempt 与 backoff | `PARTIAL` |
 
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
-### 5.3 Scheduler / Internal 的实际阻断点
+### 5.3 Scheduler 已接通，Internal 仍阻断
 
-[scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py) 和 [internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py) 虽然调用共用 `GovernedCommandApplication`，但它们仍构造 `AgentWorkOrder`。`HostCommandRepository._normalize_admission()` 只接受带显式 BudgetPolicy 的 `WorkOrderV3`。
+[scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py) 已构造 `WorkOrderV3 + BudgetPolicy`，以 `delegate:<worker_key>` 冻结 TaskNode，并在 handler 前验证 durable child grant。真实测试已贯通 Attempt、Budget consumed、Review waiver、Verification、Acceptance、Receipt 与 replay。
+
+[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py) 仍构造 `AgentWorkOrder`；`HostCommandRepository._normalize_admission()` 只接受带显式 BudgetPolicy 的 `WorkOrderV3`。
 
 因此实际流程是：
 
 ```text
-Scheduler/Internal lifecycle started
+Internal lifecycle started
   → HostCommand + AgentWorkOrder + graph
   → HostCommandRepository admission
   → HOST_COMMAND_INVALID
   → no worker / no acceptance / no execution receipt
 ```
 
-这两路必须修复为 `WorkOrderV3 + BudgetPolicy + node-bound grant + Task Runtime composition`，才能从 `BROKEN` 转为 `WIRED`。
+Internal 必须修复为 `WorkOrderV3 + BudgetPolicy + node-bound grant + Task Runtime composition`，才能从 `BROKEN` 转为 `WIRED`。
 
 ## 6. Acceptance Effect 与对话提交语义
 
@@ -443,15 +448,15 @@ All ingress sources
 
 从当前流程到目标流程的必要变更是：
 
-1. 把 Scheduler 和 Internal Agent 修复为 `WorkOrderV3 + BudgetPolicy`，并进入同一 admission/coordinator。
-2. 删除 Executive legacy SkillDag 和进程内 task truth，不再保留第二套执行语义。
-3. 使 coordinator 真正消费 DAG 并发、retry limit、backoff 和后续 attempts。
-4. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
-5. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
-6. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation。
-7. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
-8. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
-9. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
+1. 把 Internal Agent 修复为 `WorkOrderV3 + BudgetPolicy`，并进入同一 admission/coordinator。
+2. 把 B0 决策接入 durable 原子 claim，使 coordinator 真正消费 DAG 并发、retry limit、backoff 和后续 attempts。
+3. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
+4. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
+5. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation。
+6. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
+7. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
+8. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
+9. 在 D0 canonical path fence 之上建立 per-task durable workspace authority 与隔离 worktree；任意 shell 字符串、文件句柄和 reparse-point 竞态不能用路径规范化的通过代替。
 
 ## 13. 代码证据索引
 
@@ -459,9 +464,11 @@ All ingress sources
 |---|---|
 | Cortex/Governor 与四路分流 | [cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[governed_task_adapter.py](../../../host_brain/app/governed_task_adapter.py) |
 | Host command admission | [governed_command.py](../../../host_brain/orchestration/governed_command.py)，[host_command_repository.py](../../../host_brain/persistence/host_command_repository.py) |
-| TaskGraph runtime | [coordinator.py](../../../host_brain/task_runtime/coordinator.py)，[task_repository.py](../../../host_brain/persistence/task_repository.py) |
+| TaskGraph runtime | [coordinator.py](../../../host_brain/task_runtime/coordinator.py)，[dag_scheduler.py](../../../host_brain/task_runtime/dag_scheduler.py)，[task_repository.py](../../../host_brain/persistence/task_repository.py) |
 | Plan search/compiler | [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py)，[planning_execution.py](../../../host_brain/orchestration/planning_execution.py)，[planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py) |
-| Scheduler/Internal 阻断 | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py) |
+| Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)（已接通），[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（仍阻断） |
+| Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |
+| Workspace 路径围栏 | [workspace_paths.py](../../../host_brain/agent_runtime/workspace_paths.py)，[agent_tools.py](../../../host_brain/agent_runtime/agent_tools.py)，[verification_policy.py](../../../host_brain/agent_runtime/verification_policy.py) |
 | Acceptance effects | [acceptance_effects.py](../../../host_brain/task_runtime/acceptance_effects.py)，[acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py)，[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) |
 | Life/Memory post-process | [digital_life/service.py](../../../host_brain/digital_life/service.py)，[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py)，[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) |
 | Gateway inbound/outbound | [delivery_runtime.py](../../../edge_client/gateway/delivery_runtime.py)，[input_reporter.py](../../../edge_client/channels/input_reporter.py)，[ingress.py](../../../host_brain/input_runtime/ingress.py)，[gateway_transport_repository.py](../../../host_brain/persistence/gateway_transport_repository.py)，[outbound.py](../../../edge_client/gateway/outbound.py) |
@@ -476,13 +483,15 @@ All ingress sources
 ```text
 Host canonical four-route data flow        WIRED
 Durable TaskGraph execution                PARTIAL
-Scheduler/Internal governed admission      BROKEN
+Scheduler governed admission               WIRED
+Internal governed admission                BROKEN
 Conversation effects                       POST_ACCEPTANCE_DURABLE_EVENTUAL
 Gateway durable transport                  WIRED_WITH_UNCERTAIN_DLQ
 Edge as sole physical actuator             WIRED
 All Host external effects via one outbox    NOT YET TRUE
 Memory canonical write path                 WIRED_EVENTUAL
 Persona evolution authority                CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
+Workspace path safety                      D0_WIRED / DURABLE ISOLATION INCOMPLETE
 Scene context                               PARTIAL_DEFAULT_OFF
 Full Architecture                           INCOMPLETE
 ```

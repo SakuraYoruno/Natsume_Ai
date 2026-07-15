@@ -29,6 +29,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
+    normalize_task_retry_policy,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
@@ -217,7 +218,9 @@ class PlannerNodeView:
     dependency_refs: tuple[str, ...] = ()
     input_refs: tuple[str, ...] = ()
     output_contract: dict[str, Any] = field(default_factory=dict)
-    retry_policy: dict[str, Any] = field(default_factory=dict)
+    retry_policy: dict[str, Any] = field(
+        default_factory=lambda: {"max_attempts": 1, "retry_backoff_ms": 0}
+    )
     risk_level: int = 1
     acceptance_criteria: tuple[str, ...] = ()
     allow_parallel: bool = True
@@ -236,7 +239,12 @@ class PlannerNodeView:
             dependency_refs=_text_tuple(data.get("dependency_refs")),
             input_refs=_text_tuple(data.get("input_refs")),
             output_contract=_mapping(data.get("output_contract")),
-            retry_policy=_mapping(data.get("retry_policy")),
+            retry_policy=normalize_task_retry_policy(
+                data.get("retry_policy")
+                if data.get("retry_policy") is not None
+                else {"max_attempts": 1, "retry_backoff_ms": 0},
+                field_name="planner_node.retry_policy",
+            ),
             risk_level=_positive_int(
                 data.get("risk_level", 1),
                 field_name="risk_level",
@@ -280,6 +288,10 @@ class PlannerNodeView:
                 TASK_GRAPH_INVALID,
                 "planner node risk_level must be between 1 and 5",
             )
+        normalize_task_retry_policy(
+            self.retry_policy,
+            field_name=f"planner node {self.node_id} retry_policy",
+        )
 
     def to_task_node(self) -> TaskNode:
         self.validate()
@@ -289,7 +301,10 @@ class PlannerNodeView:
             route=_task_route_binding(self.route_type, self.target_id),
             input_refs=_dedupe_text(self.input_refs, self.dependency_refs),
             output_contract=deepcopy(self.output_contract),
-            retry_policy=deepcopy(self.retry_policy),
+            retry_policy=normalize_task_retry_policy(
+                self.retry_policy,
+                field_name=f"planner node {self.node_id} retry_policy",
+            ),
             risk_level=self.risk_level,
             acceptance_criteria=self.acceptance_criteria,
         )
@@ -305,7 +320,10 @@ class PlannerNodeView:
             "dependency_refs": list(self.dependency_refs),
             "input_refs": list(self.input_refs),
             "output_contract": deepcopy(self.output_contract),
-            "retry_policy": deepcopy(self.retry_policy),
+            "retry_policy": normalize_task_retry_policy(
+                self.retry_policy,
+                field_name=f"planner node {self.node_id} retry_policy",
+            ),
             "risk_level": self.risk_level,
             "acceptance_criteria": list(self.acceptance_criteria),
             "allow_parallel": self.allow_parallel,
@@ -859,10 +877,8 @@ def adapt_skill_dag_plan(
                 input_refs=input_refs,
                 output_contract=output_contract,
                 retry_policy={
-                    "retry_limit": retry_limit,
+                    "max_attempts": retry_limit + 1,
                     "retry_backoff_ms": retry_backoff_ms,
-                    "idempotency_key": _text(getattr(source_node, "idempotency_key", "")),
-                    "fallback_policy": _text(getattr(source_node, "fallback_policy", "")),
                 },
                 risk_level=max(1, min(5, int(getattr(source_node, "risk_level", 1) or 1))),
                 acceptance_criteria=acceptance_criteria,

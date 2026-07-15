@@ -131,6 +131,27 @@ def test_approved_plan_search_selects_complete_compiler_ready_mixed_route_path()
         assert payload["candidate_idempotency_key"].startswith(
             "plan-candidate://sha256/"
         )
+        assert payload["retry_policy"] == {
+            "max_attempts": 1,
+            "retry_backoff_ms": 0,
+        }
+
+
+def test_plan_intent_retry_policy_rejects_legacy_backoff_alias() -> None:
+    step = _step(
+        "legacy-retry",
+        route="skill",
+        target_id="browser_research",
+        step_index=1,
+    )
+    step["retry_policy"] = {"max_attempts": 2, "backoff_ms": 10}
+    intent, governor = _approved_plan(step)
+
+    with pytest.raises(PlanIntentSearchError) as caught:
+        build_plan_intent_search(intent, governor_result=governor)
+
+    assert caught.value.reason_code == PLAN_INTENT_GRAPH_INVALID
+    assert "unsupported fields: backoff_ms" in caught.value.detail
 
 
 def test_dependency_expansion_preserves_parallel_roots_and_join_topology() -> None:

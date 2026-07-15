@@ -49,9 +49,9 @@
 
 | 功能域 | 外部入口/呈现 | 当前主 owner | 主要下游 | 当前裁决 |
 |---|---|---|---|---|
-| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 为 `WIRED`；少量兼容 route 仍进 Executive |
+| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 为 `WIRED`；进度/最近轮次走只读投影，Executive 已退出生产路由 |
 | 任务、Skill 与 Delegate | Chat 意图、`/v1/agent/run`、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；原生 DAG 重试/并发仍 `PARTIAL` |
-| 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | 定义、时钟和持久化存在；governed execution 因 WorkOrder 合同错位为 `BROKEN` |
+| 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | 定义、时钟、持久化与 governed execution 已接通；DAG 自动恢复仍受 Lane B 限制 |
 | 记忆、检索与设定 | Memory/Canon API、Monitor Memory/Canon | `memory`、`retrieval`、`canon` | SQLite、Chroma、Neo4j、Surface Context | 多类记忆与 Canon proposal/apply 可用；统一 Knowledge OS 为 `MISSING` |
 | 数字生命状态 | `/v1/digital-life/*`、Monitor Life Systems | `digital_life` | Projection、Persona、Lifecycle、Delivery Outbox | command/event/reducer 地基 `WIRED`；World/Scene/Intent 统一上下文仍 `PARTIAL/MISSING` |
 | 人格、情绪和关系表达 | Surface Reply、Bond API、Monitor Persona/Bond | `persona`、`bond`、`surface_runtime` | Model Runtime、Memory、Life Projection、Embodiment | 表达链可用；Persona 旧直写已中央封口，受治理的演化提案链仍缺失 |
@@ -77,13 +77,13 @@
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
-| Runtime Contracts | WorkOrder、TaskGraph、Budget、Review、Verification、Acceptance 数据合同 | [`contracts/agent_runtime/`](../../../host_brain/contracts/agent_runtime)、[`natsume_contracts/task/v1.py`](../../../natsume_contracts/task/v1.py) | 标准库与纯类型 | app、persistence、provider 实现 | `WIRED`；当前同时存在 `AgentWorkOrder` 和 `WorkOrderV3`，调用方未全部迁移 |
+| Runtime Contracts | WorkOrder、TaskGraph、Budget、Review、Verification、Acceptance 数据合同 | [`contracts/agent_runtime/`](../../../host_brain/contracts/agent_runtime)、[`natsume_contracts/task/v1.py`](../../../natsume_contracts/task/v1.py) | 标准库与纯类型 | app、persistence、provider 实现 | `WIRED`；Host/Scheduler 用 V3，Internal/Agent compatibility 仍有 `AgentWorkOrder` |
 | Orchestration | HostCommand admission、Governor grant 解析、计划图编译、revision 和 node grant | [`orchestration/governed_command.py`](../../../host_brain/orchestration/governed_command.py)、[`orchestration/planning_graph_compiler.py`](../../../host_brain/orchestration/planning_graph_compiler.py)、[`orchestration/node_grants.py`](../../../host_brain/orchestration/node_grants.py) | contracts、repository ports、PlanningSearch result | 领域 worker 实现、外部副作用 | Host 主链 `WIRED`；失败重规划和所有入口统一性仍 `PARTIAL` |
 | Governed Host Adapter | 把 `chat/skill/delegate/plan` 编译为 HostCommand + `WorkOrderV3` + immutable graph | [`app/governed_task_adapter.py`](../../../host_brain/app/governed_task_adapter.py) | Orchestration、Task Runtime、route worker | 执行期二次规划 | `WIRED`；是当前 Host canonical vertical slice |
-| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/budget_runtime.py`](../../../host_brain/task_runtime/budget_runtime.py)、[`task_runtime/review_runtime.py`](../../../host_brain/task_runtime/review_runtime.py)、[`task_runtime/acceptance_effect_dispatcher.py`](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py) | Task repository ports、worker/verifier/acceptance ports | 路由意图识别、计划搜索 | `PARTIAL`；多节点依赖可持久，但 DAG 级并发、runtime retry/backoff 和自动 Review continuation 未闭环 |
-| Scheduler | 定义、occurrence、时钟、lease、模式/资源策略和定时 worker registry | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py) | Secure Ingress、Governor、Task Runtime、Scheduler Repository | 自建第二套 Task 状态机 | `BROKEN`；运行时仍构造 `AgentWorkOrder`，而 admission 已要求 `WorkOrderV3 + BudgetPolicy` |
+| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/dag_scheduler.py`](../../../host_brain/task_runtime/dag_scheduler.py)、[`task_runtime/budget_runtime.py`](../../../host_brain/task_runtime/budget_runtime.py)、[`task_runtime/review_runtime.py`](../../../host_brain/task_runtime/review_runtime.py) | Task repository ports、worker/verifier/acceptance ports | 路由意图识别、计划搜索 | `PARTIAL`；B0 已冻结纯调度/retry 合同，生产并发、retry/backoff、恢复和自动 continuation 未闭环 |
+| Scheduler | 定义、occurrence、时钟、lease、模式/资源策略和定时 worker registry | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py) | Secure Ingress、Governor、Task Runtime、Scheduler Repository | 自建第二套 Task 状态机 | `WIRED`；Clock/Manual occurrence 已贯通 V3/Budget/child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent Runtime | 认证后的内部 Agent WorkOrder、结果持久化和 Review API | [`app/internal_task_runtime.py`](../../../host_brain/app/internal_task_runtime.py)、[`app/internal_agent_ingress.py`](../../../host_brain/app/internal_agent_ingress.py) | Secure Ingress、Agent Executor、Task Runtime | 绕过 HostCommand 权限 lineage | `BROKEN`；与 Scheduler 相同的 WorkOrder 合同错位 |
-| Executive Compatibility | 非 canonical route 的 legacy SkillDag 和进程内任务投影 | [`executive_runtime/runtime.py`](../../../host_brain/executive_runtime/runtime.py)、[`app/runtime_task_registry.py`](../../../host_brain/app/runtime_task_registry.py) | 历史 handler/skill | 任务真相、canonical route 执行 | `LEGACY`；canonical 四路已 fail closed，其余路径尚未退役 |
+| Read Projection / Executive Guard | `task_progress`、`recent_turn` 的只读投影与 retired fail-close guard | [`agent_runtime/read_routes.py`](../../../host_brain/agent_runtime/read_routes.py)、[`executive_runtime/runtime.py`](../../../host_brain/executive_runtime/runtime.py) | Durable Task/Conversation projection | Task/Attempt、worker、状态写入 | `WIRED / RETIRED`；Executive 无生产入口，legacy SkillDag 执行和内存 registry 已删除 |
 
 ### 4.3 规划、Agent 和领域能力
 
@@ -91,7 +91,7 @@
 |---|---|---|---|---|---|
 | PlanningSearch Kernel | Candidate expansion、cognitive ranking、conditional MCTS、virtual transition、reward 和 trace | [`planning_search/service.py`](../../../host_brain/planning_search/service.py)、[`planning_search/contracts.py`](../../../host_brain/planning_search/contracts.py)、[`planning_search/ports.py`](../../../host_brain/planning_search/ports.py) | 纯合同、领域注入的纯函数 port | 工具执行、网络、持久写入、真实副作用 | 内核 `WIRED`；通用智能规划收益未证明 |
 | Host Plan Adapter | 把 Governor 已批准的 steps 合法化为顺序候选并编译图 | [`orchestration/plan_intent_search.py`](../../../host_brain/orchestration/plan_intent_search.py)、[`orchestration/planning_execution.py`](../../../host_brain/orchestration/planning_execution.py) | PlanningSearch、graph compiler | 凭空新增工具或越过批准边界 | `PARTIAL`；只比较已批准步骤的顺序，不生成竞争方案 |
-| Agent Runtime | Agent contract、planner adapter、executor、workspace/artifact、verification 和 studios | [`agent_runtime/executor.py`](../../../host_brain/agent_runtime/executor.py)、[`agent_runtime/planner_adapter.py`](../../../host_brain/agent_runtime/planner_adapter.py)、[`agent_runtime/workspace_policy.py`](../../../host_brain/agent_runtime/workspace_policy.py)、[`agent_runtime/studios/`](../../../host_brain/agent_runtime/studios) | Model/Capability ports、Artifact store、Task context | 入口身份、Task 权威、全局 composition | `PARTIAL`；workspace 不是 OS/tenant/worktree 强隔离，且尚有 `AgentWorkOrder` 兼容面 |
+| Agent Runtime | Agent contract、planner adapter、executor、workspace/artifact、verification 和 studios | [`agent_runtime/executor.py`](../../../host_brain/agent_runtime/executor.py)、[`agent_runtime/planner_adapter.py`](../../../host_brain/agent_runtime/planner_adapter.py)、[`agent_runtime/workspace_paths.py`](../../../host_brain/agent_runtime/workspace_paths.py)、[`agent_runtime/workspace_policy.py`](../../../host_brain/agent_runtime/workspace_policy.py)、[`agent_runtime/studios/`](../../../host_brain/agent_runtime/studios) | Model/Capability ports、Artifact store、Task context | 入口身份、Task 权威、全局 composition | `PARTIAL`；D0 路径围栏已接 scoped I/O/Verification，但 durable workspace owner、隔离 worktree、handle-level TOCTOU 防护未完成，且尚有 `AgentWorkOrder` 兼容面 |
 | Domain Packs | Research、Media Translation、Light Novel、Pentest 等声明式领域包与生命周期 job | [`domain_packs/registry.py`](../../../host_brain/domain_packs/registry.py)、[`domain_packs/production_runtime.py`](../../../host_brain/domain_packs/production_runtime.py)、[`domain_packs/contracts.py`](../../../host_brain/domain_packs/contracts.py) | 平台 ports、Agent Runtime、Capability Broker | 复制平台调度、自建授权 | `PARTIAL`；存在生产 job 资产，尚未全部收敛到统一 `WorkOrderV3` 主链 |
 | Pentest Domain | 授权范围、阶段执行、工具 adapter、finding/report、攻击图和自主策略 | [`pentest/production_runtime.py`](../../../host_brain/pentest/production_runtime.py)、[`pentest/secure_run.py`](../../../host_brain/pentest/secure_run.py)、[`pentest/agent/agent_loop.py`](../../../host_brain/pentest/agent/agent_loop.py) | Secure authority、受限工具 port、PlanningSearch adapter、领域 repositories | 绕过 scope/approval 的真实工具调用 | 领域功能 `WIRED`；L3 仍 `SHADOW_UNCALIBRATED`，且领域包内部责任过密 |
 | Tribe / Organ / BioOps | 意图分流、内部事件、生理隐喻 agent、organ 健康与 BioOps 专项工作流 | [`tribe/thalamus_agent.py`](../../../host_brain/tribe/thalamus_agent.py)、[`tribe/event_bus.py`](../../../host_brain/tribe/event_bus.py)、[`organ_ops/organ_registry.py`](../../../host_brain/organ_ops/organ_registry.py)、[`bio_ops/workflow.py`](../../../host_brain/bio_ops/workflow.py) | Model invocation port、typed event、受治理 capability | 任务真相、长期状态的平行 writer | `PARTIAL`；应保持为策略/领域 proposal 层，不能成为第二执行内核 |
@@ -199,7 +199,7 @@ SchedulerClock / authenticated Internal Agent
   → Task Runtime
 ```
 
-这是目标调用链，但当前两条 adapter 仍提交 `AgentWorkOrder`，与 admission 强制的 `WorkOrderV3 + BudgetPolicy` 不兼容，所以不能标记为完成。
+Scheduler 已按该调用链接通；Internal Agent 仍提交 `AgentWorkOrder`，与 admission 强制的 `WorkOrderV3 + BudgetPolicy` 不兼容，所以 Lane A 仍不能整体标记为完成。
 
 ### 6.3 数字生命与主动输出
 
@@ -282,10 +282,9 @@ Composition Root 只负责把两侧构造并连接
 
 | 优先级 | 模块缺口 | 影响 | 目标 owner |
 |---|---|---|---|
-| P0 | Scheduler/Internal 仍提交 `AgentWorkOrder` | 看似已进 governed runtime，真实 admission 却失败 | Governed Execution |
+| P0 | Internal 仍提交 `AgentWorkOrder` | 看似已进 governed runtime，真实 admission 却失败 | Governed Execution |
 | P1 | Persona candidate 尚未进入统一 proposal/Review/版本激活 | 旧直写虽已封口，但人格长期演化仍不可用 | Persona Evolution Authority |
 | P0 | Task Runtime 未消费全部 retry/backoff/concurrency/continuation 策略 | 合同声明与运行时语义不一致 | Governed Execution |
-| P1 | Executive SkillDag 和进程内 registry 仍存在 | 任务状态与多节点执行仍有第二语义 | Governed Execution |
 | P1 | 全局 ProcessServiceContainer 和 accessor 仍存在 | 资源归属、测试隔离和进程边界不清 | Composition Kernel |
 | P1 | Host Plan 不生成竞争路径 | 通用智能规划目标尚未实现 | Planning and Decision |
 | P1 | 核心包依赖图存在大型循环 | 模块无法独立演进、构造和验证 | 各 bounded context + Composition Kernel |

@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.0
+版本：v2.1
 核对日期：2026-07-15
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -33,18 +33,21 @@ flowchart TD
     EFFECT["Durable effect intents"]
     DISPATCH["AcceptanceEffectDispatcher"]
     SSE["SSE / reply projection"]
-    LEGACY["Executive compatibility path"]
+    READ["Durable read projection\ntask_progress / recent_turn"]
+    REJECT["Unsupported route\nfail closed"]
 
     REQ --> ROUTE --> AIR --> INTENT --> GOV --> CORTEX --> SUPPORT
     SUPPORT -->|"yes"| GR --> BUILD --> PLAN
     PLAN -->|"yes"| SEARCH --> ADMIT
     PLAN -->|"no"| DIRECT --> ADMIT
     ADMIT --> TASK --> NODE --> WORK --> VERIFY --> ACCEPT --> EFFECT --> DISPATCH --> SSE
-    SUPPORT -->|"no: compatibility route"| LEGACY
+    SUPPORT -->|"read route"| READ --> SSE
+    SUPPORT -->|"unsupported"| REJECT
 
     style GR fill:#d7f5df,stroke:#22863a
     style TASK fill:#d7f5df,stroke:#22863a
-    style LEGACY fill:#fff3cd,stroke:#b08800
+    style READ fill:#d7f5df,stroke:#22863a
+    style REJECT fill:#ffd9d9,stroke:#b31d28
 ```
 
 ## Task 节点时序
@@ -98,11 +101,10 @@ flowchart LR
 
 ## 当前例外与缺口
 
-1. `task_progress`、`recent_turn` 等 compatibility route 仍可能进入 Executive。
-2. Scheduler/Internal 虽有 governed adapter，但会因旧 WorkOrder 与新 admission 不兼容而失败。
-3. Durable DAG 尚未完整执行并发、runtime retry/backoff 和自动 Review continuation。
+1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
+2. Scheduler 已接入同一 admission；Internal 仍因旧 WorkOrder 与新 admission 不兼容而失败。
+3. B0 已冻结 DAG 调度/retry 合同，但生产尚未完整执行并发、runtime retry/backoff、恢复和自动 Review continuation。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. Legacy 直接回复和异步后效仍存在于非 canonical 路径，不能推广为新主链语义。
 
 ## 代码锚点
 
@@ -112,7 +114,8 @@ flowchart LR
 - Direct contracts：`host_brain/orchestration/host_route_contracts.py`
 - Plan search/compiler：`host_brain/orchestration/plan_intent_search.py`、`planning_graph_compiler.py`
 - Admission：`host_brain/orchestration/planning_admission.py`、`host_brain/persistence/host_command_repository.py`
-- Task execution：`host_brain/task_runtime/coordinator.py`
+- Task execution：`host_brain/task_runtime/coordinator.py`、`host_brain/task_runtime/dag_scheduler.py`
+- Read projection：`host_brain/agent_runtime/read_routes.py`
 - Node grant：`host_brain/orchestration/node_grants.py`
 - Acceptance effects：`host_brain/task_runtime/acceptance_effects.py`、`acceptance_effect_dispatcher.py`
-- Legacy guard：`host_brain/executive_runtime/runtime.py`
+- Retired Executive guard：`host_brain/executive_runtime/runtime.py`

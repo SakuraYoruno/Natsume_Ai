@@ -1,6 +1,6 @@
 {
   "schema_version": "natsume.universal-governed-runtime-coverage.v1",
-  "baseline_commit": "31114f7ba9985e99fc82187aeb99b939bbf426ab",
+  "baseline_commit": "a6d7ae383",
   "declared_program_status": "INCOMPLETE",
   "routes": {
     "chat": {
@@ -102,11 +102,12 @@
       ]
     },
     "native_multi_node_task_graph": {
-      "status": "PASS",
+      "status": "IMPLEMENTED_NOT_WIRED",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
-        "tests/integration/test_gr03a_governed_durable_dag.py"
+        "host_brain/task_runtime/dag_scheduler.py",
+        "tests/unit/test_ne01_dag_scheduler.py"
       ]
     },
     "revision_plus_one_replan": {

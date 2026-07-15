@@ -955,6 +955,7 @@ def create_app() -> FastAPI:
                 scheduler = build_process_scheduler_container(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
+                    token_service=get_token_service(),
                     evaluator=command_ingress.evaluator,
                     claim_result_store=command_ingress.store,
                     intent_engine=get_intent_engine(),

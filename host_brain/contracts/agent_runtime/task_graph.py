@@ -26,6 +26,8 @@ TASK_GRAPH_SCHEMA_VERSION = "Natsume.agent.task_graph.v1"
 TASK_NODE_SCHEMA_VERSION = "Natsume.agent.task_node.v1"
 TASK_EVENT_SCHEMA_VERSION = "Natsume.agent.task_event.v1"
 
+TASK_RETRY_POLICY_FIELDS = frozenset({"max_attempts", "retry_backoff_ms"})
+
 
 class TaskGraphStatus(StrEnum):
     CREATED = "CREATED"
@@ -162,6 +164,54 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     return tuple(str(item).strip() for item in value if str(item).strip())
 
 
+def normalize_task_retry_policy(
+    value: Any,
+    *,
+    field_name: str = "TaskNode.retry_policy",
+) -> dict[str, int]:
+    """Validate and freeze the canonical TaskNode retry-policy shape.
+
+    ``retry_backoff_ms`` has a canonical zero default so v1 producers that
+    only bounded ``max_attempts`` keep their existing meaning.  Legacy aliases
+    are rejected instead of being silently interpreted at the execution
+    boundary.
+    """
+
+    if not isinstance(value, Mapping) or not value:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name} must be a non-empty object",
+        )
+    policy = dict(value)
+    unknown = sorted(str(key) for key in set(policy) - TASK_RETRY_POLICY_FIELDS)
+    if unknown:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name} contains unsupported fields: {','.join(unknown)}",
+        )
+
+    max_attempts = policy.get("max_attempts")
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name}.max_attempts must be an integer >= 1",
+        )
+    retry_backoff_ms = policy.get("retry_backoff_ms", 0)
+    if (
+        isinstance(retry_backoff_ms, bool)
+        or not isinstance(retry_backoff_ms, int)
+        or retry_backoff_ms < 0
+    ):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name}.retry_backoff_ms must be an integer >= 0",
+        )
+    return {
+        "max_attempts": max_attempts,
+        "retry_backoff_ms": retry_backoff_ms,
+    }
+
+
 def validate_task_node_transition(
     current: TaskNodeStatus | str,
     target: TaskNodeStatus | str,
@@ -249,11 +299,7 @@ class TaskNode:
                 if isinstance(data.get("output_contract"), Mapping)
                 else {}
             ),
-            retry_policy=(
-                dict(data.get("retry_policy") or {})
-                if isinstance(data.get("retry_policy"), Mapping)
-                else {}
-            ),
+            retry_policy=normalize_task_retry_policy(data.get("retry_policy")),
             risk_level=_non_negative_int(data.get("risk_level", 1), field_name="risk_level", minimum=1),
             acceptance_criteria=_text_tuple(data.get("acceptance_criteria")),
             status=_enum_value(TaskNodeStatus, data.get("status") or "CREATED", field_name="TaskNode.status"),
@@ -273,6 +319,7 @@ class TaskNode:
             raise ContractViolation(TASK_GRAPH_INVALID, f"TaskNode dependencies must be unique: {self.node_id}")
         if self.risk_level < 1 or self.risk_level > 5:
             raise ContractViolation(TASK_GRAPH_INVALID, "TaskNode.risk_level must be between 1 and 5")
+        normalize_task_retry_policy(self.retry_policy)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -282,7 +329,7 @@ class TaskNode:
             "route": self.route,
             "input_refs": list(self.input_refs),
             "output_contract": deepcopy(self.output_contract),
-            "retry_policy": deepcopy(self.retry_policy),
+            "retry_policy": normalize_task_retry_policy(self.retry_policy),
             "risk_level": self.risk_level,
             "acceptance_criteria": list(self.acceptance_criteria),
             "status": self.status.value,
@@ -480,6 +527,7 @@ __all__ = [
     "TASK_EVENT_SCHEMA_VERSION",
     "TASK_GRAPH_SCHEMA_VERSION",
     "TASK_NODE_SCHEMA_VERSION",
+    "TASK_RETRY_POLICY_FIELDS",
     "EventActorType",
     "EventRedactionLevel",
     "TaskEvent",
@@ -487,6 +535,7 @@ __all__ = [
     "TaskGraphStatus",
     "TaskNode",
     "TaskNodeStatus",
+    "normalize_task_retry_policy",
     "validate_task_graph_transition",
     "validate_task_graph_admission_state",
     "validate_task_node_transition",

@@ -380,7 +380,7 @@ def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
                 route="executive_runtime",
                 input_refs=(),
                 output_contract={},
-                retry_policy={"retry_limit": 0, "retry_backoff_ms": 0},
+                retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),
                 status=TaskNodeStatus.READY,

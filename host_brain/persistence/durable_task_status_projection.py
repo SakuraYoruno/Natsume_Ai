@@ -65,7 +65,7 @@ class DurableTaskStatusProjectionError(RuntimeError):
 
 
 class DurableTaskStatusProjection:
-    """Query-only replacement for ``RuntimeTaskRegistry`` progress reads."""
+    """Query-only owner for progress reads from canonical durable task data."""
 
     def __init__(
         self,

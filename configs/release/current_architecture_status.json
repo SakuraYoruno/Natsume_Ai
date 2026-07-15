@@ -22,11 +22,13 @@
       ]
     },
     "scheduler_governed_runtime": {
-      "status": "BROKEN",
-      "reason": "Scheduler constructs AgentWorkOrder while HostCommand admission requires WorkOrderV3 with BudgetPolicy.",
+      "status": "WIRED",
+      "scope": ["clock occurrence", "manual occurrence"],
+      "semantics": "HostCommand + WorkOrderV3 + BudgetPolicy + TaskGraph + child grant + Review + Verification + Acceptance + Receipt",
       "evidence_refs": [
         "host_brain/scheduler/governed_runtime.py",
-        "host_brain/persistence/host_command_repository.py"
+        "host_brain/scheduler/worker_registry.py",
+        "tests/integration/test_aw02_scheduler_production_cutover.py"
       ]
     },
     "internal_agent_governed_runtime": {
@@ -50,11 +52,30 @@
         "verification",
         "acceptance"
       ],
-      "missing": ["parallel DAG scheduling", "runtime retry", "retry backoff"]
+      "contract_progress": [
+        "deterministic ready/retry/fan-in scheduling decision",
+        "canonical max_attempts and retry_backoff_ms validation"
+      ],
+      "missing": [
+        "production scheduler integration",
+        "atomic node claim",
+        "parallel DAG execution",
+        "durable runtime retry and backoff",
+        "lease heartbeat and startup recovery",
+        "automatic Review continuation"
+      ]
     },
     "executive_authority_removal": {
-      "status": "PARTIAL",
-      "reason": "Canonical routes fail closed, but legacy SkillDag execution and LegacyRuntimeTaskRegistry writes remain."
+      "status": "WIRED",
+      "production_entry": "REMOVED",
+      "legacy_skill_dag_execution": "REMOVED",
+      "legacy_runtime_task_registry": "REMOVED",
+      "read_routes": "DURABLE_PROJECTION",
+      "evidence_refs": [
+        "host_brain/agent_runtime/cortex_runtime.py",
+        "host_brain/agent_runtime/read_routes.py",
+        "tests/contract/test_gr05_runtime_task_truth_boundary.py"
+      ]
     },
     "planning_search_kernel": {
       "status": "WIRED",
@@ -127,7 +148,26 @@
     },
     "workspace_isolation": {
       "status": "PARTIAL",
-      "reason": "WorkspacePolicy is wired but still permits arbitrary paths/runtime_repo and does not provide OS, tenant, or worktree isolation."
+      "path_safety": "D0_WIRED",
+      "evidence": [
+        "host_brain/agent_runtime/workspace_paths.py",
+        "tests/unit/test_workspace_path_resolver.py",
+        "tests/unit/test_agent_tool_workspace_paths.py",
+        "tests/contract/test_nle_verification_gate_contract.py"
+      ],
+      "protected_surfaces": [
+        "agent file read/write/list",
+        "browser screenshot save path",
+        "verification cwd/argv paths",
+        "agent git cwd"
+      ],
+      "missing": [
+        "durable per-task workspace authority",
+        "runtime_repo removal",
+        "OS/tenant/worktree isolation",
+        "handle-level TOCTOU hardening"
+      ],
+      "reason": "Canonical path resolution now rejects traversal, absolute/UNC/device paths, same-prefix sibling escapes, and resolved symlink/junction escapes on scoped Agent/Verification surfaces. WorkspacePolicy still permits arbitrary paths/runtime_repo and does not provide durable ownership or OS, tenant, or worktree isolation."
     },
     "evolution_lab": {"status": "PLACEHOLDER"},
     "counterfactual_analysis": {"status": "MISSING"},

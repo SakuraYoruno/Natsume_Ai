@@ -14,6 +14,10 @@ from host_brain.scheduler.contracts import (
     SchedulerOccurrence,
     occurrence_work_order_id,
 )
+from host_brain.task_runtime.worker_registry import (
+    GovernedWorkerRegistryError,
+    GovernedWorkerRoute,
+)
 
 
 SCHEDULER_HANDLER_NOT_REGISTERED = "SCHEDULER_HANDLER_NOT_REGISTERED"
@@ -112,11 +116,15 @@ class GovernedSchedulerWorker:
         definition_repository: SchedulerDefinitionRepositoryPort,
         occurrence_repository: SchedulerOccurrenceRepositoryPort,
         result_repository: SchedulerExecutionResultRepositoryPort,
+        node_grant_verifier: Any,
     ) -> None:
+        if not callable(getattr(node_grant_verifier, "verify", None)):
+            raise TypeError("node_grant_verifier must expose verify")
         self._handlers = handlers
         self._definitions = definition_repository
         self._occurrences = occurrence_repository
         self._results = result_repository
+        self._node_grants = node_grant_verifier
 
     async def execute_stream(
         self,
@@ -125,6 +133,40 @@ class GovernedSchedulerWorker:
         work_order: Any,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
+        route = _canonical_delegate_route(execution_context.get("worker_route"))
+        if route.target_id != str(command.target_id or "").strip():
+            raise SchedulerWorkerError(
+                SCHEDULER_DURABLE_RESULT_INVALID,
+                "TaskNode delegate target differs from HostCommand target",
+            )
+        verified_grant = self._node_grants.verify(
+            grant_ref=str(execution_context.get("node_grant_ref") or "").strip(),
+            request_id=str(command.request_id or "").strip(),
+            session_id=str(command.session_id or "").strip(),
+            principal_id=str(command.principal_id or "").strip(),
+            graph_id=str(execution_context.get("graph_id") or "").strip(),
+            root_work_order_id=str(
+                execution_context.get("work_order_id") or ""
+            ).strip(),
+            graph_revision=execution_context.get("graph_revision"),
+            node_id=str(execution_context.get("node_id") or "").strip(),
+            route=route.kind,
+            target_id=str(route.target_id or "").strip(),
+            parent_grant_ref=str(
+                execution_context.get("parent_grant_ref") or ""
+            ).strip(),
+        )
+        verified_payload = (
+            verified_grant.to_dict()
+            if callable(getattr(verified_grant, "to_dict", None))
+            else dict(verified_grant)
+            if isinstance(verified_grant, Mapping)
+            else {}
+        )
+        worker_context = {
+            **dict(execution_context),
+            "verified_node_grant": verified_payload,
+        }
         occurrence_id = _work_order_occurrence_id(work_order)
         occurrence_raw = self._occurrences.get_occurrence(occurrence_id)
         if inspect.isawaitable(occurrence_raw):
@@ -177,7 +219,7 @@ class GovernedSchedulerWorker:
                 occurrence=occurrence,
                 definition=definition,
                 command=command,
-                execution_context=dict(execution_context),
+                execution_context=worker_context,
             )
             if inspect.isawaitable(result_raw):
                 result_raw = await result_raw
@@ -244,7 +286,7 @@ class GovernedSchedulerWorker:
 
 
 class SchedulerWorkerResolver:
-    """Task Runtime resolver for the single frozen scheduler route."""
+    """Task Runtime resolver for canonical ``delegate:<worker_key>`` routes."""
 
     def __init__(
         self,
@@ -260,10 +302,17 @@ class SchedulerWorkerResolver:
                 SCHEDULER_HANDLER_NOT_REGISTERED,
                 "scheduler executor assignment is invalid",
             )
-        if str(worker_route or "").strip() != SCHEDULER_WORKER_ROUTE:
+        try:
+            route = GovernedWorkerRoute.parse(str(worker_route or ""))
+        except GovernedWorkerRegistryError as exc:
             raise SchedulerWorkerError(
                 SCHEDULER_HANDLER_NOT_REGISTERED,
                 "scheduler worker route is not registered",
+            ) from exc
+        if route.kind != "delegate" or not route.target_id:
+            raise SchedulerWorkerError(
+                SCHEDULER_HANDLER_NOT_REGISTERED,
+                "scheduler worker route must be canonical delegate:<worker_key>",
             )
         return self._canonical
 
@@ -433,6 +482,22 @@ def _work_order_occurrence_id(work_order: Any) -> str:
             "scheduler WorkOrder lacks occurrence_id",
         )
     return occurrence_id
+
+
+def _canonical_delegate_route(value: object) -> GovernedWorkerRoute:
+    try:
+        route = GovernedWorkerRoute.parse(str(value or ""))
+    except GovernedWorkerRegistryError as exc:
+        raise SchedulerWorkerError(
+            SCHEDULER_DURABLE_RESULT_INVALID,
+            "scheduler TaskNode route is invalid",
+        ) from exc
+    if route.kind != "delegate" or not route.target_id:
+        raise SchedulerWorkerError(
+            SCHEDULER_DURABLE_RESULT_INVALID,
+            "scheduler TaskNode route must be canonical delegate:<worker_key>",
+        )
+    return route
 
 
 def _stable_id(prefix: str, material: str) -> str:

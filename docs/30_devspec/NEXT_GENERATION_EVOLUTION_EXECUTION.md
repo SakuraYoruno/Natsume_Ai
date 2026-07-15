@@ -31,8 +31,9 @@
 | 项目 | 执行起点 |
 |---|---|
 | Host `chat/skill/delegate/plan` | 已接 canonical runtime，作为可复用地基 |
-| Scheduler/Internal Agent | `BROKEN`，优先修复 |
-| Durable DAG | 多节点基础已实现；并发/retry/backoff 未实现 |
+| Scheduler | `WIRED`：真实 occurrence 已贯通 `WorkOrderV3 + Budget + child grant + Review + Verification + Acceptance + Receipt` |
+| Internal Agent | `BROKEN`：仍提交 `AgentWorkOrder`，优先修复 |
+| Durable DAG | 多节点基础与 B0 调度/retry 合同已冻结；生产并发、retry/backoff、恢复和 continuation 未实现 |
 | Budget | Host 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
@@ -88,7 +89,15 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 状态：`IN_PROGRESS`
 
-当前已完成切片：Persona 中央写入围栏、迁移专用审计入口、stage/milestone/interaction/emergent 无副作用候选化，以及 `T-PERSONA-FENCE-01` 全仓静态门禁。Lane A、Lane B、其余 Lane C 和 Lane D 仍未完成，因此 NE-01 不得封板。
+当前已完成切片：
+
+- Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
+- Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
+- Durable DAG 的 B0 纯调度决策与 canonical retry policy 冻结，尚未接生产 Coordinator/Store；
+- Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
+- Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
+
+Internal Agent、Lane B 的 B1～B4、Lane D 的 durable workspace authority/隔离 worktree/显式 composition 仍未完成，因此 NE-01 不得封板。
 
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 
@@ -116,6 +125,7 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 #### Lane D：Composition 与 workspace
 
+- D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；
