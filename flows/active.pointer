@@ -1,5 +1,0 @@
-{
-  "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
-  "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
-  "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json"
-}

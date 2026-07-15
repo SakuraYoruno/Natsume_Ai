@@ -603,7 +603,7 @@
 
 最后做一轮全局复扫，继续处理残留在标题层和状态层的高可见英文：
 
-- `SkillsHub`
+- `SkillCatalog`
   - 页头 `Skills Hub` 收为 `技能中心`
   - `ON / OFF` 收为 `开启 / 关闭`
 - `PromptConfig`
@@ -615,7 +615,7 @@
 
 本轮再次执行 `npm run build`，构建通过；关键产物体积保持稳定：
 
-- `SkillsHub` 约 `6.75 kB`
+- `SkillCatalog` 约 `6.75 kB`
 - `PromptConfig` 约 `11.90 kB`
 - `Bond` 约 `12.75 kB`
 - `LineChart` 仍保持约 `499.99 kB`

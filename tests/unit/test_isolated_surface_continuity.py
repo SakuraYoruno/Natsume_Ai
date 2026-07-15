@@ -700,29 +700,6 @@ def test_continuity_blocks_internal_process_surface_language() -> None:
     assert selected.text == "嗯，下一轮摘要只留未完成话口。"
 
 
-def test_continuity_prompt_includes_user_visible_generation_protocol() -> None:
-    payload = {
-        "case_id": "continuity_generation_protocol",
-        "turns": [
-            _turn(
-                "t01",
-                "那我懂了",
-                "short_ack",
-                response_move="ack_with_topic_hook",
-                facts=["当前主题：摘要滚动策略。", "未完成话口：每轮更新上一轮摘要和 open loop。"],
-            ),
-        ],
-    }
-    request = build_continuity_surface_inputs(payload, soul_md=SOUL)[0].request
-    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
-
-    assert "连续链表层生成协议" in rendered
-    assert "先把压缩事实翻成用户能直接收到的私聊句" in rendered
-    assert "open loop=未完成话口" in rendered
-    assert "给你来一段长的 -> 日常就日常，别端着。" in rendered
-    assert "懂了，旧细节退成方向词就行。" in rendered
-
-
 def test_continuity_user_visible_surface_gets_positive_rerank_signal() -> None:
     payload = {
         "case_id": "continuity_user_visible_surface",

@@ -20,7 +20,7 @@ from host_brain.channels.mateengine import (  # noqa: E402
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Send a MateEngine bridge probe event.")
-    parser.add_argument("--say", default=None, help="Send free text through the Natsume MateEngine BepInEx bridge.")
+    parser.add_argument("--say", default=None, help="Send free text through the Natsume MateEngine local bridge.")
     parser.add_argument("--event-type", default=EVENT_MOB_PROXIMITY, choices=sorted(SUPPORTED_SIGNAL_EVENTS))
     parser.add_argument("--name", default="Natsume Bridge")
     parser.add_argument("--event-id", default="natsume_bridge")

@@ -16,8 +16,6 @@ from host_brain.skills.impl import browser_executor
 
 
 def _prepare_registry(monkeypatch, tmp_path: Path) -> SQLiteLedger:
-    monkeypatch.setenv("HOST_SKILL_HUB_ENABLED", "0")
-    monkeypatch.setenv("HOST_SKILL_CUSTOM_PROVIDERS_ENABLED", "0")
     monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
     configure_process_service_ports()
     container = dependencies.get_process_service_container()

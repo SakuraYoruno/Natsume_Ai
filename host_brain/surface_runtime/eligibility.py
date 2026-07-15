@@ -113,7 +113,7 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
         return False
     if agent_id in {"translate_agent", "intent_agent"}:
         return True
-    return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
+    return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS
 
 
 def _surface_scene_guardrails(

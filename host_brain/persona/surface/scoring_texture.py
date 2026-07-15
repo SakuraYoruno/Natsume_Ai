@@ -1,7 +1,7 @@
 """Texture scoring for isolated surface candidate scoring.
 
-Extracted from candidate_scoring.py — covers signature_texture scoring,
-scene_quality_sample scoring, and question_budget counting.
+Extracted from candidate_scoring.py — covers signature texture scoring and
+question-budget counting.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from host_brain.persona.surface.scene_constants import (
     _LOVER_RELATIONSHIP_STAGES,
     _SIGNATURE_FLAT_SAFE_RE,
     _SIGNATURE_TEXTURE_STAGES,
-    _SURFACE_SCENE_QUALITY_SCORING_SCENES,
 )
 from host_brain.persona.surface.scoring.control_affect import (
     _JEALOUSY_LOW_PRESSURE_MARKERS,
@@ -112,96 +111,6 @@ def _apply_signature_texture_scoring(
             reason_codes.append("SIGNATURE_TEXTURE_MISSING")
             return -3.5
     return 0.0
-
-
-# ---------------------------------------------------------------------------
-# Scene quality sample scoring
-# ---------------------------------------------------------------------------
-
-
-def _apply_surface_scene_quality_sample_scoring(
-    request: Any, text: str, dimensions: dict[str, float], reason_codes: list[str]
-) -> float:
-    from host_brain.persona.surface.data_models import (
-        select_surface_scene_quality_sample,
-    )
-
-    sample = select_surface_scene_quality_sample(
-        user_message=request.user_message,
-        task_mode=request.control.task_mode,
-        response_move=request.control.response_move,
-        relationship_distance=request.control.relationship_distance,
-    )
-    if sample is None:
-        return 0.0
-    if sample.scene_id not in _SURFACE_SCENE_QUALITY_SCORING_SCENES:
-        return 0.0
-
-    normalized = _clean_text(text)
-    good_hits = [
-        item for item in sample.good_examples
-        if item and (item == normalized or item in normalized)
-    ]
-    bad_hits = [
-        item for item in sample.bad_examples
-        if item and item in normalized
-    ]
-    should_not_hits = [
-        item for item in sample.should_not_surface
-        if item and item in normalized
-    ]
-
-    # Fact-grounded exceptions for short_continue scene
-    if sample.scene_id == "short_continue" and should_not_hits:
-        facts_text = _clean_text(" ".join([*request.control.facts, *request.facts]))
-        fact_grounded_topic_terms = {"红字", "报错", "输入输出"}
-        fact_grounded_aliases = {"输入输出": ("输入和输出", "输入、输出", "输入/输出")}
-        should_not_hits = [
-            item
-            for item in should_not_hits
-            if not (
-                item in fact_grounded_topic_terms
-                and (
-                    item in facts_text
-                    or any(alias in facts_text for alias in fact_grounded_aliases.get(item, ()))
-                )
-            )
-        ]
-
-    def drop(key: str, amount: float) -> None:
-        dimensions[key] = max(0.0, float(dimensions.get(key, 86.0)) - amount)
-
-    def raise_(key: str, amount: float) -> None:
-        dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
-
-    delta = 0.0
-    if good_hits:
-        delta += min(5.0, 2.5 + 0.75 * len(good_hits))
-        raise_("context_fit", 0.0)
-        raise_("scene_grounding", 0.0)
-        raise_("distance_control", 0.0)
-        raise_("spoken_chat_texture", 0.0)
-        raise_("non_oily", 0.0)
-        raise_("context_fit", max(84.0, float(dimensions.get("context_fit", 86.0))))
-        raise_("scene_grounding", max(88.0, float(dimensions.get("scene_grounding", 86.0))))
-        raise_("distance_control", max(86.0, float(dimensions.get("distance_control", 86.0))))
-        raise_("spoken_chat_texture", max(88.0, float(dimensions.get("spoken_chat_texture", 86.0))))
-        raise_("non_oily", max(86.0, float(dimensions.get("non_oily", 86.0))))
-        reason_codes.append(f"SCENE_QUALITY_GOOD_SAMPLE:{sample.scene_id}")
-
-    if bad_hits or should_not_hits:
-        combined = [*bad_hits[:3], *should_not_hits[:5]]
-        delta -= min(24.0, 10.0 + 3.0 * len(combined))
-        drop("context_fit", max(0.0, float(dimensions.get("context_fit", 86.0)) - 68.0))
-        drop("scene_grounding", max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 68.0))
-        drop("naturalness", max(0.0, float(dimensions.get("naturalness", 86.0)) - 74.0))
-        drop("distance_control", max(0.0, float(dimensions.get("distance_control", 86.0)) - 74.0))
-        if bad_hits:
-            reason_codes.append(f"SCENE_QUALITY_BAD_EXAMPLE:{sample.scene_id}:{','.join(bad_hits[:3])}")
-        if should_not_hits:
-            reason_codes.append(f"SCENE_QUALITY_SHOULD_NOT:{sample.scene_id}:{','.join(should_not_hits[:5])}")
-        reason_codes.append(f"SCENE_QUALITY_BAD_SAMPLE:{sample.scene_id}:{','.join(combined[:4])}")
-    return delta
 
 
 # ---------------------------------------------------------------------------

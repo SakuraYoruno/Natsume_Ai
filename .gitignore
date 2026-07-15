@@ -2,14 +2,6 @@
 .DS_Store
 Thumbs.db
 
-# --- Skills Hub（外部安装的 skill，用户数据，不纳入版本管理）---
-skills/*
-!skills/example-echo/
-!skills/example-echo/**
-!host_brain/skills/
-!host_brain/skills/project_locator.py
-!host_brain/skills/codex_task_builder.py
-
 # --- Editors ---
 .claude/
 .idea/
@@ -49,8 +41,8 @@ build/
 dist/
 *.egg-info/
 pip-wheel-metadata/
-integrations/**/bin/
-integrations/**/obj/
+/tools/mateengine/**/bin/
+/tools/mateengine/**/obj/
 
 # --- Coverage / test reports ---
 .coverage
@@ -81,25 +73,10 @@ temp/
 !.env.optional.example
 !.env.experimental.example
 
-# --- data/ runtime artifacts (never commit) ---
+# --- Root runtime artifacts (never commit) ---
 /identifier.sqlite
 /data~.xp3/
-# JDK / Neo4j 安装包及解压目录
-data/install/
-data/jdk*/
-data/neo4j*/
-# Neo4j 运行时生成的 JSON / log
-data/neo4j_install_info.json
-data/neo4j_server.log
-data/download_model.log
-# ChromaDB 向量数据库运行时文件
-data/chroma_db/
 chroma_data/
-# Local generated knowledge bases
-data/knowledge_bases/
-# 其他数据库文件
-data/*.db
-data/*.sqlite3
 
 # --- models/ 下载的模型文件 (never commit) ---
 models/
@@ -140,7 +117,6 @@ configs/secrets/key_profiles.runtime.json
 # --- local VTS / GPT-SoVITS runtime artifacts ---
 .vts_token
 GPT_SoVITS/
-data/evidence/*.db
 
 # --- Windows device file artifacts ---
 nul
@@ -154,9 +130,6 @@ test_fastapi_import.py
 test_host_optimizations.py
 test_real_env_integration.py
 test_webui_integration.py
-
-# --- flows 运行时导出产物 ---
-flows/exports/
 
 # --- release 构建产物 ---
 /release/

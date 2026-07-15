@@ -394,8 +394,8 @@ def test_manifest_has_all_active_families_and_no_implicit_runtime_adapters() -> 
 
     manifest = registry.manifest()
 
-    assert len(manifest) == 34
-    assert len({item["command_id"] for item in manifest}) == 34
+    assert len(manifest) == 33
+    assert len({item["command_id"] for item in manifest}) == 33
     assert "wechat.channel.reset" not in {item["command_id"] for item in manifest}
     assert all(item["action"].startswith("obs:command:") for item in manifest)
     assert all(len(item["required_scopes"]) >= 2 for item in manifest)

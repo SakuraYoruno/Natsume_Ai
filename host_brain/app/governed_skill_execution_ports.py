@@ -29,8 +29,6 @@ class GovernedSkillExecutionPorts:
     resource_manager_provider: Callable[..., Any]
     episodic_store_provider: Callable[[], Any]
     semantic_recaller_provider: Callable[[], Any]
-    refresh_skill_registry: Callable[[], Any]
-    activate_hub_skill: Callable[..., Any]
 
     # These method names are the structural subset consumed by the shared
     # low-level executor for resource and memory Skills.
@@ -53,9 +51,6 @@ def build_governed_skill_execution_ports(
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
 
-    from host_brain.app.tool_routes import (  # noqa: PLC0415
-        _attempt_activate_hub_skill,
-    )
     from host_brain.composition import process_services  # noqa: PLC0415
 
     return GovernedSkillExecutionPorts(
@@ -66,8 +61,6 @@ def build_governed_skill_execution_ports(
         resource_manager_provider=process_services.get_resource_manager,
         episodic_store_provider=process_services.get_episodic_store,
         semantic_recaller_provider=process_services.get_semantic_recaller,
-        refresh_skill_registry=process_services.refresh_skill_registry,
-        activate_hub_skill=_attempt_activate_hub_skill,
     )
 
 

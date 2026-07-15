@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
 import socket
 import uuid
 from pathlib import Path
@@ -17,9 +15,6 @@ from host_brain.memory.chroma_client import (
     build_chroma_probe_report,
     load_chroma_runtime_config,
 )
-from host_brain.skills.hub.hub_installer import install_skill, list_installed_skills, remove_skill, search_remote_skills_with_status
-
-
 
 def _load_env_file(path: str) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -53,7 +48,7 @@ def _prod_env(monkeypatch):
     monkeypatch.setenv('Natsume_ENV', 'prod')
     env_values = _load_env_file('.env')
     for key, value in env_values.items():
-        if key.startswith(('CHROMA_', 'RETR_', 'HOST_SKILL_')) or key in {'NATSUME_CHROMA_PORT'}:
+        if key.startswith(('CHROMA_', 'RETR_')) or key in {'NATSUME_CHROMA_PORT'}:
             monkeypatch.setenv(key, value)
     for name in ['_episodic_store']:
         if hasattr(deps, name):
@@ -129,45 +124,3 @@ def test_memory_prod_episodic_rejects_missing_evidence_and_empty_text() -> None:
     assert empty.success is False
     assert missing.reason_code is not None
     assert empty.reason_code is not None
-
-
-
-
-def test_hub_prod_local_install_list_remove_roundtrip(tmp_path) -> None:
-    hub_dir = tmp_path / 'skills'
-    src = tmp_path / 'demo_local_skill'
-    src.mkdir(parents=True)
-    (src / 'SKILL.md').write_text(
-        "---\n"
-        "name: \"demo-local-skill\"\n"
-        "version: \"0.1.0\"\n"
-        "description: \"demo local skill\"\n"
-        "author: \"tester\"\n"
-        "clearance: LOW\n"
-        "risk_level: 1\n"
-        "scope: host\n"
-        "reversible: true\n"
-        "require_confirm: false\n"
-        "scheduler_allowed: true\n"
-        "tool: web_search\n"
-        "---\n",
-        encoding='utf-8',
-    )
-
-    installed = install_skill(str(src), skills_dir=hub_dir, force=False)
-    listed = list_installed_skills(skills_dir=hub_dir)
-    removed = remove_skill('demo-local-skill', skills_dir=hub_dir)
-    listed_after = list_installed_skills(skills_dir=hub_dir)
-
-    assert installed.success is True
-    assert any(row['name'] == 'demo-local-skill' for row in listed)
-    assert removed.success is True
-    assert all(row['name'] != 'demo-local-skill' for row in listed_after)
-
-
-def test_hub_prod_search_remote_with_official_fallback() -> None:
-    result = search_remote_skills_with_status('weather')
-
-    assert result.registry_url or result.discovery_sources
-    assert result.error is None or isinstance(result.error, str)
-    assert isinstance(result.results, list)

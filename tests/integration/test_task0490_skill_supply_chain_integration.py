@@ -2,14 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 from pathlib import Path
-import sys
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.skills import custom_provider_installer
-from host_brain.skills.hub import hub_installer, hub_loader
-from host_brain.skills.registry import SkillRegistry
 from host_brain.skills.supply_chain import (
     MANIFEST_SCHEMA_VERSION,
     SkillSupplyChainVerifier,
@@ -55,7 +50,7 @@ def _write_signed_bundle(bundle: Path, *, marker: Path) -> Path:
         "tool: task0490_test_tool\n"
         "---\n"
     ).encode("utf-8")
-    # If either the verifier, quarantine or Hub boundary imports this file,
+    # If the verifier, quarantine or intake service imports this file,
     # the marker exposes the security regression without external effects.
     provider = (
         "from pathlib import Path\n"
@@ -119,7 +114,6 @@ def _write_signed_bundle(bundle: Path, *, marker: Path) -> Path:
 
 def test_task0490_signed_bundle_quarantine_store_and_zero_import_wave(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     marker = tmp_path / "provider-imported.txt"
     source = _write_signed_bundle(tmp_path / "source", marker=marker)
@@ -166,7 +160,6 @@ def test_task0490_signed_bundle_quarantine_store_and_zero_import_wave(
     assert duplicate.stage_acceptance_status == "DUPLICATE_SAME"
     assert first.bundle_id == duplicate.bundle_id
     assert not marker.exists()
-    assert not any(name.startswith("_natsume_hub_skill_") for name in sys.modules)
     assert store.get_active_bundle(
         bundle_kind="PROVIDER",
         bundle_name="task0490-safe-bundle",
@@ -194,43 +187,4 @@ def test_task0490_signed_bundle_quarantine_store_and_zero_import_wave(
     assert not marker.exists()
     assert len(store.list_bundles()) == 1
 
-    # Existing HTTP/skill facades cannot bypass signed quarantine: their old
-    # source-only contract is rejected before filesystem/network/subprocess.
-    monkeypatch.setenv("HOST_SUPPLY_CHAIN_ACTIVATION_MODE", "STAGED")
-    monkeypatch.setenv(
-        "HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON",
-        json.dumps({KEY_ID: _trust()}),
-    )
-    legacy_install = hub_installer.install_skill(
-        str(source),
-        skills_dir=tmp_path / "legacy-live-dir",
-        force=True,
-    )
-    assert legacy_install.success is False
-    assert legacy_install.error == "SUPPLY_CHAIN_SIGNED_BUNDLE_REQUIRED"
-    assert not (tmp_path / "legacy-live-dir").exists()
-    try:
-        custom_provider_installer.write_provider_source(
-            "legacy",
-            "class Legacy: pass\nSKILL_PROVIDER_CLASS = Legacy",
-        )
-    except ValueError as exc:
-        assert str(exc) == "SKILL_SUPPLY_CHAIN_LEGACY_SOURCE_REJECTED"
-    else:
-        raise AssertionError("legacy custom provider source was accepted")
-
-    # Scanning the physical quarantine may report the signed bundle, but the
-    # Python extension is rejected and the active registry remains untouched.
-    registry = SkillRegistry()
-    staged_scan = hub_loader.load_hub_skills(
-        registry,
-        skills_dir=tmp_path / "quarantine",
-    )
-    assert staged_scan.registered_count == 0
-    assert staged_scan.activation_eligible_count == 0
-    assert any(
-        item.reason_code == "SUPPLY_CHAIN_PYTHON_EXTENSION_FORBIDDEN"
-        for item in staged_scan.skills
-    )
-    assert registry.list_skill_names() == []
     assert not marker.exists()

@@ -779,10 +779,10 @@ class SqliteBondClient:
     持久化连接、事务和 schema 所有权均位于 persistence adapter。
 
     环境变量：
-        HOST_BOND_SQLITE_PATH: SQLite 文件路径，默认 data/bond_events.db
+        HOST_BOND_SQLITE_PATH: SQLite 文件路径，默认 runtime/host/bond_events.db
     """
 
-    DEFAULT_DB_PATH = Path("data/bond_events.db")
+    DEFAULT_DB_PATH = Path("runtime/host/bond_events.db")
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         raw_path = str(

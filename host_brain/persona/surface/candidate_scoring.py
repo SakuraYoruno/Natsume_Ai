@@ -23,9 +23,6 @@ from host_brain.persona.surface_original_quote_bank import (
     select_surface_original_quotes,
     surface_original_quote_similarity_hits,
 )
-from host_brain.persona.surface_scene_quality_pack import (
-    select_surface_scene_quality_sample,
-)
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 from host_brain.persona.surface.data_models import (
@@ -185,7 +182,6 @@ from host_brain.persona.surface.scene_constants import (
     _SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES,
     _SIGNATURE_FLAT_SAFE_RE,
     _SIGNATURE_TEXTURE_STAGES,
-    _SURFACE_SCENE_QUALITY_SCORING_SCENES,
     _SURFACE_QUOTE_SCENE_ALIASES,
     _TECHNICAL_TASK_MODES,
     _THIN_MORNING_GREETING_RE,
@@ -1011,61 +1007,6 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
 
 
 # ---------------------------------------------------------------------------
-# Scene quality sample scoring
-# ---------------------------------------------------------------------------
-
-def _apply_surface_scene_quality_sample_scoring(request, text, dimensions, reason_codes):
-    sample = select_surface_scene_quality_sample(
-        user_message=request.user_message,
-        task_mode=request.control.task_mode,
-        response_move=request.control.response_move,
-        relationship_distance=request.control.relationship_distance,
-    )
-    if sample is None:
-        return 0.0
-    if sample.scene_id not in _SURFACE_SCENE_QUALITY_SCORING_SCENES:
-        return 0.0
-    normalized = _clean_text(text)
-    good_hits = [item for item in sample.good_examples if item and (item == normalized or item in normalized)]
-    bad_hits = [item for item in sample.bad_examples if item and item in normalized]
-    should_not_hits = [item for item in sample.should_not_surface if item and item in normalized]
-    if sample.scene_id == "short_continue" and should_not_hits:
-        facts_text = _clean_text(" ".join([*request.control.facts, *request.facts]))
-        fact_grounded_topic_terms = {"红字", "报错", "输入输出"}
-        fact_grounded_aliases = {"输入输出": ("输入和输出", "输入、输出", "输入/输出")}
-        should_not_hits = [
-            item
-            for item in should_not_hits
-            if not (
-                item in fact_grounded_topic_terms
-                and (item in facts_text or any(alias in facts_text for alias in fact_grounded_aliases.get(item, ())))
-            )
-        ]
-    delta = 0.0
-    if good_hits:
-        delta += min(5.0, 2.5 + 0.75 * len(good_hits))
-        dimensions["context_fit"] = max(84.0, float(dimensions.get("context_fit", 86.0)))
-        dimensions["scene_grounding"] = max(88.0, float(dimensions.get("scene_grounding", 86.0)))
-        dimensions["distance_control"] = max(86.0, float(dimensions.get("distance_control", 86.0)))
-        dimensions["spoken_chat_texture"] = max(88.0, float(dimensions.get("spoken_chat_texture", 86.0)))
-        dimensions["non_oily"] = max(86.0, float(dimensions.get("non_oily", 86.0)))
-        reason_codes.append(f"SCENE_QUALITY_GOOD_SAMPLE:{sample.scene_id}")
-    if bad_hits or should_not_hits:
-        hits = [*bad_hits[:3], *should_not_hits[:5]]
-        delta -= min(24.0, 10.0 + 3.0 * len(hits))
-        dimensions["context_fit"] = min(68.0, float(dimensions.get("context_fit", 86.0)))
-        dimensions["scene_grounding"] = min(68.0, float(dimensions.get("scene_grounding", 86.0)))
-        dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
-        dimensions["distance_control"] = min(74.0, float(dimensions.get("distance_control", 86.0)))
-        if bad_hits:
-            reason_codes.append(f"SCENE_QUALITY_BAD_EXAMPLE:{sample.scene_id}:{','.join(bad_hits[:3])}")
-        if should_not_hits:
-            reason_codes.append(f"SCENE_QUALITY_SHOULD_NOT:{sample.scene_id}:{','.join(should_not_hits[:5])}")
-        reason_codes.append(f"SCENE_QUALITY_BAD_SAMPLE:{sample.scene_id}:{','.join(hits[:4])}")
-    return delta
-
-
-# ---------------------------------------------------------------------------
 # Question budget counting
 # ---------------------------------------------------------------------------
 
@@ -1314,9 +1255,6 @@ def score_isolated_surface_candidates(request, candidates):
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
         if candidate_surface != candidate:
             reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
-        score += _apply_surface_scene_quality_sample_scoring(
-            request, quality.normalized_text or candidate_surface, dimensions, reason_codes,
-        )
         quality_forbidden_template = (
             _continuity_boundary_relevant(request) or _boundary_repair_relevant(request)
         ) and any(code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT"))
@@ -1837,11 +1775,6 @@ def score_isolated_surface_candidates(request, candidates):
         if any(code.startswith("AWKWARD_COLLOCATION:") for code in reason_codes):
             dimensions["naturalness"] = min(70.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["line_rhythm"] = min(83.0, float(dimensions.get("line_rhythm", 86.0)))
-        if any(code.startswith("SCENE_QUALITY_BAD_EXAMPLE:") for code in reason_codes):
-            score = min(79.0, score)
-            dimensions["context_fit"] = min(70.0, float(dimensions.get("context_fit", 86.0)))
-            dimensions["scene_grounding"] = min(70.0, float(dimensions.get("scene_grounding", 86.0)))
-            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))

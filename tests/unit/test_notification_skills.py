@@ -77,8 +77,6 @@ def test_notify_schedule_reminder_fails_closed_through_executive_runtime(
 ) -> None:
     from host_brain.audit.sqlite_ledger import SQLiteLedger
 
-    monkeypatch.setenv("HOST_SKILL_HUB_ENABLED", "0")
-    monkeypatch.setenv("HOST_SKILL_CUSTOM_PROVIDERS_ENABLED", "0")
     monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
     configure_process_service_ports()
     container = dependencies.get_process_service_container()

@@ -269,7 +269,7 @@ def test_task0489_query_only_secure_command_restart_wave(
 
     first_composition = build_obs_command_composition(env=env, db_path=db_path)
     assert first_composition.execution_enabled is True
-    assert len(first_composition.registry.bound_command_ids) == 34
+    assert len(first_composition.registry.bound_command_ids) == 33
     path = f"/v1/host/obs-commands/{COMMAND_ID}"
     first_headers = _signed_headers(
         registry=first_composition.registry,

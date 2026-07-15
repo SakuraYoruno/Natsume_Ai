@@ -33,51 +33,29 @@ def test_example_configuration_is_default_off_and_loopback_only() -> None:
 
 def test_effect_bridges_use_separate_hmac_and_audit_authorities() -> None:
     mate = _text("tools/mateengine_bridge_server.py")
-    plugin = _text(
-        "integrations/mateengine/NatsumeMateEngineBridge/BridgeSecurity.cs"
-    )
     desktop = _text("desktop_pet/bridge_security.cjs")
     wechat = _text("tools/wxautox4_bridge.py")
 
     assert "NATSUME_MATEENGINE_BRIDGE_HMAC_SECRET" in mate
     assert "NATSUME_MATEENGINE_BRIDGE_AUDIT_JSONL_PATH" in mate
     assert "NATSUME_MATEENGINE_PLUGIN_HMAC_SECRET" in mate
-    assert "NATSUME_MATEENGINE_PLUGIN_HMAC_SECRET" in plugin
-    assert "NATSUME_MATEENGINE_PLUGIN_AUDIT_JSONL_PATH" in plugin
     assert "NATSUME_DESKTOP_PET_HMAC_SECRET" in desktop
     assert "NATSUME_DESKTOP_PET_AUDIT_JSONL_PATH" in desktop
     assert 'BRIDGE_HMAC_SECRET_ENV = "NATSUME_WECHAT_BRIDGE_HMAC_SECRET"' in wechat
     assert "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET" in wechat
 
-    assert 'GetEnvironmentVariable("NATSUME_BRIDGE_HMAC_SECRET")' not in plugin
     assert 'env.NATSUME_BRIDGE_HMAC_SECRET' not in desktop
 
 
-def test_mate_plugin_auth_and_audit_precede_every_effect_enqueue() -> None:
-    source = _text(
-        "integrations/mateengine/NatsumeMateEngineBridge/"
-        "NatsumeMateEngineBridgePlugin.cs"
-    )
-    listener = source[source.index("private void ListenLoop()") : source.index("private void HandleCommand")]
+def test_mate_assembly_patcher_is_kept_as_an_offline_tool() -> None:
+    project = _text("tools/mateengine/assembly_patcher/MateEngineAssemblyPatcher.csproj")
+    source = _text("tools/mateengine/assembly_patcher/Program.cs")
 
-    assert listener.index("security.TryAuthenticate") < listener.index(
-        "JsonUtility.FromJson<BridgeCommand>"
-    )
-    assert listener.index("security.CommitAccepted") < listener.index("_queue.Enqueue")
-    assert "MaxCommandsPerFrame" in source
-    assert "RelativePath(animator.transform, transform)" in source
-    assert "IndexOf(cleanName" not in source
-
-    security = _text(
-        "integrations/mateengine/NatsumeMateEngineBridge/BridgeSecurity.cs"
-    )
-    assert "Audit log contains a torn terminal row." in security
-    assert "_poisoned = true;" in security
-    assert "bridge audit and replay path families must be distinct" in security
-    assert "MaximumLiveClaims = 100_000" in security
-    assert "CompactClaimInterval = 4_096" in security
-    assert "CleanupClaimInterval = 4_096" in security
-    assert "new FileInfo(_path).Length" not in security
+    assert "Mono.Cecil" in project
+    assert 'const string TextPrefix = "NATSUME_TEXT::";' in source
+    assert 'var backupPath = assemblyPath + ".natsume-bak";' in source
+    assert "File.Copy(assemblyPath, backupPath);" in source
+    assert "PatchActionEvent(module, applyAction)" in source
 
 
 def test_desktop_and_wechat_have_no_unsigned_effect_fallback() -> None:
@@ -105,9 +83,8 @@ def test_protected_production_handoff_surfaces_are_not_claimed_here() -> None:
         ".env.example",
         "desktop_pet/main.cjs",
         "desktop_pet/bridge_security.cjs",
-        "integrations/mateengine/NatsumeMateEngineBridge/BridgeSecurity.cs",
-        "integrations/mateengine/NatsumeMateEngineBridge/NatsumeMateEngineBridgePlugin.cs",
         "tools/mateengine_bridge_server.py",
+        "tools/mateengine/assembly_patcher/Program.cs",
         "tools/wxautox4_bridge.py",
     }
     protected = {

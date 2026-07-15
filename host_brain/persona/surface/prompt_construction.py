@@ -9,18 +9,11 @@ from __future__ import annotations
 import json
 import re
 
-from host_brain.persona.continuity_surface_sample_bank import (
-    render_continuity_surface_generation_guidance,
-)
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.surface_original_quote_bank import (
     SurfaceOriginalQuoteQuery,
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
-)
-from host_brain.persona.surface_scene_quality_pack import (
-    render_surface_scene_quality_guidance,
-    select_surface_scene_quality_sample,
 )
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
@@ -77,17 +70,6 @@ from host_brain.persona.surface.util import (
     _clean_text,
     _model_dump,
 )
-
-def continuity_surface_generation_guidance(request: IsolatedSurfaceInput) -> str:
-    if not _continuity_boundary_relevant(request):
-        return ""
-    return render_continuity_surface_generation_guidance(
-        response_move=request.control.response_move or request.control.task_mode,
-        task_mode=request.control.task_mode,
-    )
-
-
-
 
 def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
     response_move = _clean_text(request.control.response_move).lower()
@@ -438,14 +420,6 @@ def _surface_temporal_mismatch_greeting_quote_scene(request: IsolatedSurfaceInpu
 
 
 def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_scene_id: str = "") -> str:
-    sample = select_surface_scene_quality_sample(
-        user_message=request.user_message,
-        task_mode=request.control.task_mode,
-        response_move=request.control.response_move,
-        relationship_distance=request.control.relationship_distance,
-    )
-    if sample and sample.scene_id:
-        return _SURFACE_QUOTE_SCENE_ALIASES.get(sample.scene_id, sample.scene_id)
     for raw in (
         request.control.task_mode,
         request.control.response_move,
@@ -577,9 +551,6 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     action_guidance = response_move_action_guidance(request)
     if action_guidance:
         user_parts.extend(["", action_guidance])
-    continuity_guidance = continuity_surface_generation_guidance(request)
-    if continuity_guidance:
-        user_parts.extend(["", continuity_guidance])
     quote_guidance = render_surface_original_quote_guidance(
         build_surface_original_quote_query(request, limit=16),
         limit=16,
@@ -595,15 +566,6 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     positive_guidance = positive_stage_scene_candidate_guidance(request)
     if positive_guidance:
         user_parts.extend(["", positive_guidance])
-    scene_quality_guidance = render_surface_scene_quality_guidance(
-        user_message=request.user_message,
-        task_mode=control.task_mode,
-        response_move=control.response_move,
-        relationship_distance=control.relationship_distance,
-        include_good_examples=False,
-    )
-    if scene_quality_guidance:
-        user_parts.extend(["", scene_quality_guidance])
     if _creative_edit_relevant(request):
         if _creative_edit_has_source_text(request):
             creative_line = "本轮已提供待改原句：候选必须直接给改写后的单句台词，保留原意再换成当前人格的口吻；不要再索要原句。"
@@ -713,5 +675,4 @@ def build_minimal_repair_messages(
         )
     )
     return messages
-
 

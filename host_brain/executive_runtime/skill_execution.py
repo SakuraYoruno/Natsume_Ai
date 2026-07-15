@@ -527,13 +527,6 @@ def _execute_skill(
         "emotion_context": dict(emotion_context or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
-    if skill_id.startswith("hub_skill_"):
-        exec_context.update(
-            {
-                "activate_hub_skill": ports.activate_hub_skill,
-                "refresh_skill_registry": ports.refresh_skill_registry,
-            }
-        )
     if governed_execution_context is not None:
         exec_context["_governed_execution_context"] = {
             "execution_mode": "governed_task_runtime",

@@ -4,7 +4,7 @@ import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
 export const SKILL_SOURCE_FILTER_ALL = 'ALL'
 
 const DEFAULT_SKILL_SOURCE = 'builtin'
-const SKILL_SOURCE_ORDER = ['builtin', 'hub', 'local', 'github', 'external']
+const SKILL_SOURCE_ORDER = ['builtin']
 
 export function getSkillSource(skill) {
   return skill?.source || DEFAULT_SKILL_SOURCE
@@ -78,12 +78,12 @@ export function buildSkillSourceGroups(skills) {
     }))
 }
 
-export function buildSkillsHubSummaryItems(data, filteredCount) {
+export function buildSkillCatalogSummaryItems(data, filteredCount) {
   return [
     {
-      label: 'Hub 状态',
-      value: data?.hub_enabled ? '开启' : '关闭',
-      tone: data?.hub_enabled ? 'text-green-600' : 'text-gray-400',
+      label: '目录状态',
+      value: data?.catalog_available ? '可用' : '不可用',
+      tone: data?.catalog_available ? 'text-green-600' : 'text-gray-400',
     },
     { label: '总技能数', value: data?.total_skills ?? '—', tone: 'text-blue-600' },
     { label: '已加载', value: data?.loaded_skills ?? '—', tone: 'text-green-600' },
@@ -96,7 +96,7 @@ export function buildSkillsHubSummaryItems(data, filteredCount) {
   ]
 }
 
-export function buildSkillsHubHeroMetaItems(data, filteredCount) {
+export function buildSkillCatalogHeroMetaItems(data, filteredCount) {
   return [
     `技能总数：${data?.total_skills ?? 0}`,
     `已加载：${data?.loaded_skills ?? 0}`,
@@ -105,21 +105,21 @@ export function buildSkillsHubHeroMetaItems(data, filteredCount) {
   ]
 }
 
-export function buildSkillsHubHeroTitle(data) {
-  return data?.hub_enabled ? 'Skills Hub 已启用' : 'Skills Hub 当前未启用'
+export function buildSkillCatalogHeroTitle(data) {
+  return data?.catalog_available ? 'Skill Catalog 可用' : 'Skill Catalog 暂不可用'
 }
 
-export function buildSkillsHubEmptyState({ filter = '', sourceFilter = SKILL_SOURCE_FILTER_ALL } = {}) {
+export function buildSkillCatalogEmptyState({ filter = '', sourceFilter = SKILL_SOURCE_FILTER_ALL } = {}) {
   const filtered = Boolean(filter) || sourceFilter !== SKILL_SOURCE_FILTER_ALL
   return {
     title: filtered ? '没有匹配的技能' : '暂无已加载技能',
-    hint: filtered ? '请尝试更换关键字或来源筛选。' : '等待 SkillsHub 拉取后将展示在此。',
+    hint: filtered ? '请尝试更换关键字或来源筛选。' : '等待内建技能目录投影后将展示在此。',
   }
 }
 
-export function buildSkillsHubLoadState({
+export function buildSkillCatalogLoadState({
   data,
-  hubError,
+  catalogError,
   loading = false,
   refreshing = false,
   stale = false,
@@ -127,7 +127,7 @@ export function buildSkillsHubLoadState({
 } = {}) {
   return resolveLoadState({
     loading: loading || refreshing,
-    error: hubError && !data ? new Error(hubError) : null,
+    error: catalogError && !data ? new Error(catalogError) : null,
     hasData: Boolean(data),
     hasSamples: skills.length > 0,
     available: Boolean(data),
@@ -135,52 +135,40 @@ export function buildSkillsHubLoadState({
   })
 }
 
-export function buildSkillsHubSampleMeta({
-  skillsHubLoadState,
+export function buildSkillCatalogSampleMeta({
+  skillCatalogLoadState,
   skills = [],
   lastUpdatedAt,
 } = {}) {
   return {
-    loadState: skillsHubLoadState,
+    loadState: skillCatalogLoadState,
     sampleSize: skills.length,
     sampleLabel: '技能',
     updatedAt: lastUpdatedAt,
-    source: 'skills hub',
-    definition: '技能中心页聚合技能总览、来源分布和过滤结果；搜索为空结果不会被误判为系统无样本。',
+    source: 'skill catalog',
+    definition: '技能目录页展示当前已注册的内建技能和 Domain Pack；搜索为空结果不会被误判为系统无样本。',
   }
 }
 
-export function buildSkillsHubNoticeView({
-  hubError,
+export function buildSkillCatalogNoticeView({
+  catalogError,
   data,
   loading = false,
   refreshing = false,
-  skillsHubLoadState,
+  skillCatalogLoadState,
 } = {}) {
   return {
-    hubError,
-    hubErrorVariant: data ? 'warning' : 'error',
-    showNoSample: Boolean(!hubError && !loading && !refreshing && skillsHubLoadState === LOAD_STATES.NO_SAMPLE),
+    catalogError,
+    catalogErrorVariant: data ? 'warning' : 'error',
+    showNoSample: Boolean(!catalogError && !loading && !refreshing && skillCatalogLoadState === LOAD_STATES.NO_SAMPLE),
   }
 }
 
-export function buildSkillsHubExternalDirsView(data) {
-  const rows = Array.isArray(data?.external_dirs_scanned) ? data.external_dirs_scanned : []
-  return {
-    hasExternalDirs: rows.length > 0,
-    count: rows.length,
-    rows: rows.map((path, index) => ({
-      key: `${index}-${path}`,
-      path,
-    })),
-  }
-}
-
-export function buildSkillsHubViewModel({
+export function buildSkillCatalogViewModel({
   data,
   filter,
   sourceFilter,
-  hubError,
+  catalogError,
   loading = false,
   refreshing = false,
   stale = false,
@@ -188,9 +176,9 @@ export function buildSkillsHubViewModel({
 } = {}) {
   const skills = Array.isArray(data?.skills) ? data.skills : []
   const filtered = filterSkills(skills, { keyword: filter, sourceFilter })
-  const skillsHubLoadState = buildSkillsHubLoadState({
+  const skillCatalogLoadState = buildSkillCatalogLoadState({
     data,
-    hubError,
+    catalogError,
     loading,
     refreshing,
     stale,
@@ -201,23 +189,22 @@ export function buildSkillsHubViewModel({
     filtered,
     sourceOptions: buildSkillSourceOptions(skills),
     sourceGroups: buildSkillSourceGroups(filtered),
-    summaryItems: buildSkillsHubSummaryItems(data, filtered.length),
-    heroTitle: buildSkillsHubHeroTitle(data),
-    heroMetaItems: buildSkillsHubHeroMetaItems(data, filtered.length),
-    emptyState: buildSkillsHubEmptyState({ filter, sourceFilter }),
-    skillsHubLoadState,
-    sampleMeta: buildSkillsHubSampleMeta({
-      skillsHubLoadState,
+    summaryItems: buildSkillCatalogSummaryItems(data, filtered.length),
+    heroTitle: buildSkillCatalogHeroTitle(data),
+    heroMetaItems: buildSkillCatalogHeroMetaItems(data, filtered.length),
+    emptyState: buildSkillCatalogEmptyState({ filter, sourceFilter }),
+    skillCatalogLoadState,
+    sampleMeta: buildSkillCatalogSampleMeta({
+      skillCatalogLoadState,
       skills,
       lastUpdatedAt,
     }),
-    noticeView: buildSkillsHubNoticeView({
-      hubError,
+    noticeView: buildSkillCatalogNoticeView({
+      catalogError,
       data,
       loading,
       refreshing,
-      skillsHubLoadState,
+      skillCatalogLoadState,
     }),
-    externalDirsView: buildSkillsHubExternalDirsView(data),
   }
 }

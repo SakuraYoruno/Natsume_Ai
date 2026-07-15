@@ -884,7 +884,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *AGENT_RUNTIME_SKILL_IDS, "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "file_read", "file_write", "file_list", *AGENT_RUNTIME_SKILL_IDS, "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic", render_target_lang=render_target_lang)
@@ -946,148 +946,6 @@ def _build_plan_execution_reply_cn(ctx: SurfaceSubAgentContext, *, render_target
             parts.append(_render_plan_step_failure_cn(step, render_target_lang=render_target_lang))
     parts.append(_mapping_text(summary_templates, "all_done", render_target_lang=render_target_lang) if success_count == len(steps) else _mapping_text(summary_templates, "partial_done", render_target_lang=render_target_lang))
     return "".join(parts)
-
-
-def _infer_hub_skill_name_from_task(task: str, *, markers: tuple[str, ...], default_name: str) -> str:
-    normalized = str(task or "").strip()
-    for marker in markers:
-        if marker in normalized:
-            normalized = normalized.split(marker, 1)[-1].strip(" ：:")
-            break
-    normalized = re.sub(r"^(?:旧角色|旧角色|旧角色蓝|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
-    normalized = re.sub(r"\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$", "", normalized, flags=re.IGNORECASE).strip()
-    normalized = normalized.strip("，。；！？,.!? ")
-    return normalized or default_name
-
-
-def _format_hub_skill_name_list_cn(values: list[Any], *, limit: int = 6, render_target_lang: str = "zh") -> str:
-    names = [str(item or "").strip() for item in values if str(item or "").strip()]
-    if not names:
-        return ""
-    preview = "、".join(names[:limit])
-    if len(names) > limit:
-        preview += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-    return preview
-
-
-def _build_hub_skill_install_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("安装 hub 技能", "安装技能", "安装skill"), default_name=_default_skill_name)).strip() or _default_skill_name
-    message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
-    success = bool(detail.get("success", ctx.success))
-    activated = bool(detail.get("activated"))
-    repair_attempted = bool(detail.get("repair_attempted"))
-    repair_succeeded = bool(detail.get("repair_succeeded"))
-    repair_actions = int(detail.get("repair_actions") or 0)
-    active_skill_names = list(detail.get("active_skill_names") or [])
-    if not success:
-        parts = [_mapping_text(templates, "install_failure_intro", render_target_lang=render_target_lang, name=name)]
-        if message:
-            parts.append(_mapping_text(templates, "install_failure_reason", render_target_lang=render_target_lang, message=message))
-        return "".join(parts)
-    parts = [_mapping_text(templates, "install_success_intro", render_target_lang=render_target_lang, name=name)]
-    if activated:
-        parts.append(_mapping_text(templates, "install_success_activated", render_target_lang=render_target_lang))
-    else:
-        parts.append(_mapping_text(templates, "install_success_pending_activation", render_target_lang=render_target_lang))
-    preview = _format_hub_skill_name_list_cn(active_skill_names, render_target_lang=render_target_lang)
-    if preview:
-        parts.append(_mapping_text(templates, "install_success_active_skills", render_target_lang=render_target_lang, preview=preview))
-    if repair_attempted:
-        if repair_succeeded:
-            parts.append(_mapping_text(templates, "install_repair_success_count", render_target_lang=render_target_lang, repair_actions=repair_actions) if repair_actions > 0 else _mapping_text(templates, "install_repair_success_generic", render_target_lang=render_target_lang))
-        else:
-            parts.append(_mapping_text(templates, "install_repair_failed", render_target_lang=render_target_lang))
-    elif message and message not in {"installed ok", "install failed"}:
-        if not (message.startswith("-") or "Installed " in message or "->" in message):
-            parts.append(_mapping_text(templates, "install_message_suffix", render_target_lang=render_target_lang, message=message))
-    return "".join(parts)
-
-
-def _build_hub_skill_search_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    skills = list(detail.get("skills") or [])
-    total = int(detail.get("total") or len(skills))
-    _default_skill_query = _runtime_text("default_skill_query", render_target_lang=render_target_lang)
-    query = str(detail.get("query") or payload.get("query") or _infer_hub_skill_name_from_task(ctx.task, markers=("搜索技能", "查找技能", "搜技能"), default_name=_default_skill_query)).strip() or _default_skill_query
-    registry_error = str(detail.get("registry_error") or "").strip()
-    discovery_sources = list(detail.get("discovery_sources") or [])
-    if total <= 0:
-        if registry_error:
-            source_names = "、".join([str(item.get("name") if isinstance(item, dict) else item or "").strip() for item in discovery_sources if str(item.get("name") if isinstance(item, dict) else item or "").strip()])
-            if source_names:
-                return _mapping_text(templates, "search_registry_unavailable_with_sources", render_target_lang=render_target_lang, registry_error=registry_error, source_names=source_names)
-            return _mapping_text(templates, "search_registry_unavailable", render_target_lang=render_target_lang, registry_error=registry_error)
-        return _mapping_text(templates, "search_empty", render_target_lang=render_target_lang, query=query)
-    previews: list[str] = []
-    for item in skills[:3]:
-        row = dict(item or {})
-        _unnamed_skill_name = _runtime_text("unnamed_skill_name", render_target_lang=render_target_lang)
-        name = str(row.get("name") or _unnamed_skill_name).strip() or _unnamed_skill_name
-        description = str(row.get("description") or "").strip()
-        author = str(row.get("author") or "").strip()
-        summary = name
-        if description:
-            summary += f"：{description}"
-        if author:
-            summary += _runtime_text("author_suffix", render_target_lang=render_target_lang, author=author)
-        previews.append(summary)
-    parts = [_mapping_text(templates, "search_intro", render_target_lang=render_target_lang, total=total)]
-    if previews:
-        delimiter = "；" if _normalize_template_lang(render_target_lang) == "zh" else "、"
-        parts.append(_mapping_text(templates, "search_preview_prefix", render_target_lang=render_target_lang) + delimiter.join(previews) + "。")
-    return "".join(parts)
-
-
-def _build_hub_skill_list_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    skills = list(detail.get("skills") or [])
-    total = int(detail.get("total") or len(skills))
-    if total <= 0:
-        return _mapping_text(templates, "list_empty", render_target_lang=render_target_lang)
-    names = [dict(item or {}).get("name") for item in skills]
-    preview = _format_hub_skill_name_list_cn(names, render_target_lang=render_target_lang)
-    if preview:
-        return _mapping_text(templates, "list_with_preview", render_target_lang=render_target_lang, total=total, preview=preview)
-    return _mapping_text(templates, "list_total_only", render_target_lang=render_target_lang, total=total)
-
-
-def _build_hub_skill_remove_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    templates = _load_static_prompt_spec("surface_reply.hub_skill.reply_templates")
-    payload = dict(ctx.payload or {})
-    detail = dict(payload.get("detail") or {})
-    _default_skill_name = _runtime_text("default_skill_name", render_target_lang=render_target_lang)
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("卸载技能", "删除技能"), default_name=_default_skill_name)).strip() or _default_skill_name
-    message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
-    success = bool(detail.get("success", ctx.success))
-    if success:
-        if message and message not in {"removed", "remove failed"}:
-            return _mapping_text(templates, "remove_success_with_message", render_target_lang=render_target_lang, name=name, message=message)
-        return _mapping_text(templates, "remove_success", render_target_lang=render_target_lang, name=name)
-    parts = [_mapping_text(templates, "remove_failure_intro", render_target_lang=render_target_lang, name=name)]
-    if message:
-        parts.append(_mapping_text(templates, "remove_failure_reason", render_target_lang=render_target_lang, message=message))
-    return "".join(parts)
-
-
-def _build_hub_skill_reply_cn(ctx: SurfaceSubAgentContext, *, render_target_lang: str = "zh") -> str | None:
-    agent_id = str(ctx.agent_id or "").strip()
-    if agent_id == "skill:hub_skill_install":
-        return _build_hub_skill_install_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_search":
-        return _build_hub_skill_search_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_list":
-        return _build_hub_skill_list_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id == "skill:hub_skill_remove":
-        return _build_hub_skill_remove_reply_cn(ctx, render_target_lang=render_target_lang)
-    return None
 
 
 def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
@@ -1558,8 +1416,6 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SurfaceSubAgentContex
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id.startswith("skill:hub_skill_"):
-        return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     result_text = _strip_internal_delegate_markers(str(ctx.result_text or ""))
     result_text = _extract_visible_text(result_text, render_target_lang=render_target_lang)
     result_text = re.sub(r"\n{3,}", "\n\n", result_text).strip()
@@ -1577,8 +1433,6 @@ def _build_deterministic_sub_agent_reply(ctx: SurfaceSubAgentContext | None, *, 
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id.startswith("skill:hub_skill_"):
-        return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     if is_agent_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
         return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
     if agent_id in {"recent_turn_direct", "task_progress_direct"}:

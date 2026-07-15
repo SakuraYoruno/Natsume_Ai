@@ -26,7 +26,6 @@ def build_executive_runtime_application_ports() -> "ExecutiveRuntimeApplicationP
         _sse,
         surface_reply_sse_generator,
     )
-    from host_brain.app.tool_routes import _attempt_activate_hub_skill  # noqa: PLC0415
     from host_brain.composition import process_services  # noqa: PLC0415
     from host_brain.executive_runtime.ports import (  # noqa: PLC0415
         ExecutiveRuntimeApplicationPorts,
@@ -58,8 +57,6 @@ def build_executive_runtime_application_ports() -> "ExecutiveRuntimeApplicationP
         get_resource_manager=process_services.get_resource_manager,
         get_episodic_store=process_services.get_episodic_store,
         get_semantic_recaller=process_services.get_semantic_recaller,
-        refresh_skill_registry=process_services.refresh_skill_registry,
-        activate_hub_skill=_attempt_activate_hub_skill,
         emit_tribe_event=emit_tribe_event,
     )
 

@@ -1374,16 +1374,6 @@ _SPECS.update(
                 "summary": {"completed": "{success_count}/{total_steps} 个步骤已完成。", "partial": "完成 {success_count}/{total_steps} 个步骤。", "failed": "计划没有完成。"},
             }, category="runtime_text", scope="surface_reply",
         ),
-        "surface_reply.hub_skill.reply_templates": _spec(
-            "surface_reply.hub_skill.reply_templates", purpose="hub_skill_reply_texts", output_type="json_object",
-            content={
-                "install_success": "技能 {name} 已安装。", "install_failed": "技能 {name} 安装失败。",
-                "install_repair_failed": "自动修复也没有成功。", "install_message_suffix": " {message}",
-                "search_intro": "找到 {total} 个技能。", "search_preview_prefix": "包括：", "list_empty": "目前没有已安装技能。",
-                "list_with_preview": "共有 {total} 个：{preview}。", "list_total_only": "共有 {total} 个技能。",
-                "remove_success": "技能 {name} 已移除。", "remove_failed": "技能 {name} 移除失败。",
-            }, category="runtime_text", scope="surface_reply",
-        ),
         "surface_reply.system_skill.reply_templates": _spec(
             "surface_reply.system_skill.reply_templates", purpose="system_skill_reply_texts", output_type="json_object",
             content={"default_app_name": "这个应用", "open_app_success": "{app_name} 已打开。", "open_app_failed": "{app_name} 没能打开。"},

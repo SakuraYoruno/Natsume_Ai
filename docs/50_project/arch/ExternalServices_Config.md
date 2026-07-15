@@ -67,11 +67,11 @@
 - LINE：`LINE_CHANNEL_ACCESS_TOKEN` / `LINE_CHANNEL_SECRET`
 - 拟人化发送：`EDGE_HUMANIZE_*`（TYPING_SPEED_CPS / BASE_DELAY_S / MAX_DELAY_S / JITTER）
 
-### 3.4 Host 本地模型与 Skills Hub
+### 3.4 Host 本地模型与签名 Skill 供应链
 
 - Host 14B 本地模型：`HOST_CHAT_HOST_14B_*`（ENABLED / MODEL_ID / BASE_URL / TIMEOUT_MS / HEALTHCHECK_*）
-- Skills Hub：`HOST_SKILL_HUB_*`（ENABLED / DIR / REGISTRY_URL）
-- 外部 Skill 扫描：`HOST_SKILL_SCAN_EXTERNAL` / `HOST_SKILL_EXTERNAL_DIRS`
+- 供应链模式：`HOST_SUPPLY_CHAIN_ACTIVATION_MODE`（默认 `BUILTINS_ONLY`）
+- 签名信任映射：`HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON`；外部 bundle 只能进入受治理 Intake / Quarantine，不扫描目录或动态导入 Python
 
 ### 3.5 数据与检索
 

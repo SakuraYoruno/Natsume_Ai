@@ -456,16 +456,6 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         ),
     ),
     _spec(
-        "skill_provider.install",
-        "skill-provider:write",
-        _schema(
-            required=("filename", "source_code"),
-            optional=("activate_now",),
-            strings=("filename",),
-            booleans=("activate_now",),
-        ),
-    ),
-    _spec(
         "mate.action.submit",
         "device:mate:write",
         _schema(
@@ -530,8 +520,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 34:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_34_ACTIVE_FAMILIES")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 33:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_33_ACTIVE_FAMILIES")
 
 
 __all__ = [

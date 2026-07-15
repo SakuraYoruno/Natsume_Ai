@@ -6,10 +6,6 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
-## T-Flow
-- T-Flow-01：active.pointer 合法 JSON + 三环境键完整。
-- T-Flow-02：active.pointer 与 docs/60_trace/flows/index.md 路径一致。
-
 ## T-Intent
 - T-18：Intent 宽松解析 + 严格校验。
 - T-19：重放保护（nonce/request_id）拒绝。
@@ -163,7 +159,7 @@
 - T-CI-01: Unified CI delivery gate must classify failures across `contract/e2e/static_scan/doc_gate` with deterministic report fields (`job_id/check_id/reason_code/failed_artifact`).
 
 ## T-Release
-- T-Release-01: Release checklist for `M0~M3` must remain deterministic (`milestone/assets/checksums/required_services`), rollback mapping must resolve `release_id/rollback_target/impact_scope`, and flow pointer cross-check must remain consistent with `T-Flow-02`.
+- T-Release-01: Release checklist for `M0~M3` must remain deterministic (`milestone/assets/checksums/required_services`), and rollback mapping must resolve `release_id/rollback_target/impact_scope`.
 
 ## T-NLE（M48 长期演化安全收敛）
 

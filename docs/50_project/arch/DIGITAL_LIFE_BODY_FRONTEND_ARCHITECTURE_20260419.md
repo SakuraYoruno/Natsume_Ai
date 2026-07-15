@@ -13,7 +13,7 @@
 > - `host_brain/app/monitor_ui/src/components/DigitalLifeNav.jsx` 当前仍保留为数字生命体快捷导航组件，但没有接入主导航壳。
 > - 下文第 3 节保留的是本轮重构立项时的问题基线；当前实际落地状态请结合第 12.4 节与第 14 节各阶段完成情况一起阅读。
 > - 2026-06-03 代码校准：`host_brain/app/monitor_ui/src/api/obs.js`、`src/api/runtime.js`、`src/queries/runtimeQueries.js`、`src/queries/queryKeys.js` 继续承载观测与运行态数据接线；`DigitalLifeOverview.jsx` 是数字生命体首页聚合面，`BackgroundRuntimeCard.jsx` 和 `AvatarStateCard.jsx` 分别承载后台生命节律与桌面身体状态；`DigitalLifeNav.jsx` 仍作为数字生命体局部导航/快捷入口，而非全站主导航唯一事实源。
-> - 2026-06-03 导航边界：Automation、Gateway、Tools、SkillsHub 等页面仍归入“运营 / 外周执行”视角；主体化首页只汇聚高信号状态，不把所有控制面板重新铺平到驾驶舱。
+> - 2026-06-03 导航边界：Automation、Gateway、Tools、Skill Catalog 等页面仍归入“运营 / 外周执行”视角；主体化首页只汇聚高信号状态，不把所有控制面板重新铺平到驾驶舱。
 > - 2026-07-11 Operator 增量：`/execution/task-runtime` 已加入 `Execution` 导航组，作为执行审查页展示 TaskGraph DAG、attempt、budget、verification、Review、token-bound resume 与 Runtime Event cursor replay。它消费 `/obs/task-runtime` versioned read model，不读取内部表，也不改变数字生命驾驶舱的信息架构；`HOST_NLE_OPERATOR_VIEWS_ENABLED=false` 可整体隐藏该增量。
 >
 > 本文档不是“把监控页换个皮肤”，而是要把当前前端从“监控页面集合”推进为“数字生命主体驾驶舱”。核心目标是让用户看到的不是分散的图表，而是一个有主体、有器官系统、有生命体征、有病灶、有因果链和有行为后果的数字生命体。
@@ -259,7 +259,7 @@
 | `MemoryBrowser` | 记忆系统 | 回忆、记忆写入、守卫 |
 | `Automation` / `RuntimeMode` | 内分泌系统 + 节律中枢 | 节律、疲劳、背景推进 |
 | `Alerts` / `immune` 相关 | 免疫系统 | 风险、守卫、阻断、自愈 |
-| `Gateway` / `Tools` / `SkillsHub` | 运动系统 | 外部行动、闭环、执行 |
+| `Gateway` / `Tools` / `Skill Catalog` | 运动系统 | 外部行动、闭环、执行 |
 | `SelfModel` / `PromptConfig` / `PersonaPromptOps` / `Canon` | 自我系统 | 身份、自我叙事、主设定 |
 
 ## 7. 数字生命体驾驶舱
@@ -481,7 +481,7 @@ OrganSystemModel
 
 - `Gateway`
 - `Tools`
-- `SkillsHub`
+- `Skill Catalog`
 
 关键指标：
 

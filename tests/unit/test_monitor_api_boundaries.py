@@ -26,7 +26,7 @@ DEPRECATED_QUERY_IMPORT = re.compile(
     r"agentLoopQueries|alertsQueries|automationQueries|bondQueries|codexBioOpsQueries|diagnosticQueries|digitalLifeQueries|"
     r"canonQueries|forgeQueries|gatewayQueries|insightsQueries|lifeBodyQueries|logQueries|memoryQueries|"
     r"metricsQueries|overviewQueries|promptQueries|runtimeModeQueries|runtimeQueries|sessionsQueries|"
-    r"skillsHubQueries|systemConfigQueries|toolsQueries|traceQueries|wechatQueries"
+    r"skillCatalogQueries|systemConfigQueries|toolsQueries|traceQueries|wechatQueries"
     r")\.js['\"]"
 )
 LEGACY_FEATURE_QUERY_IMPORT = re.compile(
@@ -1522,18 +1522,11 @@ def test_tools_execution_results_use_shared_json_block() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
-    custom_provider_form = (
-        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderForm.jsx"
-    ).read_text(encoding="utf-8")
 
-    for rel, source in {
-        "features/execution/components/ToolExecutePanel.jsx": tool_execute_panel,
-        "features/execution/components/CustomSkillProviderForm.jsx": custom_provider_form,
-    }.items():
-        assert "shared/ui/JsonBlock.jsx" in source, rel
-        assert "JSON.stringify(result.data" not in source, rel
-        assert 'variant="light"' in source, rel
-        assert 'className="mt-1 border-green-200 bg-white/70 font-mono text-green-900"' in source, rel
+    assert "shared/ui/JsonBlock.jsx" in tool_execute_panel
+    assert "JSON.stringify(result.data" not in tool_execute_panel
+    assert 'variant="light"' in tool_execute_panel
+    assert 'className="mt-1 border-green-200 bg-white/70 font-mono text-green-900"' in tool_execute_panel
 
 
 def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() -> None:
@@ -1670,7 +1663,6 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/operations/components/canon/CanonDocumentsSection.jsx",
         "features/life/digitalLifeGatewayModel.js",
         "features/operations/components/promptOps/PromptTemplateEditorPanel.jsx",
-        "features/execution/components/CustomSkillProviderList.jsx",
         "features/observability/components/insights/InsightsStateGroup.jsx",
         "features/observability/components/insights/InsightsLlmGroup.jsx",
         "features/observability/components/insights/insightsGroupShared.jsx",
@@ -1849,7 +1841,7 @@ def test_insights_visual_metadata_lives_in_observability_feature() -> None:
     assert "resolveInsightsChainNodeColor(node.node_name)" not in insights_global
 
 
-def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
+def test_canon_status_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
     migrated_files = {
         "features/operations/components/canon/CanonDocumentsSection.jsx": [
@@ -1858,10 +1850,6 @@ def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
         "features/operations/components/canon/CanonProposalsSection.jsx": [
             "const STATUS_STYLES",
             "const PROPOSAL_STATUS_LABELS",
-        ],
-        "features/execution/components/CustomSkillProviderList.jsx": [
-            "const PROVIDER_STATUS_LABELS",
-            "const styles = {",
         ],
         "features/operations/canonModel.js": [
             "const MANIFEST_STATUS_LABELS",
@@ -1875,8 +1863,6 @@ def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
         "CANON_MANIFEST_STATUS_CLASSES",
         "CANON_PROPOSAL_STATUS_LABELS",
         "CANON_PROPOSAL_STATUS_CLASSES",
-        "TOOL_PROVIDER_STATUS_LABELS",
-        "TOOL_PROVIDER_STATUS_CLASSES",
         "resolveStatusLabel",
         "resolveStatusClass",
     ]:
@@ -1946,10 +1932,10 @@ def test_canon_view_model_lives_in_operations_feature() -> None:
         assert forbidden not in page
 
 
-def test_skills_hub_display_metadata_lives_in_shared_module() -> None:
+def test_skill_catalog_display_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
-    skills_hub = (
-        MONITOR_SRC / "features" / "execution" / "components" / "SkillsHubSurface.jsx"
+    skill_catalog = (
+        MONITOR_SRC / "features" / "execution" / "components" / "SkillCatalogSurface.jsx"
     ).read_text(encoding="utf-8")
 
     for export_name in [
@@ -1958,23 +1944,23 @@ def test_skills_hub_display_metadata_lives_in_shared_module() -> None:
     ]:
         assert export_name in shared
 
-    assert "shared/statusMeta.js" in skills_hub
-    assert "const CLEARANCE_STYLES" not in skills_hub
-    assert "const SOURCE_STYLES" not in skills_hub
-    assert "bg-purple-100', text: 'text-purple-700'" not in skills_hub
-    assert "label: 'GitHub'" not in skills_hub
-    assert "label: 'MEDIUM'" not in skills_hub
+    assert "shared/statusMeta.js" in skill_catalog
+    assert "const CLEARANCE_STYLES" not in skill_catalog
+    assert "const SOURCE_STYLES" not in skill_catalog
+    assert "bg-purple-100', text: 'text-purple-700'" not in skill_catalog
+    assert "label: 'GitHub'" not in skill_catalog
+    assert "label: 'MEDIUM'" not in skill_catalog
 
 
-def test_skills_hub_view_model_lives_in_execution_feature() -> None:
-    skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
-    skills_controller = (
-        MONITOR_SRC / "features" / "execution" / "skillsHubController.js"
+def test_skill_catalog_view_model_lives_in_execution_feature() -> None:
+    skill_page = (MONITOR_SRC / "pages" / "SkillCatalog.jsx").read_text(encoding="utf-8")
+    skill_controller = (
+        MONITOR_SRC / "features" / "execution" / "skillCatalogController.js"
     ).read_text(encoding="utf-8")
-    skills_surface = (
-        MONITOR_SRC / "features" / "execution" / "components" / "SkillsHubSurface.jsx"
+    skill_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "SkillCatalogSurface.jsx"
     ).read_text(encoding="utf-8")
-    skills_model = (MONITOR_SRC / "features" / "execution" / "skillsHubModel.js").read_text(encoding="utf-8")
+    skill_model = (MONITOR_SRC / "features" / "execution" / "skillCatalogModel.js").read_text(encoding="utf-8")
 
     for export_name in [
         "getSkillSource",
@@ -1982,30 +1968,27 @@ def test_skills_hub_view_model_lives_in_execution_feature() -> None:
         "buildSkillSourceOptions",
         "filterSkills",
         "buildSkillSourceGroups",
-        "buildSkillsHubSummaryItems",
-        "buildSkillsHubHeroMetaItems",
-        "buildSkillsHubHeroTitle",
-        "buildSkillsHubEmptyState",
-        "buildSkillsHubLoadState",
-        "buildSkillsHubSampleMeta",
-        "buildSkillsHubNoticeView",
-        "buildSkillsHubExternalDirsView",
-        "buildSkillsHubViewModel",
+        "buildSkillCatalogSummaryItems",
+        "buildSkillCatalogHeroMetaItems",
+        "buildSkillCatalogHeroTitle",
+        "buildSkillCatalogEmptyState",
+        "buildSkillCatalogLoadState",
+        "buildSkillCatalogSampleMeta",
+        "buildSkillCatalogNoticeView",
+        "buildSkillCatalogViewModel",
     ]:
-        assert f"export function {export_name}(" in skills_model
+        assert f"export function {export_name}(" in skill_model
 
-    assert "./skillsHubModel.js" in skills_controller
-    assert "buildSkillsHubViewModel({" in skills_controller
-    assert "SKILL_SOURCE_FILTER_ALL" in skills_controller
-    assert "sampleMeta.loadState" in skills_surface
-    assert "noticeView.showNoSample" in skills_surface
-    assert "externalDirsView.hasExternalDirs" in skills_surface
-    assert "externalDirsView.rows.map" in skills_surface
-    assert "features/execution/skillsHubController.js" in skills_page
-    assert "buildSkillsHubLoadState({" in skills_model
-    assert "resolveLoadState({" in skills_model
-    assert "LOAD_STATES.NO_SAMPLE" in skills_model
-    assert "buildSkillsHubExternalDirsView(data)" in skills_model
+    assert "./skillCatalogModel.js" in skill_controller
+    assert "buildSkillCatalogViewModel({" in skill_controller
+    assert "SKILL_SOURCE_FILTER_ALL" in skill_controller
+    assert "sampleMeta.loadState" in skill_surface
+    assert "noticeView.showNoSample" in skill_surface
+    assert "externalDirsView" not in skill_surface
+    assert "features/execution/skillCatalogController.js" in skill_page
+    assert "buildSkillCatalogLoadState({" in skill_model
+    assert "resolveLoadState({" in skill_model
+    assert "LOAD_STATES.NO_SAMPLE" in skill_model
 
     for needle in [
         "new Set(skills.map((skill) => skill.source || 'builtin'))",
@@ -2019,14 +2002,14 @@ def test_skills_hub_view_model_lives_in_execution_feature() -> None:
         "LOAD_STATES",
         "resolveLoadState",
         "sampleLabel=\"技能\"",
-        "source=\"skills hub\"",
-        "definition=\"技能中心页聚合",
+        "source=\"skill catalog\"",
+        "definition=\"技能目录页展示",
         "LOAD_STATES.NO_SAMPLE",
         "data?.hub_enabled ? 'Skills Hub 已启用'",
         "data?.external_dirs_scanned",
         "data.external_dirs_scanned.map",
     ]:
-        assert needle not in skills_page
+        assert needle not in skill_page
 
 
 def test_tools_execution_badge_metadata_lives_in_shared_module() -> None:
@@ -2167,8 +2150,6 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
         "useToolsCatalogQuery",
         "usePermissionStatsQuery",
         "useActionPlanStatsQuery",
-        "useCustomSkillProvidersQuery",
-        "useCustomSkillProviderTemplateQuery",
         "refreshPermissionStatsQuery",
         "refreshActionPlanStatsQuery",
     ]:
@@ -2180,8 +2161,6 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
         "fetchToolMetaPack",
         "fetchPermissionStats",
         "fetchActionPlanStats",
-        "fetchCustomSkillProviders",
-        "fetchCustomSkillProviderTemplate",
     ]:
         assert fetcher_name in tools_queries
         assert fetcher_name not in execution_queries
@@ -2268,14 +2247,14 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     execution_queries = _read_optional(execution_queries_path)
     agent_loop_queries = (MONITOR_SRC / "features" / "execution" / "agentLoopQueries.js").read_text(encoding="utf-8")
     gateway_queries = (MONITOR_SRC / "features" / "execution" / "gatewayQueries.js").read_text(encoding="utf-8")
-    skills_queries = (MONITOR_SRC / "features" / "execution" / "skillsHubQueries.js").read_text(encoding="utf-8")
+    skills_queries = (MONITOR_SRC / "features" / "execution" / "skillCatalogQueries.js").read_text(encoding="utf-8")
     wechat_queries = (MONITOR_SRC / "features" / "execution" / "wechatQueries.js").read_text(encoding="utf-8")
     agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
     gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
-    skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
+    skills_page = (MONITOR_SRC / "pages" / "SkillCatalog.jsx").read_text(encoding="utf-8")
     skills_controller = (
-        MONITOR_SRC / "features" / "execution" / "skillsHubController.js"
+        MONITOR_SRC / "features" / "execution" / "skillCatalogController.js"
     ).read_text(encoding="utf-8")
 
     assert not execution_queries_path.exists()
@@ -2283,7 +2262,7 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     expected_exports = {
         "agentLoopQueries.js": ("useAgentLoopConsoleQuery", agent_loop_queries),
         "gatewayQueries.js": ("useGatewayOverviewQuery", gateway_queries),
-        "skillsHubQueries.js": ("useSkillsHubQuery", skills_queries),
+        "skillCatalogQueries.js": ("useSkillCatalogQuery", skills_queries),
         "wechatQueries.js": ("useWeChatChannelQuery", wechat_queries),
     }
     for filename, (export_name, source) in expected_exports.items():
@@ -2295,14 +2274,14 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
         "fetchAgentLoopStats": agent_loop_queries,
         "fetchGatewayStats": gateway_queries,
         "fetchWeChatStats": f"{gateway_queries}\n{wechat_queries}",
-        "fetchSkillsHubStats": skills_queries,
+        "fetchSkillCatalogStats": skills_queries,
     }.items():
         assert fetcher_name in source
         assert fetcher_name not in execution_queries
 
     assert "features/execution/agentLoopQueries.js" in agent_loop_page
     assert "./gatewayQueries.js" in gateway_controller
-    assert "./skillsHubQueries.js" in skills_controller
+    assert "./skillCatalogQueries.js" in skills_controller
     assert "features/execution/gatewayQueries.js" not in gateway_page
     for source in [agent_loop_page, gateway_page, gateway_controller, skills_page, skills_controller]:
         assert "features/execution/queries.js" not in source
@@ -2732,32 +2711,17 @@ def test_system_config_view_model_lives_in_operations_feature() -> None:
 
 
 def test_tools_operations_model_lives_in_execution_feature() -> None:
-    installer = (
-        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderInstaller.jsx"
-    ).read_text(encoding="utf-8")
     stats_panels = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsStatsPanels.jsx"
     ).read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "execution" / "toolsOperationsModel.js").read_text(encoding="utf-8")
 
     for export_name in [
-        "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM",
-        "mergeCustomSkillProviderTemplate",
-        "buildCustomSkillProviderInstallRequest",
-        "getCustomSkillProvidersLoadState",
-        "getCustomSkillProviderTemplateLoadState",
         "buildPermissionGuardStatsView",
         "buildActionPlanStatsView",
     ]:
         assert export_name in model
 
-    assert "toolsOperationsModel.js" in installer
-    assert "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM" in installer
-    assert "mergeCustomSkillProviderTemplate(prev, templateData)" in installer
-    assert "mergeCustomSkillProviderTemplate(prev, nextTemplate)" in installer
-    assert "buildCustomSkillProviderInstallRequest(form)" in installer
-    assert "getCustomSkillProvidersLoadState({" in installer
-    assert "getCustomSkillProviderTemplateLoadState({" in installer
     assert "toolsOperationsModel.js" in stats_panels
     assert "buildPermissionGuardStatsView({" in stats_panels
     assert "buildActionPlanStatsView({" in stats_panels
@@ -2768,10 +2732,6 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
         "LOAD_STATES.NO_SAMPLE",
         "hasSamples:",
         "hasData:",
-        "installCustomSkillProvider({",
-        "filename: form.filename",
-        "source_code: form.source_code",
-        "activate_now: form.activate_now",
         "Number(data?.total_checks",
         "Number(data?.total_plans",
         "data?.top_denied_tools",
@@ -2780,7 +2740,6 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
         "{ label: '总校验次数'",
         "{ label: '总计划数'",
     ]:
-        assert forbidden not in installer
         assert forbidden not in stats_panels
 
 

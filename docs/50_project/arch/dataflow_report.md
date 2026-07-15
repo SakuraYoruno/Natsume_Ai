@@ -561,15 +561,15 @@ SurfaceMainChain.run() (persona/surface_main_chain.py, 250 行)
       → 记忆召回计划与 evidence 组织
   → SurfacePacketCompiler (persona/surface_packet_compiler.py, 713 行)
       → 多包编译为 CompiledSurfaceInput
-  → CandidateScoring.score_candidates()    (persona/surface/candidate_scoring.py, 1,912 行)
+  → CandidateScoring.score_candidates()    (persona/surface/candidate_scoring.py, 1,846 行)
     → scoring/parse.py (262 行)
         → 候选解析、问题预算计数、控制违规检测
     → scoring/stage_positions.py (406 行)
         → 场景位置评分（back/morning/low-energy/self-doubt/positive 五种位置）
     → scoring/control_affect.py (398 行)
         → 控制情感评分（情绪基调 + 关系距离双轴）
-    → scoring/texture.py (273 行)
-        → 纹理评分（签名纹理命中 + 场景质量样本评分）
+    → scoring/texture.py (195 行)
+        → 纹理评分（签名纹理命中）
   → 最终选择最高分候选
 ```
 

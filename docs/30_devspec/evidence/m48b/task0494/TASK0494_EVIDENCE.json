@@ -86,7 +86,7 @@
     },
     {
       "kind": "csharp_compile",
-      "command": "dotnet build integrations/mateengine/NatsumeMateEngineBridge/NatsumeMateEngineBridge.csproj --no-restore",
+      "command": "dotnet build tools/mateengine/assembly_patcher/MateEngineAssemblyPatcher.csproj --no-restore",
       "result": "0 errors; 28 existing Unity/assembly/deprecation/JsonUtility field warnings on clean changed build"
     },
     {

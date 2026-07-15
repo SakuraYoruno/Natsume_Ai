@@ -11,10 +11,9 @@
 
 ## 5分钟入门（给新成员）
 1. 先读：`requirements_trace.md`。
-2. 再看 `flows/index.md` 与 `BUG_FIX_LOG.md` 作为历史一致性补充。
+2. 再看 `BUG_FIX_LOG.md` 作为历史一致性补充。
 3. 当前未维护 `requirements_trace.csv`，以 Markdown 追溯矩阵为准。
 
 ## 关键文件
 - `requirements_trace.md`（v2.0；含 M48-A R-178～182 与完整架构程序追踪）
-- `flows/index.md`
 - `BUG_FIX_LOG.md`

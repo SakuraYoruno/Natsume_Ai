@@ -63,11 +63,11 @@
     },
     {
       "scope_id": "skill-provider-supply-chain",
-      "path_scope": "host_brain/skills/custom_provider_installer.py; host_brain/skills/loader.py; host_brain/skills/hot_loader.py; host_brain/skills/hub/**; host_brain/integrations/providers/**",
+      "path_scope": "host_brain/skills/signed_intake_*.py; host_brain/skills/supply_chain*.py; host_brain/skills/provider_catalog.py; host_brain/skills/agent_runtime_registry.py",
       "primary_owner": "TASK-0490",
       "secondary_consumers": ["TASK-0487", "TASK-0495"],
       "previous_owner": "repository baseline",
-      "coordination": "TASK-0490 owns quarantine and activation. Protected provider_catalog.py and agent_runtime_registry.py remain no-touch pending owner handoff."
+      "coordination": "TASK-0490 owns signed intake and quarantine. Legacy Hub source install, raw custom-provider drop-ins and auto-repair have been removed."
     },
     {
       "scope_id": "pentest-secure-run",
@@ -95,7 +95,7 @@
     },
     {
       "scope_id": "bridge-exposure",
-      "path_scope": "tools/mateengine_bridge_server.py; integrations/mateengine/**; desktop_pet/**; tools/wxautox4_bridge.py",
+      "path_scope": "tools/mateengine_bridge_server.py; tools/mateengine/assembly_patcher/**; desktop_pet/**; tools/wxautox4_bridge.py",
       "primary_owner": "TASK-0494",
       "secondary_consumers": ["TASK-0487", "TASK-0488", "TASK-0492", "TASK-0493"],
       "previous_owner": "repository baseline",
@@ -325,7 +325,7 @@
       "feature_flag": "HOST_SUPPLY_CHAIN_ACTIVATION_MODE",
       "default": "BUILTINS_ONLY; planned values BUILTINS_ONLY|QUARANTINE|STAGED",
       "implementation_status": "PLANNED",
-      "existing_kill_switches": ["HOST_SKILL_HUB_ENABLED=false", "HOST_SKILL_CUSTOM_PROVIDERS_ENABLED=false"],
+      "existing_kill_switches": ["HOST_SUPPLY_CHAIN_ACTIVATION_MODE=BUILTINS_ONLY"],
       "stop_condition": "Unsigned, digest/SBOM-missing or unsandboxed bundle imports; sandbox/secret/egress escape; provider exception silently selects a fake fallback.",
       "evidence_path": "docs/30_devspec/evidence/m48b/task0490",
       "rollback": "Set BUILTINS_ONLY, disable hub/custom providers and quarantine the candidate; never restore untrusted hot import."

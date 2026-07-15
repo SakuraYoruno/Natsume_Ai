@@ -91,17 +91,6 @@ def build_default_cases() -> list[LiveCase]:
             notes="验证复杂建议请求是否真的被拆成步骤，而不是只回澄清问题。",
         ),
         LiveCase(
-            case_id="hub_skill_search",
-            prompt="蓝蓝，搜索技能 weather",
-            expected_targets=("hub_skill_search",),
-            required_patterns=("weather",),
-            require_local_voice=True,
-            force_dual_voice_reply=True,
-            wait_voice_reply_result=True,
-            allow_voice_reply_on_primary_failure=True,
-            notes="验证自然语言到 Hub Skill Search 的映射是否可用。",
-        ),
-        LiveCase(
             case_id="memory_store",
             prompt="请记住：我明天上午 9 点开会。",
             expected_targets=("memory_store",),

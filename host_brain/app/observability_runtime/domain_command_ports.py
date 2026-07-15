@@ -470,15 +470,6 @@ def _tool_execute(payload: Mapping[str, Any], _request_id: str) -> Any:
     return tool_routes.execute_tool(body)
 
 
-def _skill_provider_install(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import tool_routes
-
-    body = tool_routes.CustomSkillProviderInstallRequest(**_canon_payload(payload, (
-        "filename", "source_code", "activate_now",
-    )))
-    return tool_routes.install_custom_skill_provider(body)
-
-
 def _mate_action(payload: Mapping[str, Any], request_id: str) -> Any:
     from host_brain.app import mateengine_routes
 
@@ -589,7 +580,6 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "scheduler.task.disable": _scheduler_disable,
     "scheduler.task.trigger": _scheduler_trigger,
     "tool.execute": _tool_execute,
-    "skill_provider.install": _skill_provider_install,
     "mate.action.submit": _mate_action,
     "mate.say.submit": _mate_say,
     "bond.event.submit": _bond_event,

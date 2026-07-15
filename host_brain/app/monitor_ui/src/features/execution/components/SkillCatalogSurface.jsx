@@ -1,14 +1,11 @@
 import React from 'react'
 import {
   CheckCircle,
-  FolderOpen,
-  Globe,
   Package,
   RefreshCw,
   Search,
   Shield,
   XCircle,
-  Zap,
 } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
@@ -18,10 +15,6 @@ import { SKILL_CLEARANCE_STYLES, SKILL_SOURCE_STYLES } from '../../../shared/sta
 
 const SOURCE_ICONS = {
   builtin: Package,
-  local: FolderOpen,
-  github: Globe,
-  external: FolderOpen,
-  hub: Zap,
 }
 
 function SourcePill({ source }) {
@@ -143,12 +136,12 @@ function SkillDirectory({ title, icon: Icon, skills }) {
   )
 }
 
-function SkillsHubHeader({ loading, refreshing, onRefresh }) {
+function SkillCatalogHeader({ loading, refreshing, onRefresh }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">技能中心</h1>
-        <p className="mt-0.5 text-sm text-gray-500">技能管理 · 热加载 · 外部目录扫描</p>
+        <h1 className="text-xl font-semibold text-gray-900">技能目录</h1>
+        <p className="mt-0.5 text-sm text-gray-500">内建技能 · Domain Pack · 治理状态</p>
       </div>
       <button className="btn-secondary" onClick={() => onRefresh()} disabled={loading || refreshing}>
         <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
@@ -158,13 +151,13 @@ function SkillsHubHeader({ loading, refreshing, onRefresh }) {
   )
 }
 
-function SkillsHubHero({ heroTitle, heroMetaItems, sampleMeta }) {
+function SkillCatalogHero({ heroTitle, heroMetaItems, sampleMeta }) {
   return (
     <PageHero
       icon={Package}
-      eyebrow="技能与能力扩展"
+      eyebrow="内建技能与能力目录"
       title={heroTitle}
-      description="集中查看内置技能、Hub / 外部技能来源、加载状态以及风险等级，方便统一收口技能侧能力。"
+      description="集中查看当前注册的内建技能、Domain Pack、加载状态和风险等级。外部 bundle 仅通过签名 Intake 进入隔离验证，不在 Host 内动态安装。"
       gradientClass="from-emerald-50 via-white to-indigo-50"
       metaItems={heroMetaItems}
       aside={(
@@ -182,32 +175,7 @@ function SkillsHubHero({ heroTitle, heroMetaItems, sampleMeta }) {
   )
 }
 
-function ExternalDirsPanel({ externalDirsView }) {
-  if (!externalDirsView.hasExternalDirs) return null
-
-  return (
-    <details className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <FolderOpen size={14} className="text-gray-400" />
-          已扫描外部目录
-        </span>
-        <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
-          {externalDirsView.count}
-        </span>
-      </summary>
-      <div className="flex flex-wrap gap-2 border-t border-gray-100 px-4 py-3">
-        {externalDirsView.rows.map((item) => (
-          <span key={item.key} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
-            <FolderOpen size={11} />{item.path}
-          </span>
-        ))}
-      </div>
-    </details>
-  )
-}
-
-function SkillsHubFilters({
+function SkillCatalogFilters({
   filter,
   sourceFilter,
   sourceOptions,
@@ -248,7 +216,7 @@ function SkillsHubFilters({
   )
 }
 
-export default function SkillsHubSurface({
+export default function SkillCatalogSurface({
   CapabilityGovernanceSection,
   filter,
   sourceFilter,
@@ -271,15 +239,14 @@ export default function SkillsHubSurface({
     emptyState,
     sampleMeta,
     noticeView,
-    externalDirsView,
   } = view
 
   return (
     <div className="space-y-6">
-      <SkillsHubHeader loading={loading} refreshing={refreshing} onRefresh={onRefresh} />
-      <SkillsHubHero heroTitle={heroTitle} heroMetaItems={heroMetaItems} sampleMeta={sampleMeta} />
+      <SkillCatalogHeader loading={loading} refreshing={refreshing} onRefresh={onRefresh} />
+      <SkillCatalogHero heroTitle={heroTitle} heroMetaItems={heroMetaItems} sampleMeta={sampleMeta} />
 
-      {noticeView.hubError ? <NoticeBanner variant={noticeView.hubErrorVariant}>{noticeView.hubError}</NoticeBanner> : null}
+      {noticeView.catalogError ? <NoticeBanner variant={noticeView.catalogErrorVariant}>{noticeView.catalogError}</NoticeBanner> : null}
       {noticeView.showNoSample ? (
         <NoticeBanner variant="info">当前还没有已加载技能样本，页面会保留中性空态。</NoticeBanner>
       ) : null}
@@ -288,9 +255,7 @@ export default function SkillsHubSurface({
       {CapabilityGovernanceSection ? (
         <CapabilityGovernanceSection model={governance} queryError={governanceError} />
       ) : null}
-      <ExternalDirsPanel externalDirsView={externalDirsView} />
-
-      <SkillsHubFilters
+      <SkillCatalogFilters
         filter={filter}
         sourceFilter={sourceFilter}
         sourceOptions={sourceOptions}
@@ -302,7 +267,7 @@ export default function SkillsHubSurface({
         <SkillDirectory
           key={source}
           title={title}
-          icon={source === 'builtin' ? Package : SOURCE_ICONS[source] || Globe}
+          icon={SOURCE_ICONS[source] || Package}
           skills={rows}
         />
       ))}

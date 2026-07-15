@@ -1,16 +1,16 @@
 import React, { useMemo } from 'react'
-import SkillsHubSurface from '../features/execution/components/SkillsHubSurface.jsx'
-import { useSkillsHubController } from '../features/execution/skillsHubController.js'
+import SkillCatalogSurface from '../features/execution/components/SkillCatalogSurface.jsx'
+import { useSkillCatalogController } from '../features/execution/skillCatalogController.js'
 import CapabilityGovernanceSection from '../features/governance/components/CapabilityGovernanceSection.jsx'
 import { buildGovernanceViewModel } from '../features/governance/governanceModel.js'
 import { useGovernanceSnapshotQuery } from '../features/governance/governanceQueries.js'
 
-export default function SkillsHub() {
-  const skillsHub = useSkillsHubController()
+export default function SkillCatalog() {
+  const skillCatalog = useSkillCatalogController()
   const governanceQuery = useGovernanceSnapshotQuery({
-    pollingEnabled: skillsHub.pollingEnabled,
-    pollingInterval: skillsHub.pollingInterval,
-    pollingTick: skillsHub.pollingTick,
+    pollingEnabled: skillCatalog.pollingEnabled,
+    pollingInterval: skillCatalog.pollingInterval,
+    pollingTick: skillCatalog.pollingTick,
   })
   const governance = useMemo(
     () => buildGovernanceViewModel(governanceQuery.data),
@@ -18,12 +18,12 @@ export default function SkillsHub() {
   )
 
   return (
-    <SkillsHubSurface
-      {...skillsHub}
+    <SkillCatalogSurface
+      {...skillCatalog}
       CapabilityGovernanceSection={CapabilityGovernanceSection}
       governance={governance}
       governanceError={governanceQuery.error}
-      onRefresh={() => Promise.allSettled([skillsHub.onRefresh(), governanceQuery.refetch()])}
+      onRefresh={() => Promise.allSettled([skillCatalog.onRefresh(), governanceQuery.refetch()])}
     />
   )
 }

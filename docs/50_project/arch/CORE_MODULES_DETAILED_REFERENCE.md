@@ -115,7 +115,6 @@ Idempotency recovery 的三种 action 都要求 Ed25519 authority attestation：
 | `host_brain/persona/galgame_text_scorer.py` | Visual Novel 文本评分 |
 | `host_brain/persona/sample_guided_text_scorer.py` | 样本引导文本评分 |
 | `host_brain/persona/surface_original_quote_bank.py` | 原始引用库管理与选择 |
-| `host_brain/persona/surface_scene_quality_pack.py` | 场景质量样本选择 |
 | `host_brain/persona/motive_engine.py` | reach_out / continuity / withdraw / self_protect 动机计算 |
 | `host_brain/persona/motive_runtime.py` | 运行时 motive bridge |
 
@@ -128,23 +127,21 @@ Idempotency recovery 的三种 action 都要求 Ed25519 authority attestation：
 | `host_brain/persona/surface_memory_recall.py` | Surface 记忆召回计划、证据组织、answer readiness |
 | `host_brain/persona/surface_packet_compiler.py` | `ReplyControlPacket` 编译 |
 | `host_brain/persona/surface_original_quote_bank.py` | 原始引用库 |
-| `host_brain/persona/surface_scene_quality_pack.py` | Surface 场景质量包 |
 | `host_brain/persona/surface_organ_influence.py` | 器官影响到 Surface 的桥接 |
 | `host_brain/persona/surface_influence_packet.py` | 7 种子影响类型的 SurfaceInfluencePacket 定义 |
 | `host_brain/persona/surface_affect_control.py` | Surface 情感控制包 |
 | `host_brain/persona/isolated_surface_continuity.py` | Surface 连续性上下文 |
-| `host_brain/persona/continuity_surface_sample_bank.py` | 连续性重写样本库 |
 
-### 3.4 `persona/surface/` 子包（17 文件，~7,972 行）
+### 3.4 `persona/surface/` 子包（17 文件，~7,684 行）
 
 | 模块 | 行数 | 当前职责 |
 |---|---|---|
-| `candidate_scoring.py` | 1,912 | 核心候选评分和选择管线 |
-| `scene_constants.py` | 1,587 | 场景标记常量（back/morning/low-energy 等） |
+| `candidate_scoring.py` | 1,846 | 核心候选评分和选择管线 |
+| `scene_constants.py` | 1,572 | 场景标记常量（back/morning/low-energy 等） |
 | `continuity_detectors.py` | 1,140 | 连续性/边界/场景相关性检测 |
-| `prompt_construction.py` | 717 | Surface LLM 调用的 prompt 构造 |
+| `prompt_construction.py` | 678 | Surface LLM 调用的 prompt 构造 |
 | `relationship_affect.py` | 360 | 关系距离和情感基调评分 |
-| `scoring_texture.py` | 251 | 纹理评分桥接（兼容旧接口） |
+| `scoring_texture.py` | 161 | 纹理评分桥接（兼容旧接口） |
 | `fact_handling.py` | 226 | Fact 处理与 must-not-do 合并 |
 | `data_models.py` | 210 | ReplyControlPacket、IsolatedSurfaceInput 等 Pydantic v1/v2 双兼容模型 |
 | `input_validation.py` | 112 | Surface 输入校验 |
@@ -152,7 +149,7 @@ Idempotency recovery 的三种 action 都要求 Ed25519 authority attestation：
 | `scoring/parse.py` | 262 | 候选解析、问题预算计数、控制违规检测 |
 | `scoring/stage_positions.py` | 406 | 场景位置评分（back/morning/low-energy/self-doubt/positive） |
 | `scoring/control_affect.py` | 398 | 控制情感评分（情绪基调 + 关系距离双轴） |
-| `scoring/texture.py` | 273 | 纹理评分（签名纹理命中 + 场景质量样本评分） |
+| `scoring/texture.py` | 195 | 纹理评分（签名纹理命中） |
 | `scoring/constants.py` | 37 | 本地评分常量（问题预算、嫉妒标记、轴标记） |
 | `scoring/__init__.py` | 19 | Re-export facade：parse、stage_positions、control_affect、texture、stage_constants |
 

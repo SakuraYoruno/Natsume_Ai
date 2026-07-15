@@ -33,7 +33,7 @@ Steam MateEngine does not load arbitrary C# code from ordinary `.me` mods. The o
 
 Direct Natsume text currently uses an offline patch to MateEngine's `Assembly-CSharp.dll`:
 
-`integrations/mateengine/MateEngineAssemblyPatcher`
+`tools/mateengine/assembly_patcher`
 
 The patch adds a `NATSUME_TEXT::` escape path to `AvatarMinecraftMessages.InjectEntity`. Host sends a normal `mob_proximity` event, but sets `name` to:
 
@@ -89,7 +89,7 @@ python tools/mateengine_bridge_probe.py --say "Natsume Bridge online."
 
 The MateSignal UDP path triggers MateEngine's built-in event bubble renderer. The `NATSUME_TEXT::` patch changes only the entity text injection path so Host can provide direct free text.
 
-BepInEx was tested as an alternative plugin path, but BepInEx 5 failed in this MateEngine runtime with `MissingMethodException: Module.GetPEKind`. The installed doorstop hook should stay disabled unless revisited with a compatible loader.
+BepInEx was tested as an alternative plugin path, but BepInEx 5 failed in this MateEngine runtime with `MissingMethodException: Module.GetPEKind`. That unused plugin project has been retired; the installed doorstop hook should stay disabled unless a compatible loader is proven in a new implementation.
 
 Expression blending and rich action control are not complete yet.
 
@@ -179,7 +179,6 @@ Useful presets include:
 - `think / focus`: stronger thinking face, still frozen.
 - `happy / cozy / surprised / anxious`: explicit reaction poses.
 - `speak`: speech-ready face without owning mouth timing; real mouth timing still comes from TTS RMS frames.
-- `chibi`: optional transform command for the plugin path if available.
 - `live / unfreeze`: explicitly unfreeze animation when manual motion is desired.
 
 ## Next bridge layer
