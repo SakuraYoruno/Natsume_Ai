@@ -74,6 +74,8 @@ Chat / Host Input / Gateway
 - `host_brain/task_runtime/coordinator_records.py`
 - `host_brain/task_runtime/coordinator_receipts.py`
 - `host_brain/task_runtime/graph_cancellation_records.py`
+- `host_brain/task_runtime/runtime_outbox.py`
+- `host_brain/task_runtime/local_graph_execution_registry.py`
 - `host_brain/task_runtime/acceptance_effects.py`
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py`
 - `host_brain/persistence/task_repository.py`
@@ -145,7 +147,7 @@ final cancellation 只有在 active ownership 与 operation/effect/review 不确
 
 该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，但生产 authority provider/受控入口/canary 与跨进程自动 reconciliation/takeover/continuation 未完成。B4/0090、B5/0091 语义继续有效；revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、历史半提交和统一 `WAITING_APPROVAL` 仍是缺口。
 
-执行层的代码结构门禁仍为红，但已有十一刀真实下降。TaskStore focused modules 已让 `task_repository.py` 从约 12.56k 降到 4,522 行并满足既有 4.6k ceiling。Coordinator 的 record validation、`GovernedExecutionReceipt`/terminal rendering 与 cancellation state projection 已拆为约 0.25k/0.16k/0.18k 行纯叶子模块；它们没有 ports、锁、task、Store 或 Coordinator reference，旧 receipt 导入仍是同一 object。`coordinator.py` 从 5,860 降到 5,423 行。当前 Gate 唯一静态问题仍是该文件未分类且超过 1.5k；不得提高 allowlist 上限，下一阶段先拆共享 Outbox 与本地执行 registry，再迁 cancellation orchestration。Retry promotion 和 claim 仍是两个事务，cancellation request/continue 仍在 Coordinator，这些缺口没有被纯函数拆分修复。
+执行层的代码结构门禁仍为红，但已有十二刀真实下降。TaskStore 主文件已满足既有 ceiling；Coordinator 的 records/receipts/cancellation projections 是无 authority 的纯叶子模块。`RuntimeOutbox` 现在独占每个 Coordinator 的 publisher/factory/limit/发布锁，27 个构造点显式绑定当前 command，31 个 drain 共享该实例；`LocalGraphExecutionRegistry` 独占本地 task map/锁并以 `track()` 覆盖完整 stream，取消在锁外 bounded wait/gather。`coordinator.py` 从 5,860 降到 5,332 行。当前 Gate 唯一静态问题仍是该文件未分类且超过 1.5k；不得提高 allowlist 上限，下一阶段迁 cancellation orchestration。Retry promotion 和 claim 仍是两个事务，stateful leaf 也不提供跨进程 Outbox claim、takeover 或 continuation。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 

@@ -116,6 +116,8 @@
         "host_brain/task_runtime/coordinator_records.py",
         "host_brain/task_runtime/coordinator_receipts.py",
         "host_brain/task_runtime/graph_cancellation_records.py",
+        "host_brain/task_runtime/runtime_outbox.py",
+        "host_brain/task_runtime/local_graph_execution_registry.py",
         "host_brain/task_runtime/heartbeat.py",
         "host_brain/integrations/runtime_events.py",
         "host_brain/task_runtime/dag_scheduler.py",

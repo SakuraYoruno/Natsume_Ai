@@ -120,6 +120,8 @@ flowchart TB
 - `host_brain/task_runtime/coordinator_records.py`：durable record 校验、并行节点 outcome 与稳定字段读取；纯叶子模块。
 - `host_brain/task_runtime/coordinator_receipts.py`：不可变 execution receipt、构造器与 terminal/commit event rendering；纯叶子模块并保持旧导入 identity。
 - `host_brain/task_runtime/graph_cancellation_records.py`：取消 intent 校验、Node 状态投影与 Budget target/projection；不拥有取消编排 authority。
+- `host_brain/task_runtime/runtime_outbox.py`：每个 Coordinator 唯一的 Outbox message factory/publisher/limit/发布锁；不持有 Store 或 Coordinator。
+- `host_brain/task_runtime/local_graph_execution_registry.py`：graph revision 级本地 task tracking 与 bounded cancel/join；只作 durable cancellation 的进程内加速器。
 - `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
 - `host_brain/task_runtime/budget_runtime.py`：预算预留、计量和结算。
 - `host_brain/task_runtime/review_runtime.py`：PRE/POST Review 与 continuation 材料。
@@ -148,7 +150,7 @@ flowchart TB
 
 TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 已不再阻塞静态文件门禁，剩余问题集中在 Coordinator。
 
-Coordinator 的第一批纯边界也已拆出，主文件由 5,860 降到 5,423 行。三个新模块只拥有确定性 record/receipt/cancellation projection，不依赖 runtime ports、Store、锁、task 或 Coordinator；执行 Outbox、本地任务 registry 和 cancellation request/continue 仍在 Coordinator，因此静态 Gate 仍为红，不能把纯函数迁移写成编排解耦完成。
+Coordinator 的纯边界与两项 stateful 进程内边界已拆出，主文件由 5,860 降到 5,332 行。确定性 records/receipts/cancellation projections 不依赖 runtime authority；RuntimeOutbox 统一 27 个构造与 31 个发布调用的单实例锁域；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join。Durable cancellation request/continue 仍在 Coordinator，发布锁也不覆盖跨进程 claim/CAS，因此静态 Gate 仍为红，不能把本地状态收口写成编排或恢复闭环完成。
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 

@@ -66,6 +66,8 @@ from .graph_cancellation_records import (
     _cancellation_requested_node_states,
     _validated_graph_cancellation_intent,
 )
+from .local_graph_execution_registry import LocalGraphExecutionRegistry
+from .runtime_outbox import RuntimeOutbox
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
 from .errors import (
     GOVERNED_ACCEPTANCE_FAILED,
@@ -172,8 +174,11 @@ class GovernedTaskCoordinator:
         if int(fanout_event_buffer_size) <= 0:
             raise ValueError("fanout_event_buffer_size must be positive")
         self._store = task_store
-        self._publisher = outbox_publisher
-        self._outbox_factory = outbox_factory
+        self._runtime_outbox = RuntimeOutbox(
+            publisher=outbox_publisher,
+            factory=outbox_factory,
+            publish_limit=publish_limit,
+        )
         self._workers = worker_resolver
         self._verifier = verifier
         self._acceptance = acceptance
@@ -186,13 +191,10 @@ class GovernedTaskCoordinator:
         self._owner_id = owner
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
-        self._publish_limit = max(1, int(publish_limit))
-        self._outbox_publish_lock = asyncio.Lock()
         # Process-local task handles only accelerate an already-durable graph
         # cancellation request.  They are never consulted as cancellation
         # authority and may be empty after restart or in another process.
-        self._execution_registry_lock = asyncio.Lock()
-        self._execution_tasks: dict[tuple[str, int], set[asyncio.Task[Any]]] = {}
+        self._execution_registry = LocalGraphExecutionRegistry()
         self._budgets = DurableBudgetRuntime(task_store=task_store, outbox_factory=outbox_factory)
 
     def supports_completion_policy(self, value: str | None) -> bool:
@@ -208,41 +210,6 @@ class GovernedTaskCoordinator:
             and self._acceptance_effects_enabled
             and self._projection_reader is not None
         )
-
-    async def _cancel_local_graph_tasks(
-        self,
-        *,
-        graph_id: str,
-        graph_revision: int,
-        intent_ref: str,
-    ) -> tuple[str, ...]:
-        """Cancel and join local executors after the durable intent exists.
-
-        An empty registry is normal after restart or when a different process
-        owns the execution.  Durable Store fences, rather than this registry,
-        prevent any later claim, Budget charge, operation COMMIT, or success
-        settlement.
-        """
-
-        current = asyncio.current_task()
-        graph_key = (str(graph_id), int(graph_revision))
-        async with self._execution_registry_lock:
-            tasks = tuple(
-                task
-                for task in self._execution_tasks.get(graph_key, ())
-                if task is not current and not task.done()
-            )
-        if not tasks:
-            return ()
-        for task in tasks:
-            task.cancel(f"durable graph cancellation: {intent_ref}")
-        done, pending = await asyncio.wait(
-            tasks,
-            timeout=min(5.0, max(0.1, self._lease_ttl_ms / 1000.0)),
-        )
-        if done:
-            await asyncio.gather(*done, return_exceptions=True)
-        return tuple(sorted(task.get_name() for task in pending))
 
     async def request_graph_cancellation(
         self,
@@ -290,8 +257,8 @@ class GovernedTaskCoordinator:
             node_states_before = _cancellation_node_states(nodes)
             node_states_after = _cancellation_requested_node_states(node_states_before)
             graph_version = _version(graph)
-            graph_outbox_seed = self._outbox(
-                admitted,
+            graph_outbox_seed = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
                 aggregate_version=graph_version + 1,
@@ -331,8 +298,8 @@ class GovernedTaskCoordinator:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     f"graph cancellation intent is invalid: {exc}",
                 ) from exc
-            graph_outbox = self._outbox(
-                admitted,
+            graph_outbox = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
                 aggregate_version=graph_version + 1,
@@ -442,16 +409,17 @@ class GovernedTaskCoordinator:
             )
         local_pending: tuple[str, ...] = ()
         try:
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
         finally:
             # Once the durable intent exists, Outbox transport health must not
             # keep local workers running behind an already-installed fence.
             # The publish exception still propagates after every local task
             # has received cancellation and the bounded join has completed.
-            local_pending = await self._cancel_local_graph_tasks(
+            local_pending = await self._execution_registry.cancel_and_join(
                 graph_id=admitted.graph_id,
                 graph_revision=admitted.graph_revision,
                 intent_ref=intent.intent_ref,
+                timeout_seconds=self._lease_ttl_ms / 1000.0,
             )
         return await self._continue_graph_cancellation(
             admitted=admitted,
@@ -587,7 +555,7 @@ class GovernedTaskCoordinator:
                             )
                         )
                     if advanced_raw.get("ready_to_finalize") is not True:
-                        await self._publish_outbox()
+                        await self._runtime_outbox.publish_pending()
                         return await self._graph_cancellation_terminal_event(
                             admitted=admitted,
                             intent_record=intent_record,
@@ -599,7 +567,7 @@ class GovernedTaskCoordinator:
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "graph cancellation continuation returned no durable result",
                     )
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
 
         refreshed = await _maybe_await(
             self._store.get_graph_cancellation_for_graph(
@@ -667,8 +635,8 @@ class GovernedTaskCoordinator:
         budget_status = _status(budget_record) if budget_record is not None else None
         budget_version = _version(budget_record) if budget_record is not None else None
         budget_target = _cancellation_budget_target(budget_status)
-        graph_outbox_seed = self._outbox(
-            admitted,
+        graph_outbox_seed = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
             aggregate_version=graph_version + 1,
@@ -676,8 +644,8 @@ class GovernedTaskCoordinator:
         )
         budget_outbox_seed = None
         if budget_id is not None and budget_status != budget_target:
-            budget_outbox_seed = self._outbox(
-                admitted,
+            budget_outbox_seed = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="BUDGET_RESERVATION",
                 aggregate_id=budget_id,
                 aggregate_version=int(budget_version) + 1,
@@ -726,8 +694,8 @@ class GovernedTaskCoordinator:
                 )
             )
         )
-        graph_outbox = self._outbox(
-            admitted,
+        graph_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
             aggregate_version=graph_version + 1,
@@ -736,8 +704,8 @@ class GovernedTaskCoordinator:
         )
         budget_outbox = None
         if budget_outbox_seed is not None and budget_id is not None:
-            budget_outbox = self._outbox(
-                admitted,
+            budget_outbox = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="BUDGET_RESERVATION",
                 aggregate_id=budget_id,
                 aggregate_version=int(budget_version) + 1,
@@ -804,7 +772,7 @@ class GovernedTaskCoordinator:
                     admitted,
                     intent_ref=intent.intent_ref,
                 )
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 return await self._graph_cancellation_terminal_event(
                     admitted=admitted,
                     intent_record=final_intent,
@@ -821,7 +789,7 @@ class GovernedTaskCoordinator:
             field_name="final graph cancellation decision",
         )
         _validated_graph_cancellation_intent(admitted, final_intent)
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         return await self._graph_cancellation_terminal_event(
             admitted=admitted,
             intent_record=final_intent,
@@ -973,12 +941,10 @@ class GovernedTaskCoordinator:
         node_grant_refs: Mapping[str, str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
-        current_task = asyncio.current_task()
-        graph_key = (admitted.graph_id, admitted.graph_revision)
-        if current_task is not None:
-            async with self._execution_registry_lock:
-                self._execution_tasks.setdefault(graph_key, set()).add(current_task)
-        try:
+        async with self._execution_registry.track(
+            graph_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+        ):
             async for event in self._execute_stream_impl(
                 admitted=admitted,
                 command=command,
@@ -986,14 +952,6 @@ class GovernedTaskCoordinator:
                 node_grant_refs=node_grant_refs,
             ):
                 yield event
-        finally:
-            if current_task is not None:
-                async with self._execution_registry_lock:
-                    active = self._execution_tasks.get(graph_key)
-                    if active is not None:
-                        active.discard(current_task)
-                        if not active:
-                            self._execution_tasks.pop(graph_key, None)
 
     async def _execute_stream_impl(
         self,
@@ -1207,7 +1165,7 @@ class GovernedTaskCoordinator:
                             graph,
                             "ACTIVE",
                         )
-                    await self._publish_outbox()
+                    await self._runtime_outbox.publish_pending()
                     continue
                 if gate.disposition == "REVIEW_DENIED":
                     await self._cancel_waiting_review_node(
@@ -1225,7 +1183,7 @@ class GovernedTaskCoordinator:
                 else:
                     reason_code = GOVERNED_REVIEW_REQUIRED
                     status = "WAITING_APPROVAL"
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=_attempt_id(review_admission, attempt_no=1),
@@ -1308,7 +1266,7 @@ class GovernedTaskCoordinator:
                     )
                     if graph_status == "BLOCKED":
                         await self._transition_graph(review_admission, graph, "ACTIVE")
-                    await self._publish_outbox()
+                    await self._runtime_outbox.publish_pending()
                     continue
                 reservation = await self._try_operation(review_admission.reservation_id)
                 receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
@@ -1334,7 +1292,7 @@ class GovernedTaskCoordinator:
                 else:
                     reason_code = GOVERNED_REVIEW_REQUIRED
                     status = "WAITING_ACCEPTANCE_REVIEW"
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 decision = await self._matching_parallel_decision(
                     admitted,
                     graph=graph,
@@ -1665,8 +1623,8 @@ class GovernedTaskCoordinator:
                             admitted.graph_revision,
                             node_id,
                             expected_version=_version(node),
-                            outbox=self._outbox(
-                                node_admission,
+                            outbox=self._runtime_outbox.build(
+                                command_id=node_admission.command_id,
                                 aggregate_type="TASK_NODE",
                                 aggregate_id=(
                                     f"{admitted.graph_id}@{admitted.graph_revision}/{node_id}"
@@ -1676,7 +1634,7 @@ class GovernedTaskCoordinator:
                             ),
                         )
                     )
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 continue
 
             selected_node_ids = set(decision.selected_node_ids)
@@ -1755,7 +1713,7 @@ class GovernedTaskCoordinator:
                     ),
                 )
                 review_refs = _review_evidence_refs(gate)
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=_attempt_id(review_admission, attempt_no=1),
@@ -2654,16 +2612,16 @@ class GovernedTaskCoordinator:
             )
         graph_version = _version(graph)
         budget_version = budget.version
-        graph_outbox = self._outbox(
-            admitted,
+        graph_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
             aggregate_version=graph_version + 1,
             event_type=f"TASK_GRAPH_{graph_target_status}",
         )
         budget_outbox = (
-            self._outbox(
-                admitted,
+            self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="BUDGET_RESERVATION",
                 aggregate_id=budget.budget_id,
                 aggregate_version=budget_version + 1,
@@ -2702,8 +2660,8 @@ class GovernedTaskCoordinator:
                 f"parallel settlement decision is invalid: {exc}",
             ) from exc
         decision_ref = decision.decision_ref
-        graph_outbox = self._outbox(
-            admitted,
+        graph_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
             aggregate_version=graph_version + 1,
@@ -2711,8 +2669,8 @@ class GovernedTaskCoordinator:
             evidence_refs=(decision_ref,),
         )
         budget_outbox = (
-            self._outbox(
-                admitted,
+            self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="BUDGET_RESERVATION",
                 aggregate_id=budget.budget_id,
                 aggregate_version=budget_version + 1,
@@ -2815,7 +2773,7 @@ class GovernedTaskCoordinator:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "parallel settlement returned an invalid Graph/Budget terminal state",
             )
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         return budget.refreshed(settled_budget), _status(settled_graph), decision_ref
 
     async def _complete_parallel_success(
@@ -3042,7 +3000,7 @@ class GovernedTaskCoordinator:
                     )
                 )
             )
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             public_projection = dict(result_projection)
             public_projection["budget"] = budget.execution_payload()
             public_projection["parallel_success"] = {
@@ -3105,15 +3063,15 @@ class GovernedTaskCoordinator:
         if graph_status == "ACTIVE" and budget.status == "ACTIVE":
             graph_version = _version(graph)
             budget_version = budget.version
-            graph_outbox_seed = self._outbox(
-                admitted,
+            graph_outbox_seed = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
                 aggregate_version=graph_version + 1,
                 event_type="TASK_GRAPH_COMPLETED",
             )
-            budget_outbox_seed = self._outbox(
-                admitted,
+            budget_outbox_seed = self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="BUDGET_RESERVATION",
                 aggregate_id=budget.budget_id,
                 aggregate_version=budget_version + 1,
@@ -3159,16 +3117,16 @@ class GovernedTaskCoordinator:
                 )
             )
         )
-        graph_outbox = self._outbox(
-            admitted,
+        graph_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
             aggregate_version=graph_version + 1,
             event_type="TASK_GRAPH_COMPLETED",
             evidence_refs=evidence_refs,
         )
-        budget_outbox = self._outbox(
-            admitted,
+        budget_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
             aggregate_type="BUDGET_RESERVATION",
             aggregate_id=budget.budget_id,
             aggregate_version=budget_version + 1,
@@ -3261,7 +3219,7 @@ class GovernedTaskCoordinator:
                 "parallel success returned an invalid terminal authority",
             )
         budget = budget.refreshed(settled_budget)
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         public_projection = dict(result_projection)
         public_projection["budget"] = budget.execution_payload()
         public_projection["parallel_success"] = {
@@ -3343,7 +3301,7 @@ class GovernedTaskCoordinator:
 
         replay_receipt = await self._terminal_replay(admitted, graph=graph, node=node)
         if replay_receipt is not None:
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             yield terminal_event(replay_receipt)
             return
 
@@ -3392,16 +3350,16 @@ class GovernedTaskCoordinator:
                 budget_id=budget.budget_id,
                 operation_scope=admitted.business_scope,
                 operation_fingerprint=admitted.operation_fingerprint,
-                attempt_created_outbox=self._outbox(
-                    admitted,
+                attempt_created_outbox=self._runtime_outbox.build(
+                    command_id=admitted.command_id,
                     aggregate_type="TASK_ATTEMPT",
                     aggregate_id=attempt_id,
                     aggregate_version=0,
                     event_type="TASK_ATTEMPT_CREATED",
                     attempt_id=attempt_id,
                 ),
-                attempt_leased_outbox=self._outbox(
-                    admitted,
+                attempt_leased_outbox=self._runtime_outbox.build(
+                    command_id=admitted.command_id,
                     aggregate_type="TASK_ATTEMPT",
                     aggregate_id=attempt_id,
                     aggregate_version=1,
@@ -3508,7 +3466,7 @@ class GovernedTaskCoordinator:
                     target_status=BudgetReservationStatus.RELEASED,
                     defer_shared_terminal=defer_shared_terminal,
                 )
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
@@ -3536,8 +3494,8 @@ class GovernedTaskCoordinator:
                 "fencing_token": fencing_token,
                 "expected_attempt_version": _version(attempt),
                 "error_ref": error_ref,
-                "outbox": self._outbox(
-                    admitted,
+                "outbox": self._runtime_outbox.build(
+                    command_id=admitted.command_id,
                     aggregate_type="TASK_ATTEMPT",
                     aggregate_id=attempt_id,
                     aggregate_version=_version(attempt) + 1,
@@ -3591,7 +3549,7 @@ class GovernedTaskCoordinator:
                         target_status=BudgetReservationStatus.RELEASED,
                         defer_shared_terminal=defer_shared_terminal,
                     )
-                    await self._publish_outbox()
+                    await self._runtime_outbox.publish_pending()
                     receipt = build_execution_receipt(
                         admitted,
                         attempt_id=attempt_id,
@@ -3643,7 +3601,7 @@ class GovernedTaskCoordinator:
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "accepted retry did not persist RETRY_PENDING with ACTIVE budget",
                     )
-                await self._publish_outbox()
+                await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
@@ -3684,7 +3642,7 @@ class GovernedTaskCoordinator:
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -3720,7 +3678,7 @@ class GovernedTaskCoordinator:
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -3744,8 +3702,8 @@ class GovernedTaskCoordinator:
                 owner_id=self._owner_id,
                 fencing_token=fencing_token,
                 ttl_ms=self._operation_ttl_ms,
-                outbox=self._outbox(
-                    admitted,
+                outbox=self._runtime_outbox.build(
+                    command_id=admitted.command_id,
                     aggregate_type="OPERATION_RESERVATION",
                     aggregate_id=admitted.reservation_id,
                     aggregate_version=0,
@@ -3821,8 +3779,8 @@ class GovernedTaskCoordinator:
 
         def heartbeat_outbox(**values: Any) -> Any:
             values.pop("attempt_id", None)
-            return self._outbox(
-                admitted,
+            return self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 attempt_id=attempt_id,
                 **values,
             )
@@ -3849,7 +3807,7 @@ class GovernedTaskCoordinator:
             raise
         except Exception as exc:
             await _stop_heartbeat_after_interruption(heartbeat)
-            await self._publish_outbox(best_effort=True)
+            await self._runtime_outbox.publish_pending(best_effort=True)
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -3935,7 +3893,7 @@ class GovernedTaskCoordinator:
                     heartbeat_error.__traceback__,
                 ),
             )
-            await self._publish_outbox(best_effort=True)
+            await self._runtime_outbox.publish_pending(best_effort=True)
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -4010,7 +3968,7 @@ class GovernedTaskCoordinator:
                 # graph/business cancellation authority, and it also cannot
                 # safely declare the operation failed.  Leave the durable
                 # Attempt/Lease/reservation for normal recovery fencing.
-                await self._publish_outbox(best_effort=True)
+                await self._runtime_outbox.publish_pending(best_effort=True)
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
@@ -4085,8 +4043,8 @@ class GovernedTaskCoordinator:
                     fencing_token=fencing_token,
                     expected_version=reservation_version,
                     receipt_ref=receipt_ref,
-                    outbox=self._outbox(
-                        admitted,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
                         aggregate_type="OPERATION_RESERVATION",
                         aggregate_id=admitted.reservation_id,
                         aggregate_version=reservation_version + 1,
@@ -4097,7 +4055,7 @@ class GovernedTaskCoordinator:
                 )
             )
         except BaseException as exc:
-            await self._publish_outbox(best_effort=True)
+            await self._runtime_outbox.publish_pending(best_effort=True)
             raise GovernedRuntimeError(
                 GOVERNED_RECEIPT_COMMIT_FAILED,
                 f"worker receipt could not be committed before terminal state: {_exception_reason(exc, 'UNKNOWN')}",
@@ -4209,7 +4167,7 @@ class GovernedTaskCoordinator:
             )
             if not defer_shared_terminal:
                 graph = await self._transition_graph(admitted, graph, "FAILED")
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -4279,7 +4237,7 @@ class GovernedTaskCoordinator:
                     )
                 )
                 review_refs = _review_evidence_refs(review_gate)
-            await self._publish_outbox()
+            await self._runtime_outbox.publish_pending()
             review_projection = dict(worker_commit)
             if review_gate is not None:
                 review_projection["review"] = review_gate.to_dict()
@@ -4348,7 +4306,7 @@ class GovernedTaskCoordinator:
                         )
                     except BaseException as exc:
                         graph = await self._transition_graph(admitted, graph, "FAILED")
-                        await self._publish_outbox()
+                        await self._runtime_outbox.publish_pending()
                         receipt = build_execution_receipt(
                             admitted,
                             attempt_id=attempt_id,
@@ -4368,7 +4326,7 @@ class GovernedTaskCoordinator:
                         return
                 else:
                     graph = await self._transition_graph(admitted, graph, "COMPLETED")
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         receipt = build_execution_receipt(
             admitted,
             attempt_id=attempt_id,
@@ -4692,8 +4650,8 @@ class GovernedTaskCoordinator:
                     admitted.graph_revision,
                     expected_version=version,
                     target_status=target_status,
-                    outbox=self._outbox(
-                        admitted,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
                         aggregate_type="TASK_GRAPH",
                         aggregate_id=admitted.graph_id,
                         aggregate_version=version + 1,
@@ -4722,8 +4680,8 @@ class GovernedTaskCoordinator:
                     admitted.node_id,
                     expected_version=version,
                     target_status=target_status,
-                    outbox=self._outbox(
-                        admitted,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
                         aggregate_type="TASK_NODE",
                         aggregate_id=(
                             f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}"
@@ -4751,8 +4709,8 @@ class GovernedTaskCoordinator:
                 admitted.graph_id,
                 admitted.graph_revision,
                 expected_version=version,
-                outbox=self._outbox(
-                    admitted,
+                outbox=self._runtime_outbox.build(
+                    command_id=admitted.command_id,
                     aggregate_type="TASK_GRAPH",
                     aggregate_id=admitted.graph_id,
                     aggregate_version=version + 1,
@@ -4788,8 +4746,8 @@ class GovernedTaskCoordinator:
                     admitted.graph_revision,
                     admitted.node_id,
                     expected_version=version,
-                    outbox=self._outbox(
-                        admitted,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
                         aggregate_type="TASK_NODE",
                         aggregate_id=(
                             f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}"
@@ -4825,8 +4783,8 @@ class GovernedTaskCoordinator:
                     expected_version=version,
                     target_status=target_status,
                     error_ref=error_ref,
-                    outbox=self._outbox(
-                        admitted,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
                         aggregate_type="TASK_ATTEMPT",
                         aggregate_id=attempt_id,
                         aggregate_version=version + 1,
@@ -4897,7 +4855,7 @@ class GovernedTaskCoordinator:
             target_status=BudgetReservationStatus.RELEASED,
             defer_shared_terminal=defer_shared_terminal,
         )
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         receipt_evidence = tuple(
             item for item in (charge.evidence_ref, charge.usage_id, failure_ref) if item
         )
@@ -4956,7 +4914,7 @@ class GovernedTaskCoordinator:
                 if _status(graph) == "ACTIVE":
                     await self._transition_graph(admitted, graph, graph_target)
         finally:
-            await self._publish_outbox(best_effort=True)
+            await self._runtime_outbox.publish_pending(best_effort=True)
 
     async def _mark_pre_reservation_failure(
         self,
@@ -4990,8 +4948,8 @@ class GovernedTaskCoordinator:
             "expected_node_version": _version(node),
             "expected_graph_version": _version(graph),
             "error_ref": error_ref,
-            "attempt_outbox": self._outbox(
-                admitted,
+            "attempt_outbox": self._runtime_outbox.build(
+                command_id=admitted.command_id,
                 aggregate_type="TASK_ATTEMPT",
                 aggregate_id=attempt_id,
                 aggregate_version=_version(attempt) + 1,
@@ -5060,57 +5018,8 @@ class GovernedTaskCoordinator:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "atomic terminal failure returned an incomplete durable state",
             )
-        await self._publish_outbox()
+        await self._runtime_outbox.publish_pending()
         return error_ref
-
-    def _outbox(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        aggregate_type: str,
-        aggregate_id: str,
-        aggregate_version: int,
-        event_type: str,
-        attempt_id: str | None = None,
-        evidence_refs: Sequence[str] = (),
-    ) -> Any:
-        material = "\n".join(
-            (
-                admitted.command_id,
-                aggregate_type,
-                aggregate_id,
-                str(aggregate_version),
-                event_type,
-            )
-        )
-        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
-        return self._outbox_factory.create(
-            aggregate_type=aggregate_type,
-            aggregate_id=aggregate_id,
-            aggregate_version=int(aggregate_version),
-            event_type=event_type,
-            payload_ref=f"taskstore://event/{aggregate_type}/{aggregate_id}/{int(aggregate_version)}",
-            idempotency_key=f"governed:{digest}",
-            attempt_id=attempt_id,
-            evidence_refs=tuple(dict.fromkeys(_text(item) for item in evidence_refs if _text(item))),
-            outbox_id=f"outbox::governed::{digest}",
-        )
-
-    async def _publish_outbox(self, *, best_effort: bool = False) -> dict[str, Any]:
-        async with self._outbox_publish_lock:
-            try:
-                result = await _maybe_await(
-                    self._publisher.publish_pending(limit=self._publish_limit)
-                )
-            except Exception:
-                if best_effort:
-                    return {"status": "DEGRADED"}
-                raise
-        return dict(result) if isinstance(result, Mapping) else {"status": "OK"}
-
-
-
-
 
 async def _worker_event_stream(
     worker: Any,
