@@ -137,6 +137,8 @@ class GovernedTaskCoordinator:
         projection_reader: ExecutionProjectionReaderPort | None = None,
         review_runtime: TaskNodeReviewRuntime | None = None,
         acceptance_effects_enabled: bool = False,
+        bounded_fanout_enabled: bool = False,
+        fanout_event_buffer_size: int = 32,
         owner_id: str,
         lease_ttl_ms: int = 120_000,
         operation_ttl_ms: int = 120_000,
@@ -147,6 +149,8 @@ class GovernedTaskCoordinator:
             raise ValueError("owner_id is required")
         if int(lease_ttl_ms) <= 0 or int(operation_ttl_ms) <= 0:
             raise ValueError("lease and operation TTLs must be positive")
+        if int(fanout_event_buffer_size) <= 0:
+            raise ValueError("fanout_event_buffer_size must be positive")
         self._store = task_store
         self._publisher = outbox_publisher
         self._outbox_factory = outbox_factory
@@ -156,10 +160,13 @@ class GovernedTaskCoordinator:
         self._projection_reader = projection_reader
         self._reviews = review_runtime
         self._acceptance_effects_enabled = bool(acceptance_effects_enabled)
+        self._bounded_fanout_enabled = bool(bounded_fanout_enabled)
+        self._fanout_event_buffer_size = int(fanout_event_buffer_size)
         self._owner_id = owner
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
         self._publish_limit = max(1, int(publish_limit))
+        self._outbox_publish_lock = asyncio.Lock()
         self._budgets = DurableBudgetRuntime(task_store=task_store, outbox_factory=outbox_factory)
 
     async def execute(
@@ -710,6 +717,140 @@ class GovernedTaskCoordinator:
                 )
                 yield self._terminal_event(receipt)
                 return
+
+            has_unaccepted_successor = any(
+                binding.node_id not in selected_node_ids
+                and statuses[binding.node_id] != "ACCEPTED"
+                for binding in admitted.nodes
+            )
+            # Shadow-only until failed/reviewed siblings stop finalizing the
+            # graph-wide Budget and TaskGraph inside their node runners.  The
+            # successor guard also keeps the terminal-leaf completion/effect
+            # transaction on the established single-runner path.
+            if (
+                self._bounded_fanout_enabled
+                and len(claimable) > 1
+                and has_unaccepted_successor
+            ):
+                queue: asyncio.Queue[tuple[str, str, Any]] = asyncio.Queue(
+                    maxsize=self._fanout_event_buffer_size
+                )
+
+                async def run_claimed_node(binding: AdmittedTaskNode) -> None:
+                    node_admission = admitted.for_node(binding.node_id)
+                    terminal_event: dict[str, Any] | None = None
+                    try:
+                        async for event in self._execute_node_stream(
+                            admitted=node_admission,
+                            command=command,
+                            work_order=work_order,
+                            budget=budget,
+                            node_grant_ref=grant_refs.get(node_admission.node_id),
+                        ):
+                            if bool(event.get("done")):
+                                terminal_event = dict(event)
+                            else:
+                                await queue.put(("event", binding.node_id, dict(event)))
+                        if terminal_event is None:
+                            raise GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                f"TaskNode {binding.node_id} produced no durable terminal projection",
+                            )
+                    except asyncio.CancelledError:
+                        raise
+                    except BaseException as exc:
+                        await queue.put(("error", binding.node_id, exc))
+                        return
+                    await queue.put(("terminal", binding.node_id, terminal_event))
+
+                tasks = {
+                    binding.node_id: asyncio.create_task(
+                        run_claimed_node(binding),
+                        name=(
+                            f"governed-node:{admitted.graph_id}@"
+                            f"{admitted.graph_revision}/{binding.node_id}"
+                        ),
+                    )
+                    for binding in claimable
+                }
+                terminals: dict[str, dict[str, Any]] = {}
+                errors: dict[str, BaseException] = {}
+                remaining = len(tasks)
+                fatal_error: BaseException | None = None
+                stop_batch = False
+                stop_terminal: dict[str, Any] | None = None
+                try:
+                    while remaining:
+                        kind, node_id, payload = await queue.get()
+                        if kind == "event":
+                            yield dict(payload)
+                            continue
+                        remaining -= 1
+                        if kind == "terminal":
+                            terminal = dict(payload)
+                            terminals[node_id] = terminal
+                            receipt = terminal.get("execution_receipt")
+                            if not (
+                                isinstance(receipt, Mapping)
+                                and bool(receipt.get("accepted"))
+                            ):
+                                # Stop sibling work as soon as the first durable
+                                # non-acceptance becomes observable.  This only
+                                # narrows the commit race; the shadow flag stays
+                                # off until shared Graph/Budget terminal authority
+                                # belongs to the outer fan-in transaction.
+                                stop_batch = True
+                                stop_terminal = terminal
+                                break
+                            continue
+                        error = payload
+                        if not isinstance(error, BaseException):
+                            error = GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                f"TaskNode {node_id} returned an invalid parallel error",
+                            )
+                        errors[node_id] = error
+                        stop_batch = True
+                        if not isinstance(error, Exception):
+                            fatal_error = error
+                        break
+                finally:
+                    if remaining or stop_batch:
+                        for task in tasks.values():
+                            if not task.done():
+                                task.cancel()
+                    await asyncio.gather(*tasks.values(), return_exceptions=True)
+                if fatal_error is not None:
+                    raise fatal_error
+                if errors:
+                    first_error_node = next(
+                        binding.node_id
+                        for binding in claimable
+                        if binding.node_id in errors
+                    )
+                    raise errors[first_error_node]
+                if stop_terminal is not None:
+                    # Siblings cancelled by fail-fast are not required to
+                    # manufacture terminal projections.  Return the durable
+                    # non-acceptance that caused the batch to stop.
+                    yield stop_terminal
+                    return
+                for binding in claimable:
+                    terminal_event = terminals.get(binding.node_id)
+                    if terminal_event is None:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            f"TaskNode {binding.node_id} lost its parallel terminal projection",
+                        )
+                    receipt = terminal_event.get("execution_receipt")
+                    accepted = isinstance(receipt, Mapping) and bool(
+                        receipt.get("accepted")
+                    )
+                    if not accepted:
+                        yield terminal_event
+                        return
+                budget = await self._budgets.refresh(budget)
+                continue
 
             for binding in claimable:
                 node_admission = admitted.for_node(binding.node_id)
@@ -2263,12 +2404,15 @@ class GovernedTaskCoordinator:
         )
 
     async def _publish_outbox(self, *, best_effort: bool = False) -> dict[str, Any]:
-        try:
-            result = await _maybe_await(self._publisher.publish_pending(limit=self._publish_limit))
-        except Exception:
-            if best_effort:
-                return {"status": "DEGRADED"}
-            raise
+        async with self._outbox_publish_lock:
+            try:
+                result = await _maybe_await(
+                    self._publisher.publish_pending(limit=self._publish_limit)
+                )
+            except Exception:
+                if best_effort:
+                    return {"status": "DEGRADED"}
+                raise
         return dict(result) if isinstance(result, Mapping) else {"status": "OK"}
 
     def _receipt(

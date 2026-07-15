@@ -5,14 +5,14 @@
 
 Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但真实 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
+本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但可生产的 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
 
 ## 当前状态
 
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL_B1_SAFE_RETRY` | B1 durable claim/promotion、safe-retry exact replay、pre-reservation 原子失败收口和执行期 Lease/Reservation 心跳已接；心跳失败返回 `RECOVERY_REQUIRED` 且禁止 COMMIT。当前生产 resolver 尚无现实 retry marker；真正并行、在线 takeover、自动 continuation 与即时 reconciliation 未闭环 |
+| Durable Task Runtime | `PARTIAL_B2_SHADOW_FANOUT` | B1 安全重试/心跳基础上新增默认关闭的有界 fan-out 实验路径：仅对存在未验收后继的多节点调度批次，按 Budget concurrency 并发；生产未启用。共享 Graph/Budget 终态仍未移到外层 fan-in，因此失败、预算超限或 post-review 场景不能安全放开；在线 takeover、自动 continuation 与即时 reconciliation 也未闭环 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
@@ -112,7 +112,13 @@ Durable 启动门禁当前按 `migration → task_store.recover_startup → 构�
 
 `schedule_retry` 提交后若仅丢失响应，同一确定性调用会严格核对 Attempt、Node、Lease、Graph、Budget、BudgetUsage 及关联 Outbox 后返回原决定，不重复扣减 retry budget。普通或重试耗尽的 pre-reservation resolver failure 通过 `fail_running_attempt_bundle` 在一个事务内落 `Attempt FAILED`、`Node FAILED`、`Graph FAILED/BLOCKED`、`Lease RELEASED` 和四条 attempt/evidence-bound Outbox；一旦已有 operation reservation，该边界拒绝接管。Budget finalize 仍在该事务之外。
 
-reservation 建立后，Coordinator 启动 `DurableExecutionHeartbeat`，每轮先续 Lease、再续 Operation Reservation，并在流事件及最终结果前执行 checkpoint；任一心跳失败只返回 `RECOVERY_REQUIRED`，绝不 COMMIT。两类续租支持同参响应丢失后的精确重放。当前仍缺在线 takeover、自动 continuation 和即时 reconciliation；生产 resolver 也尚未真实抛出 safe-retry marker，因此阶段仍是 `PARTIAL_B1_SAFE_RETRY`。
+reservation 建立后，Coordinator 启动 `DurableExecutionHeartbeat`，每轮先续 Lease、再续 Operation Reservation，并在流事件及最终结果前执行 checkpoint；任一心跳失败只返回 `RECOVERY_REQUIRED`，绝不 COMMIT。两类续租支持同参响应丢失后的精确重放。
+
+`GovernedTaskCoordinator` 另有 `bounded_fanout_enabled` 实验开关，默认 `false`，生产 composition 没有启用。只有 scheduler 一次选出多个节点且图中仍存在未 `ACCEPTED` 的后继/剩余节点时，实验路径才按 `BudgetPolicy.limits.concurrency` 有界并发。progress 事件经 `asyncio.Queue(maxsize=fanout_event_buffer_size)` 实时合流，buffer 默认 32 且非正值拒绝构造；慢消费者会把背压传到 child。首个观察到的非接受终态会被保存、立即 cancel/join 未完成 siblings 并原样返回；child error 同样 fail-fast。只有全成功批次才按 admission 顺序验收；外层取消也会 join 子任务及其 heartbeat。
+
+集成测试已证明 concurrency=2 真重叠、concurrency=1 串行、fan-in 只在依赖 `ACCEPTED` 后运行、progress 可提前流出；buffer=1 的慢消费者最多推进“已交付 + buffer + active child”个已产生事件。失败测试让 admission 中第二个节点 right 先返回失败，结果为该失败终态被返回、Graph `FAILED`、left 被取消、join 未运行且零 `OPERATION_COMMITTED`；外层取消也达到零 COMMIT、零 child/heartbeat task leak。`RuntimeOutboxPublisher` 的实例级 `threading.Lock` 还把同进程共享 publisher 的 list/append/mark drain 串行化，线程合同观测到 peak=1。
+
+这仍是 `PARTIAL_B2_SHADOW_FANOUT`，不是生产并发完成。fail-fast 只缩小竞态窗口：并行节点失败、Budget 超限或进入 post-review 时，共享 Graph/Budget terminal authority 仍在 child 内，尚未统一移到外层 fan-in；纯 terminal-leaf batch 也不并行。取消只有进程内传播，没有 durable cancel fence，崩溃后仍依赖 TTL 与启动恢复。publisher 实例锁只覆盖同进程共享实例，跨进程仍缺 durable Outbox claim/CAS。生产 resolver 的 retry marker、reservation 后即时 reconciliation、在线 takeover 和自动 continuation 仍缺失。
 
 ### Planning Search
 

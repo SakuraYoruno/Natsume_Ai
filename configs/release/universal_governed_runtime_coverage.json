@@ -103,12 +103,13 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
-      "stage": "PARTIAL_B1_SAFE_RETRY",
-      "wiring_progress": "The Coordinator enters schedule_retry only for explicit RetryableWorkerPreparationError before operation reservation. retry_count BudgetUsage, Budget, Attempt, Node, Lease, graph blocking, and outbox changes are atomic; a response lost after commit is exactly replayed only after strict aggregate, BudgetUsage, and related-Outbox validation, without a duplicate retry charge. Ordinary/exhausted pre-reservation failures atomically close Attempt, Node, Graph, Lease and four evidence-bound Outboxes, while Budget finalization remains outside that bundle. After reservation, Lease then Reservation renewal, exact response-loss replay, stream/final checkpoints, and fail-closed RECOVERY_REQUIRED without COMMIT are wired. Startup runs recovery before activation and uses a construction-scoped execution owner. Current built-in resolvers emit no marker source; real classification, parallelism, post-reservation immediate reconciliation, online takeover, and automatic continuation remain incomplete.",
+      "stage": "PARTIAL_B2_SHADOW_FANOUT",
+      "wiring_progress": "The Coordinator enters schedule_retry only for explicit RetryableWorkerPreparationError before operation reservation. retry_count BudgetUsage, Budget, Attempt, Node, Lease, graph blocking, and outbox changes are atomic; a response lost after commit is exactly replayed only after strict aggregate, BudgetUsage, and related-Outbox validation, without a duplicate retry charge. Ordinary/exhausted pre-reservation failures atomically close Attempt, Node, Graph, Lease and four evidence-bound Outboxes, while Budget finalization remains outside that bundle. After reservation, Lease then Reservation renewal, exact response-loss replay, stream/final checkpoints, and fail-closed RECOVERY_REQUIRED without COMMIT are wired. Startup runs recovery before activation and uses a construction-scoped execution owner. A bounded_fanout_enabled shadow switch defaults false and is not enabled in production. Only scheduler-selected batches with more than one node and an unaccepted successor or remaining node run concurrently, bounded by BudgetPolicy concurrency. Progress uses a bounded asyncio queue (fanout_event_buffer_size defaults 32 and rejects non-positive values), so slow consumers backpressure children. The first observed non-accepted terminal is retained and returned after unfinished siblings are cancelled and joined; child errors also fail fast. Only all-success batches are validated in admission order, while outer cancellation joins children and heartbeats. RuntimeOutboxPublisher has an instance threading lock serializing same-process shared-publisher list/append/mark drains, and the coordinator retains its local asyncio lock. Cross-process durable Outbox claim/CAS is still missing. Fail-fast only narrows the race: shared Graph/Budget terminal ownership for parallel failure, Budget overrun, and post-review remains inside child execution, terminal-leaf batches remain sequential, and cancellation has no durable fence. Current built-in resolvers also emit no marker source; production fan-out, post-reservation immediate reconciliation, online takeover, and automatic continuation remain incomplete.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/heartbeat.py",
+        "host_brain/integrations/runtime_events.py",
         "host_brain/task_runtime/dag_scheduler.py",
         "host_brain/composition/task_runtime.py",
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
@@ -118,6 +119,7 @@
         "tests/contract/test_ne01_atomic_failure_bundle.py",
         "tests/contract/test_ne01_task_store_heartbeat_contract.py",
         "tests/unit/test_ne01_task_runtime_heartbeat.py",
+        "tests/contract/test_nle_runtime_event_contract.py",
         "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },

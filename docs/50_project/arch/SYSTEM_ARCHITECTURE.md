@@ -125,9 +125,15 @@ flowchart TB
 
 执行器只接收冻结节点输入和 node-bound grant。任何失败后的计划变化都应生成新 graph revision，不能在 worker 内静默修改原图。
 
-当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。`PARTIAL_B1_SAFE_RETRY` 在原子 claim/promotion 上增加了唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
+当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。B1 在原子 claim/promotion 上增加了唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
 
-pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。当前 Host/Scheduler/Internal built-in resolver 仍没有现实 marker source；现实故障分类、真正并行 fan-out、在线 takeover、即时 reconciliation 和自动 Review continuation 仍未完成。
+pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
+
+`PARTIAL_B2_SHADOW_FANOUT` 另增加默认 `false`、生产未启用的 `bounded_fanout_enabled`。当 scheduler 选出的 claimable batch 超过一个节点，并且图中仍有未 `ACCEPTED` 的后继/剩余节点时，Coordinator 按 Budget concurrency 启动 asyncio child。progress 由 `asyncio.Queue(maxsize=fanout_event_buffer_size)` 实时合流；buffer 默认 32、非正值拒绝，满队列把慢消费者背压传回 child。首个观察到的非接受终态会被保存，cancel/join 未完成 siblings 后直接返回；child error 同样 fail-fast。只有全成功批次才按 admission 顺序验收。外层取消也会 join child/heartbeat。
+
+测试已覆盖 2 槽真重叠、1 槽串行、依赖验收后的 fan-in、流式 progress、buffer=1 的慢消费者背压、admission 第二节点失败时返回该终态并取消第一 sibling/Graph FAILED/join 未跑/零 COMMIT，以及外层取消零 COMMIT/零 task leak。Coordinator 本地 asyncio lock 序列化自身 publish；`RuntimeOutboxPublisher` 的实例级 `threading.Lock` 再保护同进程 Host/Internal/Scheduler 共享实例的 list/append/mark drain，ThreadPoolExecutor 合同观测 peak=1。
+
+这些仍只是 shadow 机制证据。fail-fast 只缩小竞态：失败、Budget 超限或 post-review 的 shared Graph/Budget terminal authority 仍在 child 内，尚未由外层 fan-in 统一裁决；terminal-leaf batch 仍顺序，取消没有 durable cancel fence。publisher 实例锁不覆盖多进程，durable Outbox claim/CAS 仍缺。当前三类 built-in resolver 也没有现实 marker source；现实故障分类、生产 fan-out、在线 takeover、即时 reconciliation 和自动 Review continuation 均未完成。
 
 ### 3.5 模型与能力执行层
 
@@ -322,7 +328,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B1_SAFE_RETRY` | built-in resolver 尚无 marker source；心跳已接但真正并行、现实失败分类、在线 takeover、即时 reconciliation 与 Review continuation 尚未接线 |
+| TaskGraph revision + `PARTIAL_B2_SHADOW_FANOUT` | built-in resolver 尚无 marker source；默认关闭的非 terminal-leaf fan-out 影子路径已有成功/取消证据，但共享 Graph/Budget 终态、durable cancel fence、生产启用、在线 takeover、即时 reconciliation 与 Review continuation 尚未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

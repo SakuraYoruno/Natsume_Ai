@@ -81,6 +81,7 @@ def _contracts(
     specs: tuple[tuple[str, tuple[str, ...]], ...],
     *,
     review_required: bool = False,
+    concurrency: int = 1,
 ) -> tuple[Any, WorkOrderV3, ExecutorAssignment, TaskGraph]:
     work_order = WorkOrderV3(
         work_order_id="work-order-gr03a",
@@ -103,7 +104,7 @@ def _contracts(
                 token_count=100_000,
                 tool_call_count=100,
                 time_ms=600_000,
-                concurrency=1,
+                concurrency=concurrency,
                 retry_count=10,
                 model_cost_micros=10_000_000,
             ),
@@ -168,6 +169,23 @@ class _Publisher:
         return {"status": "OK", "limit": limit}
 
 
+class _AsyncPublisherProbe:
+    def __init__(self) -> None:
+        self.active = 0
+        self.peak_active = 0
+        self.call_count = 0
+
+    async def publish_pending(self, *, limit: int = 100) -> dict[str, Any]:
+        self.call_count += 1
+        self.active += 1
+        self.peak_active = max(self.peak_active, self.active)
+        try:
+            await asyncio.sleep(0.005)
+        finally:
+            self.active -= 1
+        return {"status": "OK", "limit": limit}
+
+
 class _Worker:
     def __init__(self, calls: list[str], fail_nodes: set[str]) -> None:
         self._calls = calls
@@ -210,6 +228,125 @@ class _SlowWorker(_Worker):
         await asyncio.sleep(self._delay_seconds)
         async for event in super().execute_stream(**kwargs):
             yield event
+
+
+class _AsyncFanOutProbe:
+    """Async barrier plus counters used to prove bounded, overlapping work."""
+
+    def __init__(self, root_nodes: tuple[str, ...]) -> None:
+        self.root_nodes = frozenset(root_nodes)
+        self.active = 0
+        self.peak_active = 0
+        self.entered_nodes: set[str] = set()
+        self.completed_nodes: set[str] = set()
+        self.cancelled_nodes: set[str] = set()
+        self.progress_events_emitted: dict[str, int] = {}
+        self.root_tasks: dict[str, asyncio.Task[Any]] = {}
+        self.all_roots_started = asyncio.Event()
+        self._lock = asyncio.Lock()
+
+    async def activate(self, node_id: str) -> None:
+        async with self._lock:
+            task = asyncio.current_task()
+            assert task is not None
+            self.root_tasks[node_id] = task
+            self.entered_nodes.add(node_id)
+            self.active += 1
+            self.peak_active = max(self.peak_active, self.active)
+            if self.entered_nodes == self.root_nodes:
+                self.all_roots_started.set()
+
+    async def deactivate(self) -> None:
+        async with self._lock:
+            self.active -= 1
+
+
+def _fan_out_commit(node_id: str) -> dict[str, Any]:
+    return {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE",
+        "node_id": node_id,
+        "budget_usage": {
+            "schema_version": "Natsume.task_runtime.worker_budget_usage.v1",
+            "usage_id": f"worker-usage://{node_id}/fan-out",
+            "measurements": {
+                "token_count": 10,
+                "retry_count": 0,
+                "model_cost_micros": 25,
+            },
+            "evidence_refs": [f"model-budget://{node_id}/fan-out"],
+        },
+    }
+
+
+class _FanOutWorker(_Worker):
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        db_path: Path,
+        probe: _AsyncFanOutProbe,
+        require_full_barrier: bool,
+        root_delay_seconds: float = 0.0,
+        progress_release: asyncio.Event | None = None,
+        block_until_cancelled: bool = False,
+        fail_node_id: str | None = None,
+        progress_event_count: int = 1,
+    ) -> None:
+        super().__init__(calls, set())
+        self._db_path = db_path
+        self._probe = probe
+        self._require_full_barrier = require_full_barrier
+        self._root_delay_seconds = root_delay_seconds
+        self._progress_release = progress_release
+        self._block_until_cancelled = block_until_cancelled
+        self._fail_node_id = fail_node_id
+        self._progress_event_count = int(progress_event_count)
+        self.join_dependency_statuses: tuple[str, ...] | None = None
+
+    async def execute_stream(self, *, execution_context: dict[str, Any], **_: Any):
+        node_id = execution_context["node_id"]
+        self._calls.append(node_id)
+        if node_id not in self._probe.root_nodes:
+            store = DurableTaskStore(self._db_path, clock=lambda: NOW)
+            self.join_dependency_statuses = tuple(
+                store.get_node("graph-gr03a", 1, dependency)["status"]
+                for dependency in sorted(self._probe.root_nodes)
+            )
+            yield _fan_out_commit(node_id)
+            return
+
+        await self._probe.activate(node_id)
+        try:
+            if self._require_full_barrier:
+                await asyncio.wait_for(
+                    self._probe.all_roots_started.wait(),
+                    timeout=2.0,
+                )
+            for progress_no in range(1, self._progress_event_count + 1):
+                self._probe.progress_events_emitted[node_id] = progress_no
+                yield {
+                    "phase": "EXECUTE",
+                    "done": False,
+                    "node_id": node_id,
+                    "message": f"fan-out progress {progress_no}: {node_id}",
+                }
+            if self._progress_release is not None:
+                await self._progress_release.wait()
+            if node_id == self._fail_node_id:
+                raise RuntimeError(f"fan-out worker failed: {node_id}")
+            if self._block_until_cancelled:
+                await asyncio.Future()
+            if self._root_delay_seconds:
+                await asyncio.sleep(self._root_delay_seconds)
+            self._probe.completed_nodes.add(node_id)
+            yield _fan_out_commit(node_id)
+        except asyncio.CancelledError:
+            self._probe.cancelled_nodes.add(node_id)
+            raise
+        finally:
+            await self._probe.deactivate()
 
 
 class _StaticResolver:
@@ -342,6 +479,9 @@ def _coordinator(
     task_store: Any = None,
     lease_ttl_ms: int = 120_000,
     operation_ttl_ms: int = 120_000,
+    bounded_fanout_enabled: bool = False,
+    fanout_event_buffer_size: int = 32,
+    outbox_publisher: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
@@ -350,7 +490,9 @@ def _coordinator(
             if task_store is not None
             else DurableTaskStore(db_path, clock=resolved_clock)
         ),
-        outbox_publisher=_Publisher(),
+        outbox_publisher=(
+            outbox_publisher if outbox_publisher is not None else _Publisher()
+        ),
         outbox_factory=OutboxMessage,
         worker_resolver=(
             worker_resolver
@@ -363,6 +505,8 @@ def _coordinator(
         owner_id="gr03a-worker",
         lease_ttl_ms=lease_ttl_ms,
         operation_ttl_ms=operation_ttl_ms,
+        bounded_fanout_enabled=bounded_fanout_enabled,
+        fanout_event_buffer_size=fanout_event_buffer_size,
     )
 
 
@@ -581,6 +725,347 @@ async def test_gr03a_fan_out_fan_in_persists_and_executes_dependency_first(
 
 
 @pytest.mark.asyncio
+async def test_ne01_bounded_fan_out_overlaps_two_roots_then_runs_fan_in(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    publisher = _AsyncPublisherProbe()
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+            outbox_publisher=publisher,
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    assert events[-1]["execution_receipt"]["accepted"] is True
+    assert probe.entered_nodes == {"left", "right"}
+    assert probe.peak_active == contracts[1].budget_policy.limits.concurrency == 2
+    assert probe.active == 0
+    assert publisher.call_count > 1
+    assert publisher.peak_active == 1
+    assert worker.join_dependency_statuses == ("ACCEPTED", "ACCEPTED")
+    assert calls[-1] == "join"
+    graph_record = DurableTaskStore(db_path, clock=lambda: NOW).get_graph(
+        "graph-gr03a", 1
+    )
+    assert graph_record["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_ne01_parallel_failure_cancels_sibling_before_commit(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+        # Fail the second admission-order node so fail-fast cannot rely on a
+        # terminal projection from the cancelled first sibling.
+        fail_node_id="right",
+        block_until_cancelled=True,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    assert events[-1]["execution_receipt"]["accepted"] is False
+    assert events[-1]["execution_receipt"]["status"] == "FAILED"
+    assert probe.entered_nodes == {"left", "right"}
+    assert probe.cancelled_nodes == {"left"}
+    assert "join" not in calls
+    with sqlite3.connect(db_path) as conn:
+        operation_commit_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_COMMITTED'
+            """
+        ).fetchone()[0]
+    assert operation_commit_count == 0
+    assert DurableTaskStore(db_path, clock=lambda: NOW).get_graph(
+        "graph-gr03a", 1
+    )["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_ne01_parallel_progress_applies_bounded_consumer_backpressure(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    progress_per_root = 20
+    buffer_size = 1
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+        progress_event_count=progress_per_root,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+            fanout_event_buffer_size=buffer_size,
+        ),
+    )
+    stream = app.execute_stream(
+        command=contracts[0],
+        work_order=contracts[1],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+
+    try:
+        first_event = await asyncio.wait_for(anext(stream), timeout=3.0)
+        assert first_event["done"] is False
+        await asyncio.sleep(0.05)
+        emitted_while_consumer_paused = sum(probe.progress_events_emitted.values())
+        # One delivered item, one buffered item and at most one blocked put per
+        # active child.  The producers cannot run through all progress chunks.
+        assert emitted_while_consumer_paused <= 1 + buffer_size + len(probe.root_nodes)
+        remaining = [event async for event in stream]
+    finally:
+        await stream.aclose()
+
+    assert remaining[-1]["execution_receipt"]["accepted"] is True
+    assert sum(probe.progress_events_emitted.values()) == progress_per_root * 2
+    assert worker.join_dependency_statuses == ("ACCEPTED", "ACCEPTED")
+
+
+@pytest.mark.asyncio
+async def test_ne01_bounded_fan_out_honours_single_concurrency_slot(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=1,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=False,
+        root_delay_seconds=0.05,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    assert events[-1]["execution_receipt"]["accepted"] is True
+    assert probe.entered_nodes == {"left", "right"}
+    assert probe.peak_active == contracts[1].budget_policy.limits.concurrency == 1
+    assert probe.active == 0
+    assert worker.join_dependency_statuses == ("ACCEPTED", "ACCEPTED")
+    assert calls[-1] == "join"
+
+
+@pytest.mark.asyncio
+async def test_ne01_parallel_progress_streams_before_all_roots_complete(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    progress_release = asyncio.Event()
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+        progress_release=progress_release,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+        ),
+    )
+    stream = app.execute_stream(
+        command=contracts[0],
+        work_order=contracts[1],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+
+    try:
+        first_event = await asyncio.wait_for(anext(stream), timeout=3.0)
+        assert first_event["phase"] == "EXECUTE"
+        assert first_event["done"] is False
+        assert probe.entered_nodes == {"left", "right"}
+        assert probe.completed_nodes == set()
+        progress_release.set()
+        remaining = [event async for event in stream]
+    finally:
+        progress_release.set()
+        await stream.aclose()
+
+    assert remaining[-1]["execution_receipt"]["accepted"] is True
+    assert probe.completed_nodes == {"left", "right"}
+
+
+@pytest.mark.asyncio
+async def test_ne01_outer_cancellation_joins_fan_out_children_and_heartbeats(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ()), ("join", ("left", "right"))),
+        concurrency=2,
+    )
+    calls: list[str] = []
+    probe = _AsyncFanOutProbe(("left", "right"))
+    worker = _FanOutWorker(
+        calls,
+        db_path=db_path,
+        probe=probe,
+        require_full_barrier=True,
+        block_until_cancelled=True,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            worker_resolver=_StaticResolver(worker),
+            bounded_fanout_enabled=True,
+        ),
+    )
+
+    async def consume() -> None:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+
+    outer = asyncio.create_task(consume(), name="test-ne01-fan-out-consumer")
+    all_started = False
+    try:
+        await asyncio.wait_for(probe.all_roots_started.wait(), timeout=3.0)
+        all_started = True
+    except TimeoutError:
+        pass
+    finally:
+        outer.cancel()
+        try:
+            await outer
+        except asyncio.CancelledError:
+            pass
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert all_started is True
+    assert probe.entered_nodes == {"left", "right"}
+    assert probe.cancelled_nodes == {"left", "right"}
+    assert probe.active == 0
+    assert set(probe.root_tasks) == {"left", "right"}
+    assert all(task.done() for task in probe.root_tasks.values())
+    leaked_heartbeats = [
+        task.get_name()
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and task.get_name().startswith("task-heartbeat:")
+    ]
+    assert leaked_heartbeats == []
+    with sqlite3.connect(db_path) as conn:
+        operation_commit_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_COMMITTED'
+            """
+        ).fetchone()[0]
+    assert operation_commit_count == 0
+
+
+@pytest.mark.asyncio
 async def test_ne01_coordinator_renews_long_execution_authority_until_acceptance(
     tmp_path: Path,
 ) -> None:
@@ -597,10 +1082,10 @@ async def test_ne01_coordinator_renews_long_execution_authority_until_acceptance
             clock=clock,
             task_store=store,
             worker_resolver=_StaticResolver(
-                _SlowWorker(calls, delay_seconds=0.32)
+                _SlowWorker(calls, delay_seconds=2.5)
             ),
-            lease_ttl_ms=200,
-            operation_ttl_ms=200,
+            lease_ttl_ms=2_000,
+            operation_ttl_ms=2_000,
         ),
     )
 

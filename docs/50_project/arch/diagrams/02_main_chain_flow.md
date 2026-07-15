@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.2
+版本：v2.3
 核对日期：2026-07-15
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -97,6 +97,32 @@ sequenceDiagram
     end
 ```
 
+## 默认关闭的 fan-out 影子路径
+
+```mermaid
+flowchart TD
+    S["compute_dag_schedule"] --> Q{"selected > 1 且\n仍有未 ACCEPTED 后继/剩余节点?"}
+    Q -->|"否 / 生产默认路径"| SEQ["顺序执行"]
+    Q -.->|"bounded_fanout_enabled=true\n仅实验测试"| LIMIT["BudgetPolicy concurrency 有界 child"]
+    LIMIT --> MERGE["progress 有界队列合流\n默认 maxsize=32，慢消费者反压"]
+    LIMIT --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
+    MERGE --> STOP{"首个观察到的非接受 terminal / child error?"}
+    STOP -->|"是"| FAILFAST["保存 terminal\ncancel + join 未完成 siblings 后返回"]
+    STOP -->|"否，全部成功"| ORDER["按 admission 顺序验收"]
+    ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
+    P0["P0：failure / Budget 超限 / post-review\nshared Graph/Budget 终态仍在 child 内"]
+    P0 -.-> STOP
+    P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
+    CANCEL["外层取消：cancel + join child / heartbeat\n无 durable cancel fence"] -.-> LIMIT
+
+    style LIMIT fill:#fff3cd,stroke:#a87500
+    style P0 fill:#ffd9d9,stroke:#b31d28
+    style P1 fill:#fff3cd,stroke:#a87500
+    style CANCEL fill:#fff3cd,stroke:#a87500
+```
+
+实验证据证明 concurrency=2 的 root 真重叠、concurrency=1 保持串行、size=1 时慢消费者会反压 child；admission 第二节点失败时会返回该 durable terminal、取消第一 sibling、阻止 join 且不产生 `OPERATION_COMMITTED`；外层取消也没有 child/heartbeat task 泄漏。同进程 Host/Internal/Scheduler 共享的 publisher 实例以 `threading.Lock` 串行完整 drain，但跨进程仍缺 durable claim/CAS。该图是 shadow，不是 production wiring：构造默认值为 `false`，生产 composition 未开启；shared Graph/Budget terminal authority 和 terminal-leaf batch 仍未闭环。
+
 ## Plan 分支的真实边界
 
 ```mermaid
@@ -119,7 +145,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget/attempt 2、普通/耗尽 failure 的 Attempt/Node/Graph/Lease 原子 terminal bundle，以及 Lease/Reservation 心跳与 checkpoint；心跳失败返回 `RECOVERY_REQUIRED` 且禁止 COMMIT。built-in resolver 尚无 marker source，Budget finalize 仍在 bundle 外；真正并行、在线 takeover、即时 reconciliation 与 Review continuation 尚未完成。
+3. `PARTIAL_B2_SHADOW_FANOUT` 在 B1 安全重试/heartbeat 上增加默认关闭的非 terminal-leaf 有界 fan-out；生产未启用。共享 Graph/Budget 终态、durable cancel fence、built-in retry marker、在线 takeover、即时 reconciliation 与 Review continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 

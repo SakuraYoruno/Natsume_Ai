@@ -3,7 +3,7 @@
 
 # 图 01：当前运行拓扑
 
-版本：v2.2
+版本：v2.3
 核对日期：2026-07-15
 
 ## 拓扑
@@ -82,6 +82,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成；Scheduler 与 Internal 已接通，DAG 并发/恢复、显式 composition 和完整 route matrix 仍未闭环。
+- 图上有连线不等于全部 NE-01 已完成；Scheduler 与 Internal 已接通。DAG 只有默认关闭、生产未启用的非 terminal-leaf fan-out 影子证据，共享 Graph/Budget 终态、durable cancel fence、恢复续跑、显式 composition 和完整 route matrix 仍未闭环。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

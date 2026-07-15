@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B1_SAFE_RETRY`；pre-reservation 原子失败收口与 Lease/Reservation 心跳已接，在线 takeover、即时 reconciliation、真正并行和自动 continuation 未完成。
+- Durable DAG：`PARTIAL_B2_SHADOW_FANOUT`；B1 原子失败/重试地基与 Lease/Reservation 心跳已接，默认关闭的非 terminal-leaf fan-out 已证明有界背压、首个非接受 fail-fast 和同进程共享 publisher 串行；共享 Graph/Budget terminal authority、跨进程 Outbox claim、在线 takeover、即时 reconciliation、terminal-leaf 并行和自动 continuation 未完成。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

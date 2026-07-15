@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.3
+版本：v3.4
 核对日期：2026-07-15
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
@@ -20,9 +20,11 @@ flowchart TD
         GC["PlanningGraphCompiler"]
         AD["Durable admission"]
         TR["GovernedTaskCoordinator"]
+        SHADOW["bounded fan-out shadow\ndefault OFF / production disabled"]
         WK["Frozen worker"]
         AC["Verification / Acceptance"]
         HS --> GC --> AD --> TR --> WK --> AC
+        TR -.-> SHADOW -.-> WK
     end
 
     subgraph ReadOnly["Read-only / retired boundary"]
@@ -118,4 +120,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。`PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget、Attempt/Node/Graph/Lease 原子 terminal bundle、Lease/Reservation heartbeat、提交响应丢失 exact replay 与 fail-closed 启动 recovery gate，resolver cancellation 不转普通失败；built-in resolver 尚无 marker source。NE-01 仍需完成 Budget 终态闭环、现实失败分类、真正并行、reservation 后即时 reconciliation、在线 takeover、自动 continuation、显式 composition 与最终 route matrix 验收。Executive 退役不能替代这些剩余条件。
+Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。`PARTIAL_B2_SHADOW_FANOUT` 在 B1 安全重试/heartbeat 地基上新增默认关闭、生产未启用的非 terminal-leaf fan-out：按 Budget concurrency 有界，progress 通过默认 32 的有界队列合流并向慢消费者反压；首个观察到的非接受 terminal 或 child error 会 fail-fast cancel/join siblings，只有全成功批次按 admission 顺序验收。同进程共享 `RuntimeOutboxPublisher` 的完整 drain 已由实例锁串行，外层取消也会 join child/heartbeat。NE-01 仍需把 failure、Budget 超限和 post-review 的 shared Graph/Budget terminal authority 移到外层 fan-in，补齐 terminal-leaf 并行、durable cancel fence、跨进程 Outbox durable claim/CAS、built-in retry marker、reservation 后即时 reconciliation、在线 takeover、自动 continuation、显式 composition 与最终 route matrix。Executive 退役不能替代这些剩余条件。

@@ -8,11 +8,12 @@ fail-closed redaction gate before anything becomes replayable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
 import re
+import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from host_brain.core.ids import now_ms
@@ -830,8 +831,10 @@ class RuntimeOutboxPublisher:
     task_store: Any
     event_store: RuntimeEventStore
     projection_worker: Any | None = None
+    _publish_lock: threading.Lock = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self._publish_lock = threading.Lock()
         if self.projection_worker is None:
             # Local import keeps eventing dependent on a small store protocol,
             # not on this integration facade.
@@ -842,6 +845,13 @@ class RuntimeOutboxPublisher:
             self.projection_worker = RuntimeEventProjectionWorker(self.event_store)
 
     def publish_pending(self, *, limit: int = 100) -> dict[str, Any]:
+        # Host, Internal and Scheduler coordinators share one process publisher.
+        # Serialize its list/append/mark drain across event loops and worker
+        # threads.  Multi-process exclusion still belongs in the durable store.
+        with self._publish_lock:
+            return self._publish_pending_locked(limit=limit)
+
+    def _publish_pending_locked(self, *, limit: int) -> dict[str, Any]:
         pending = list(self.task_store.list_pending_outbox(limit=limit))
         published: list[dict[str, Any]] = []
         for row in pending:

@@ -45,7 +45,7 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
-      "stage": "PARTIAL_B1_SAFE_RETRY",
+      "stage": "PARTIAL_B2_SHADOW_FANOUT",
       "implemented": [
         "durable admission",
         "dependency progression",
@@ -72,6 +72,13 @@
         "Coordinator checkpoints every worker stream event and final result and returns RECOVERY_REQUIRED without COMMIT on heartbeat failure",
         "fail-closed startup ordering from migration through task_store.recover_startup and recovery-outbox publication before runtime activation",
         "construction-scoped execution owner derived from the configured logical owner and ProcessTaskRuntimeContainer recovery identity",
+        "default-off bounded fan-out shadow path for scheduler-selected multi-node batches that still have unaccepted successors",
+        "BudgetPolicy concurrency-bounded child execution with live progress merge; the first observed non-accepted terminal is returned after sibling join, while all-success batches are validated in admission order",
+        "fanout_event_buffer_size defaults to 32, rejects non-positive values, and bounds the asyncio progress queue so slow consumers backpressure child producers",
+        "first observable non-accepted terminal or child error cancels and joins unfinished siblings",
+        "coordinator-local asyncio lock serializing concurrent Outbox publication",
+        "RuntimeOutboxPublisher instance-level threading lock serializing same-process shared-publisher list/append/mark drains across coordinators and threads",
+        "outer cancellation joins fan-out children and their heartbeats; integration evidence shows zero OPERATION_COMMITTED and no task leak",
         "idempotency reservation",
         "budget",
         "review",
@@ -83,7 +90,11 @@
         "canonical max_attempts and retry_backoff_ms validation"
       ],
       "missing": [
-        "parallel DAG execution",
+        "production-enabled parallel DAG execution",
+        "outer fan-in ownership of shared Graph and Budget terminal transitions for parallel failure, Budget-limit, and post-review outcomes",
+        "parallel execution of terminal-leaf batches",
+        "durable cancellation fence rather than in-process cancellation followed by TTL/startup recovery",
+        "cross-process durable Outbox claim/CAS; the publisher instance lock only covers one shared instance in one process",
         "single transaction for promotion plus claim",
         "real production resolver sources that classify proven side-effect-free transient preparation failures",
         "Budget finalization inside the pre-reservation terminal failure transaction or an explicit compensation contract",
@@ -93,12 +104,14 @@
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "terminal_failure_boundary": "Ordinary and exhausted pre-reservation resolver failures atomically close Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes. Any existing operation reservation rejects this path, and Budget finalization remains outside the bundle.",
       "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. Any heartbeat failure yields RECOVERY_REQUIRED and forbids COMMIT, but does not provide online takeover, immediate reconciliation, or continuation.",
+      "bounded_fanout_boundary": "GovernedTaskCoordinator has a bounded_fanout_enabled shadow switch that defaults to false and is not enabled by production composition. It runs only when the scheduler selects more than one node and the graph still has an unaccepted successor or remaining node. The selected batch is bounded by BudgetPolicy concurrency. Progress uses an asyncio.Queue bounded by fanout_event_buffer_size (default 32; non-positive rejected), propagating slow-consumer backpressure to children. The first observed non-accepted terminal is retained, unfinished siblings are cancelled and joined, and that durable terminal is returned; child errors also fail fast. Only all-success batches are validated in admission order. Outer cancellation also joins children and heartbeats. RuntimeOutboxPublisher adds an instance-level threading lock for same-process shared-publisher list/append/mark drains, while the coordinator keeps a local asyncio lock; cross-process durable claim/CAS is still missing. Fail-fast only narrows the race: shared Graph/Budget terminal ownership for node failure, Budget overrun, and post-review still lives inside child execution, terminal-leaf batches are sequential, and there is no durable cancel fence, so this switch cannot be enabled by default.",
       "startup_recovery_boundary": "Startup is ordered migration -> task_store.recover_startup -> publisher construction -> recovery outbox publication -> later runtime activation. Recovery exceptions fail closed before route activation. ASGI derives a construction-scoped execution owner from the configured logical owner. This does not provide online takeover, reconciliation completion, or automatic continuation.",
       "evidence_refs": [
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "host_brain/persistence/task_repository.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/heartbeat.py",
+        "host_brain/integrations/runtime_events.py",
         "host_brain/composition/task_runtime.py",
         "host_brain/audit/migration_compat.py",
         "tests/unit/test_aw03_migration_compat.py",
@@ -107,6 +120,7 @@
         "tests/contract/test_ne01_atomic_failure_bundle.py",
         "tests/contract/test_ne01_task_store_heartbeat_contract.py",
         "tests/unit/test_ne01_task_runtime_heartbeat.py",
+        "tests/contract/test_nle_runtime_event_contract.py",
         "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },
