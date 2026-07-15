@@ -17,6 +17,7 @@ import uuid
 
 TASK_STORE_INVALID = "TASK_STORE_INVALID"
 TASK_STORE_DURABLE_DATA_INVALID = "TASK_STORE_DURABLE_DATA_INVALID"
+TASK_STORE_CAS_CONFLICT = "TASK_STORE_CAS_CONFLICT"
 TASK_STORE_SCHEMA_NOT_READY = "TASK_STORE_SCHEMA_NOT_READY"
 TASK_STORE_NOT_FOUND = "TASK_STORE_NOT_FOUND"
 TASK_STORE_LEASE_CONFLICT = "TASK_STORE_LEASE_CONFLICT"
@@ -29,6 +30,27 @@ _DURABLE_REFERENCE_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
 )
 _MAX_OUTBOX_EVIDENCE_REFS = 32
+_PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS = frozenset(
+    {
+        "decision_ref",
+        "schema_version",
+        "graph_id",
+        "graph_revision",
+        "graph_version_before",
+        "graph_version_after",
+        "budget_id",
+        "budget_version_before",
+        "budget_version_after",
+        "result_node_id",
+        "result_attempt_id",
+        "result_receipt_ref",
+        "payload_json",
+        "payload_sha256",
+        "graph_outbox_id",
+        "budget_outbox_id",
+        "created_ts_ms",
+    }
+)
 
 
 class TaskStoreError(RuntimeError):
@@ -279,6 +301,7 @@ __all__ = [
     "OperationReservationResult",
     "OutboxMessage",
     "RecoveryReport",
+    "TASK_STORE_CAS_CONFLICT",
     "TASK_STORE_CANCELLATION_CONFLICT",
     "TASK_STORE_DURABLE_DATA_INVALID",
     "TASK_STORE_INVALID",

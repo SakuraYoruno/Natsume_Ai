@@ -59,6 +59,7 @@ def test_task_repository_reexports_canonical_task_store_value_types() -> None:
         "OperationReservationResult",
         "OutboxMessage",
         "RecoveryReport",
+        "TASK_STORE_CAS_CONFLICT",
         "TASK_STORE_CANCELLATION_CONFLICT",
         "TASK_STORE_DURABLE_DATA_INVALID",
         "TASK_STORE_INVALID",
