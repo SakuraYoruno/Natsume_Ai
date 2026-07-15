@@ -3,8 +3,8 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.3
-核对日期：2026-07-15
+版本：v2.4
+核对日期：2026-07-16
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
 
@@ -101,8 +101,10 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    SCHEMA["0090 schema ready?\nBudget / worker 前 fail-fast"] --> S["compute_dag_schedule"]
-    S --> Q{"selected > 1 且\n仍有未 ACCEPTED 后继/剩余节点?"}
+    POLICY["TaskGraph completion_policy\nlegacy 或显式 ATOMIC_GRAPH_SUCCESS_V1"] --> GATE["atomic capability + node-grant service\n+ parent grant：admission 前校验"]
+    GATE --> SCHEMA["0090；atomic 时 0091 schema ready?\nBudget / worker 前 fail-fast"]
+    SCHEMA --> S["compute_dag_schedule"]
+    S --> Q{"selected > 1 且\n有后继/剩余节点或 atomic policy?"}
     Q -->|"否 / 生产默认路径"| SEQ["顺序执行"]
     Q -.->|"bounded_fanout_enabled=true\n默认 OFF，生产未启用"| ACTIVATE["outer 在 spawn 前激活 Graph"]
     ACTIVATE --> LIMIT["BudgetPolicy concurrency 有界 child"]
@@ -119,7 +121,12 @@ flowchart TD
     DECIDE -->|"failure"| FAILED["Graph FAILED\nBudget RELEASED"]
     DECIDE -->|"Budget overrun"| BUDGET["Graph BLOCKED\nBudget RELEASED"]
     DECIDE -->|"post-review"| REVIEW["Graph BLOCKED\nBudget 保持 ACTIVE"]
-    DECIDE -->|"全部 ACCEPTED"| ORDER["按 admission 顺序校验 outcomes\n继续调度"]
+    DECIDE -->|"全部 ACCEPTED"| SUCCESS_POLICY{"ATOMIC_GRAPH_SUCCESS_V1?"}
+    SUCCESS_POLICY -->|"否"| ORDER["按 admission 顺序校验 outcomes\n继续调度"]
+    SUCCESS_POLICY -->|"是"| PROJECTION["所有 Node/Attempt/Reservation ACCEPTED\ncanonical projection 重算 digest\n绑定 command/request/route/target/grant"]
+    PROJECTION --> RESULT["仅显式 result projection\n编译全图 effects 与公开结果"]
+    RESULT --> SUCCESS_UOW["单 UoW：Graph COMPLETED + Budget CONSUMED\n两 Outbox + effects + 0091 decision"]
+    SUCCESS_UOW --> REPLAY["completed replay 只读 0091\n双响应丢失重读 terminal authority"]
     NODE -->|"Operation Reservation 未决"| RECOVERY["RECOVERY_REQUIRED\nGraph/Budget 不终结"]
     FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n+ 0090 canonical v2 decision\n单事务 + exact replay"]
     BUDGET --> ATOMIC
@@ -128,8 +135,7 @@ flowchart TD
     BUDGET --> USAGE["selected=BUDGET_BLOCKED 绑定 rejected usage\n被动 blocked sibling 无需本地 usage"]
     ATOMIC --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
-    P0["P0：terminal-leaf batch 与最终成功终态\n仍走顺序路径"]
-    P0 -.-> SEQ
+    OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
     P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
     CANCEL["外层取消：cancel + join child / heartbeat\n无 durable cancel fence"] -.-> LIMIT
     CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
@@ -137,7 +143,7 @@ flowchart TD
     PREVIEW["P1：WAITING_APPROVAL 仍走 pre-review 专线\n未统一 optional-attempt observation"] -.-> SNAP
 
     style LIMIT fill:#fff3cd,stroke:#a87500
-    style P0 fill:#ffd9d9,stroke:#b31d28
+    style OFF fill:#fff3cd,stroke:#a87500
     style P1 fill:#fff3cd,stroke:#a87500
     style CANCEL fill:#fff3cd,stroke:#a87500
     style CAS fill:#fff3cd,stroke:#a87500
@@ -147,7 +153,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-live/re-entry outcomes 全量来自 admitted Graph durable terminal Nodes/latest stable Attempts，`RETRY_PENDING` 可作为非 selected outcome；当前 batch 只定优先级/selected。response-loss exact replay；ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict。selected Budget usage 与 row digest/Outbox/Attempt/usage fail-closed。完整 marker 扫描仅 single-revision 安全；multi-revision 仍需 revisioned Outbox identity。该图不是 production wiring。
+0090/B4 的 live/re-entry failure/review/Budget 语义保持不变。B5 atomic success 已覆盖单节点、串行、多 terminal 完成顺序、projection 篡改、flag/grant admission、restart 与双响应丢失，但开关和生产 composition 均 OFF。该图不是 production wiring。
 
 ## Plan 分支的真实边界
 
@@ -171,7 +177,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` 默认关闭、生产未启用；live/re-entry 的 payload/ref 与 exact replay 已统一，但 multi-revision 完整 marker 扫描仍需 revisioned TaskGraph Outbox identity。历史半提交、`WAITING_APPROVAL`、terminal-leaf、durable cancel、跨进程 Outbox、Budget 高竞争、online takeover、reconciliation/continuation 尚未完成。
+3. `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`：atomic policy/result、admission/grant/projection 门禁与 0091 UoW 已实现；0090/B4 保留。B5C durable cancel、revisioned 0090、历史半提交、`WAITING_APPROVAL`、跨进程 Outbox、Budget 高竞争、online takeover、reconciliation/continuation 和 canary 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 

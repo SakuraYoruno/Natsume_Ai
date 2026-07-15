@@ -14,6 +14,7 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     TASK_GRAPH_INVALID,
     ContractViolation,
 )
+from host_brain.contracts.agent_runtime.task_graph import TaskGraphCompletionPolicy
 from host_brain.agent_runtime.planner_adapter import (
     CanonicalPlannerOutput,
     GraphRevisionIdentity,
@@ -181,7 +182,22 @@ def test_t_nle_05_ready_siblings_parallel_unless_source_explicitly_disables_it()
     )
 
     assert parallel.execution_batches == (("a",), ("b", "c"))
+    assert parallel.task_graph.result_node_id is None
     assert serial.execution_batches == (("a",), ("b",), ("c",))
+    assert serial.task_graph.result_node_id is None
+
+    atomic_plan = _dag(
+        _node("a"),
+        _node("b", dependencies=("a",)),
+        _node("c", dependencies=("a",)),
+    )
+    atomic_plan.completion_policy = "ATOMIC_GRAPH_SUCCESS_V1"  # type: ignore[attr-defined]
+    atomic = adapt_skill_dag_plan(atomic_plan, identity=_identity())
+    assert atomic.task_graph.result_node_id == "c"
+    assert (
+        atomic.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
 
 
 def test_t_nle_05_skill_dag_retry_limit_maps_to_canonical_attempt_policy() -> None:
@@ -320,6 +336,7 @@ def test_t_nle_05_shadow_comparison_checks_complete_execution_semantics() -> Non
         planner_ref="planner://different-provenance",
         created_at=999,
         nodes=source.nodes,
+        result_node_id=source.task_graph.result_node_id or "a",
         parallel_window=source.parallel_window,
     )
     equivalent = build_planner_shadow_comparison(source, same_semantics)
@@ -334,6 +351,7 @@ def test_t_nle_05_shadow_comparison_checks_complete_execution_semantics() -> Non
         planner_ref="planner://different-provenance",
         created_at=999,
         nodes=(replace(source.nodes[0], risk_level=5),),
+        result_node_id=source.task_graph.result_node_id or "a",
         parallel_window=source.parallel_window,
     )
     mismatch = build_planner_shadow_comparison(source, risk_drift)

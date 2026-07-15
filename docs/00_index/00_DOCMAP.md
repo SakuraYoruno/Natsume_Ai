@@ -3,8 +3,8 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v8.1
-维护日期：2026-07-15
+版本：v8.2
+维护日期：2026-07-16
 状态：`CURRENT_AUTHORITY_MAP`
 
 ## 1. 权威顺序
@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL`；默认关闭且 production OFF。live/re-entry outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），并从 Reservation/BudgetUsage 重建同一 payload/ref exact replay；当前 batch 只定优先级/selected。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict。selected Budget usage 与 row digest/Outbox/Attempt/usage fail-closed。multi-revision marker 扫描仍需 revisioned Outbox identity；其余边界不变。
+- Durable DAG：`PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`。显式 `result_node_id` 与持久可选 `ATOMIC_GRAPH_SUCCESS_V1` 冻结成功语义；独立 atomic/bounded 开关均默认关闭，三处生产 composition 未启用。0091 单 UoW 提交 `Graph COMPLETED + Budget CONSUMED + 两条 Outbox + 全图 effect intents + success decision`，结果来自显式结果节点的 canonical projection。0090/B4 失败语义保留；B5C durable cancel、revisioned 0090、多进程 Outbox、自动接管/续跑和 canary 未完成。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

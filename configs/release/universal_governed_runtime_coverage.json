@@ -103,8 +103,8 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
-      "stage": "PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL",
-      "wiring_progress": "The default-off fan-out keeps production disabled. Live and ACTIVE crash re-entry reconstruct the same canonical payload/ref from durable Node, Attempt, Reservation, and BudgetUsage facts with exact replay. Outcomes cover every admitted-Graph durable terminal Node with its latest stable Attempt, not only the current batch; the batch chooses priority/selected, and RETRY_PENDING is supported as a non-selected re-entry outcome. Ownership, or CAS followed by active-fact reread, maps to IN_PROGRESS; pure CAS remains conflict. Selected BUDGET_BLOCKED binds rejected usage; passive siblings need no local usage. Every row read validates digest, exact Outboxes and Attempt, plus usage for Budget. Full marker-history scans are single-revision only because legacy Graph Outboxes lack graph_revision; multi-revision reads validate the returned row, and revisioned identity remains required. Historical half states, terminal-leaf, durable cancellation, reconciliation/continuation, cross-process Outbox, Budget contention, production markers, and takeover remain incomplete.",
+      "stage": "PARTIAL_B5_TERMINAL_SUCCESS_SHADOW",
+      "wiring_progress": "PRODUCTION_OFF. B4/0090 still reconstructs failure, Budget, review, and crash-reentry decisions from durable whole-Graph facts with exact replay. B5 adds an optional durable TaskGraph completion_policy: legacy is the default, while ATOMIC_GRAPH_SUCCESS_V1 requires an explicit sink result_node_id. atomic_graph_success_enabled and bounded_fanout_enabled are independent, default false, and disabled in Host, Scheduler, and Internal production composition. Application capability and grant checks run before repository admission; direct Coordinator entry requires an exact all-node grant map. Atomic single-node, serial, and terminal-leaf executions defer shared completion to the outer authority. Every accepted node binds a digest-recomputed canonical worker projection; only the explicit result projection supplies public output and Graph effects. Migration 0091 and complete_parallel_graph_success atomically commit Graph COMPLETED, Budget CONSUMED, distinct Graph/Budget Outboxes, the complete Graph effect set, and the canonical success decision. Completed replay reads 0091 without recompiling effects, and repeated response loss re-reads terminal authority. Durable cancellation, revisioned 0090 marker identity, historical half-state repair, cross-process Outbox claim/CAS, Budget contention, reconciliation/continuation, production canary, and takeover remain incomplete.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
@@ -114,16 +114,22 @@
         "host_brain/composition/task_runtime.py",
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "host_brain/audit/migrations/0090_task_runtime_parallel_settlement_decision.sql",
+        "host_brain/audit/migrations/0091_task_runtime_parallel_success_decision.sql",
         "host_brain/contracts/agent_runtime/parallel_settlement.py",
+        "host_brain/contracts/agent_runtime/parallel_success.py",
+        "host_brain/persistence/worker_projection_repository.py",
         "tests/unit/test_ne01_dag_scheduler.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_aw02_task_runtime_composition.py",
         "tests/contract/test_ne01_atomic_failure_bundle.py",
         "tests/contract/test_ne01_parallel_store_settlement.py",
+        "tests/contract/test_ne01_parallel_success_contract.py",
+        "tests/contract/test_ne01_parallel_success_store.py",
         "tests/contract/test_ne01_task_store_heartbeat_contract.py",
         "tests/unit/test_ne01_task_runtime_heartbeat.py",
         "tests/contract/test_nle_runtime_event_contract.py",
-        "tests/integration/test_gr03a_governed_durable_dag.py"
+        "tests/integration/test_gr03a_governed_durable_dag.py",
+        "tests/integration/test_ne01_b5_parallel_success.py"
       ]
     },
     "revision_plus_one_replan": {

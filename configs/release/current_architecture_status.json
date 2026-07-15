@@ -1,6 +1,6 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-15",
+  "as_of_date": "2026-07-16",
   "source_baseline": {
     "dev_commit": "a6d7ae383",
     "repository_cleanup_commit": "f0cd1dfd7"
@@ -45,7 +45,7 @@
     },
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
-      "stage": "PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL",
+      "stage": "PARTIAL_B5_TERMINAL_SUCCESS_SHADOW",
       "implemented": [
         "durable admission",
         "dependency progression",
@@ -73,6 +73,15 @@
         "fail-closed startup ordering from migration through task_store.recover_startup and recovery-outbox publication before runtime activation",
         "construction-scoped execution owner derived from the configured logical owner and ProcessTaskRuntimeContainer recovery identity",
         "default-off bounded fan-out shadow path for scheduler-selected multi-node batches that still have unaccepted successors; production composition does not enable it",
+        "TaskGraph v1 optional completion_policy and result_node_id freeze whole-graph result authority; legacy multi-sink graphs keep result_node_id absent",
+        "PlanningGraphCompiler defaults multi-sink graphs to safe legacy semantics and emits ATOMIC_GRAPH_SUCCESS_V1 only on explicit request or inherited replan policy",
+        "independent default-off atomic_graph_success_enabled capability; Host, Scheduler, and Internal production compositions do not enable atomic success or bounded terminal-leaf fan-out",
+        "GovernedCommandApplication rejects unsupported atomic policy, missing node-grant service, or missing parent grant before repository admission; direct Coordinator entry requires an exact all-node grant map",
+        "atomic Graphs activate the outer Graph before deferred single-node, serial, or fan-out child execution",
+        "terminal-leaf fan-out is allowed only for an explicitly atomic Graph when the separate bounded fan-out switch is enabled",
+        "every accepted node binds a canonical WorkerProjectionStore payload whose digest is recomputed and whose command, request, graph, node, attempt, route, target, receipt, and node grant match durable admission",
+        "0091 canonical parallel-success decision and one BEGIN IMMEDIATE unit of work atomically commit Graph COMPLETED, Budget CONSUMED, distinct Graph and Budget Outboxes, the complete Graph effect set, and explicit result-node authority",
+        "completed Graph replay reads and validates frozen 0091 authority without recompiling effects; repeated post-commit response loss re-reads terminal authority without re-running workers",
         "outer activation of the shared TaskGraph before spawning BudgetPolicy concurrency-bounded child executions",
         "deferred child authority limited to Attempt, Node, Lease, Reservation, and Budget usage or EXCEEDED facts; children cannot terminalize the Graph or RELEASE or CONSUME the shared Budget",
         "normal non-accepted outcomes wait for every started sibling to reach a durable node-local outcome; arbitration priority is recovery, Budget, failure, review, then retry, with admission order used only within one class",
@@ -106,7 +115,7 @@
       ],
       "missing": [
         "production-enabled parallel DAG execution",
-        "parallel execution of terminal-leaf batches",
+        "production canary and enablement for atomic success and terminal-leaf fan-out",
         "durable cancellation fence rather than in-process cancellation followed by TTL/startup recovery",
         "cross-process durable Outbox claim/CAS; the publisher instance lock only covers one shared instance in one process",
         "Budget charge CAS retry behavior sized for concurrency greater than four and an explicit ALREADY_EXCEEDED sibling disposition",
@@ -122,13 +131,16 @@
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "terminal_failure_boundary": "Ordinary and exhausted pre-reservation resolver failures atomically close Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes. Any existing operation reservation rejects this path, and Budget finalization remains outside the bundle.",
       "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. Any heartbeat failure yields RECOVERY_REQUIRED and forbids COMMIT, but does not provide online takeover, immediate reconciliation, or continuation.",
-      "bounded_fanout_boundary": "GovernedTaskCoordinator has a bounded_fanout_enabled shadow switch that defaults to false and is not enabled by production composition. Live and ACTIVE crash re-entry reconstruct the same canonical payload and taskbatch reference from durable Node, Attempt, Reservation, and BudgetUsage facts and use exact response-loss replay. Outcomes include every durable terminal Node with its latest stable Attempt across the admitted Graph, not only the current claimable batch; the current batch selects priority and selected node, and RETRY_PENDING is a valid non-selected reconstructable outcome. Re-entry with live ownership returns IN_PROGRESS. A settlement ownership fence, or CAS followed by an active-fact reread, also maps to IN_PROGRESS; pure CAS remains a durable conflict. The selected BUDGET_BLOCKED outcome binds rejected usage, while passively blocked siblings need no local usage. Every decision-row read validates digest, exact Graph/optional-Budget Outboxes, and Attempt lineage, plus Budget usage lineage. Complete historical marker scans are safe only for single-revision graph ids because legacy Graph Outboxes lack graph_revision; multi-revision reads validate only the returned row's exact bindings, and revisioned Outbox identity remains required. Historical half-committed states, WAITING_APPROVAL unification, terminal-leaf, durable cancellation, reconciliation/continuation, cross-process Outbox claim/CAS, Budget high-contention, production markers, and online takeover remain incomplete; production enablement is forbidden.",
+      "bounded_fanout_boundary": "PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF. TaskGraph.completion_policy is durable and optional: legacy remains the default, while ATOMIC_GRAPH_SUCCESS_V1 requires an explicit sink result_node_id. atomic_graph_success_enabled and bounded_fanout_enabled are independent, default false, and disabled in Host, Scheduler, and Internal production composition. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Atomic single, serial, and terminal-leaf executions defer shared completion to the outer authority. Each accepted node must bind a digest-recomputed canonical worker projection; only the explicit result projection can compile Graph effects and public output. Migration 0091 and complete_parallel_graph_success atomically commit Graph COMPLETED, Budget CONSUMED, two Outboxes, the complete Graph effect set, and a canonical success decision. Completed replay reads frozen 0091 authority and never recompiles effects. B4/0090 failure, Budget, review, and crash-re-entry semantics remain active. Durable cancellation, revisioned 0090 marker identity, historical half-state repair, cross-process Outbox claim/CAS, Budget high-contention, reconciliation, continuation, takeover, and production canary remain incomplete; production enablement is forbidden.",
       "startup_recovery_boundary": "Startup is ordered migration -> task_store.recover_startup -> publisher construction -> recovery outbox publication -> later runtime activation. Recovery exceptions fail closed before route activation. ASGI derives a construction-scoped execution owner from the configured logical owner. This does not provide online takeover, reconciliation completion, or automatic continuation.",
       "evidence_refs": [
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "host_brain/audit/migrations/0090_task_runtime_parallel_settlement_decision.sql",
+        "host_brain/audit/migrations/0091_task_runtime_parallel_success_decision.sql",
         "host_brain/contracts/agent_runtime/parallel_settlement.py",
+        "host_brain/contracts/agent_runtime/parallel_success.py",
         "host_brain/persistence/task_repository.py",
+        "host_brain/persistence/worker_projection_repository.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/heartbeat.py",
         "host_brain/integrations/runtime_events.py",
@@ -139,10 +151,13 @@
         "tests/unit/test_aw02_task_runtime_composition.py",
         "tests/contract/test_ne01_atomic_failure_bundle.py",
         "tests/contract/test_ne01_parallel_store_settlement.py",
+        "tests/contract/test_ne01_parallel_success_contract.py",
+        "tests/contract/test_ne01_parallel_success_store.py",
         "tests/contract/test_ne01_task_store_heartbeat_contract.py",
         "tests/unit/test_ne01_task_runtime_heartbeat.py",
         "tests/contract/test_nle_runtime_event_contract.py",
-        "tests/integration/test_gr03a_governed_durable_dag.py"
+        "tests/integration/test_gr03a_governed_durable_dag.py",
+        "tests/integration/test_ne01_b5_parallel_success.py"
       ]
     },
     "executive_authority_removal": {

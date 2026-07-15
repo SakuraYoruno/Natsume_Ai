@@ -3,8 +3,8 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v1.2
-核对日期：2026-07-15
+版本：v1.3
+核对日期：2026-07-16
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
@@ -33,7 +33,7 @@
 | Internal Agent governed | `WIRED` | Internal production cutover integration | ingress v2 立即编译 V3；Budget、child grant、PRE/POST Review、Verification、Acceptance、Receipt、replay 已贯通；长 Review 的 grant renewal 随 continuation 统一处理 | NE-01 已完成切片 |
 | 全 route universal runtime | `PARTIAL` | Cortex governed/read split + Scheduler/Internal production integrations | Host 四执行路由、Scheduler、Internal 已 governed；`task_progress/recent_turn` 已转只读投影；完整 Operator/Gateway surface matrix 仍需最终验收 | NE-01 |
 | Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
-| 多节点 Durable DAG | `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` | Coordinator、heartbeat、RuntimeOutboxPublisher、TaskStore、0090 decision journal、GR03a/NE-01 contracts | 默认关闭且 production OFF。live/re-entry 重建同一 payload/ref；outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts，当前 batch 仅定优先级/selected，支持非 selected `RETRY_PENDING`。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict；selected Budget usage 与 row digest/Outbox/Attempt/usage fail-closed。P0：terminal-leaf、durable cancel。P1：multi-revision marker 扫描仍需 revisioned Outbox identity；历史半提交、reconciliation/continuation、跨进程 Outbox、Budget 高竞争、production marker、takeover 仍缺 | NE-01 B4 |
+| 多节点 Durable DAG | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | Coordinator、TaskStore、0090/0091 decisions、worker projection store、B5 contracts/integration | B5A/B5B 已有可选 atomic policy、显式 result、admission/grant/projection fail-close，以及单节点/串行/多 terminal 0091 成功 UoW；0090/B4 failure/re-entry 保留。atomic/bounded 均默认关闭且三处生产 composition OFF。P0：B5C durable cancel。P1：revisioned 0090、历史半提交、跨进程 Outbox、Budget 高竞争、reconciliation/takeover/continuation、production canary 仍缺 | NE-01 B5 |
 | Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` + Host/Scheduler/Internal integrations | core ingress 已覆盖；concurrency 未计量，DEGRADE/REVIEW 分支与剩余 Domain/Operator 路径未完整 | NE-01 |
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |

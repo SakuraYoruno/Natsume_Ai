@@ -38,6 +38,18 @@ class TaskGraphStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class TaskGraphCompletionPolicy(StrEnum):
+    """Frozen whole-graph completion semantics.
+
+    Absence of this compatible v1 extension preserves the historical
+    node-terminal completion path.  The atomic policy is an explicit durable
+    opt-in and must never be inferred from process-local feature flags.
+    """
+
+    LEGACY_NODE_TERMINAL_V1 = "LEGACY_NODE_TERMINAL_V1"
+    ATOMIC_GRAPH_SUCCESS_V1 = "ATOMIC_GRAPH_SUCCESS_V1"
+
+
 class TaskNodeStatus(StrEnum):
     CREATED = "CREATED"
     BLOCKED = "BLOCKED"
@@ -349,6 +361,8 @@ class TaskGraph:
     created_at: int
     nodes: tuple[TaskNode, ...] = ()
     schema_version: str = TASK_GRAPH_SCHEMA_VERSION
+    result_node_id: str | None = None
+    completion_policy: TaskGraphCompletionPolicy | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "TaskGraph":
@@ -371,6 +385,20 @@ class TaskGraph:
             planner_ref=str(data.get("planner_ref") or "").strip(),
             status=_enum_value(TaskGraphStatus, data.get("status") or "CREATED", field_name="TaskGraph.status"),
             created_at=_non_negative_int(data.get("created_at"), field_name="created_at"),
+            result_node_id=(
+                str(data.get("result_node_id") or "").strip()
+                if data.get("result_node_id") is not None
+                else None
+            ),
+            completion_policy=(
+                _enum_value(
+                    TaskGraphCompletionPolicy,
+                    data.get("completion_policy"),
+                    field_name="TaskGraph.completion_policy",
+                )
+                if data.get("completion_policy") is not None
+                else None
+            ),
             nodes=nodes,
         )
         graph.validate()
@@ -396,6 +424,59 @@ class TaskGraph:
                     TASK_GRAPH_INVALID,
                     f"TaskNode {node.node_id} has unknown dependencies: {','.join(missing)}",
                 )
+        completion_policy: TaskGraphCompletionPolicy | None = None
+        if self.completion_policy is not None:
+            try:
+                completion_policy = TaskGraphCompletionPolicy(self.completion_policy)
+            except (TypeError, ValueError) as exc:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.completion_policy is invalid",
+                ) from exc
+        depended_on = {
+            dependency
+            for node in self.nodes
+            for dependency in node.dependencies
+        }
+        sink_node_ids = tuple(
+            node.node_id for node in self.nodes if node.node_id not in depended_on
+        )
+        if self.result_node_id is not None:
+            result_node_id = str(self.result_node_id).strip()
+            if not result_node_id or result_node_id not in known:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.result_node_id must identify a node in the graph",
+                )
+            dependents = sorted(
+                node.node_id
+                for node in self.nodes
+                if result_node_id in node.dependencies
+            )
+            if dependents:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.result_node_id must identify a sink node; "
+                    f"dependents: {','.join(dependents)}",
+                )
+            if (
+                completion_policy
+                is not TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+                and len(sink_node_ids) > 1
+            ):
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "legacy TaskGraph cannot declare one result authority across "
+                    "multiple terminal sinks",
+                )
+        if (
+            completion_policy is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+            and self.result_node_id is None
+        ):
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "atomic Graph success requires an explicit result_node_id",
+            )
         self._validate_acyclic()
 
     def _validate_acyclic(self) -> None:
@@ -418,7 +499,7 @@ class TaskGraph:
             visit(node_id)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "graph_id": self.graph_id,
             "root_work_order_id": self.root_work_order_id,
@@ -428,6 +509,16 @@ class TaskGraph:
             "created_at": self.created_at,
             "nodes": [node.to_dict() for node in self.nodes],
         }
+        # ``result_node_id`` is an optional compatible extension of the v1
+        # wire shape.  Omitting ``None`` preserves byte-stable legacy journal
+        # payloads and their existing digests/replay identities.
+        if self.result_node_id is not None:
+            payload["result_node_id"] = self.result_node_id
+        if self.completion_policy is not None:
+            payload["completion_policy"] = TaskGraphCompletionPolicy(
+                self.completion_policy
+            ).value
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,6 +625,7 @@ __all__ = [
     "EventRedactionLevel",
     "TaskEvent",
     "TaskGraph",
+    "TaskGraphCompletionPolicy",
     "TaskGraphStatus",
     "TaskNode",
     "TaskNodeStatus",

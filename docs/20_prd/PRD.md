@@ -3,8 +3,8 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.0
-日期：2026-07-15
+版本：v4.1
+日期：2026-07-16
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
 本文只定义产品必须提供什么、禁止什么以及如何验收，不记录代码完成度、文件数量、端口默认值或阶段状态。
@@ -149,8 +149,10 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 ### FR-NLE-002：持久 Task Control Plane
 
 - TaskGraph 的 dependency、revision、attempt、lease、heartbeat、retry/backoff、cancel、recovery 和 idempotency 必须持久化。
+- TaskGraph 可以通过版本化 `completion_policy` 显式选择整图原子成功语义；选择后必须持久化唯一 `result_node_id`，且它必须属于当前 revision 并为 sink。legacy 多 sink 图不得伪造单一结果 authority，禁止以最后完成、最后声明或任意成功节点隐式决定用户可见结果。
 - token、tool、time、concurrency、retry 和 model cost 必须可预留、计量、阻断和回放。
 - 依赖已满足节点可有界并发；循环依赖必须阻断，禁止忽略依赖继续执行。
+- atomic completion policy 下的全节点 Accepted fan-in 必须以单一 durable 决策原子绑定 Graph 完成、Budget 消费、状态 Outbox 与整图副作用意图；并发节点只能贡献证据，公开结果与整图副作用只能来自显式结果节点的已验收投影。生产进程不支持该 policy 时必须在 durable admission 前拒绝。
 
 ### FR-NLE-003：验证、Review 与回放
 

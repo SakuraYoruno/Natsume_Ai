@@ -3,8 +3,8 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.4
-核对日期：2026-07-15
+版本：v5.5
+核对日期：2026-07-16
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` | 默认关闭且生产未启用；live/re-entry 从 durable Node/Attempt/Reservation/BudgetUsage 重建同一 payload/ref 并 exact replay。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS 保持 conflict；selected Budget usage 和 decision row digest/Outbox/Attempt/usage fail-closed。multi-revision 完整 marker 扫描仍需 revisioned Outbox identity；terminal-leaf、durable cancel、跨进程 Outbox、takeover/continuation 未闭环 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | 可选 `ATOMIC_GRAPH_SUCCESS_V1` 持久冻结显式结果 authority；独立 atomic/bounded 开关均默认关闭，三处生产 composition 未启用。0091 单 UoW 已覆盖单节点、串行与多 terminal 成功，结果只取 canonical result projection。0090/B4 保留；B5C、revisioned 0090、跨进程 Outbox、自动接管/续跑和 canary 未闭环 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -90,7 +90,7 @@ Scheduler 与 Internal Agent 均已有真实任务证据。Internal 会先剥离
 
 ### 4.1 Durable TaskGraph
 
-当前 coordinator 能持久化多节点图、阻断未知依赖和环、推进 `BLOCKED → READY`、创建 Attempt/Lease/Reservation，并在 Verification 与 Acceptance 后完成节点。
+当前 coordinator 能持久化多节点图、阻断未知依赖和环、推进 `BLOCKED → READY`、创建 Attempt/Lease/Reservation，并在 Verification 与 Acceptance 后完成节点。`TaskGraph.result_node_id` 与 `completion_policy` 是兼容 v1 可选字段。缺省/`LEGACY_NODE_TERMINAL_V1` 保留旧语义：单 sink 可显式 result，多 sink 必须保持无 result；`ATOMIC_GRAPH_SUCCESS_V1` 必须显式绑定一个当前 revision sink。admission、durable identity 和 planner semantic/shadow comparison 都校验二者，不能从完成顺序推断结果 authority。`PlanningGraphCompiler` 默认 legacy，只有调用方显式请求或失败重规划继承前一 revision 才生成 atomic policy。
 
 B0 的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定选择 READY、依赖满足、retry due/waiting 节点，严格 fan-in，并受 concurrency/occupied slots 限制。B1 的 store/coordinator 子集已让 Coordinator 从 durable snapshot 消费该决策，并由 TaskStore 在 `BEGIN IMMEDIATE` 中原子提交 Attempt、Node、Lease、初始 Heartbeat 和 Outbox；claim 响应丢失可在 authority/TTL/outbox 均未漂移时精确返回原 Lease。
 
@@ -102,9 +102,9 @@ B0 的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定�
 
 operation reservation 建立后，Coordinator 会创建 `DurableExecutionHeartbeat`。后台循环严格先续 Lease、再续 Reservation，Worker 的每个流事件和最终结果都经过 checkpoint；停止并 join 心跳后才允许使用最新 Reservation version 执行 COMMIT。Lease 与 Reservation 续租均写版本化 Outbox，并支持同参调用在“事务已提交但响应丢失”时精确重放。任何续租失败、版本漂移或心跳生命周期异常都会产生 `RECOVERY_REQUIRED` 收据，Coordinator 不会 COMMIT Worker 结果。这个语义只建立 fail-closed 保护，不会在同一进程内自动 takeover 或即时完成 reconciliation。
 
-Coordinator 现在还有一个 `bounded_fanout_enabled` 实验开关，构造默认值为 `false`，生产 composition 没有传入启用值。当 `compute_dag_schedule()` 一次选出多个 claimable 节点，且图中仍有不属于该批次、尚未 `ACCEPTED` 的后继/剩余节点时，outer 会先把 Graph 从 `CREATED` 激活，再把已选节点创建为 asyncio child；批次数量已由 scheduler 按 Budget concurrency 截断，纯 terminal-leaf 仍排除。非终态 progress 由 `fanout_event_buffer_size` 个 semaphore slot 限制在途数量（默认 32，非正值拒绝），慢消费者会反压 producer；总 queue 另为每个 child 预留一个 control slot，因此 terminal/error/self-cancel 不会被满 progress buffer 阻塞或丢失。
+Coordinator 现在有两个独立实验能力：`atomic_graph_success_enabled` 决定进程是否能执行 frozen atomic policy，`bounded_fanout_enabled` 决定 scheduler 多节点批次是否实际并发；二者构造默认值均为 `false`，Host、Scheduler、Internal 三处生产 composition 均未传入启用值。Application 在 `repository.admit` 前检查 atomic capability、node-grant service 与 parent grant，任一缺失即拒绝且不写 durable admission。Coordinator 再要求 `node_grant_refs` 精确覆盖整个 admitted Graph。atomic 图即使是单节点或顺序执行也使用 deferred child + outer terminal authority；terminal-leaf 实际并行还必须另开 bounded fan-out。progress buffer/控制槽的反压语义保持 B4 合同。
 
-Coordinator 在任何 Budget activation 或 worker resolution 前调用 `assert_parallel_settlement_decision_ready()`；`0090` 缺表/缺列会以 schema-not-ready fail-fast。对于 `ACTIVE` 多节点重入，若 durable snapshot 仍含 live Node、active Attempt 或 `ACTIVE` Lease，入口返回 `GOVERNED_EXECUTION_IN_PROGRESS`，不会 resolve 新 worker、改变 Attempt/Lease，也不会抢现有 owner 的 execution authority。结算窗口遇到 ownership fence，或 CAS 后重读发现 active Node/Attempt/Lease，也返回 `IN_PROGRESS`；纯 CAS 且没有 active ownership 事实仍转为 `GOVERNED_DURABLE_STATE_CONFLICT`。
+Coordinator 在任何 Budget activation 或 worker resolution 前调用 `assert_parallel_settlement_decision_ready()`；`0090` 缺表/缺列会以 schema-not-ready fail-fast。B5 成功开关实际生效时还会先调用 `assert_parallel_success_decision_ready()`，要求迁移 0091 完整可用。对于 `ACTIVE` 多节点重入，若 durable snapshot 仍含 live Node、active Attempt 或 `ACTIVE` Lease，入口返回 `GOVERNED_EXECUTION_IN_PROGRESS`，不会 resolve 新 worker、改变 Attempt/Lease，也不会抢现有 owner 的 execution authority。结算窗口遇到 ownership fence，或 CAS 后重读发现 active Node/Attempt/Lease，也返回 `IN_PROGRESS`；纯 CAS 且没有 active ownership 事实仍转为 `GOVERNED_DURABLE_STATE_CONFLICT`。
 
 并行 child 使用 deferred shared-terminal 模式：它仍独占自己的 Attempt、Node、Lease、Reservation，并可记录 Budget usage 或把预算标成 `EXCEEDED`，但不得终结共享 Graph，也不得把 Budget 置为 `RELEASED/CONSUMED`。因此普通的 node-local 非接受不会 fail-fast cancel sibling；outer 会等待所有已启动 sibling 到达 durable node-local terminal，再按固定优先级解释整批结果。并行 `_publish_outbox()` 先受 Coordinator 本地 asyncio lock 保护；同进程 Host/Internal/Scheduler 共享的 `RuntimeOutboxPublisher` 又以实例级 `threading.Lock` 串行化 list/append/mark drain。跨线程合同用两个 worker 证明共享 publisher 的 peak active drain 为 1，但该锁不覆盖多进程。
 
@@ -112,9 +112,15 @@ live 与 crash/re-entry 不再从瞬时 receipt 拼不同决策：两者均重�
 
 合同/集成测试覆盖：live 首次构造与 crash/re-entry 重构得到同一 payload/ref、提交响应丢失 exact replay、较早批次 terminal Node 被纳入后续 decision、`RETRY_PENDING` sibling 作为非 selected outcome、Budget selected usage 与被动 blocked sibling 分离、newer selected Attempt replay rejection，以及 decision row/marker corruption fail-closed。
 
+B5 terminal success 不复用 0090 的 failure decision。每个 Accepted 节点必须拥有 latest `SUCCEEDED` Attempt、已 `COMMITTED` 的 operation Reservation receipt，以及由 `WorkerProjectionStore` 冻结的 `Natsume.task_runtime.worker_projection.v1` 投影。读取后重新 canonicalize 并重算 digest，精确校验 command/request、graph/revision、node/attempt、route/target、receipt、node grant 与 `APPROVE`；仅凭一条看似合法的 digest 字符串不能通过。只有 `result_node_id` 对应投影会编译整图 effects 并成为公开 projection；其他 Accepted 叶只提供 outcome/evidence。Skill 同样不能以瞬时 executor 返回值争夺结果 authority。
+
+`DurableTaskStore.complete_parallel_graph_success()` 是 B5 唯一成功 mutation authority。它在同一个 `BEGIN IMMEDIATE` 中将 Graph `ACTIVE → COMPLETED`、共享 Budget `ACTIVE → CONSUMED`，写入不同的 Graph/Budget Outbox、全部 `GRAPH` scope effect intents，以及迁移 0091 的 `Natsume.task_runtime.parallel_success.v1` decision row。decision 使用 `tasksuccess://sha256/...` 引用并绑定 completion policy、所有 Node status/version、Accepted outcome、显式结果 Attempt/receipt、projection digest、effect identity 和两条 Outbox；任何晚故障整体回滚。已完成图的 replay 只读取并复核 0091，不重新编译 effects；若第一次提交和第二次 exact replay 的响应都丢失，Coordinator 重读 Graph terminal authority 后进入同一 completed replay 分支。
+
+对抗验证包含单节点 atomic、串行 atomic、多 terminal roots 反向完成顺序、flag-off 与缺 node-grant service 在 admission 前拒绝、projection narrative/command/grant 篡改、restart after accepted、completed restart 不重编 effects、一次和连续两次 Store 响应丢失。它证明 shadow contract 自洽，不等于生产 canary。
+
 历史 marker 校验存在一个真实 schema 边界：旧 TaskGraph Outbox 只有 `aggregate_id=graph_id`，没有 `graph_revision`。因此完整扫描 `taskbatch` marker 的缺 decision row/错绑只在该 graph ID 仅一个 revision 时安全；多 revision 读取仍会对返回 decision row 的 digest、Outbox、Attempt、usage 做精确校验，但不能完整判断其他 revision 历史 marker 是否缺行。要封闭此缺口，需要 revisioned TaskGraph Outbox aggregate identity。
 
-该路径仍不能默认启用。B4 已让 `ACTIVE` 多节点 Graph 在崩溃重入时从 durable Node/latest Attempt 重建 outcomes，并按 recovery > Budget > failure > review 复用 live outer 的完整 snapshot/Attempt/Lease/Reservation fence 与原子事务；同时存在 review 与 failure 时会稳定选择 failure。canonical decision journal 也让 `taskbatch` ref 可独立解析并受 replay 防篡改校验。范围不包含历史已半提交状态：`BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 不会由该入口自动修复；`WAITING_APPROVAL` 仍走独立 pre-review 专线，没有纳入统一的 optional-attempt observation。纯 terminal-leaf、durable cancel fence、跨进程 Outbox claim、Budget 高竞争语义也仍未完成。
+该路径仍不能默认启用。B5A/B5B 只补齐持久 atomic policy、显式结果 authority 与受门禁保护的全成功边界；B4 的 0090 failure/review/Budget/crash-re-entry 决策语义没有被替换。范围不包含历史已半提交状态；`WAITING_APPROVAL` 仍走独立 pre-review 专线。B5C durable cancel fence、revisioned 0090 marker identity、跨进程 Outbox claim、Budget 高竞争、自动 takeover/continuation 与 production canary 仍未完成。
 
 Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
@@ -122,7 +128,7 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 仍缺：
 
-- B4 fan-out 未进生产；live 与 `ACTIVE` 多节点重入的共享 Graph/Budget 终态已移到 outer snapshot transaction，但 terminal-leaf batch 与最终成功终态仍未并行；
+- B5 terminal success 仍是 production-off shadow；持久 policy、独立 atomic/bounded 开关、admission/grant/projection 门禁和 0091 成功 UoW 已实现，但三处生产 composition/canary 未启用；
 - 历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态仍待 reconciliation；`WAITING_APPROVAL` 仍非统一 optional-attempt observation；
 - legacy TaskGraph Outbox 缺 `graph_revision`，多 revision 的完整 `taskbatch` marker 历史扫描仍待 revisioned Outbox identity；
 - 取消没有 durable cancel fence，进程崩溃后的回收仍依赖 TTL/startup recovery；
@@ -255,7 +261,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 在已完成的 live/`ACTIVE` crash-re-entry 非 terminal-leaf outer 收口上补齐 terminal-leaf 并行、最终成功终态与 durable cancel fence；通过故障矩阵后才考虑生产启用。
+1. 实现 B5C durable cancel request/fence/journal，并证明取消与 0091 success mutation 的竞争在 crash/re-entry 后仍 fail closed；完成故障矩阵后才考虑生产 canary。
 2. 将历史 `BLOCKED + failure Node` / `FAILED + ACTIVE Budget` 半提交修复归入 reconciliation，并把 `WAITING_APPROVAL` 收敛为统一 optional-attempt observation。
 3. 为跨进程 Outbox drain 建立 durable claim/CAS 或单 writer；同进程 publisher 实例锁不能替代该 authority。
 4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，收敛 Budget CAS/`ALREADY_EXCEEDED` 并发语义，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。

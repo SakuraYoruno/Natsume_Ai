@@ -34,6 +34,8 @@ class TaskStorePort(Protocol):
 
     def assert_parallel_settlement_decision_ready(self) -> None: ...
 
+    def assert_parallel_success_decision_ready(self) -> None: ...
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
@@ -320,6 +322,33 @@ class TaskStorePort(Protocol):
     ) -> Mapping[str, Any]: ...
 
     def get_latest_parallel_settlement_decision(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def complete_parallel_graph_success(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: Any,
+        budget_outbox: Any,
+        effect_intents: Sequence[Mapping[str, Any] | Any],
+    ) -> Mapping[str, Any]: ...
+
+    def get_parallel_success_decision(
+        self,
+        decision_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_latest_parallel_success_decision(
         self,
         graph_id: str,
         revision: int,

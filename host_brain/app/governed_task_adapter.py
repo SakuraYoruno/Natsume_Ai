@@ -148,10 +148,12 @@ class _FrozenSkillWorker:
         ledger: Any,
         execution_ports: GovernedSkillExecutionPorts,
         node_grant_verifier: DurableNodeGrantVerifier,
+        projections: Any | None = None,
     ) -> None:
         self._ledger = ledger
         self._execution_ports = execution_ports
         self._node_grant_verifier = node_grant_verifier
+        self._projections = projections
 
     async def execute_stream(
         self,
@@ -326,6 +328,41 @@ class _FrozenSkillWorker:
         )
         if worker_budget is not None:
             commit["budget_usage"] = worker_budget.to_payload()
+        if self._projections is not None:
+            projection_body = {
+                **commit,
+                "command_id": command.command_id,
+                "graph_id": str(execution_context.get("graph_id") or ""),
+                "graph_revision": int(execution_context.get("graph_revision") or 0),
+                "node_id": node_id,
+                "attempt_id": str(execution_context.get("attempt_id") or ""),
+                "node_grant_ref": node_grant_ref,
+            }
+            projection_body.pop("receipt_ref", None)
+            payload_digest = _sha256_json(projection_body)
+            projection_id = (
+                "worker-projection://skill/"
+                f"{payload_digest.split(':', 1)[1]}"
+            )
+            durable = self._projections.stage(
+                projection_id=projection_id,
+                projection={
+                    **projection_body,
+                    "projection_id": projection_id,
+                    "payload_digest": payload_digest,
+                    "schema_version": "Natsume.task_runtime.worker_projection.v1",
+                },
+            )
+            if (
+                not isinstance(durable, Mapping)
+                or str(durable.get("projection_id") or "") != projection_id
+                or str(durable.get("payload_digest") or "") != payload_digest
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "skill result could not be frozen in the canonical worker projection journal",
+                )
+            commit["receipt_ref"] = projection_id
         yield commit
 
 
@@ -892,12 +929,13 @@ def build_governed_host_runtime(
         model_attempt_service=model_attempt_service,
         production_authority_verifier=production_authority_verifier,
     )
+    projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     canonical = _FrozenSkillWorker(
         ledger=ledger,
         execution_ports=skill_execution_ports,
         node_grant_verifier=node_grant_verifier,
+        projections=projection_store,
     )
-    projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     chat_worker = None
     delegate_worker = None
     if projection_store is not None:
@@ -1251,6 +1289,7 @@ def _build_contracts(
         planner_ref=f"planner://governed-host/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
+        result_node_id=node_id,
         nodes=(node,),
     )
     command = build_host_command(

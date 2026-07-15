@@ -3,8 +3,8 @@
 
 # Natsume AI 稳定工程合同
 
-版本：v4.0
-日期：2026-07-15
+版本：v4.1
+日期：2026-07-16
 文档类型：`STABLE_ENGINEERING_CONTRACT / NO_EXECUTION_STATUS`
 
 本文把 PRD 转为长期稳定的工程约束，不记录实现完成度或阶段状态。
@@ -124,6 +124,7 @@ Ingress
 ### 3.3 TaskGraph 与 revision
 
 - TaskGraph 必须持久化 node、dependency、input/output ref、retry policy、idempotency 和 verifier。
+- `completion_policy` 是 TaskGraph v1 的持久可选扩展；缺省保持 legacy node-terminal 语义。选择 `ATOMIC_GRAPH_SUCCESS_V1` 时必须同时冻结 `result_node_id`，该节点必须存在于当前图且为 sink。legacy 多 sink 图不得声明单一 result；admission、durable replay、planner semantic comparison 与 worker projection 必须校验同一 identity，不允许用 completion order 推断结果 authority。
 - 未满足依赖的节点保持 `BLOCKED`；循环和未知依赖显式阻断。
 - Planner 只能提交冻结 revision；worker 不得改变节点集合或依赖。
 - 失败重规划沿用 `graph_id` 并创建 `revision + 1`，保留旧 revision、失败 Attempt 和证据。
@@ -134,6 +135,7 @@ Ingress
 - Lease、heartbeat 和 fencing token 防止双 worker；takeover 必须留下恢复证据。
 - retry/backoff 必须实际消费 `retry_policy` 和 retry budget。
 - 所有依赖已满足节点可有界 fan-out；fan-in 在依赖全部 Accepted 后推进。
+- atomic success 与 bounded fan-out 使用独立、默认关闭的进程能力开关。atomic policy 必须在 repository admission 前验证 runtime capability、acceptance-effects writer、durable projection reader、node-grant service、parent grant 与显式 `result_node_id`；不满足即 fail closed。terminal-leaf 实际并发还必须另行启用 bounded fan-out，不能从 policy 或图形状推断开关。
 - cancel、timeout、crash、lease expiry 和 process restart 不得重复已确认副作用。
 
 ### 3.5 Budget
@@ -162,6 +164,8 @@ Budget ledger 支持 token、tool call、time、concurrency、retry 和 model co
 ### 3.8 副作用与一致性
 
 - 外部副作用只能由 Acceptance 同事务写入 durable effect intents 后执行。
+- 多节点全成功的外层 UoW 必须一次提交 `Graph COMPLETED`、共享 `Budget CONSUMED`、Graph/Budget 两条不同 Outbox、整图 effect intents 与 canonical success decision；任何晚故障必须整体回滚，响应丢失只允许 identity 完全一致的 exact replay。
+- 整图 effect intents 和最终公开 projection 必须从显式结果节点已经冻结并通过 canonical digest、command/request、route/target、attempt/receipt 与 node-grant lineage 校验的 durable worker projection 编译；其他 Accepted 节点只提供 outcome/evidence，不得争夺结果 authority。Skill 节点同样不得绕过该冻结投影读取瞬时 executor 返回值。Graph 已完成后的 replay 只读 canonical success decision，不重新编译 effect intents。
 - dispatcher 对每个 effect 独立 claim、retry、dedupe 和出 receipt。
 - 对话、Memory、Life、Gateway 和 Edge 可以是 Acceptance 后最终一致，但必须公开该语义；不得宣称跨系统单事务。
 - fire-and-forget task 不得承担不可恢复的 canonical 写入。

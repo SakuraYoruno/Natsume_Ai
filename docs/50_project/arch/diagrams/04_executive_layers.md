@@ -3,8 +3,8 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.4
-核对日期：2026-07-15
+版本：v3.5
+核对日期：2026-07-16
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
 
@@ -18,12 +18,13 @@ flowchart TD
     subgraph Canonical["Canonical governed path"]
         HS["Host route contracts / Plan search"]
         GC["PlanningGraphCompiler"]
+        GATE["atomic capability + grant\npre-admission gate"]
         AD["Durable admission"]
         TR["GovernedTaskCoordinator"]
-        SHADOW["bounded fan-out shadow\ndefault OFF / production disabled"]
+        SHADOW["atomic success + bounded fan-out shadow\nindependent default OFF / production disabled"]
         WK["Frozen worker"]
         AC["Verification / Acceptance"]
-        HS --> GC --> AD --> TR --> WK --> AC
+        HS --> GC --> GATE --> AD --> TR --> WK --> AC
         TR -.-> SHADOW -.-> WK
     end
 
@@ -120,4 +121,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。`PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` 默认关闭：live/re-entry outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），当前 batch 只定优先级/selected；payload/ref 与 exact replay 已统一。ownership/CAS 后 active ownership 才映射 `IN_PROGRESS`，纯 CAS为 conflict。multi-revision marker 扫描仍需 revisioned Outbox identity。下一步仍是 terminal-leaf 与 durable cancel，其余 reconciliation/continuation 等未完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`：可选 atomic policy、显式 result、pre-admission capability/grant、canonical projection 与 0091 单 UoW 已有 shadow 证据；atomic/bounded 和三处生产 composition 均 OFF。0090/B4 保留；下一步是 B5C durable cancel、revisioned 0090、多进程 Outbox、takeover/continuation 与 production canary，不能宣称 Lane B 或完整架构完成。

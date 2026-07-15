@@ -69,6 +69,7 @@ def test_internal_boundary_compiles_v2_to_explicit_governed_v3() -> None:
     assert command.root_work_order_id == order.root_work_order_id
     assert command.graph_id == order.task_graph_id == graph.graph_id
     assert graph.nodes[0].route == "delegate:agent_runtime"
+    assert graph.result_node_id == graph.nodes[0].node_id
     assert order.task_node_id == graph.nodes[0].node_id
     assert order.approval_ref == GRANT_REF
     assert order.approval_policy["governor_grant_ref"] == GRANT_REF

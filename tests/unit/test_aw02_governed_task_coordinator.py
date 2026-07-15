@@ -15,7 +15,11 @@ from host_brain.contracts.agent_runtime.task_graph import (
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.orchestration import GovernedCommandApplication
-from host_brain.task_runtime import GovernedRuntimeError, GovernedTaskCoordinator
+from host_brain.task_runtime import (
+    AdmittedExecution,
+    GovernedRuntimeError,
+    GovernedTaskCoordinator,
+)
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
     HostCommandSurface,
@@ -428,6 +432,7 @@ def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
         planner_ref="planner://governed/one-node",
         status=TaskGraphStatus.CREATED,
         created_at=1,
+        result_node_id="node-one",
         nodes=(
             TaskNode(
                 node_id="node-one",
@@ -493,6 +498,50 @@ def _application(
         owner_id="worker-one",
     )
     return GovernedCommandApplication(command_repository=_Repository(), coordinator=coordinator)
+
+
+def test_admitted_execution_preserves_explicit_result_authority() -> None:
+    command, _, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
+
+    admitted = AdmittedExecution.from_contracts(
+        command=command,
+        assignment=assignment,
+        graph=graph,
+    )
+
+    assert admitted.result_node_id == "node-one"
+    assert admitted.for_node("node-one").result_node_id == "node-one"
+
+
+def test_coordinator_durable_identity_rejects_result_authority_drift() -> None:
+    command, _, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
+    admitted = AdmittedExecution.from_contracts(
+        command=command,
+        assignment=assignment,
+        graph=graph,
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    drifted_graph = {**store.graph, "graph": dict(store.graph["graph"])}
+    drifted_graph["graph"]["result_node_id"] = None
+
+    with pytest.raises(GovernedRuntimeError) as error:
+        coordinator._assert_durable_identity(  # noqa: SLF001
+            admitted,
+            graph=drifted_graph,
+            node=store.node,
+        )
+
+    assert error.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
 
 
 @pytest.mark.asyncio

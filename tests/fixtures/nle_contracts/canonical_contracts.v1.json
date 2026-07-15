@@ -64,9 +64,12 @@
     },
     "TaskGraph": {
       "schema_version": "Natsume.agent.task_graph.v1",
-      "fields": ["graph_id", "root_work_order_id", "revision", "planner_ref", "status", "created_at", "nodes", "schema_version"],
+      "fields": ["graph_id", "root_work_order_id", "revision", "planner_ref", "status", "created_at", "nodes", "schema_version", "result_node_id", "completion_policy"],
       "required_fields": ["schema_version", "graph_id", "root_work_order_id", "revision", "planner_ref", "status", "created_at", "nodes"],
-      "enum_fields": {"status": ["CREATED", "ACTIVE", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED"]}
+      "enum_fields": {
+        "status": ["CREATED", "ACTIVE", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED"],
+        "completion_policy": ["LEGACY_NODE_TERMINAL_V1", "ATOMIC_GRAPH_SUCCESS_V1"]
+      }
     },
     "TaskNode": {
       "schema_version": "Natsume.agent.task_node.v1",

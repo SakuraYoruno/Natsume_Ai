@@ -3,8 +3,8 @@
 
 # 当前需求可追溯矩阵
 
-版本：v3.2
-核对日期：2026-07-15
+版本：v3.3
+核对日期：2026-07-16
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
@@ -40,7 +40,7 @@
 | TRACE-EXEC-01 | FR-ARCH-003 | Host 四路线必须共享 WorkOrderV3/TaskGraph | Cortex、GovernedHostRuntime | GR-05/06 receipt；T-GR-RUNTIME-01 | `WIRED` | NE-01 守卫 |
 | TRACE-EXEC-02 | FR-ARCH-003 | Scheduler 必须进入同一 admission | Scheduler governed runtime | production cutover integration；child grant/receipt lineage | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | production cutover integration；principal/child grant/Review/receipt lineage | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry、受控 fan-out/fan-in | coordinator/heartbeat/task store/0090 decision journal/task composition | B4 默认关闭且 production OFF：live/re-entry outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），从 Reservation/BudgetUsage 重建同一 payload/ref并 exact replay；ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict；row digest/Outbox/Attempt/usage fail-closed | `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL`。P0：terminal-leaf、durable cancel。P1：multi-revision marker 扫描仍需 revisioned Outbox identity；历史半提交、reconciliation/continuation、跨进程 Outbox、Budget 高竞争、production marker、takeover 仍缺 | NE-01 B4 |
+| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry、受控 fan-out/fan-in、显式结果与整图原子成功 | coordinator/heartbeat/task store/0090+0091 decision journals/worker projection/task composition | B4/0090 保留 whole-Graph failure、Budget、review 与 crash-reentry exact replay；B5 增加持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id`、admission 前 capability/grant 门禁、canonical projection digest/identity 重验，以及单节点/串行/terminal-leaf 全成功单 UoW。0091 原子提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、完整 Graph effects 与 success decision；completed replay 不重编 effects。atomic 与 bounded 开关独立、默认 false，三处生产 composition 均 OFF | `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF`。P0 下一项：durable cancel。P1：revisioned 0090 marker identity、历史半提交修复、reconciliation/continuation、跨进程 Outbox、Budget 高竞争、production canary、takeover 仍缺 | NE-01 B5C |
 | TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | Host/Scheduler/Internal integrations | `PARTIAL_CORE_INGRESS` | NE-01 |
 | TRACE-EXEC-06 | FR-NLE-003 | Review token 后自动安全 continuation | ReviewStore/review runtime | Review tests/UI | `PARTIAL_MANUAL` | NE-01 |
 | TRACE-EXEC-07 | FR-ARCH-003 | 不得有第二任务真相 | Durable Task/Conversation projections | registry absence contract + code audit | `WIRED` | NE-01 已完成切片 |

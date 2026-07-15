@@ -3,8 +3,8 @@
 
 # Natsume AI 系统架构总览
 
-版本：v1.2
-核对日期：2026-07-15
+版本：v1.3
+核对日期：2026-07-16
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
@@ -129,15 +129,15 @@ flowchart TB
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
-`PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` 保留默认 `false`、生产未启用的 `bounded_fanout_enabled`。当 scheduler 选出的 claimable batch 超过一个节点，并且图中仍有未 `ACCEPTED` 的后继/剩余节点时，Coordinator outer 先激活 Graph，再按 Budget concurrency 启动 asyncio child；纯 terminal-leaf batch 仍顺序。progress 由默认 32 的 semaphore slot 有界反压，且每个 child 有保留 control slot，terminal/error/self-cancel 不会被满 progress buffer 吞掉。child deferred 路径只拥有 Attempt/Node/Lease/Reservation 与 Budget usage/`EXCEEDED`，不能终结 Graph 或 `RELEASE/CONSUME` Budget。正常 node-local 非接受会等待全部已启动 sibling 落稳，不再 fail-fast cancel。
+`PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` 在 B4 之上增加持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1` 和显式 sink `result_node_id`。缺省继续 legacy；legacy 多 sink 不声明 result。`PlanningGraphCompiler` 默认 legacy，只有显式请求或重规划继承才 atomic。Coordinator 的 `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 独立且默认 `false`，Host、Scheduler、Internal 三处生产 composition 均 OFF。Application 在 repository admission 前检查 atomic capability、node-grant service 与 parent grant，Coordinator 只接收 exact node-grant map；atomic 图可顺序执行并由 outer 封口，terminal-leaf 实际并行还需 bounded 开关。
 
-运行入口先验证 `0090` decision schema，再允许 Budget activation 或 worker resolution，因此 schema 缺失/陈旧会在产生预算或执行副作用前 fail-fast。`ACTIVE` 多节点重入若 durable snapshot 仍含 live Node、active Attempt 或 `ACTIVE` Lease，则返回 `GOVERNED_EXECUTION_IN_PROGRESS`，不解析 worker、不抢 execution authority。结算窗口的 ownership fence，或 CAS 后重读发现 active Node/Attempt/Lease，也映射为 `IN_PROGRESS`；没有 active durable fact 的纯 CAS 保持 durable conflict。
+运行入口先验证 `0090` decision schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
 
-全部 child 稳定后，live 与 crash/re-entry 都从 durable Node、Attempt、Reservation、BudgetUsage 重建同一个 canonical v2 payload/ref，并通过同一原子事务结算；response-loss 只 exact replay。outcomes 全量覆盖 admitted Graph 中具备 latest stable Attempt 的 durable terminal Nodes，不局限当前 claimable batch；当前 batch 只决定优先级/selected，`RETRY_PENDING` 可作为非 selected outcome 并重入恢复。selected `BUDGET_BLOCKED` 绑定 rejected usage，被动 blocked sibling 无需本地 usage。decision row 读取校验 digest、精确 Outbox、Attempt（Budget 加 usage）；terminal replay 再校验 Graph target/version。
+0090/B4 继续从 durable Node、Attempt、Reservation、BudgetUsage 重建 failure/review/Budget canonical v2 decision。全节点 Accepted 时，B5 对每个 frozen worker projection 重算 canonical digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式 result projection 编译整图 effects 和公开结果。`complete_parallel_graph_success()` 在单 UoW 中提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、全图 effect intents 与 0091 decision。completed replay 只读 0091、不重编 effects；两次响应丢失后重读 terminal authority。
 
 完整历史 `taskbatch` marker 缺行/错绑扫描只在 single-revision graph ID 上安全。legacy TaskGraph Outbox 没有 `graph_revision`，multi-revision 时不能可靠把同一 graph ID 下的历史 marker 分配到 revision；此时读取仍对返回 decision row 自身做 digest/Outbox/Attempt/usage 精确校验。revisioned TaskGraph Outbox identity 是尚未完成的结构边界。
 
-这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。live 与 `ACTIVE` 多节点 crash/re-entry 的非 terminal-leaf shared terminal 已由 outer 统一，canonical v2 decision 也已与 Graph/可选 Budget/Outbox 同事务持久化。历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态不会自动修复；`WAITING_APPROVAL` 仍走独立 pre-review 专线，尚未统一为 optional-attempt observation。terminal-leaf、durable cancel fence、跨进程 Outbox claim/CAS、Budget 高竞争语义、production marker、online takeover、自动 reconciliation/Review continuation 均未完成。
+这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。单节点、串行、多 terminal 完成顺序、projection 篡改、flag/grant admission、restart 与双响应丢失已有对抗验证；但 B5C durable cancel、revisioned 0090、历史半提交修复、`WAITING_APPROVAL` 统一、跨进程 Outbox、Budget 高竞争、online takeover、自动 continuation 与 production canary 均未完成。
 
 ### 3.5 模型与能力执行层
 
@@ -225,7 +225,7 @@ flowchart LR
 | Governor Decision | 这次请求允许做什么 | 对一次批准不可变 |
 | HostCommand | 系统接受了什么命令 | Durable admission record |
 | WorkOrderV3 | 范围、预算、验收和上下文是什么 | 与 graph revision 绑定 |
-| TaskGraph | 哪些节点以何种依赖执行 | revision 不可变 |
+| TaskGraph | 哪些节点以何种依赖执行；可选 completion policy 与显式 result authority | revision 不可变；atomic policy 不可由进程开关推断 |
 | Attempt | 某节点第几次执行发生了什么 | 每次执行独立 |
 | Lease | 哪个 worker 在什么 fencing token 下拥有节点 | 有时效，可回收 |
 | Node Grant | 该 worker 对该节点能做什么 | scope 精确绑定 |
@@ -332,7 +332,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B4_CRASH_REENTRY_DECISION_JOURNAL` | 默认关闭且生产未启用；live/re-entry 从 durable Node/Attempt/Reservation/BudgetUsage 重建同一 payload/ref并 exact replay。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS 为 conflict；selected Budget usage 与 decision row digest/Outbox/Attempt/usage fail-closed。multi-revision 完整 marker 扫描仍需 revisioned Outbox identity；历史半提交、terminal-leaf、durable cancel、跨进程 Outbox、Budget 高竞争、takeover/continuation 未接线 |
+| TaskGraph revision + `PARTIAL_B5_TERMINAL_SUCCESS_SHADOW / PRODUCTION_OFF` | 可选 atomic policy、显式 result、admission/grant/projection fail-close 与 0091 成功 UoW 已有 shadow 证据；atomic/bounded 和三处生产 composition 均 OFF。0090/B4 保留；B5C、revisioned 0090、跨进程 Outbox、Budget 高竞争、takeover/continuation/canary 未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

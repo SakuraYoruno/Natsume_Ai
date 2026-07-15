@@ -1155,6 +1155,7 @@ def _build_contracts(
         planner_ref=f"planner://governed-scheduler/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(received_at_ms),
+        result_node_id=node_id,
         nodes=(node,),
     )
     command = build_host_command(

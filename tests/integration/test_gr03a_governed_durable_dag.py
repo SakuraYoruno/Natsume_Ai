@@ -17,6 +17,7 @@ from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, Budge
 from host_brain.contracts.agent_runtime.review_policy import ReviewResumePhase
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
@@ -101,6 +102,7 @@ def _contracts(
     review_required: bool = False,
     concurrency: int = 1,
     token_limit: int = 100_000,
+    completion_policy: TaskGraphCompletionPolicy | None = None,
 ) -> tuple[Any, WorkOrderV3, ExecutorAssignment, TaskGraph]:
     work_order = WorkOrderV3(
         work_order_id="work-order-gr03a",
@@ -129,6 +131,18 @@ def _contracts(
             ),
         ),
     )
+    depended_on = {
+        dependency for _, dependencies in specs for dependency in dependencies
+    }
+    sink_node_ids = tuple(
+        node_id for node_id, _ in specs if node_id not in depended_on
+    )
+    result_node_id = (
+        sink_node_ids[-1]
+        if len(sink_node_ids) == 1
+        or completion_policy is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+        else None
+    )
     graph = TaskGraph(
         graph_id="graph-gr03a",
         root_work_order_id=work_order.work_order_id,
@@ -136,6 +150,8 @@ def _contracts(
         planner_ref="planner://gr03a/dag",
         status=TaskGraphStatus.CREATED,
         created_at=NOW,
+        result_node_id=result_node_id,
+        completion_policy=completion_policy,
         nodes=tuple(
             TaskNode(
                 node_id=node_id,

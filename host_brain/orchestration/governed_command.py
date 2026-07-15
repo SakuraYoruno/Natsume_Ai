@@ -9,6 +9,7 @@ from typing import Any
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
 
 from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraphCompletionPolicy,
     validate_task_graph_admission_state,
 )
 from host_brain.task_runtime.coordinator import (
@@ -113,6 +114,27 @@ class GovernedCommandApplication:
                 "assignment must be ExecutorAssignment",
             )
         self._require_ready_graph(graph)
+        completion_policy = str(
+            getattr(getattr(graph, "completion_policy", None), "value", None)
+            or getattr(graph, "completion_policy", None)
+            or ""
+        ).strip()
+        if completion_policy == TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value:
+            if self._node_grants is None:
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "atomic Graph success requires a node grant service before admission",
+                )
+            if not str(command.governor_grant_ref or "").strip():
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "atomic Graph success requires a parent Governor grant before admission",
+                )
+            if not self._coordinator.supports_completion_policy(completion_policy):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "runtime cannot admit the TaskGraph's frozen completion policy",
+                )
         record_raw = self._commands.admit(command, work_order, assignment, graph)
         if inspect.isawaitable(record_raw):
             record_raw = await record_raw

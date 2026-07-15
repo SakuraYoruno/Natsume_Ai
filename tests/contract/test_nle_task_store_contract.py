@@ -3092,3 +3092,29 @@ def test_t_nle_06_frozen_v1_public_deserializers_keep_compatibility_fallbacks() 
     ).to_dict()
     budget_payload["consumed"] = []
     assert BudgetReservation.from_mapping(budget_payload).consumed == BudgetAmount()
+
+
+def test_ne01_optional_result_authority_preserves_legacy_graph_wire_and_store_shape(
+    tmp_path: Path,
+) -> None:
+    graph = _graph(graph_id="graph-legacy-result-authority")
+    legacy_payload = graph.to_dict()
+    assert "result_node_id" not in legacy_payload
+
+    restored = TaskGraph.from_mapping(legacy_payload)
+    assert restored.result_node_id is None
+    assert restored.to_dict() == legacy_payload
+
+    store = _migrated_store(tmp_path, name="legacy-result-authority.sqlite3")
+    store.create_graph(
+        restored,
+        outbox=_event(
+            "TASK_GRAPH",
+            restored.graph_id,
+            0,
+            "TASK_GRAPH_CREATED",
+        ),
+    )
+    durable = store.get_graph(restored.graph_id, restored.revision)
+    assert "result_node_id" not in durable["graph"]
+    assert TaskGraph.from_mapping(durable["graph"]).to_dict() == legacy_payload
