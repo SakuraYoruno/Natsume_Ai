@@ -102,12 +102,15 @@
       ]
     },
     "native_multi_node_task_graph": {
-      "status": "IMPLEMENTED_NOT_WIRED",
+      "status": "PARTIAL",
+      "wiring_progress": "B1 store/coordinator subset wires scheduling, atomic claim, due promotion, retry deadline primitives, cancellation, schema/graph/budget guards, restart-safe attempt sequence, and concurrency fence. Production failure does not yet enter schedule_retry; parallel/recovery/retry-budget semantics remain incomplete.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/dag_scheduler.py",
-        "tests/unit/test_ne01_dag_scheduler.py"
+        "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
+        "tests/unit/test_ne01_dag_scheduler.py",
+        "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },
     "revision_plus_one_replan": {

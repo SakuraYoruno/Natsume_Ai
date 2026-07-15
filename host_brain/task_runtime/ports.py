@@ -30,6 +30,8 @@ class TaskStorePort(Protocol):
 
     def assert_budget_usage_ready(self) -> None: ...
 
+    def assert_dag_scheduling_ready(self) -> None: ...
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
@@ -115,6 +117,45 @@ class TaskStorePort(Protocol):
         expected_node_version: int,
         operation_scope: str | None,
         operation_fingerprint: str | None,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def promote_retry_due(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def claim_ready_node(
+        self,
+        *,
+        attempt_id: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        expected_node_version: int,
+        expected_attempt_count: int,
+        owner_id: str,
+        lease_ttl_ms: int,
+        budget_id: str,
+        operation_scope: str | None,
+        operation_fingerprint: str | None,
+        attempt_created_outbox: Any,
+        attempt_leased_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def schedule_retry(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        error_ref: str,
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 

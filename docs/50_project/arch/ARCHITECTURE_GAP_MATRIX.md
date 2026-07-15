@@ -33,7 +33,7 @@
 | Internal Agent governed | `WIRED` | Internal production cutover integration | ingress v2 立即编译 V3；Budget、child grant、PRE/POST Review、Verification、Acceptance、Receipt、replay 已贯通；长 Review 的 grant renewal 随 continuation 统一处理 | NE-01 已完成切片 |
 | 全 route universal runtime | `PARTIAL` | Cortex governed/read split + Scheduler/Internal production integrations | Host 四执行路由、Scheduler、Internal 已 governed；`task_progress/recent_turn` 已转只读投影；完整 Operator/Gateway surface matrix 仍需最终验收 | NE-01 |
 | Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
-| 多节点 Durable DAG | `PARTIAL` | `task_runtime/coordinator.py`、`dag_scheduler.py` | B0 决策和 retry 合同已冻结；未接原子 claim、真实并发/retry/backoff/恢复/continuation | NE-01 |
+| 多节点 Durable DAG | `PARTIAL_B1_STORE` | Coordinator、TaskStore、0089 migration、GR03a integration | B0、原子 claim、到期 promotion、store retry deadline/attempt 2、取消和并发门禁已接；生产失败尚未进入 `schedule_retry`，仍缺真正并行、retry budget/分类、heartbeat/takeover、continuation | NE-01 B2 |
 | Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` + Host/Scheduler/Internal integrations | core ingress 已覆盖；concurrency 未计量，DEGRADE/REVIEW 分支与剩余 Domain/Operator 路径未完整 | NE-01 |
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
@@ -51,7 +51,7 @@
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
 | 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
-| 无全局 Service Locator | `MISSING` | `process_service_container.py`、`process_*services.py` | legacy task 槽位/accessor 已删，但仍约 60 个槽位和数十个 accessor/依赖文件 | NE-01 |
+| 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 已删 5 个零消费者槽位和 4 个 accessor；仍有 61 个总字段/54 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
 | Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
 | Workspace ownership | `PARTIAL_D0_PATH_FENCE` | `agent_runtime/workspace_paths.py`、resolver/tool/verification tests | scoped 路径安全已统一；仍缺 per-task durable owner、`runtime_repo` 退役、隔离 worktree、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |

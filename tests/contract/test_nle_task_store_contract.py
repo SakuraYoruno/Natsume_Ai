@@ -2377,6 +2377,54 @@ def test_t_nle_06_cancellation_is_cas_guarded_and_emits_matching_outbox(tmp_path
     assert pending[-1]["aggregate_version"] == cancelled["status_version"]
 
 
+def test_ne01_retry_deadline_invariant_and_backoff_cancellation(tmp_path: Path) -> None:
+    db_path = tmp_path / "retry-cancel.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="ne01-retry-cancel",
+        ts_ms=100,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    store = DurableTaskStore(db_path, clock=MutableClock(200))
+    graph = _graph(node_status=TaskNodeStatus.RETRY_PENDING)
+    store.create_graph(
+        graph,
+        outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
+    )
+
+    with pytest.raises(TaskStoreError) as invalid_deadline:
+        store.assert_dag_scheduling_ready()
+    assert invalid_deadline.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_node
+            SET retry_not_before_ms = 500
+            WHERE graph_id = ? AND graph_revision = 1 AND node_id = 'node-1'
+            """,
+            (graph.graph_id,),
+        )
+        conn.commit()
+    store.assert_dag_scheduling_ready()
+
+    cancelled = store.request_cancel_node(
+        graph.graph_id,
+        graph.revision,
+        "node-1",
+        expected_version=0,
+        outbox=_event(
+            "TASK_NODE",
+            f"{graph.graph_id}@{graph.revision}/node-1",
+            1,
+            "TASK_NODE_CANCELLED",
+        ),
+    )
+    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["retry_not_before_ms"] is None
+    assert cancelled["cancellation_requested_ts_ms"] == 200
+    store.assert_dag_scheduling_ready()
+
+
 @pytest.mark.parametrize(
     ("action", "outcome", "receipt_ref"),
     (

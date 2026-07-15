@@ -32,8 +32,6 @@ from host_brain.governor.tokens import TokenService
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
-from host_brain.memory.consolidation_trigger import ConsolidationTrigger
-from host_brain.memory.episodic_memory_graph import EpisodicMemoryGraph
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.reasoning.reflection_chain import ReflectionChain
@@ -42,7 +40,6 @@ from host_brain.skills.capability_scorecard_provider import FederatedCapabilityS
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
 from host_brain.skills.registry import SkillRegistry
-from host_brain.skills.skill_composer import SkillComposer
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
@@ -694,18 +691,6 @@ def get_memory_worth_evaluator() -> MemoryWorthEvaluator:
     return _container().memory_worth_evaluator
 
 
-def get_episodic_memory_graph() -> EpisodicMemoryGraph:
-    if _container().episodic_memory_graph is None:
-        _container().episodic_memory_graph = EpisodicMemoryGraph()
-    return _container().episodic_memory_graph
-
-
-def get_consolidation_trigger() -> ConsolidationTrigger:
-    if _container().consolidation_trigger is None:
-        _container().consolidation_trigger = ConsolidationTrigger()
-    return _container().consolidation_trigger
-
-
 def get_predictive_state_engine() -> PredictiveStateEngine:
     if _container().predictive_state_engine is None:
         _container().predictive_state_engine = PredictiveStateEngine()
@@ -754,9 +739,3 @@ def get_capability_forge_service() -> Any:
             )
         )
     return _container().capability_forge_service
-
-
-def get_skill_composer() -> SkillComposer:
-    if _container().skill_composer is None:
-        _container().skill_composer = SkillComposer()
-    return _container().skill_composer

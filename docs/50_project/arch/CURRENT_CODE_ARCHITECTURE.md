@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL` | 依赖推进及执行资产已有；B0 已冻结稳定 fan-out/fan-in/retry 决策和 canonical retry policy，但尚未接入生产 Coordinator/Store |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B1_STORE` | Coordinator 已消费 B0、原子 READY claim 与到期 promotion；store 级 retry deadline/attempt 2、取消、预算并发门禁和 claim exact replay 已接线，但生产失败尚未调用 `schedule_retry`，执行仍顺序且无 heartbeat/takeover |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -28,7 +28,7 @@
 | Budget | `CORE_INGRESS_WIRED / PROGRAM_PARTIAL` | Host 四路线、Scheduler 与 Internal 有 durable ledger；并发预算与 DEGRADE/REVIEW 策略未完整执行 |
 | Review/Resume | `MANUAL_CONTINUATION` | token 与 checkpoint 已持久化；resume 不会自动重新调度原图 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE` | 仍有模块级 `ProcessServiceContainer` 和大量 `get_*()` service locator |
+| Composition | `INCOMPLETE` | 已删除首批 5 个零消费者槽位和 4 个 accessor；排除 6 个 lock 与 `application_ports` 后，模块级 `ProcessServiceContainer` 仍有 54 个可变服务引用及大量 locator |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -92,13 +92,15 @@ Scheduler 与 Internal Agent 均已有真实任务证据。Internal 会先剥离
 
 当前 coordinator 能持久化多节点图、阻断未知依赖和环、推进 `BLOCKED → READY`、创建 Attempt/Lease/Reservation，并在 Verification 与 Acceptance 后完成节点。
 
-B0 新增的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定选择 READY、依赖满足、retry due/waiting 节点，严格 fan-in，并受 concurrency/occupied slots 限制。所有 TaskNode 生产者已统一使用 `{max_attempts, retry_backoff_ms}`；这只是合同冻结，不代表生产并发或 retry 已接线。
+B0 的 `task_runtime/dag_scheduler.py` 是无副作用调度决策：它稳定选择 READY、依赖满足、retry due/waiting 节点，严格 fan-in，并受 concurrency/occupied slots 限制。B1 的 store/coordinator 子集已让 Coordinator 从 durable snapshot 消费该决策，并由 TaskStore 在 `BEGIN IMMEDIATE` 中原子提交 Attempt、Node、Lease、初始 Heartbeat 和 Outbox；claim 响应丢失可在 authority/TTL/outbox 均未漂移时精确返回原 Lease。
+
+迁移 0089 只在 Node 持久化 `retry_not_before_ms`；attempt 次数始终由 Attempt journal 的连续 `attempt_no` 派生，避免第二真相。Store primitive 可把显式确认无 operation reservation 的失败原子转为 `RETRY_PENDING`，Coordinator 可在到期后晋升 READY 并创建 attempt 2；但生产异常路径当前从不调用该 primitive，因此这只是 store 级能力，不是自动 retry。已有 reservation 时必须拒绝 retry，等待后续 reconciliation/takeover 链；当前 Coordinator 尚未自动把该 reservation 转成 `RECOVERY_REQUIRED`。Schema readiness 在 Budget 写入前检查，retry schedule/promotion 还会同事务校验 ACTIVE graph/graph-level Budget，backoff 节点可原子取消。若 0089 的物理事务已提交但 migration receipt 丢失，runner 只有在冻结 checksum、列约束与完整索引形状全部成立时才补记 receipt，否则 fail closed。
 
 仍缺：
 
-- claimable 节点当前串行执行，没有 DAG 级 fan-out 并发；
-- 已有 attempt 后不会创建下一 attempt，`retry_policy.max_attempts` 与 backoff 没有成为运行时行为；
-- 仍缺原子 node claim、Lease heartbeat/startup recovery、持久 retry deadline、自动 Review continuation 和跨进程并发额度。
+- claimable 节点当前仍串行执行，没有 DAG 级真正并行 fan-out；
+- retry scheduling 仍需上游先完成“副作用前失败”分类，尚未自动消费 retry budget；promotion 与 claim 也不是同一决策事务；
+- 仍缺周期 Lease heartbeat、mid-attempt recovery/takeover、自动 Review continuation；长等待后的 grant renewal/derivation 未闭环。
 
 ### 4.2 Budget
 
@@ -188,7 +190,8 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 但全局对象图尚未收敛：
 
 - `host_brain/composition/process_service_container.py` 在模块级创建 `_PROCESS_SERVICE_CONTAINER`；
-- container 仍有约 60 个可变 service 槽位；
+- 第一轮静态调用图清理已删除 `retrieval_orchestrator`、`context_compressor`、`episodic_memory_graph`、`consolidation_trigger`、`skill_composer` 5 个生产零消费者槽位及 4 个死 accessor；
+- container 当前共 61 个字段；排除 6 个 lock 与 `application_ports` 后仍有 54 个可变 service 引用；
 - `process_services.py` 与 `process_runtime_services.py` 仍暴露数十个 `get_*()` accessor；
 - 数十个生产 Python 文件仍直接或间接依赖该 locator；
 - `host_brain.app` 仍承担部分真实 service factory 和 wiring。
@@ -222,8 +225,8 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 把 B0 调度决策接入 Durable Store/Coordinator，实现原子 claim、真实 retry/backoff、并发、恢复与自动 continuation。
-2. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机。
+1. 在 B1 store/coordinator 子集上先接通生产失败 → safe retry + retry budget，再实现真正并行 fan-out、promotion+claim 单事务、周期 heartbeat 与 mid-attempt takeover。
+2. 为长时间 Review continuation 明确 child-grant renewal/derivation 时机并自动重调度。
 3. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
 4. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
 5. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。

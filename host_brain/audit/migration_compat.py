@@ -75,6 +75,44 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
+# 0089 contains an ALTER TABLE followed by an index creation inside one
+# explicit transaction.  The SQL transaction may commit before the runner can
+# persist its migration receipt.  On the next startup SQLite then reports a
+# duplicate column even though the complete physical migration is present.
+# Repair is allowed only for this exact checksum and only after validating the
+# column constraint plus the exact graph-scoped index shape.
+CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
+    str,
+    tuple[
+        str,
+        str,
+        dict[str, tuple[str, bool]],
+        dict[str, tuple[str, tuple[str, ...]]],
+        tuple[str, ...],
+    ],
+] = {
+    "0089_task_runtime_dag_scheduling.sql": (
+        "b322b4d98b0fa05eb0774a91530818c88d17dbd5168f821dacecef67ec3d1663",
+        "task_runtime_node",
+        {"retry_not_before_ms": ("INTEGER", False)},
+        {
+            "idx_task_runtime_node_retry_due": (
+                "task_runtime_node",
+                (
+                    "graph_id",
+                    "graph_revision",
+                    "status",
+                    "retry_not_before_ms",
+                    "node_id",
+                ),
+            )
+        },
+        (
+            "check(retry_not_before_msisnullorretry_not_before_ms>=0)",
+        ),
+    )
+}
+
 # A draft of 0072 reached one workspace database before the physical asset was
 # sealed.  The draft created the final tables and journals but omitted one
 # sealing trigger.  Compatibility is permitted only when both the final 0072
@@ -514,6 +552,71 @@ def is_exact_legacy_inline_schema_failure(asset: Any, exc: BaseException) -> boo
         and str(getattr(asset, "checksum")) == frozen[0]
         and str(exc).lower().startswith("duplicate column name:")
     )
+
+
+def is_exact_checksum_bound_schema_replay_failure(
+    asset: Any,
+    exc: BaseException,
+) -> bool:
+    """Recognize only a receipt-loss replay of a frozen non-idempotent asset."""
+
+    frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
+    return bool(
+        frozen is not None
+        and str(getattr(asset, "checksum")) == frozen[0]
+        and str(exc).lower().startswith("duplicate column name:")
+    )
+
+
+def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> bool:
+    """Prove that a non-idempotent migration committed before receipt loss."""
+
+    frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
+    if frozen is None:
+        return False
+    _checksum, table, required_columns, required_indexes, sql_fragments = frozen
+    try:
+        table_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        if table_row is None or table_row[0] is None:
+            return False
+        normalized_sql = re.sub(r"\s+", "", str(table_row[0]).lower())
+        if any(fragment not in normalized_sql for fragment in sql_fragments):
+            return False
+
+        rows = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+        columns = {
+            str(row[1]): (str(row[2] or "").upper(), bool(row[3]))
+            for row in rows
+        }
+        if not all(
+            column in columns
+            and columns[column][0] == expected_type
+            and (not requires_not_null or columns[column][1])
+            for column, (expected_type, requires_not_null) in required_columns.items()
+        ):
+            return False
+
+        for index_name, (index_table, expected_index_columns) in required_indexes.items():
+            index_row = conn.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?",
+                (index_name,),
+            ).fetchone()
+            if index_row is None or str(index_row[0]) != index_table:
+                return False
+            actual_index_columns = tuple(
+                str(row[2])
+                for row in conn.execute(
+                    f'PRAGMA index_info("{index_name}")'
+                ).fetchall()
+            )
+            if actual_index_columns != expected_index_columns:
+                return False
+    except (IndexError, sqlite3.DatabaseError):
+        return False
+    return True
 
 
 def legacy_inline_schema_postcondition_holds(conn: Any, asset: Any) -> bool:

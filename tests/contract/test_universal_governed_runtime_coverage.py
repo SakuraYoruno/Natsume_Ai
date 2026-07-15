@@ -60,7 +60,7 @@ def test_manifest_requires_every_control_for_every_route(tmp_path: Path) -> None
         load_universal_runtime_coverage(ROOT, manifest_path=candidate)
 
 
-def test_manifest_distinguishes_implemented_not_wired_from_pass(tmp_path: Path) -> None:
+def test_manifest_distinguishes_partial_and_not_wired_from_pass(tmp_path: Path) -> None:
     report = load_universal_runtime_coverage(ROOT)
     assert "generic_three_layer_planning_search" not in report.missing_architecture_controls
     assert "revision_plus_one_replan" not in report.missing_architecture_controls
@@ -72,5 +72,14 @@ def test_manifest_distinguishes_implemented_not_wired_from_pass(tmp_path: Path) 
     ] = "PARTIAL"
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(UniversalRuntimeCoverageError, match="IMPLEMENTED_NOT_WIRED"):
+    partial_report = load_universal_runtime_coverage(ROOT, manifest_path=candidate)
+    assert "composition_without_global_service_locator" in (
+        partial_report.missing_architecture_controls
+    )
+
+    payload["architecture_controls"]["composition_without_global_service_locator"][
+        "status"
+    ] = "IN_PROGRESS"
+    candidate.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(UniversalRuntimeCoverageError, match="PASS, PARTIAL"):
         load_universal_runtime_coverage(ROOT, manifest_path=candidate)

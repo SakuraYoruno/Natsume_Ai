@@ -50,6 +50,15 @@
         "dependency progression",
         "attempt",
         "lease",
+        "coordinator consumption of deterministic B0 scheduling decisions",
+        "atomic READY claim for attempt, node, lease, initial heartbeat, and outbox",
+        "exact committed-claim replay after response loss",
+        "store-level retry_not_before_ms and restart-safe retry-pending attempt sequencing",
+        "0089 checksum-bound physical-schema verification after migration receipt loss",
+        "schema readiness before budget mutation",
+        "ACTIVE graph and budget guards for retry scheduling/promotion",
+        "cancellation of RETRY_PENDING backoff nodes",
+        "ACTIVE budget concurrency fence at claim time",
         "idempotency reservation",
         "budget",
         "review",
@@ -61,12 +70,20 @@
         "canonical max_attempts and retry_backoff_ms validation"
       ],
       "missing": [
-        "production scheduler integration",
-        "atomic node claim",
         "parallel DAG execution",
-        "durable runtime retry and backoff",
-        "lease heartbeat and startup recovery",
+        "single transaction for promotion plus claim",
+        "production Coordinator entry into schedule_retry",
+        "automatic worker failure classification and retry-budget consumption",
+        "periodic lease heartbeat and mid-attempt recovery takeover",
         "automatic Review continuation"
+      ],
+      "evidence_refs": [
+        "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
+        "host_brain/persistence/task_repository.py",
+        "host_brain/task_runtime/coordinator.py",
+        "host_brain/audit/migration_compat.py",
+        "tests/unit/test_aw03_migration_compat.py",
+        "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },
     "executive_authority_removal": {
@@ -120,10 +137,23 @@
     "explicit_composition_root": {
       "status": "PARTIAL",
       "global_service_locator": "PRESENT",
+      "cleanup_progress": {
+        "container_fields": 61,
+        "mutable_service_references_excluding_locks_and_application_ports": 54,
+        "retired_zero_consumer_slots": [
+          "retrieval_orchestrator",
+          "context_compressor",
+          "episodic_memory_graph",
+          "consolidation_trigger",
+          "skill_composer"
+        ],
+        "retired_get_accessors": 4
+      },
       "evidence_refs": [
         "host_brain/composition/process_service_container.py",
         "host_brain/composition/process_services.py",
-        "host_brain/composition/process_runtime_services.py"
+        "host_brain/composition/process_runtime_services.py",
+        "tests/contract/test_ne01_process_service_container_cleanup.py"
       ]
     },
     "world_model": {

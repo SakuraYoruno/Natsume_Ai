@@ -40,11 +40,11 @@
 | TRACE-EXEC-01 | FR-ARCH-003 | Host 四路线必须共享 WorkOrderV3/TaskGraph | Cortex、GovernedHostRuntime | GR-05/06 receipt；T-GR-RUNTIME-01 | `WIRED` | NE-01 守卫 |
 | TRACE-EXEC-02 | FR-ARCH-003 | Scheduler 必须进入同一 admission | Scheduler governed runtime | production cutover integration；child grant/receipt lineage | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | production cutover integration；principal/child grant/Review/receipt lineage | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry | coordinator/task store/dag scheduler | B0 scheduler unit + GR-03 tests | `PARTIAL_B0_CONTRACT_ONLY` | NE-01 |
+| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry | coordinator/task store/dag scheduler | B0 unit + atomic claim + store primitive retry/reopen/cancel integration；production retry entry 待补 | `PARTIAL_B1_STORE` | NE-01 B2 |
 | TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | Host/Scheduler/Internal integrations | `PARTIAL_CORE_INGRESS` | NE-01 |
 | TRACE-EXEC-06 | FR-NLE-003 | Review token 后自动安全 continuation | ReviewStore/review runtime | Review tests/UI | `PARTIAL_MANUAL` | NE-01 |
 | TRACE-EXEC-07 | FR-ARCH-003 | 不得有第二任务真相 | Durable Task/Conversation projections | registry absence contract + code audit | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-08 | FR-ARCH-001 | 显式 composition、无 locator | Task container + process service locator | static scan/code audit | `INCOMPLETE` | NE-01 |
+| TRACE-EXEC-08 | FR-ARCH-001 | 显式 composition、无 locator | Task container + process service locator | dead-slot cleanup contract（54 = 61 fields - 6 locks - application_ports）；static scan/code audit | `INCOMPLETE_54_SERVICE_REFS` | NE-01 |
 | TRACE-EXEC-09 | FR-ARCH-001、FR-ARCH-010 | Agent/Verification 路径不得逃逸 workspace | canonical resolver + scoped tool/verification wiring | resolver/tool/verification unit + contract | `D0_WIRED / OWNERSHIP_INCOMPLETE` | NE-01 |
 
 ## 4. Planning Search

@@ -33,7 +33,7 @@
 | Host `chat/skill/delegate/plan` | 已接 canonical runtime，作为可复用地基 |
 | Scheduler | `WIRED`：真实 occurrence 已贯通 `WorkOrderV3 + Budget + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED`：边界 v2 已立即编译为 V3，完整 Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已通过真实集成 |
-| Durable DAG | 多节点基础与 B0 调度/retry 合同已冻结；生产并发、retry/backoff、恢复和 continuation 未实现 |
+| Durable DAG | `PARTIAL_B1_STORE`：Coordinator 消费 B0、原子 READY claim、到期 promotion 与预算并发门禁；store 具备 retry deadline/attempt 2，但生产失败尚未调用 `schedule_retry`，真正并行、retry budget、heartbeat/takeover 和 continuation 未实现 |
 | Budget | Host/Scheduler/Internal 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
@@ -96,11 +96,12 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
 - Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
 - Internal Agent 真实 `WorkOrderV3` admission、Secure Ingress principal、Budget、`delegate:agent_runtime` child grant、PRE/POST Review、Verification、Acceptance、Receipt 与 replay；
-- Durable DAG 的 B0 纯调度决策与 canonical retry policy 冻结，尚未接生产 Coordinator/Store；
+- Durable DAG B1 store/coordinator 子集：Coordinator 消费 B0，原子提交 Attempt/Node/Lease/初始 Heartbeat/Outbox，并执行到期 promotion；store 级 retry deadline、attempt 序列、并发门禁、backoff cancel 与 claim exact replay 已持久化。生产 Coordinator 尚未从真实失败进入 `schedule_retry`，所以不能把手工 store 测试写成生产自动重试；0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
 - Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
+- Composition 第一刀删除 5 个生产零消费者全局槽位、4 个死 accessor 及重导出/reset 残留；排除 6 个 lock 与 `application_ports` 端口束后的可变服务引用由 59 降为 54，但全局 container 仍存在。
 
-Lane A 已完成；Lane B 的 B1～B4、Lane D 的 durable workspace authority/隔离 worktree/显式 composition 仍未完成，因此 NE-01 不得封板。长时间人工 Review 超过 child-grant TTL 的统一 renewal/derivation 仍随 Review continuation 一并解决。
+Lane A 已完成；Lane B 只有 B1 store/coordinator 子集，生产 retry entry、retry budget、heartbeat/takeover 与真正并行仍未完成。Lane D 的 durable workspace authority/隔离 worktree/显式 composition 也未完成，因此 NE-01 不得封板。长时间人工 Review 超过 child-grant TTL 的统一 renewal/derivation 仍随 Review continuation 一并解决。
 
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 
@@ -114,6 +115,8 @@ Lane A 已完成；Lane B 的 B1～B4、Lane D 的 durable workspace authority/�
 - Host Input/Gateway/Scheduler/Internal/Operator 的 route matrix 全部 fail closed。
 
 #### Lane B：Durable DAG completion
+
+状态：`PARTIAL_B1_STORE / LANE_IN_PROGRESS`。当前证明 durable decision、atomic claim、store 级 retry deadline 与到期 continuation；尚未证明生产失败会进入 retry，也不代表并行 fan-out 或运行中 takeover 已完成。
 
 - 调度所有依赖已满足节点，支持有界 fan-out/fan-in；
 - 真正消费 `retry_policy.max_attempts`、backoff 和 retry budget；

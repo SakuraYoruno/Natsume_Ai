@@ -12,10 +12,11 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL` | B0 调度/retry 合同已冻结；生产并发、retry/backoff、恢复和自动 continuation 未闭环 |
+| Durable Task Runtime | `PARTIAL_B1_STORE` | Coordinator 已消费 B0，原子 claim、到期 promotion、预算并发门禁与 store 级 retry deadline/attempt 2 已接；生产失败尚未调用 `schedule_retry`，真正并行、retry budget、heartbeat/takeover、Review continuation 未闭环 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
+| 显式 Composition | `INCOMPLETE` | 已删除首批 5 个零消费者全局槽位和 4 个 accessor；排除 6 个 lock 与 `application_ports` 端口束后仍有 54 个可变服务引用，尚未形成 Host/Obs/Worker 显式 scopes |
 | Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
 | Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |

@@ -10,6 +10,8 @@ import host_brain.audit.migration_runner as migration_runner_module
 from host_brain.audit.migration_compat import (
     PLATFORM_REGISTRY_DRAFT_CHECKSUM,
     PLATFORM_REGISTRY_FINAL_CHECKSUM,
+    checksum_bound_schema_replay_postcondition_holds,
+    is_exact_checksum_bound_schema_replay_failure,
     is_exact_legacy_inline_schema_failure,
     legacy_inline_schema_postcondition_holds,
 )
@@ -156,9 +158,9 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 88
-    assert upgraded.summary["applied_count"] == 5
-    assert upgraded.records[-1].migration_id == "0088_host_command_graph_revision"
+    assert upgraded.summary["current_version"] == 89
+    assert upgraded.summary["applied_count"] == 6
+    assert upgraded.records[-1].migration_id == "0089_task_runtime_dag_scheduling"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -184,6 +186,39 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
             WHERE type = 'table' AND name = 'task_runtime_acceptance_effect_intent'
             """
         ).fetchone() == ("task_runtime_acceptance_effect_intent",)
+
+
+def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) -> None:
+    db_path = tmp_path / "0089-receipt-loss.sqlite3"
+    runner = SQLiteMigrationRunner(db_path=db_path)
+    seeded = runner.apply_migrations(request_id="0089-seed", ts_ms=20)
+    assert seeded.success is True, seeded.as_dict()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 89")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 89")
+        conn.commit()
+
+    repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
+    assert repaired.success is True, repaired.as_dict()
+    assert repaired.records[-1].migration_id == "0089_task_runtime_dag_scheduling"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT disposition FROM schema_migration_assets WHERE migration_id = 89"
+        ).fetchone() == ("APPLIED_WITH_COMPAT",)
+
+        asset = _asset(
+            "0089_task_runtime_dag_scheduling.sql",
+            "b322b4d98b0fa05eb0774a91530818c88d17dbd5168f821dacecef67ec3d1663",
+        )
+        failure = sqlite3.OperationalError(
+            "duplicate column name: retry_not_before_ms"
+        )
+        assert is_exact_checksum_bound_schema_replay_failure(asset, failure) is True
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is True
+
+        conn.execute("DROP INDEX idx_task_runtime_node_retry_due")
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
 
 
 def test_aw03_migrations_require_an_explicit_immediate_transaction(tmp_path) -> None:

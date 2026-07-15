@@ -28,11 +28,16 @@ from host_brain.persistence.host_command_repository import (
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
     TASK_STORE_CAS_CONFLICT,
+    TASK_STORE_SCHEDULER_CAPACITY,
     DurableTaskStore,
     OutboxMessage,
     TaskStoreError,
 )
-from host_brain.task_runtime import AdmittedExecution, GovernedTaskCoordinator
+from host_brain.task_runtime import (
+    AdmittedExecution,
+    GovernedRuntimeError,
+    GovernedTaskCoordinator,
+)
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
@@ -250,9 +255,11 @@ def _coordinator(
     fail_nodes: set[str] | None = None,
     review_runtime: TaskNodeReviewRuntime | None = None,
     acceptance_decision: str = "ACCEPT",
+    clock: Any = None,
 ) -> GovernedTaskCoordinator:
+    resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
-        task_store=DurableTaskStore(db_path, clock=lambda: NOW),
+        task_store=DurableTaskStore(db_path, clock=resolved_clock),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
         worker_resolver=_Resolver(calls, fail_nodes),
@@ -260,6 +267,31 @@ def _coordinator(
         acceptance=_Acceptance(acceptance_decision),
         review_runtime=review_runtime,
         owner_id="gr03a-worker",
+    )
+
+
+def _runtime_outbox(
+    aggregate_type: str,
+    aggregate_id: str,
+    aggregate_version: int,
+    event_type: str,
+    *,
+    attempt_id: str | None = None,
+) -> OutboxMessage:
+    discriminator = hashlib.sha256(
+        f"{aggregate_type}\n{aggregate_id}\n{aggregate_version}\n{event_type}".encode()
+    ).hexdigest()
+    return OutboxMessage.create(
+        aggregate_type=aggregate_type,
+        aggregate_id=aggregate_id,
+        aggregate_version=aggregate_version,
+        event_type=event_type,
+        payload_ref=(
+            f"taskstore://event/{aggregate_type}/{aggregate_id}/{aggregate_version}"
+        ),
+        idempotency_key=f"gr03a-runtime:{discriminator}",
+        outbox_id=f"outbox::gr03a-runtime::{discriminator}",
+        attempt_id=attempt_id,
     )
 
 
@@ -651,6 +683,379 @@ async def test_gr03a_restart_resumes_after_accepted_predecessor_without_reexecut
     assert len(final_snapshot["budgets"]) == 1
     assert final_snapshot["budgets"][0]["status"] == "CONSUMED"
     assert len({row["usage_id"] for row in final_snapshot["budget_usage"]}) == 6
+
+
+@pytest.mark.asyncio
+async def test_ne01_b1_retry_deadline_and_attempt_sequence_survive_reopen(
+    tmp_path: Path,
+) -> None:
+    class _Clock:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __call__(self) -> int:
+            return self.value
+
+    clock = _Clock(NOW)
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 100},
+            ),
+        ),
+    )
+    repository = HostCommandRepository(db_path, clock=clock)
+    record = repository.admit(command, work_order, assignment, graph)
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    first_runtime = _coordinator(db_path, calls, clock=clock)
+    budget = await first_runtime._budgets.ensure_active(  # noqa: SLF001
+        admitted=admitted,
+        work_order=record["work_order"],
+    )
+    store = DurableTaskStore(db_path, clock=clock)
+    graph_record = store.get_graph(graph.graph_id, graph.revision)
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=graph_record["status_version"],
+        target_status="ACTIVE",
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            graph_record["status_version"] + 1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    node = store.get_node(graph.graph_id, graph.revision, "root")
+    attempt_id = "attempt::gr03a::pre-side-effect-failure"
+    claim = store.claim_ready_node(
+        attempt_id=attempt_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        node_id="root",
+        expected_node_version=node["status_version"],
+        expected_attempt_count=0,
+        owner_id="gr03a-worker",
+        lease_ttl_ms=10_000,
+        budget_id=budget.budget_id,
+        operation_scope=admitted.business_scope,
+        operation_fingerprint=admitted.operation_fingerprint,
+        attempt_created_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            0,
+            "TASK_ATTEMPT_CREATED",
+            attempt_id=attempt_id,
+        ),
+        attempt_leased_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            1,
+            "TASK_ATTEMPT_LEASED",
+            attempt_id=attempt_id,
+        ),
+    )
+    running_node = store.transition_node(
+        graph.graph_id,
+        graph.revision,
+        "root",
+        expected_version=claim["node"]["status_version"],
+        target_status="RUNNING",
+        outbox=_runtime_outbox(
+            "TASK_NODE",
+            f"{graph.graph_id}@{graph.revision}/root",
+            claim["node"]["status_version"] + 1,
+            "TASK_NODE_RUNNING",
+        ),
+    )
+    running_attempt = store.transition_attempt(
+        attempt_id,
+        owner_id="gr03a-worker",
+        fencing_token=claim["lease"]["fencing_token"],
+        expected_version=claim["attempt"]["status_version"],
+        target_status="RUNNING",
+        outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            claim["attempt"]["status_version"] + 1,
+            "TASK_ATTEMPT_RUNNING",
+            attempt_id=attempt_id,
+        ),
+    )
+    retry = store.schedule_retry(
+        attempt_id,
+        owner_id="gr03a-worker",
+        fencing_token=claim["lease"]["fencing_token"],
+        expected_attempt_version=running_attempt["status_version"],
+        error_ref="taskerror://gr03a/pre-side-effect",
+        outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            running_attempt["status_version"] + 1,
+            "TASK_ATTEMPT_FAILED",
+            attempt_id=attempt_id,
+        ),
+    )
+    assert running_node["status"] == "RUNNING"
+    assert retry["node"]["status"] == "RETRY_PENDING"
+    assert retry["retry_not_before_ms"] == NOW + 100
+    assert retry["lease"]["status"] == "RELEASED"
+
+    replay = HostCommandRepository(db_path, clock=clock).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    resumed = AdmittedExecution.from_contracts(
+        command=replay["command"],
+        assignment=replay["assignment"],
+        graph=replay["graph"],
+        replayed=True,
+    )
+    clock.value = NOW + 99
+    with pytest.raises(GovernedRuntimeError) as waiting:
+        _ = [
+            event
+            async for event in _coordinator(db_path, calls, clock=clock).execute_stream(
+                admitted=resumed,
+                command=replay["command"],
+                work_order=replay["work_order"],
+            )
+        ]
+    assert waiting.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert calls == []
+
+    clock.value = NOW + 100
+    events = [
+        event
+        async for event in _coordinator(db_path, calls, clock=clock).execute_stream(
+            admitted=resumed,
+            command=replay["command"],
+            work_order=replay["work_order"],
+        )
+    ]
+    assert events[-1]["execution_receipt"]["accepted"] is True
+    assert calls == ["root"]
+    reopened = DurableTaskStore(db_path, clock=clock)
+    snapshot = reopened.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    attempts = [row for row in snapshot["attempts"] if row["node_id"] == "root"]
+    assert [(row["attempt_no"], row["status"]) for row in attempts] == [
+        (1, "FAILED"),
+        (2, "SUCCEEDED"),
+    ]
+    assert reopened.get_node(graph.graph_id, graph.revision, "root")[
+        "retry_not_before_ms"
+    ] is None
+
+
+@pytest.mark.asyncio
+async def test_ne01_b1_atomic_claim_enforces_durable_graph_concurrency(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("left", ()), ("right", ()))
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    runtime = _coordinator(db_path, [])
+    budget = await runtime._budgets.ensure_active(  # noqa: SLF001
+        admitted=admitted,
+        work_order=record["work_order"],
+    )
+    first_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    graph_record = first_store.get_graph(graph.graph_id, graph.revision)
+    first_store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=graph_record["status_version"],
+        target_status="ACTIVE",
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            graph_record["status_version"] + 1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    left = first_store.get_node(graph.graph_id, graph.revision, "left")
+    first_store.claim_ready_node(
+        attempt_id="attempt::gr03a::left",
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        node_id="left",
+        expected_node_version=left["status_version"],
+        expected_attempt_count=0,
+        owner_id="gr03a-left",
+        lease_ttl_ms=10_000,
+        budget_id=budget.budget_id,
+        operation_scope=admitted.for_node("left").business_scope,
+        operation_fingerprint=admitted.for_node("left").operation_fingerprint,
+        attempt_created_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            "attempt::gr03a::left",
+            0,
+            "TASK_ATTEMPT_CREATED",
+            attempt_id="attempt::gr03a::left",
+        ),
+        attempt_leased_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            "attempt::gr03a::left",
+            1,
+            "TASK_ATTEMPT_LEASED",
+            attempt_id="attempt::gr03a::left",
+        ),
+    )
+
+    reopened = DurableTaskStore(db_path, clock=lambda: NOW)
+    right = reopened.get_node(graph.graph_id, graph.revision, "right")
+    with pytest.raises(TaskStoreError) as blocked:
+        reopened.claim_ready_node(
+            attempt_id="attempt::gr03a::right",
+            graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+            node_id="right",
+            expected_node_version=right["status_version"],
+            expected_attempt_count=0,
+            owner_id="gr03a-right",
+            lease_ttl_ms=10_000,
+            budget_id=budget.budget_id,
+            operation_scope=admitted.for_node("right").business_scope,
+            operation_fingerprint=admitted.for_node("right").operation_fingerprint,
+            attempt_created_outbox=_runtime_outbox(
+                "TASK_ATTEMPT",
+                "attempt::gr03a::right",
+                0,
+                "TASK_ATTEMPT_CREATED",
+                attempt_id="attempt::gr03a::right",
+            ),
+            attempt_leased_outbox=_runtime_outbox(
+                "TASK_ATTEMPT",
+                "attempt::gr03a::right",
+                1,
+                "TASK_ATTEMPT_LEASED",
+                attempt_id="attempt::gr03a::right",
+            ),
+        )
+
+    assert blocked.value.reason_code == TASK_STORE_SCHEDULER_CAPACITY
+    snapshot = reopened.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert [(row["node_id"], row["attempt_no"]) for row in snapshot["attempts"]] == [
+        ("left", 1),
+    ]
+    assert reopened.get_node(graph.graph_id, graph.revision, "right")["status"] == "READY"
+
+
+@pytest.mark.asyncio
+async def test_ne01_b1_atomic_claim_exact_replay_returns_one_live_authority(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    runtime = _coordinator(db_path, [])
+    budget = await runtime._budgets.ensure_active(  # noqa: SLF001
+        admitted=admitted,
+        work_order=record["work_order"],
+    )
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    graph_record = store.get_graph(graph.graph_id, graph.revision)
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=graph_record["status_version"],
+        target_status="ACTIVE",
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            graph_record["status_version"] + 1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    node = store.get_node(graph.graph_id, graph.revision, "root")
+    attempt_id = "attempt::gr03a::claim-replay"
+    created_outbox = _runtime_outbox(
+        "TASK_ATTEMPT",
+        attempt_id,
+        0,
+        "TASK_ATTEMPT_CREATED",
+        attempt_id=attempt_id,
+    )
+    leased_outbox = _runtime_outbox(
+        "TASK_ATTEMPT",
+        attempt_id,
+        1,
+        "TASK_ATTEMPT_LEASED",
+        attempt_id=attempt_id,
+    )
+    claim_args = {
+        "attempt_id": attempt_id,
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": "root",
+        "expected_node_version": node["status_version"],
+        "expected_attempt_count": 0,
+        "owner_id": "gr03a-worker",
+        "lease_ttl_ms": 10_000,
+        "budget_id": budget.budget_id,
+        "operation_scope": admitted.business_scope,
+        "operation_fingerprint": admitted.operation_fingerprint,
+        "attempt_created_outbox": created_outbox,
+        "attempt_leased_outbox": leased_outbox,
+    }
+    first = store.claim_ready_node(**claim_args)
+    assert first["replayed"] is False
+
+    reopened = DurableTaskStore(db_path, clock=lambda: NOW)
+    replay = reopened.claim_ready_node(**claim_args)
+    assert replay["replayed"] is True
+    assert replay["attempt"]["attempt_id"] == first["attempt"]["attempt_id"]
+    assert replay["lease"]["lease_id"] == first["lease"]["lease_id"]
+    assert replay["lease"]["fencing_token"] == first["lease"]["fencing_token"]
+    snapshot = reopened.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert len(snapshot["attempts"]) == 1
+    assert len(snapshot["active_leases"]) == 1
+    with sqlite3.connect(db_path) as conn:
+        claim_outbox_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()[0]
+    assert claim_outbox_count == 3
+
+    with pytest.raises(TaskStoreError) as drifted:
+        reopened.claim_ready_node(**{**claim_args, "owner_id": "other-worker"})
+    assert drifted.value.reason_code == TASK_STORE_CAS_CONFLICT
+    after_drift = reopened.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert len(after_drift["attempts"]) == 1
+    assert len(after_drift["active_leases"]) == 1
 
 
 @pytest.mark.asyncio

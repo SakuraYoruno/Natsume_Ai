@@ -125,7 +125,7 @@ flowchart TB
 
 执行器只接收冻结节点输入和 node-bound grant。任何失败后的计划变化都应生成新 graph revision，不能在 worker 内静默修改原图。
 
-当前 coordinator 可以处理多节点依赖推进；B0 已统一 `{max_attempts, retry_backoff_ms}` 并冻结无副作用调度决策，但还没有把它接入 durable 原子 claim，也没有完整消费并发、runtime retry/backoff、startup recovery 和自动 Review continuation。
+当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。B1 store/coordinator 子集在 TaskStore 中原子 claim READY node（Attempt、Node、Lease、初始 Heartbeat、Outbox），并持久化 store 级 retry deadline/attempt 2 与预算并发门禁；Coordinator 能晋升已存在的到期 retry，claim 提交响应丢失时可 exact replay。生产异常尚未调用 `schedule_retry`，仍未完成真正并行 fan-out、retry budget、周期 heartbeat、mid-attempt takeover 和自动 Review continuation。
 
 ### 3.5 模型与能力执行层
 
@@ -181,7 +181,7 @@ host_brain.__main__
 
 `host_brain/composition/task_runtime.py::ProcessTaskRuntimeContainer` 已显式拥有 TaskStore、ReviewStore、CommandRepository、EventStore 和 lifecycle，是当前较清晰的 composition 范例。
 
-但整个 Host 尚未完成显式对象图迁移：`host_brain/composition/process_service_container.py` 仍保存模块级可变 container，`process_services.py` 与 `process_runtime_services.py` 暴露全局 accessor，部分 `host_brain.app` 文件仍同时承担 adapter 和 service factory。新代码不应继续扩大这条 Service Locator 路径。
+但整个 Host 尚未完成显式对象图迁移：首轮已静态证明并删除 5 个零消费者槽位和 4 个 accessor，当前仍有 61 个 container 字段；排除 6 个 lock 与 `application_ports` 端口束后是 54 个可变服务引用。`process_services.py` 与 `process_runtime_services.py` 继续暴露大量全局 accessor，部分 `host_brain.app` 文件仍同时承担 adapter 和 service factory。新代码不应继续扩大这条 Service Locator 路径。
 
 ## 5. Command 与 Task 架构
 
@@ -318,7 +318,7 @@ flowchart LR
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + B0 DAG decision | 生产并发/retry/backoff/recovery 尚未接线 |
+| TaskGraph revision + B1 store/coordinator subset | 生产失败进入 safe retry、真正并行、retry budget/分类、heartbeat/takeover、Review continuation 尚未接线 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

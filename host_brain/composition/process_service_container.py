@@ -34,7 +34,6 @@ class ProcessServiceContainer:
     life_memory_store: Any = None
     memory_service_container: Any = None
     retrieval_pipeline: Any = None
-    retrieval_orchestrator: Any = None
     obs_metrics_collector: Any = None
     graph_runtime: Any = None
     routing_matrix: Any = None
@@ -43,7 +42,6 @@ class ProcessServiceContainer:
     state_write_arbiter: Any = None
     distillation_engine: Any = None
     semantic_recaller: Any = None
-    context_compressor: Any = None
     emotion_timeline: Any = None
     silence_engine: Any = None
     bond_aware_style_engine: Any = None
@@ -52,12 +50,9 @@ class ProcessServiceContainer:
     multimodal_processor: Any = None
     multimodal_observer: Any = None
     memory_worth_evaluator: Any = None
-    episodic_memory_graph: Any = None
-    consolidation_trigger: Any = None
     predictive_state_engine: Any = None
     meta_learning_loop: Any = None
     planning_agent: Any = None
-    skill_composer: Any = None
     capability_gap_telemetry: Any = None
     capability_forge_service: Any = None
     capability_forge_token_service: Any = None

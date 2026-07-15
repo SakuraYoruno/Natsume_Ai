@@ -22,6 +22,7 @@ from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.contracts.agent_runtime.task_graph import TaskNodeStatus
 
 from .admission import AdmittedExecution, AdmittedTaskNode
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
@@ -42,6 +43,11 @@ from .errors import (
     GOVERNED_WORKER_COMMIT_INVALID,
     GOVERNED_WORKER_FAILED,
     GovernedRuntimeError,
+)
+from .dag_scheduler import (
+    DagNodeScheduleCandidate,
+    DagScheduleInputError,
+    compute_dag_schedule,
 )
 from .review_runtime import (
     TaskNodeReviewContext,
@@ -187,8 +193,9 @@ class GovernedTaskCoordinator:
             raise GovernedRuntimeError(
                 GOVERNED_ADMISSION_INVALID,
                 "runtime command differs from admitted command",
-            )
+        )
         grant_refs = _validated_node_grant_refs(admitted, node_grant_refs)
+        await _maybe_await(self._store.assert_dag_scheduling_ready())
         budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
 
         while True:
@@ -524,31 +531,90 @@ class GovernedTaskCoordinator:
                     f"TaskGraph is not schedulable: {graph_status}",
                 )
 
-            promotable = [
-                binding
-                for binding in admitted.nodes
-                if statuses[binding.node_id] == "BLOCKED"
-                and binding.dependencies
-                and all(
-                    statuses.get(dependency) == "ACCEPTED"
-                    for dependency in binding.dependencies
+            scheduler_snapshot = await _maybe_await(
+                self._store.read_scheduler_snapshot(
+                    admitted.graph_id,
+                    admitted.graph_revision,
                 )
-            ]
-            if promotable:
-                for binding in promotable:
+            )
+            if not isinstance(scheduler_snapshot, Mapping):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "durable scheduler snapshot is invalid",
+                )
+            observed_ts_ms = _record_non_negative_int(
+                scheduler_snapshot,
+                "observed_ts_ms",
+            )
+            raw_active_leases = scheduler_snapshot.get("active_leases")
+            if not isinstance(raw_active_leases, list):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "durable scheduler snapshot does not expose active leases",
+                )
+            occupied_attempts = {
+                _required_record_text(lease, "attempt_id")
+                for lease in raw_active_leases
+                if isinstance(lease, Mapping)
+                and _record_non_negative_int(lease, "expires_ts_ms") > observed_ts_ms
+            }
+            try:
+                decision = compute_dag_schedule(
+                    tuple(
+                        DagNodeScheduleCandidate(
+                            node_id=binding.node_id,
+                            dependencies=binding.dependencies,
+                            status=TaskNodeStatus(statuses[binding.node_id]),
+                            retry_not_before_ms=_optional_record_non_negative_int(
+                                durable_nodes[binding.node_id],
+                                "retry_not_before_ms",
+                            ),
+                        )
+                        for binding in admitted.nodes
+                    ),
+                    now_ms=observed_ts_ms,
+                    concurrency_limit=budget.policy.limits.concurrency,
+                    occupied_slots=len(occupied_attempts),
+                )
+            except (DagScheduleInputError, ValueError) as exc:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"durable DAG scheduling snapshot is invalid: {exc}",
+                ) from exc
+
+            if decision.dependency_ready_node_ids or decision.retry_due_node_ids:
+                for node_id in decision.dependency_ready_node_ids:
                     await self._transition_node(
-                        admitted.for_node(binding.node_id),
-                        durable_nodes[binding.node_id],
+                        admitted.for_node(node_id),
+                        durable_nodes[node_id],
                         "READY",
+                    )
+                for node_id in decision.retry_due_node_ids:
+                    node_admission = admitted.for_node(node_id)
+                    node = durable_nodes[node_id]
+                    await _maybe_await(
+                        self._store.promote_retry_due(
+                            admitted.graph_id,
+                            admitted.graph_revision,
+                            node_id,
+                            expected_version=_version(node),
+                            outbox=self._outbox(
+                                node_admission,
+                                aggregate_type="TASK_NODE",
+                                aggregate_id=(
+                                    f"{admitted.graph_id}@{admitted.graph_revision}/{node_id}"
+                                ),
+                                aggregate_version=_version(node) + 1,
+                                event_type="TASK_NODE_READY",
+                            ),
+                        )
                     )
                 await self._publish_outbox()
                 continue
 
+            selected_node_ids = set(decision.selected_node_ids)
             claimable = [
-                binding
-                for binding in admitted.nodes
-                if statuses[binding.node_id] == "READY"
-                and all(statuses.get(dependency) == "ACCEPTED" for dependency in binding.dependencies)
+                binding for binding in admitted.nodes if binding.node_id in selected_node_ids
             ]
             if not claimable:
                 active_statuses = {
@@ -709,10 +775,11 @@ class GovernedTaskCoordinator:
             )
 
         attempts = await self._attempts_for_node(admitted)
-        if attempts:
+        attempt_numbers = [int(item.get("attempt_no") or 0) for item in attempts]
+        if attempt_numbers != list(range(1, len(attempt_numbers) + 1)):
             raise GovernedRuntimeError(
-                GOVERNED_EXECUTION_IN_PROGRESS,
-                "an admitted graph revision already owns an attempt; automatic duplicate execution is forbidden",
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable TaskAttempt journal is not contiguous",
             )
         existing_reservation = await self._try_operation(admitted.reservation_id)
         if existing_reservation is not None:
@@ -724,18 +791,22 @@ class GovernedTaskCoordinator:
         if graph_status == "CREATED":
             graph = await self._transition_graph(admitted, graph, "ACTIVE")
 
-        attempt_id = _attempt_id(admitted, attempt_no=1)
-        attempt = await _maybe_await(
-            self._store.create_attempt(
+        attempt_no = len(attempt_numbers) + 1
+        attempt_id = _attempt_id(admitted, attempt_no=attempt_no)
+        claimed_raw = await _maybe_await(
+            self._store.claim_ready_node(
                 attempt_id=attempt_id,
                 graph_id=admitted.graph_id,
                 graph_revision=admitted.graph_revision,
                 node_id=admitted.node_id,
-                attempt_no=1,
                 expected_node_version=_version(node),
+                expected_attempt_count=len(attempt_numbers),
+                owner_id=self._owner_id,
+                lease_ttl_ms=self._lease_ttl_ms,
+                budget_id=budget.budget_id,
                 operation_scope=admitted.business_scope,
                 operation_fingerprint=admitted.operation_fingerprint,
-                outbox=self._outbox(
+                attempt_created_outbox=self._outbox(
                     admitted,
                     aggregate_type="TASK_ATTEMPT",
                     aggregate_id=attempt_id,
@@ -743,27 +814,28 @@ class GovernedTaskCoordinator:
                     event_type="TASK_ATTEMPT_CREATED",
                     attempt_id=attempt_id,
                 ),
-            )
-        )
-        lease = await _maybe_await(
-            self._store.acquire_lease(
-                attempt_id,
-                owner_id=self._owner_id,
-                ttl_ms=self._lease_ttl_ms,
-                expected_attempt_version=_version(attempt),
-                outbox=self._outbox(
+                attempt_leased_outbox=self._outbox(
                     admitted,
                     aggregate_type="TASK_ATTEMPT",
                     aggregate_id=attempt_id,
-                    aggregate_version=_version(attempt) + 1,
+                    aggregate_version=1,
                     event_type="TASK_ATTEMPT_LEASED",
                     attempt_id=attempt_id,
                 ),
             )
         )
-        attempt = await _maybe_await(self._store.get_attempt(attempt_id))
-        node = await _maybe_await(
-            self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
+        claimed = _mapping(claimed_raw, field_name="atomic READY claim")
+        attempt = _mapping(
+            claimed.get("attempt"),
+            field_name="atomic READY claim attempt",
+        )
+        lease = _mapping(
+            claimed.get("lease"),
+            field_name="atomic READY claim lease",
+        )
+        node = _mapping(
+            claimed.get("node"),
+            field_name="atomic READY claim node",
         )
         lease_id = _required_record_text(lease, "lease_id")
         fencing_token = _record_positive_int(lease, "fencing_token")
@@ -1959,6 +2031,26 @@ def _record_positive_int(record: Mapping[str, Any], key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise GovernedRuntimeError(GOVERNED_DURABLE_STATE_CONFLICT, f"durable {key} must be positive")
     return value
+
+
+def _record_non_negative_int(record: Mapping[str, Any], key: str) -> int:
+    value = record.get(key) if isinstance(record, Mapping) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GovernedRuntimeError(
+            GOVERNED_DURABLE_STATE_CONFLICT,
+            f"durable {key} must be a non-negative integer",
+        )
+    return value
+
+
+def _optional_record_non_negative_int(
+    record: Mapping[str, Any],
+    key: str,
+) -> int | None:
+    value = record.get(key) if isinstance(record, Mapping) else None
+    if value is None:
+        return None
+    return _record_non_negative_int(record, key)
 
 
 def _reservation_result(value: Any) -> tuple[bool, dict[str, Any]]:

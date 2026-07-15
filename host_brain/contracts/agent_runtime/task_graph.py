@@ -114,7 +114,9 @@ _NODE_TRANSITIONS: dict[TaskNodeStatus, frozenset[TaskNodeStatus]] = {
     ),
     TaskNodeStatus.ACCEPTED: frozenset(),
     TaskNodeStatus.FAILED: frozenset(),
-    TaskNodeStatus.RETRY_PENDING: frozenset({TaskNodeStatus.READY}),
+    TaskNodeStatus.RETRY_PENDING: frozenset(
+        {TaskNodeStatus.READY, TaskNodeStatus.CANCELLED}
+    ),
     TaskNodeStatus.CANCEL_REQUESTED: frozenset({TaskNodeStatus.CANCELLED}),
     TaskNodeStatus.CANCELLED: frozenset(),
 }

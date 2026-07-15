@@ -80,6 +80,7 @@ class _FakeTaskStore:
             "node_id": node.node_id,
             "status": node.status.value,
             "status_version": node.status_version,
+            "retry_not_before_ms": None,
             "node": node.to_dict(),
         }
         self.attempts: dict[str, dict[str, Any]] = {}
@@ -89,6 +90,9 @@ class _FakeTaskStore:
         self.reservation_acquired = bool(reservation_acquired)
 
     def assert_budget_usage_ready(self) -> None:
+        return None
+
+    def assert_dag_scheduling_ready(self) -> None:
         return None
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
@@ -107,7 +111,9 @@ class _FakeTaskStore:
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
         return {
+            "observed_ts_ms": 1,
             "attempts": [dict(item) for item in self.attempts.values()],
+            "active_leases": [],
             "budgets": [dict(self.budget)] if self.budget else [],
         }
 
@@ -203,6 +209,51 @@ class _FakeTaskStore:
         }
         self.attempts[attempt["attempt_id"]] = attempt
         return dict(attempt)
+
+    def claim_ready_node(self, **kwargs: Any) -> dict[str, Any]:
+        assert self.budget is not None
+        assert kwargs["budget_id"] == self.budget["budget_id"]
+        assert kwargs["expected_attempt_count"] == len(self.attempts)
+        self.calls.append("attempt:CREATED")
+        attempt = {
+            "attempt_id": kwargs["attempt_id"],
+            "graph_id": kwargs["graph_id"],
+            "graph_revision": kwargs["graph_revision"],
+            "node_id": kwargs["node_id"],
+            "attempt_no": len(self.attempts) + 1,
+            "status": "LEASED",
+            "status_version": 1,
+        }
+        self.attempts[attempt["attempt_id"]] = attempt
+        self.calls.append("attempt:LEASED")
+        self.node["status"] = "LEASED"
+        self.node["status_version"] += 1
+        self.node["retry_not_before_ms"] = None
+        self.node["node"]["status"] = "LEASED"
+        self.node["node"]["status_version"] = self.node["status_version"]
+        return {
+            "attempt": dict(attempt),
+            "lease": {
+                "lease_id": "lease::one",
+                "attempt_id": attempt["attempt_id"],
+                "fencing_token": 1,
+                "status_version": 0,
+            },
+            "node": self.get_node(
+                kwargs["graph_id"],
+                kwargs["graph_revision"],
+                kwargs["node_id"],
+            ),
+        }
+
+    def promote_retry_due(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert self.node["status"] == "RETRY_PENDING"
+        self.node["status"] = "READY"
+        self.node["status_version"] += 1
+        self.node["retry_not_before_ms"] = None
+        self.node["node"]["status"] = "READY"
+        self.node["node"]["status_version"] = self.node["status_version"]
+        return self.get_node(args[0], args[1], args[2])
 
     def acquire_lease(self, attempt_id: str, *, owner_id: str, ttl_ms: int, expected_attempt_version: int, outbox: Any) -> dict[str, Any]:
         attempt = self.attempts[attempt_id]
@@ -438,6 +489,48 @@ def _application(
         owner_id="worker-one",
     )
     return GovernedCommandApplication(command_repository=_Repository(), coordinator=coordinator)
+
+
+@pytest.mark.asyncio
+async def test_dag_schema_is_checked_before_budget_mutation() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    def _reject_stale_schema() -> None:
+        calls.append("schema:rejected")
+        raise RuntimeError("migration 0089 missing")
+
+    store.assert_dag_scheduling_ready = _reject_stale_schema  # type: ignore[method-assign]
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    with pytest.raises(RuntimeError, match="migration 0089 missing"):
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert calls == ["schema:rejected"]
+    assert store.budget is None
 
 
 @pytest.mark.asyncio

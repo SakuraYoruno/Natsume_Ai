@@ -102,8 +102,8 @@ flowchart LR
 ## 当前例外与缺口
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
-2. Scheduler 已接入同一 admission；Internal 仍因旧 WorkOrder 与新 admission 不兼容而失败。
-3. B0 已冻结 DAG 调度/retry 合同，但生产尚未完整执行并发、runtime retry/backoff、恢复和自动 Review continuation。
+2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
+3. B1 store/coordinator 子集已接 decision、原子 claim、到期 promotion、store retry deadline/cancel 和 concurrency fence；生产失败尚未进入 retry，真正并行、retry budget、heartbeat/takeover 与 Review continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 
 ## 代码锚点
