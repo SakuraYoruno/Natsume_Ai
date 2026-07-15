@@ -831,7 +831,7 @@ HOST_LLM_MULTI_POOL_ENABLED=false
 | 关联文档 | 关系 |
 |----------|------|
 | `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` | 本文档不改变运行面拓扑，仅恢复各模块内部 LLM 能力 |
-| `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` | 本文档实施后需同步更新模块的"LLM 调用情况"字段 |
+| `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` | 仅在生产模型 authority 或主链事实变化后同步 |
 | 2026-04-21 Conversation History 方案（Git 历史） | 并行方案；Reflection / DialogueState 改造与本方案解耦但可共用 LLM 池 |
 | 2026-04-21 Tool Call Chain 分析（Git 历史） | Tool 链路 LLM 调用也纳入本方案的池化框架 |
 | `docs/30_devspec/ModelPlane.md` | 本方案的模型平面扩展需反向更新 ModelPlane.md |

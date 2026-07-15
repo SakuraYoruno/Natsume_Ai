@@ -1,36 +1,22 @@
 受众：MASTER
-标题：架构档案目录
+标题：架构文档目录
 
-# 架构档案目录
+# 架构文档目录
 
-版本：v2.0
+版本：v3.0
 维护日期：2026-07-15
-状态：当前事实与目标
 
-## 当前事实
+## 当前权威
 
-- `CURRENT_CODE_ARCHITECTURE.md`
-- `CORE_MODULES_DETAILED_REFERENCE.md`
-- `dataflow_report.md`
-- `PENTEST_MODULES_ARCHITECTURE.md`
-- `diagrams/00_INDEX.md`
-
-## 目标与正式演进
-
-- `NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
-- `NATSUME_AI_V1_LONG_TERM_EVOLUTION_REFACTOR_PLAN_20260710.md`
-- `AGENT_ORCHESTRATION_DETAIL.md`
-- `AGENTIC_RAG_ARCHITECTURE.md`
+- `CURRENT_CODE_ARCHITECTURE.md`：代码现在是什么。
+- `TARGET_ARCHITECTURE.md`：最终应该是什么，不含状态。
+- `ARCHITECTURE_GAP_MATRIX.md`：目标与当前之间的差距。
+- `../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md`：当前怎么做。
 
 ## 专项参考
 
-- `DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
-- `CODEX_BIO_OPERATIONS_PLAN.md`
-- `CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md`
-- `CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md`
-- `ENV_EXTERNAL_SERVICES_CHECKLIST.md`
-- `ExternalServices_Config.md`
-- `MODE_TRANSITION_SYSTEM.md`
-- `UNIFIED_MESSAGE_GATEWAY_DESIGN.md`
+- `PENTEST_MODULES_ARCHITECTURE.md`
+- `AGENTIC_RAG_ARCHITECTURE.md`
+- `diagrams/00_INDEX.md`
 
-其余文件属于专项分析或历史收敛材料，引用前必须对照当前代码；不得据此宣告完整架构完成。
+专项参考与当前权威冲突时，以生产代码和上述三份架构文档为准。旧完整架构/长期演化计划位于 `../../_history/programs/2026-07/`。

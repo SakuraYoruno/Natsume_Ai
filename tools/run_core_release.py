@@ -48,7 +48,7 @@ PREPARE_SCHEMA_VERSION = "natsume.core-release-prepare-receipt.v1"
 ROLLBACK_MATRIX_SCHEMA_VERSION = "natsume.core-rollback-matrix.v1"
 OUTPUT_RELATIVE = Path("docs/50_release/core")
 MASTER_EXECUTION_RELATIVE = Path(
-    "docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md"
+    "docs/_history/programs/2026-07/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md"
 )
 ROLLBACK_CONFIG_RELATIVE = Path("configs/release/core_rollback_map.json")
 ARCHITECTURE_POLICY_RELATIVE = Path("configs/release/core_architecture_policy.json")

@@ -182,18 +182,28 @@ def _collect_markdown_paths(
 ) -> list[Path]:
     if explicit_paths:
         paths = [Path(path).resolve() for path in explicit_paths]
-        return [path for path in paths if path.suffix.lower() == ".md" and path.exists()]
+        return [
+            path
+            for path in paths
+            if path.suffix.lower() == ".md"
+            and path.exists()
+            and not _should_skip_markdown(path)
+        ]
 
     collected: list[Path] = []
     for path in repo_root.rglob("*.md"):
-        normalized = _normalize(path)
-        if any(part in SKIP_DIR_NAMES for part in path.parts):
-            continue
-        if any(token in normalized for token in SKIP_SUBSTRINGS):
+        if _should_skip_markdown(path):
             continue
         collected.append(path.resolve())
     collected.sort(key=lambda p: _normalize(_to_rel(p, repo_root)))
     return collected
+
+
+def _should_skip_markdown(path: Path) -> bool:
+    normalized = _normalize(path)
+    return any(part in SKIP_DIR_NAMES for part in path.parts) or any(
+        token in normalized for token in SKIP_SUBSTRINGS
+    )
 
 
 def _first_non_empty_lines(raw: str, *, limit: int) -> list[str]:

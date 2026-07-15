@@ -12,8 +12,9 @@
 
 1) **事实文档（每次代码迭代都要同步）**
    - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
-   - `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
-   - `docs/50_project/arch/dataflow_report.md`
+   - `configs/release/current_architecture_status.json`
+   - `docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md`
+   - `docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md`
    - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
    - `docs/60_trace/requirements_trace.md`
    - `docs/00_index/00_DOCMAP.md`

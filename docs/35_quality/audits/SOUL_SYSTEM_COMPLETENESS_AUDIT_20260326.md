@@ -194,7 +194,7 @@
 |------|------|------|------|
 | 灵魂情感架构优化 | `docs/15_theory/soul_emotion_optimization.md` (182KB) | 5 大优化方向 + 完整伪代码 | ✅ 已实施 |
 | 灵魂系统全面升级路径 | `docs/15_theory/SOUL_SYSTEM_FULL_UPGRADE_PATH.md` (40KB) | 8 阶段完整设计 | ✅ 全部实施完成 |
-| 整体架构全景 | `docs/15_theory/architecture_overview.md` | 第三章"数字生命灵魂人格实现" | ✅ |
+| 当前架构事实 | `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` | 数字生命与人格资产现状 | 以当前代码审计为准 |
 | 当前代码架构 | `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` | persona/ 目录完整文件映射 | ✅ |
 | README | `README.md` 第 1069 行 | "灵魂构成（Soul Architecture）"专章 | ✅ |
 

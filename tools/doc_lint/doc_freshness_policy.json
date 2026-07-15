@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "Natsume_Ai 文档过期门禁（代码事实对齐）",
   "default_max_age_days": 14,
   "rules": [
@@ -13,32 +13,41 @@
         "edge_client/**/*.py",
         "configs/**/*.json",
         "scripts/runtime/**/*.ps1",
-        "docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md",
         "docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md",
         "docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md"
       ]
     },
     {
-      "id": "arch-core-modules",
-      "doc": "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
-      "note": "主模块职责、接线、边界变化需回写到核心模块索引。",
+      "id": "arch-machine-status",
+      "doc": "configs/release/current_architecture_status.json",
+      "note": "生产接线与能力状态变化后，必须同步机器可读当前状态。",
       "max_age_days": 7,
       "sources": [
         "host_brain/**/*.py",
-        "tests/unit/**/*.py",
-        "tests/contract/**/*.py"
+        "edge_client/**/*.py",
+        "natsume_contracts/**/*.py"
       ]
     },
     {
-      "id": "arch-dataflow",
-      "doc": "docs/50_project/arch/dataflow_report.md",
-      "note": "数据流和回流链路变化后，需同步架构数据流报告。",
-      "max_age_days": 10,
+      "id": "arch-gap-matrix",
+      "doc": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+      "note": "当前事实或机器状态变化后，必须重新解释目标差距。",
+      "max_age_days": 7,
       "sources": [
-        "host_brain/app/**/*.py",
-        "host_brain/observability/**/*.py",
-        "edge_client/**/*.py",
-        "host_brain/app/monitor_ui/src/**/*"
+        "configs/release/current_architecture_status.json",
+        "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md"
+      ]
+    },
+    {
+      "id": "active-execution-contract",
+      "doc": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
+      "note": "差距或目标合同变化后，唯一活动执行合同必须同步入口、依赖和 Gate。",
+      "max_age_days": 14,
+      "sources": [
+        "configs/release/current_architecture_status.json",
+        "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md"
       ]
     },
     {
@@ -69,7 +78,9 @@
       "max_age_days": 14,
       "sources": [
         "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
-        "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
+        "docs/50_project/arch/TARGET_ARCHITECTURE.md",
+        "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md",
+        "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
         "docs/60_trace/requirements_trace.md",
         "docs/50_project/guides/DOCUMENT_SYNC_WORKFLOW.md",
         "docs/50_project/index.md",

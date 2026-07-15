@@ -16,8 +16,8 @@ CANDIDATE_SCORING = (
     REPO_ROOT / "host_brain" / "persona" / "surface" / "candidate_scoring.py"
 )
 
-# These existing warnings are registered as separate cleanup debt. TASK-0461 only
-# authorizes the candidate_scoring.py fix, so this test must not rewrite them.
+# These warnings remain explicit quality debt; this test prevents accidental
+# growth while the owning scoring modules are migrated.
 DEFERRED_SAME_ESCAPE_WARNINGS = (
     "host_brain/persona/surface/scoring_texture.py",
     "host_brain/persona/surface/scoring/parse.py",
@@ -37,7 +37,7 @@ def _compile_deprecation_warnings(relative_path: str) -> list[str]:
     ]
 
 
-def test_doc_audience_pre_commit_hook_uses_real_cli_and_staged_paths() -> None:
+def _doc_audience_hook() -> dict[str, object]:
     config = yaml.safe_load(
         (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     )
@@ -47,17 +47,19 @@ def test_doc_audience_pre_commit_hook_uses_real_cli_and_staged_paths() -> None:
         for hook in repository.get("hooks", ())
         if hook.get("id") == "doc-audience-lint"
     ]
+    assert len(hooks) == 1
+    return hooks[0]
+
+
+def test_doc_audience_pre_commit_hook_uses_real_cli_and_staged_paths() -> None:
+    hook = _doc_audience_hook()
 
     assert AUDIENCE_LINT.is_file()
-    assert len(hooks) == 1
-    hook = hooks[0]
     assert hook["pass_filenames"] is True
-    assert "tools/doc_lint/doc_audience_lint.py" in hook["entry"]
-    assert "tools/doc_audience_lint.py" not in hook["entry"]
+    assert "tools/doc_lint/doc_audience_lint.py" in str(hook["entry"])
+    assert "tools/doc_audience_lint.py" not in str(hook["entry"])
 
-    # Executing the configured entry with two staged-file arguments proves that
-    # filenames become repeatable --path arguments instead of a full-repo scan.
-    command = shlex.split(hook["entry"])
+    command = shlex.split(str(hook["entry"]))
     command.extend(("docs/30_devspec/DevSpec.md", "docs/40_agents/AGENTS.md"))
     completed = subprocess.run(
         command,
@@ -72,9 +74,30 @@ def test_doc_audience_pre_commit_hook_uses_real_cli_and_staged_paths() -> None:
     assert json.loads(completed.stdout)["status"] == "passed"
 
 
+def test_doc_audience_hook_skips_negative_fixtures_when_paths_are_explicit() -> None:
+    hook = _doc_audience_hook()
+    command = shlex.split(str(hook["entry"]))
+    command.extend(
+        (
+            "tests/fixtures/ci/doc_gate/bad/missing_audience.md",
+            "tests/fixtures/ci/doc_gate/bad/missing_title.md",
+        )
+    )
+
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert json.loads(completed.stdout)["status"] == "passed"
+
+
 def test_candidate_scoring_compiles_with_deprecation_warnings_as_errors() -> None:
-    # compile() deterministically exercises import-time parsing without relying
-    # on whether an existing .pyc happens to suppress the warning.
     source = CANDIDATE_SCORING.read_text(encoding="utf-8")
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)

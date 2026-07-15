@@ -3,6 +3,8 @@
 
 # Natsume AI V1 完整架构重构执行合同（Architecture Waves v2）
 
+> 历史快照：本文同时保留当时执行板与后续纠错，不再承担当前状态或执行 authority。当前差距以 `../../../50_project/arch/ARCHITECTURE_GAP_MATRIX.md` 为准。
+
 版本：v2.3
 日期：2026-07-15
 状态：`CORE_INFRASTRUCTURE_PASS__FULL_ARCHITECTURE_INCOMPLETE`

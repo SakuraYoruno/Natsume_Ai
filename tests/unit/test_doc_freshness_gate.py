@@ -295,3 +295,22 @@ def test_scoped_report_only_timestamps_triggering_sources(
     assert doc.resolve() in seen
     assert changed_source.resolve() in seen
     assert untouched_source.resolve() not in seen
+
+
+def test_check_all_uses_batched_git_pathspec_timestamp(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    first = repo / "src" / "first.py"
+    second = repo / "src" / "nested" / "second.py"
+    _write(first, "FIRST = 1\n")
+    _commit_all(repo, "first", date="2000-01-01T00:00:00+0000")
+    _write(second, "SECOND = 1\n")
+    _commit_all(repo, "second", date="2000-01-02T00:00:00+0000")
+
+    latest = freshness._git_latest_timestamp_for_patterns(
+        repo,
+        ["src/**/*.py"],
+    )
+
+    assert latest is not None
+    assert latest[0] == "src/nested/second.py"
+    assert latest[1] == freshness._git_timestamp(second, repo)

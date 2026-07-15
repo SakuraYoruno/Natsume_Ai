@@ -1,19 +1,13 @@
-﻿受众：MASTER
+受众：MASTER
 标题：Trace 与追溯目录
 
 # Trace 与追溯目录
 
-版本：v1.2
-维护日期：2026-07-10
-标签：当前事实
+版本：v2.0
+维护日期：2026-07-15
 
-本目录承担需求、实现、测试之间的追溯关系。新成员应先确认你的改动能回到 Trace 入口。
+- `requirements_trace.md`：当前 FR→合同→代码→证据→NE 波映射。
+- `BUG_FIX_LOG.md`：历史问题记录。
+- `../50_project/arch/ARCHITECTURE_GAP_MATRIX.md`：当前状态解释。
 
-## 5分钟入门（给新成员）
-1. 先读：`requirements_trace.md`。
-2. 再看 `BUG_FIX_LOG.md` 作为历史一致性补充。
-3. 当前未维护 `requirements_trace.csv`，以 Markdown 追溯矩阵为准。
-
-## 关键文件
-- `requirements_trace.md`（v2.0；含 M48-A R-178～182 与完整架构程序追踪）
-- `BUG_FIX_LOG.md`
+旧 R/TASK/Milestone 状态不再在本目录重复维护；从 `../_history/programs/2026-07/` 与 Git 历史追溯。
