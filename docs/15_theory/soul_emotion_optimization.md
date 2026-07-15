@@ -18,7 +18,7 @@
 - `host_brain/core/qa.py`
 - `host_brain/governor/decision.py`
 - `host_brain/persona/surface_main_chain.py`
-- `host_brain/app/reply_envelope.py`
+- `host_brain/input_runtime/reply_envelope.py`
 
 **阅读口径（2026-06-04 优先）：**
 - 本文是 2026-03-05 起多轮情感架构优化记录，正文中的“已实施”“目标文件”“预期效果”按当时阶段记录理解，不等同于当前代码仍逐项满足。

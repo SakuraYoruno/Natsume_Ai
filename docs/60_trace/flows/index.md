@@ -40,8 +40,8 @@
 | 聊天入口 | `host_brain/app/chat_routes.py` + `host_brain/app/chat_handler.py` | immune gate + 统一 SSE 入口 |
 | Cortex 编排 | `host_brain/app/cortex_orchestrator.py` | 转交共享运行时 |
 | 共享运行时 | `host_brain/app/agent_runtime_shared.py` | 召回、trace、后处理 |
-| Executive 路由 | `host_brain/app/executive_router.py` | 路由薄门面 |
-| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | chat / skill / delegate / plan 主执行 |
+| Executive 路由 | `host_brain/app/executive_runtime.py` | canonical runtime 的应用层 composition 入口 |
+| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/executive_runtime/runtime.py` | chat / skill / delegate / plan 主执行 |
 | 主链作者 | `host_brain/app/surface_reply_runtime.py` -> `host_brain/persona/surface_main_chain.py` | normal chat 文本最终作者为 SurfaceMainChain |
 
 因此，当前正确口径是：

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -9,30 +8,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.diag import extract_artifact_paths, run
-
-
-def test_diag_unified_dry_run_retrieval_writes_reports(tmp_path: Path) -> None:
-    output_json = tmp_path / "diag_retrieval.json"
-    output_md = tmp_path / "diag_retrieval.md"
-
-    report = run(
-        [
-            "retrieval",
-            "--dry-run",
-            "--output-json",
-            str(output_json),
-            "--output-md",
-            str(output_md),
-        ]
-    )
-
-    assert report["status"] == "DRY_RUN"
-    assert bool(report["success"]) is True
-    assert "_diag_retrieval.py" in " ".join(list(report.get("command") or []))
-    assert output_json.exists()
-    assert output_md.exists()
-    data = json.loads(output_json.read_text(encoding="utf-8-sig"))
-    assert data["domain"] == "retrieval"
 
 
 def test_diag_unified_emotion_command_includes_threshold_and_case_file(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.reply_envelope import (
+from host_brain.input_runtime.reply_envelope import (
     FINAL_REPLY,
     NO_REPLY,
     ReplyEnvelope,
@@ -9,7 +9,7 @@ from host_brain.app.reply_envelope import (
     can_send,
     envelope_from_commit,
 )
-from host_brain.app.reply_performance import ReplyPerformance
+from host_brain.input_runtime.reply_performance import ReplyPerformance
 
 
 def test_final_reply_envelope_is_the_only_sendable_persistable_cacheable_kind() -> None:

@@ -514,7 +514,7 @@ agent 内部路由状态维护在：
 
 选图由 `resolve_execution_profile()` 决定（`CHAT_FAST` / `WORKFLOW_SUPERVISED` / `INTENT_EXEC`），不再按布尔开关切换路径。
 
-多 Agent 升级已于 P15 终点封板（152 用例全通过），详见 `docs/50_project/phases/MULTI_AGENT_P15_SEAL_RESULT.md`。
+多 Agent 升级的 P15 历史封板记录可从 Git 历史追溯；当前有效性必须以生产接线和现行测试重新确认。
 
 ### 11.8 严禁设计
 

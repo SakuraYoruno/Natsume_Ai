@@ -62,7 +62,7 @@ Git 仓库（`origin/codex` 分支）是代码和文档的唯一真相源。两�
 
 **产出方**：开发节点
 **消费方**：运行节点
-**存放路径**：`docs/45_testing/dev_test_reports/`
+**存放路径**：`artifacts/acceptance_reports/`（本地临时产物，不提交）
 **命名规范**：`DEV_TEST_REPORT_<feature_slug>_<YYYYMMDD>.md`
 **模板**：`docs/50_project/guides/DEV_TEST_REPORT_TEMPLATE.md`
 
@@ -81,7 +81,7 @@ Git 仓库（`origin/codex` 分支）是代码和文档的唯一真相源。两�
 
 **产出方**：运行节点
 **消费方**：开发节点
-**存放路径**：`docs/45_testing/runtime_feedback_reports/`
+**存放路径**：`artifacts/acceptance_reports/`（本地临时产物，不提交）
 **命名规范**：`RUNTIME_FEEDBACK_<feature_slug>_<YYYYMMDD>.md`
 **模板**：`docs/50_project/guides/RUNTIME_FEEDBACK_REPORT_TEMPLATE.md`
 
@@ -116,13 +116,13 @@ Git 仓库（`origin/codex` 分支）是代码和文档的唯一真相源。两�
 
 ```
 git add -A
-git commit -m "feat: <feature> + 开发实测报告
+git commit -m "功能：<功能名>与开发实测报告
 
 改动文件：
 - <file1>: <改了什么>
 - <file2>: <改了什么>
 
-实测报告：docs/45_testing/dev_test_reports/DEV_TEST_REPORT_<slug>_<date>.md
+实测报告：artifacts/acceptance_reports/DEV_TEST_REPORT_<slug>_<date>.md
 待真机验证：<N> 项（P0: <n> / P1: <n> / P2: <n>）"
 
 git push origin codex
@@ -147,10 +147,10 @@ git pull origin codex
 
 ```
 git add -A
-git commit -m "test: <feature> 真机测试反馈
+git commit -m "测试：<功能名>真机测试反馈
 
 测试结果：P0 通过 <n>/<total> / P1 通过 <n>/<total>
-反馈报告：docs/45_testing/runtime_feedback_reports/RUNTIME_FEEDBACK_<slug>_<date>.md"
+反馈报告：artifacts/acceptance_reports/RUNTIME_FEEDBACK_<slug>_<date>.md"
 
 git push origin codex
 ```

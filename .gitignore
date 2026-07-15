@@ -169,6 +169,7 @@ flows/exports/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
+/delivery_gate_report.json
 /tools/artifacts/
 /tools/external/
 test_output.txt

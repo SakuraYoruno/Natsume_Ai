@@ -1,4 +1,4 @@
-受众：MASTER / Release Reviewer
+受众：MASTER
 标题：TASK-0486 M48-A Release Seal 验证报告
 
 # TASK-0486 M48-A Release Seal 验证报告

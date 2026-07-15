@@ -378,18 +378,6 @@ _EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS = {
     "default": "状态还不错，心里很平稳，可以自然地聊下去",
 }
 
-_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES = {
-    "system_prompt": (
-        "你是轻量情感推理器。根据用户消息和上下文判断 user_emotion 与 natsume_emotion。"
-        "只输出 JSON，字段 user_emotion, natsume_emotion, reason, confidence。"
-    ),
-    "mood_state_line": "当前 mood_state：{mood_state}",
-    "emotion_tag_line": "当前 Natsume 情绪：{current_emotion_tag}",
-    "recent_conversation_header": "最近对话：",
-    "recent_conversation_item": "- {line}",
-    "latest_user_message_line": "最新用户消息：{user_message}",
-}
-
 _VISION_ACTION_PLANNER_PROMPT_TEMPLATES = {
     "system_prompt": (
         "你是一个谨慎的桌面视觉自动化规划器。只输出一个 JSON 对象，不要输出 Markdown 或额外解释。"
@@ -729,14 +717,6 @@ _SPECS: dict[str, PromptSpec] = {
         content=_EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS,
         category="agent_runtime_text",
         scope="emotion_context",
-    ),
-    "emotion_llm_inference.prompt_templates": _spec(
-        "emotion_llm_inference.prompt_templates",
-        purpose="emotion_llm_inference_prompt_templates",
-        output_type="json_object",
-        content=_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES,
-        category="agent_prompt",
-        scope="emotion_agent",
     ),
     "vision.action_planner.prompt_templates": _spec(
         "vision.action_planner.prompt_templates",

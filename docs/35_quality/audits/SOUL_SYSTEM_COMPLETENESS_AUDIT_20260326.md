@@ -125,7 +125,7 @@
 | 模块 | 文件 | 状态 |
 |------|------|------|
 | 情感上下文 | `emotion_context.py` | ✅ (今日修复线程安全) |
-| LLM 情感推理级联 | `emotion_llm_inference.py` | ✅ |
+| LLM 情感推理级联 | 历史候选实现 | 后续核查确认未接入生产，已删除 |
 | 情感 Agent | `emotion_agent_handler.py` | ✅ |
 | Prompt 构建器 | `prompt_builder.py` | ✅ (已集成所有灵魂槽位) |
 

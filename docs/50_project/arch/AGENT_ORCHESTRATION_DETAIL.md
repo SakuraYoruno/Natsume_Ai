@@ -18,12 +18,13 @@
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
-- `host_brain/app/executive_router.py`
 - `host_brain/app/executive_runtime.py`
-- `host_brain/app/executive_runtime_core.py`
+- `host_brain/executive_runtime/runtime.py`
+- `host_brain/executive_runtime/route_planning.py`
+- `host_brain/executive_runtime/skill_execution.py`
 - `host_brain/app/surface_reply_runtime.py`
 - `host_brain/app/surface_main_chain_adapter.py`
-- `host_brain/app/reply_envelope.py`
+- `host_brain/input_runtime/reply_envelope.py`
 - `host_brain/app/agent_routes.py`
 - `host_brain/app/pentest_routes.py`
 - `host_brain/app/input_routes.py`
@@ -61,9 +62,8 @@ POST /v1/chat
   -> IntentDecisionEngine.evaluate_intent
   -> cortex_orchestrator_sse_generator
   -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl
-  -> executive_router_sse_generator
   -> executive_runtime_sse_generator
-  -> executive_runtime_core
+  -> executive_runtime.runtime._executive_runtime_core_impl
   -> surface_reply_runtime.surface_reply_sse_generator
   -> surface_main_chain_adapter.surface_main_chain_sse_generator
   -> persona.surface_main_chain.SurfaceMainChain
@@ -83,8 +83,8 @@ POST /v1/chat
 | Intent 收口 | `thalamus_agent` | 把用户输入收敛为 canonical intent draft |
 | 治理审批 | Governor | 做票据、风险、批准决策 |
 | Cortex 编排 | `cortex_orchestrator.py` + `agent_runtime_shared.py` | 组装上下文、召回、bond、trace 和后处理 |
-| Executive 路由 | `executive_router.py` | 路由层薄门面 |
-| Executive 核心 | `executive_runtime.py` + `executive_runtime_core.py` | 决定 chat / skill / delegate / plan 等执行路径 |
+| Executive 路由 | `executive_runtime.py` | canonical runtime 的应用层 composition 入口 |
+| Executive 核心 | `executive_runtime/runtime.py` + `route_planning.py` + `skill_execution.py` | 决定并执行 legacy chat / skill / delegate / plan 路线 |
 | Surface 收口 | `surface_reply_runtime.py` + `surface_main_chain_adapter.py` | 把 chat 路径收束到 SurfaceMainChain，兼容 deterministic sub-agent 输出与 fallback |
 | 最终输出 | `persona/surface_main_chain.py` + `reply_envelope.py` | normal chat 文本最终作者与可发送/持久化/缓存收口 |
 
@@ -92,7 +92,7 @@ POST /v1/chat
 
 ## 三、当前 Executive 路由类型
 
-`host_brain/app/executive_runtime_core.py` 当前主路由类型如下：
+`host_brain/executive_runtime/runtime.py` 联合 `route_planning.py` 处理的 legacy 主路由类型如下：
 
 | route_type | 说明 | 典型目标 |
 |---|---|---|
@@ -107,7 +107,7 @@ POST /v1/chat
 
 - 先做 route 选择
 - 再按 route 走 skill / delegate / plan / chat
-- 失败时由 `executive_runtime_core` 生成恢复策略，再决定回退到 delegate 或 chat
+- 失败时由 `runtime.py` 与 `conversation_execution.py` 收口恢复策略，再决定回退到 delegate 或 chat
 
 ---
 

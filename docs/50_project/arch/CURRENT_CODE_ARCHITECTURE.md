@@ -98,7 +98,7 @@ sequenceDiagram
     participant CR as "chat_routes"
     participant CH as "chat_handler"
     participant AS as "agent_runtime_shared"
-    participant ER as "executive_runtime_core"
+    participant ER as "executive_runtime/runtime"
     participant SA as "surface_main_chain_adapter"
     participant SMC as "SurfaceMainChain"
 
@@ -123,7 +123,9 @@ sequenceDiagram
 | `host_brain/app/chat_routes.py` | `/v1/chat` request wrapper、immune gate、BioOps preflight |
 | `host_brain/app/chat_handler.py` | 主 SSE generator |
 | `host_brain/app/agent_runtime_shared.py` | 共享 runtime hub、检索预取、子 agent gateway |
-| `host_brain/app/executive_runtime_core.py` | skill-first 执行、硬规则路由、多步任务、sub-agent dispatch |
+| `host_brain/executive_runtime/runtime.py` | legacy Executive 运行核心与 route outcome 收口 |
+| `host_brain/executive_runtime/route_planning.py` | 硬规则路由与复杂计划判定 |
+| `host_brain/executive_runtime/skill_execution.py` | legacy Skill/Plan 执行 |
 | `host_brain/app/surface_main_chain_adapter.py` | App 层到 Persona Surface 主链的桥接 |
 | `host_brain/persona/surface_main_chain.py` | SurfaceMainChain 入口 |
 | `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |

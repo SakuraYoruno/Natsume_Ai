@@ -1,20 +1,21 @@
-﻿受众：PROJECT / MASTER / CODEX
-标题：测试与反馈目录
+受众：PROJECT
+标题：测试与验收目录
 
-# 测试与反馈目录
+# 测试与验收目录
 
-版本：v1.0
-维护日期：2026-05-30
-标签：历史归档（测试沉淀）
+版本：v2.0
+维护日期：2026-07-15
+状态：当前证据
 
-本目录集中存放开发测试、运行反馈、回归报告。日常入口优先看上层汇总与当期报告目录。
+## Governed Runtime
 
-## 5分钟入门（给新成员）
-1. 先看该目录下按时间命名的最新测试报告。
-2. 再看 `dev_test_reports/` 与 `runtime_feedback_reports/` 的对照。
-3. 若需要证据链，继续到 `docs/50_project/index.md` 和 `docs/60_trace/requirements_trace.md`。
+- `test_reports/gr02a_planning_search_shadow_benchmark_v1.json`
+- `test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json`
+- `test_reports/index.md`
 
-## 关键目录
-- `dev_test_reports/`
-- `runtime_feedback_reports/`
-- `test_reports/`
+## Pentest
+
+- `pentest_agent_capability_map.md`
+- `pentest_vulnerable_labs.md`
+
+临时开发报告、运行反馈和逐次实测日志不再保存在 `docs/`。长期验收优先提交可重复生成的结构化证据。

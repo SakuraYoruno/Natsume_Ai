@@ -22,12 +22,12 @@
 - `host_brain/app/chat_payload_builder.py` — 人格、情感、Bond 上下文汇总
 - `host_brain/app/surface_context_packet.py` — Surface Main Chain 上下文包
 - `host_brain/persona/surface_main_chain.py` — 当前最终表达生成链
-- `host_brain/app/reply_envelope.py` — 最终回复发送 / 持久化 / 缓存收口
+- `host_brain/input_runtime/reply_envelope.py` — 最终回复发送 / 持久化 / 缓存收口
 - `host_brain/bond/bond_stage_engine.py` — Bond 6 阶段关系系统
 - `host_brain/bond/bond_dynamics.py` — Bond 动态写入器
 - `host_brain/memory/episodic.py` — 情节记忆
 - `host_brain/core/qa.py` — QA 超我契约
-- `host_brain/app/emotion_llm_inference.py` — LLM 情感推理级联管线
+- 独立 `emotion_llm_inference.py` 未接入生产主链，已在仓库清理中移除
 - `host_brain/app/handlers/emotion_agent_handler.py` — 情感 Agent
 - `host_brain/app/emotion_context.py` — 情感上下文（日记/画像/记忆闭环）
 
@@ -50,7 +50,7 @@
 | QA 超我契约 | `qa.py` / `qa_checks.py` | 虚假执行拦截、Canon-as-fact、emotion_tag 校验 |
 | Style Canon 风格不变量层 | `style_canon.json` | 风格骨架、语气约束 |
 | World Canon 世界观不变量层 | `wc-003-persona-core.json` + Canon 同步 | 人格宪法、不可变法律 |
-| LLM 情感推理（方向 G） | `emotion_llm_inference.py` | 三级级联（关键词→LLM Flash→Fallback） |
+| 情感推断基础（方向 G） | `emotion_context.py` | 显式情感、文本 bootstrap 与保守 fallback；独立 LLM 级联尚未接入 |
 | 情感 Agent（方向 G Phase 2） | `emotion_agent_handler.py` | ReAct 深度分析、情感记忆检索 |
 | 用户情感画像（方向 F） | `emotion_context.py` | UserEmotionProfile 蒸馏 |
 

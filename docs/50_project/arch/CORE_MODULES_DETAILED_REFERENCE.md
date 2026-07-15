@@ -27,9 +27,10 @@
 | `host_brain/app/chat_routes.py` | `/v1/chat` 的 wrapper：request id、BioOps preflight、immune gate、调用 `handle_chat` |
 | `host_brain/app/chat_handler.py` | 主 SSE generator，协调 governor、runtime、surface 输出和 MateEngine cue |
 | `host_brain/app/agent_runtime_shared.py` | 共享 runtime hub、检索预取、上下文记忆 fastpath、sub-agent gateway |
-| `host_brain/app/executive_runtime_core.py` | 硬规则路由、skill-first 执行、多步计划、sub-agent dispatch |
-| `host_brain/app/executive_runtime.py` | 薄入口，转入 executive runtime core |
-| `host_brain/app/executive_router.py` | 薄入口，提供 router/lifecycle |
+| `host_brain/app/executive_runtime.py` | canonical Executive Runtime 的应用层 composition 入口 |
+| `host_brain/executive_runtime/runtime.py` | legacy Executive 运行核心与 route outcome 收口 |
+| `host_brain/executive_runtime/route_planning.py` | 硬规则路由与复杂计划判定 |
+| `host_brain/executive_runtime/skill_execution.py` | legacy Skill/Plan 执行 |
 | `host_brain/app/cortex_orchestrator.py` | 薄入口，连接 cortex prompt builder |
 | `host_brain/app/surface_reply_preprocessor.py` | Surface 输入结构、SSE/截断/守卫相关预处理 |
 | `host_brain/app/surface_main_chain_adapter.py` | App 层到 Persona Surface 主链的桥接与结果适配 |
@@ -39,7 +40,8 @@
 主链简图：
 
 ```text
-chat_routes -> chat_handler -> agent_runtime_shared -> executive_runtime_core
+chat_routes -> chat_handler -> agent_runtime_shared -> app.executive_runtime
+  -> executive_runtime.runtime
   -> surface_main_chain_adapter -> persona.surface_main_chain
 ```
 

@@ -16,7 +16,7 @@ from host_brain.digital_life.application_boundary import (
     project_surface_organ_context,
     submit_life_command,
 )
-from host_brain.app.reply_envelope import ReplyEnvelope
+from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.app import surface_main_chain_adapter
 from host_brain.surface_runtime import delivery_audit
 from natsume_contracts.life import LifeCommand

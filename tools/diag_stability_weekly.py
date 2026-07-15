@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_ROOT = ROOT / "docs" / "60_trace"
+ARTIFACTS_ROOT = ROOT / "artifacts" / "diagnostics"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -69,8 +69,8 @@ def _is_failure_status(status: Any) -> bool:
 def _default_output_paths() -> tuple[Path, Path]:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return (
-        DOCS_ROOT / f"WEEKLY_STABILITY_REPORT_{stamp}.json",
-        DOCS_ROOT / f"WEEKLY_STABILITY_REPORT_{stamp}.md",
+        ARTIFACTS_ROOT / f"WEEKLY_STABILITY_REPORT_{stamp}.json",
+        ARTIFACTS_ROOT / f"WEEKLY_STABILITY_REPORT_{stamp}.md",
     )
 
 

@@ -426,9 +426,9 @@ gc_count = vault.gc_expired_manifests(
 
 **审计写入**：所有操作写入 `ledger.log_vault_manifest()` / `ledger.log_vault_gc()`。
 
-### 5.2 LSP Policies（`lsp/policies/`）
+### 5.2 LSP Policies
 
-`lsp/policies/` 目录存放 LSP（Language Server Protocol）相关策略配置，用于 IDE 集成场景的代码分析策略。
+旧 `lsp/policies/` 只有空目录占位，没有策略文件或生产读取入口，已在仓库清理中移除；不得将它描述为已实现能力。若后续引入 IDE/LSP 策略，必须同时提交真实 schema、加载入口和测试。
 
 ---
 

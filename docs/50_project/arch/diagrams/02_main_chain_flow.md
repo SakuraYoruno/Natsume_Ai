@@ -39,15 +39,15 @@ flowchart TD
         GOV["Governor.evaluate_intent<br/>R1-R8 + Token"]
         CO["cortex_orchestrator<br/>编排中段收口"]
         ARS["agent_runtime_shared<br/>_cortex_orchestrator_sse_generator_impl"]
-        ER["executive_router<br/>(薄壳)"]
-        ERT["executive_runtime<br/>(路由薄层)"]
-        ERC["executive_runtime_core<br/>(决策核心)"]
-        TH --> GOV --> CO --> ARS --> ER --> ERT --> ERC
+        EA["app/executive_runtime.py<br/>(composition adapter)"]
+        ERT["executive_runtime/runtime.py<br/>(运行核心)"]
+        ERD["route_planning / skill_execution<br/>(领域模块)"]
+        TH --> GOV --> CO --> ARS --> EA --> ERT --> ERD
     end
 
     SSE --> TH
 
-    ERC --> SEL{"分流"}
+    ERD --> SEL{"分流"}
     SEL -->|chat 主路径| CA["surface_reply<br/>preprocessor / payload_builder / postprocessor"]
     SEL -->|skill| SK["skill 调用"]
     SEL -->|delegate| DG["delegate"]
@@ -100,9 +100,9 @@ sequenceDiagram
 | 6 | `host_brain/app/chat_handler.py` | `handle_chat(...)`、`_unified_chat_sse_generator(...)` | 253 |
 | 7 | `host_brain/app/cortex_orchestrator.py` | 编排中段收口 | — |
 | 8 | `host_brain/app/agent_runtime_shared.py` | `_cortex_orchestrator_sse_generator_impl(...)` | 3720 |
-| 9 | `host_brain/app/executive_router.py` | `executive_router_sse_generator(...)` | 11 |
-| 10 | `host_brain/app/executive_runtime.py` | 路由薄层 | — |
-| 11 | `host_brain/app/executive_runtime_core.py` | 决策核心 | — |
+| 9 | `host_brain/app/executive_runtime.py` | `executive_runtime_sse_generator(...)` | canonical runtime 应用入口 |
+| 10 | `host_brain/executive_runtime/runtime.py` | `_executive_runtime_core_impl(...)`、`stream_chat_route(...)` | — |
+| 11 | `host_brain/executive_runtime/route_planning.py`、`skill_execution.py` | 路由判定与 legacy Skill/Plan 执行 | — |
 | 12 | `host_brain/app/surface_reply_runtime.py` (3361 行) | 入口 | — |
 | 13 | `host_brain/app/surface_reply_preprocessor.py` (1623 行) | 预处理 | — |
 | 14 | `host_brain/app/surface_main_chain.py` (1363 行) | payload 构建 | — |

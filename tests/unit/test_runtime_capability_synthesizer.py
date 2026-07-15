@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
-from host_brain.app.capability_gap_detector import CapabilityGapDecision
-from host_brain.app.runtime_capability_synthesizer import (
+from host_brain.executive_runtime.capability_gap import CapabilityGapDecision
+from host_brain.executive_runtime.capability_synthesis import (
     RuntimeCapabilityRegistry,
     synthesize_runtime_capability,
 )

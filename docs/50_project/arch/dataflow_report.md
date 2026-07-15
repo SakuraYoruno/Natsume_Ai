@@ -27,14 +27,15 @@ Chat / Surface 主链：
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
-- `host_brain/app/executive_router.py`
 - `host_brain/app/executive_runtime.py`
-- `host_brain/app/executive_runtime_core.py`
+- `host_brain/executive_runtime/runtime.py`
+- `host_brain/executive_runtime/route_planning.py`
+- `host_brain/executive_runtime/skill_execution.py`
 - `host_brain/app/surface_reply_runtime.py`
 - `host_brain/app/surface_reply_preprocessor.py`
 - `host_brain/app/surface_reply_postprocessor.py`
 - `host_brain/app/surface_main_chain_adapter.py`
-- `host_brain/app/reply_envelope.py`
+- `host_brain/input_runtime/reply_envelope.py`
 - `host_brain/persona/surface_main_chain.py`
 - `host_brain/persona/surface_packet_compiler.py`
 - `host_brain/persona/surface_runtime.py`
@@ -179,8 +180,8 @@ Governor 决策在 surface 回复前完成；immune gate 必须早于 chat handl
 1. airlock_sanitize_input(message)
 2. retrieval/persona prefetch
 3. direct fastpath 尝试
-4. executive_router_sse_generator(...)
-5. executive_runtime_core 决策 route=chat/delegate/skill/plan
+4. executive_runtime_sse_generator(...)
+5. `executive_runtime/runtime.py` 联合 `route_planning.py` 决策 legacy route，并调用对应执行模块
 6. route=chat/delegate 时进入 surface_reply_sse_generator(...)
 7. SurfaceMainChain 生成最终文本
 8. ReplyEnvelope 包装 COMMIT

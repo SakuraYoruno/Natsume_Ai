@@ -15,7 +15,7 @@
 本文档最初按“一次 PR 全改”撰写，但当前仓库已按多批次把主恢复链路落到代码里。阅读口径更新如下：
 
 - `host_brain/integrations/llm_helpers.py` / `llm_gateway.py` 已提供共享模型池、tier A/B/C/D、MiniMax provider、冷却、缓存、`LLM_POOL_EXHAUSTED`、`llm_pool_call` 审计。
-- 主聊天与主感知链已切池：`chat_agent.py`、`thalamus_agent.py`、`multimodal_observer_backends.py`、`emotion_llm_inference.py`、`plan_graph.py`。
+- 主聊天与主感知链已切池：`chat_agent.py`、`thalamus_agent.py`、`multimodal_observer_backends.py`、`plan_graph.py`；独立 `emotion_llm_inference.py` 当时未接入生产主链，现已删除。
 - 认知模块已接池：`reflection_chain.py`、`self_reflection.py`、`evolution_desire_engine.py`、`bond_narrative.py`、`style_distiller.py`、`prefrontal_agent.py`、`mirror_neuron_agent.py`、`initiative_governor_agent.py`。
 - 内心世界已拆成 `inner_world_numeric_tick` + `inner_world_monologue_tick`；后台独白生成走共享池，调度器已对后台 LLM 任务增加 `focus / gaming / sleep` 模式门控。
 - 记忆层当前已补 `hippocampus_agent` 检索后联想摘要，以及 `MemoryDistillationEngine / LongTermMemoryDistiller` 的共享池摘要接线。
@@ -31,7 +31,7 @@
 本文档属于 `docs/50_project/arch/` 的**蓝图与实施记录**类型文档，当前主要用于对照“原计划”与“实际代码落点”，并需在落地时同步：
 - 更新 `docs/00_index/00_DOCMAP.md` 加入本文档索引
 - 更新 `.env.example` 补齐所有新增环境变量（含默认值与用途说明）
-- 落地后在 `docs/45_testing/dev_test_reports/` 产出 DEV 实测报告
+- 落地后在 `artifacts/acceptance_reports/` 产出本地 DEV 实测报告；仅将长期结构化证据提升到文档区
 - 运行节点按 `docs/50_project/guides/RUNTIME_FEEDBACK_REPORT_TEMPLATE.md` 产出反馈报告
 
 本方案的前置事实基础：
@@ -409,7 +409,7 @@ WHITELIST_PATHS:
 | `limbic_agent` | `host_brain/tribe/limbic_agent.py` | 新增 `generate_emotion_narrative()`：根据数值状态 + 事件生成"妹妹此刻的感受文本"（1-3 句），存入 `emotion_timeline` | B |
 | `emotion_reactivity` | `host_brain/persona/emotion_reactivity.py` | 情感共鸣判断从规则映射换 LLM | B |
 | `emotional_silence` | `host_brain/persona/emotional_silence.py` | 沉默 hint 生成走 LLM（当前是模板字典）| B |
-| `emotion_llm_inference` | `host_brain/app/emotion_llm_inference.py` | 已有 LLM 接入，接入新池 | B |
+| `emotion_llm_inference` | 已删除的历史候选实现 | 未接入生产；若恢复必须通过 Model Runtime 与正式 composition 接线 | B |
 
 ### 5.4 人格层
 
@@ -654,7 +654,7 @@ _LLM_TASK_BY_SYSMODE = {
 | # | 文件 | 改动 |
 |---|------|------|
 | 39 | `docs/00_index/00_DOCMAP.md` | 加入本方案文档索引 |
-| 40 | `docs/45_testing/dev_test_reports/DEV_TEST_REPORT_full_llm_restoration_20260422.md` | 按模板产出开发实测报告 |
+| 40 | `artifacts/acceptance_reports/DEV_TEST_REPORT_full_llm_restoration_20260422.md` | 按模板产出本地开发实测报告 |
 
 ### 9.2 环境变量新增（同步到 `.env.example`）
 
@@ -772,7 +772,7 @@ HOST_INNER_WORLD_MONOLOGUE_TICK_S=300
 
 ### 10.3.1 当前 DEV 证据
 
-- 已产出：`docs/45_testing/dev_test_reports/DEV_TEST_REPORT_full_llm_restoration_2026-04-22.md`
+- 历史 DEV 报告已从工作树清理，需要时从 Git 历史追溯。
 - 当前本地已完成的定向验证包括共享池、反思/风格/关系桥接、内心世界双 tick、记忆蒸馏、scheduler 模式门控、CI 禁降级门禁等相关套件。
 
 ### 10.4 不变量清单
@@ -832,8 +832,8 @@ HOST_LLM_MULTI_POOL_ENABLED=false
 |----------|------|
 | `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` | 本文档不改变运行面拓扑，仅恢复各模块内部 LLM 能力 |
 | `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` | 本文档实施后需同步更新模块的"LLM 调用情况"字段 |
-| `docs/50_project/arch/CONVERSATION_HISTORY_REWORK_PLAN_20260421.md` | 并行方案；Reflection / DialogueState 改造与本方案解耦但可共用 LLM 池 |
-| `docs/50_project/arch/TOOL_CALL_CHAIN_ANALYSIS_20260421.md` | Tool 链路 LLM 调用也纳入本方案的池化框架 |
+| 2026-04-21 Conversation History 方案（Git 历史） | 并行方案；Reflection / DialogueState 改造与本方案解耦但可共用 LLM 池 |
+| 2026-04-21 Tool Call Chain 分析（Git 历史） | Tool 链路 LLM 调用也纳入本方案的池化框架 |
 | `docs/30_devspec/ModelPlane.md` | 本方案的模型平面扩展需反向更新 ModelPlane.md |
 
 ## 附录 B：本方案不涉及的范围

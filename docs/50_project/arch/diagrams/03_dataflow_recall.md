@@ -154,7 +154,7 @@ sequenceDiagram
 | ledger schema | `host_brain/audit/ledger_schema.py` | `intent_log` / `governor_log` / `skill_exec_log` / `memory_ops_log` / `life_episode` / `life_evidence` / `canon_*` / `semantic_memory` / `retrieval_event_log` |
 | WorldCanon SSOT | `host_brain/memory/canon_world_store.py` | `WorldCanonStore` |
 | WorldCanon prompt slot | `host_brain/core/prompt_context.py` | `build_world_canon_slot(...)` |
-| ReplyEnvelope | `host_brain/app/reply_envelope.py` | final reply contract |
+| ReplyEnvelope | `host_brain/input_runtime/reply_envelope.py` | final reply contract |
 | Surface 后效 | `host_brain/app/surface_main_chain_adapter.py` | `_schedule_surface_life_aftereffect(...)` / `_async_post_process(...)` 调度 |
 
 ## 不变量

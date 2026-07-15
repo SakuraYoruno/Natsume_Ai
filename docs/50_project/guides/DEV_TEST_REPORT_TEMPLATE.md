@@ -3,7 +3,7 @@
 
 <!-- ====================================================================
   使用说明：
-  1. 复制本模板到 docs/45_testing/dev_test_reports/
+  1. 将临时实测报告保存在 artifacts/acceptance_reports/（不提交）
   2. 按命名规范重命名：DEV_TEST_REPORT_<feature_slug>_<YYYYMMDD>.md
   3. 填写所有 [PLACEHOLDER] 占位符
   4. 删除本注释块

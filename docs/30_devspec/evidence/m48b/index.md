@@ -1,24 +1,30 @@
-# M48-B Historical Evidence
+受众：CODEX
+标题：M48-B Entry Gate 机器证据索引
 
-本目录冻结为 2026-07-12 以前的历史证据，不再承担执行、handoff、Seal 或解锁职责。旧状态只描述当时的局部实现；未完成 production 接线已统一并入 Architecture Waves v2 的 AW-00，后续不再创建逐 TASK evidence 目录。
+# M48-B Entry Gate 机器证据索引
 
-- `M48B_ENTRY_GATE_PACKET.json`：所有权、migration、cutover、隔离 fixture 与 P0 控制的机器可读 SSOT。
-- `M48B_ENTRY_GATE_PACKET.md`：人工评审视图。
-- `M48B_ENTRY_GATE_MASTER_APPROVAL.md`：用户委托的本地实施审批与明确未授权边界。
-- `M48B_ENTRY_GATE_RESULT.json`：fail-closed 机检结果；五项条款满足时为 `OPEN`。
-- `task0487/`：Secure Ingress identity/security state/catalog compatibility 的实现与验证证据。
-- `task0488/`：Gateway raw-body verification、durable inbox/outbox/ack/DLQ/reconciliation 与生命周期验证证据。
-- `task0489/`：Obs Query-only boundary、16-family Secure command plane、outcome journal/owner/drain、隔离验证与 protected runtime handoff 证据。
-- `task0490/`：Skill/Provider 严格签名验证、content-addressed physical quarantine、0060 durable state、STAGED-only intake、legacy import/install 封口与 protected production handoff 证据。
-- `task0491/`：真实 0058 principal/evidence、Governor token intersection、Lab-only choke points、0061 strict RunStore、legacy Pentest 封口与 protected route/composition handoff 证据。
-- `task0492/`：17-endpoint typed Service Catalog、18770 双 owner/public bind fail-closed、candidate-only startup gate、one-shot reservation composition 与 protected startup handoff 证据。
-- `task0493/`：Edge contracts-only AST guard、122 条内容寻址 finding、54 个 TASK-0581 迁移组、动态 loader/callable flow 封口与不可降级 Delivery Gate 证据。
-- `task0494/`：Mate/Desktop/WeChat Bridge default-off、专属 HMAC/scope/rate/replay/audit、bounded admission/queue、remote approval 与 protected producer/startup/verifier handoff 证据。
-- `task0495/`：五域 `ISOLATED_ONLY` golden/fault matrix、no-real-I/O guard、provider fail-closed construction、精确 durable claim/result/audit 语义与 protected Safety Seal handoff 证据。
-- `task0496/`：Platform Safety Seal 三路只读聚合审计与机器可读 `BLOCKED` 结果；登记 production handoff、M48-A Release Seal、exception expiry、rollback 和最终 MASTER 签署 blocker。
+版本：v2.0
+维护日期：2026-07-15
+状态：历史机器证据
 
-执行：
+## Gate 汇总
 
-```powershell
-python tools/run_m48b_entry_gate.py --root . --pretty
-```
+- `M48B_ENTRY_GATE_PACKET.json`
+- `M48B_ENTRY_GATE_RESULT.json`
+- `M48B_ENTRY_GATE_PACKET.md`
+- `M48B_ENTRY_GATE_MASTER_APPROVAL.md`
+
+## 任务证据
+
+- `task0487/TASK0487_EVIDENCE.json`
+- `task0488/TASK0488_EVIDENCE.json`
+- `task0489/TASK0489_EVIDENCE.json`
+- `task0490/TASK0490_EVIDENCE.json`
+- `task0491/TASK0491_EVIDENCE.json`
+- `task0492/TASK0492_EVIDENCE.json`
+- `task0493/TASK0493_EVIDENCE.json`
+- `task0494/TASK0494_EVIDENCE.json`
+- `task0495/TASK0495_EVIDENCE.json`
+- `task0496/TASK0496_SEAL_RESULT.json`
+
+逐任务 Markdown 复述已移除；需要叙事上下文时从 Git 历史追溯，验收与自动化读取以本页列出的结构化文件为准。

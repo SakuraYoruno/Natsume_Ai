@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # 单文件硬上限：1 MiB。
 # 选 1MiB 的依据：
-#   - 当前仓库内最大文件 docs/30_devspec/DevTasks.md 约 586 KB；
-#   - 真实源码 / Markdown 文档几乎不应超过 1MiB；
+#   - 当前源码和 Markdown 文档均不需要超过 1 MiB；
+#   - 大型运行资产必须逐项说明用途并进入显式白名单；
 #   - 若未来确有合法大文件（如必要的测试 fixture），需在下方 ALLOWLIST 显式登记。
 MAX_SINGLE_FILE_BYTES = 1 * 1024 * 1024
 
@@ -34,7 +34,6 @@ ALLOWLIST: frozenset[str] = frozenset(
         # FreeMote tooling assets are intentionally tracked for local GalGame/resource extraction workflows.
         "tools/FreeMote/Tools/bc7enc.exe",
         "tools/FreeMote/lib/emotedriver.dll",
-        "tools/Ulysses-FreeMoteToolkit-v4.5.1.zip",
     }
 )
 

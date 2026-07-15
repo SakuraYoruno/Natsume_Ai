@@ -58,7 +58,8 @@ Host Main 负责所有真正的事实、记忆、政策、审计与业务执行�
   -> intent 编译
   -> Governor / immune gate
   -> cortex_orchestrator
-  -> executive_runtime_core
+  -> app.executive_runtime
+  -> executive_runtime.runtime
   -> chat / skill / delegate / plan
   -> post process
 ```
@@ -83,10 +84,9 @@ flowchart LR
     D --> E["thalamus_agent"]
     E --> F["Governor"]
     F --> G["cortex_orchestrator"]
-    G --> H["executive_router"]
-    H --> I["executive_runtime"]
-    I --> J["executive_runtime_core"]
-    J --> L["surface_reply / skill / delegate / plan"]
+    G --> I["app.executive_runtime"]
+    I --> J["executive_runtime.runtime"]
+    J --> L["route_planning / skill_execution / conversation_execution"]
     L --> SC["surface_main_chain (normal chat 最终作者)"]
     SC --> M["async_post_process"]
 ```
@@ -95,7 +95,7 @@ flowchart LR
 
 - `/v1/chat` 的 HTTP 首跳由 `host_brain/app/asgi.py` + `host_brain/app/app_factory.py` 退示的 `chat_endpoint` 接住，再委托给 `chat_routes.handle_v1_chat_route` 与 `chat_handler.handle_chat`；`chat_handler.py` 是进入主编排前的薄层
 - `cortex_orchestrator` 是聊天编排中段收口点
-- `executive_runtime_core.py` 是当前真正的执行与路由核心
+- `host_brain/executive_runtime/runtime.py` 是当前执行核心，路由、计划、Skill 与对话职责继续下沉到同包的分层模块
 - `surface_reply_runtime.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，受 necessary_facts、must_not_do 与 ReplyEnvelope 收口约束；旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
 
 ## 四、外部输入与平台消息链
@@ -108,7 +108,7 @@ flowchart TD
     B --> C["即时 ACK / 质量分析 / 偏航检测"]
     C --> D["thalamus_agent"]
     D --> E["cortex_orchestrator"]
-    E --> F["executive_runtime_core"]
+    E --> F["executive_runtime.runtime"]
     F --> G["surface_reply / skill / delegate / plan"]
     G --> H["Gateway 回复 / 后处理"]
 ```

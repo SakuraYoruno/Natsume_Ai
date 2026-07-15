@@ -1,19 +1,13 @@
-﻿受众：PROJECT
-标题：测试报告子目录（45_testing 下）
+受众：PROJECT
+标题：Governed Runtime 验收证据索引
 
-# 测试报告子目录（45_testing）
+# Governed Runtime 验收证据索引
 
-版本：v1.0
-维护日期：2026-05-30
-标签：历史归档
+版本：v2.0
+维护日期：2026-07-15
+状态：当前机器证据
 
-记录边缘测试与专项验收数据，用于回溯。
+- `gr02a_planning_search_shadow_benchmark_v1.json`：规划搜索影子基准与收益比较。
+- `gr06_universal_governed_runtime_live_acceptance_20260715.json`：chat、skill、delegate、plan 全路线 live acceptance。
 
-## 5分钟入门（给新成员）
-1. 看文件名按时间排序，优先最新。
-2. 按报告结论确认是否为已修复或待修复项。
-3. 回到对应任务条目补充验收状态。
-
-## 关键文件
-- `EDGE_OPTIMIZATION_AND_TEST_REPORT_2026-03-04.md`
-- `EMOTION_CLOSED_LOOP_REPORT_20260309_235917.md`
+这两份证据证明对应程序 Gate，不代表 Full Architecture 的全部目标已封板。

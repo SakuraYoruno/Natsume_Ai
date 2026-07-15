@@ -1,4 +1,4 @@
-受众：MASTER / Release Operator
+受众：MASTER
 标题：M48-A 已知限制与后续 Backlog
 
 # M48-A 已知限制与后续 Backlog

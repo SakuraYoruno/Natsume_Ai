@@ -24,7 +24,7 @@ SCOPED_PRODUCTION_PATHS = (
     "host_brain/app/chat_handler.py",
     "host_brain/app/input_routes.py",
     "host_brain/app/mateengine_routes.py",
-    "host_brain/app/outbound_orchestrator.py",
+    "host_brain/input_runtime/outbound_delivery.py",
     "host_brain/app/vts_emotion_driver.py",
     "host_brain/app/surface_reply_postprocessor.py",
     "host_brain/app/agent_runtime_shared.py",

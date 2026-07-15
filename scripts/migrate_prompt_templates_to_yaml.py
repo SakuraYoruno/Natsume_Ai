@@ -38,7 +38,7 @@ _EXECUTIVE_SCOPES = {
 }
 _PERSONA_SCOPES = {
     "persona", "inner_world", "body_sense", "self_model", "self_reflection",
-    "emotional_silence", "emotion_context", "emotion_llm_inference",
+    "emotional_silence", "emotion_context",
     "emotion_utterance_index", "trait_drift_guard", "drift_detector",
     "evolution_orchestrator", "evolution_desire_engine",
 }
