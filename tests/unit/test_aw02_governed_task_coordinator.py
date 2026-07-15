@@ -524,13 +524,9 @@ def test_admitted_execution_preserves_explicit_result_authority() -> None:
     assert admitted.for_node("node-one").result_node_id == "node-one"
 
 
-def test_coordinator_durable_identity_rejects_result_authority_drift() -> None:
-    command, _, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
-    admitted = AdmittedExecution.from_contracts(
-        command=command,
-        assignment=assignment,
-        graph=graph,
-    )
+@pytest.mark.asyncio
+async def test_coordinator_durable_identity_rejects_result_authority_drift() -> None:
+    command, work_order, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
     calls: list[str] = []
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
@@ -542,17 +538,26 @@ def test_coordinator_durable_identity_rejects_result_authority_drift() -> None:
         acceptance=_Acceptance("ACCEPT"),
         owner_id="worker-one",
     )
-    drifted_graph = {**store.graph, "graph": dict(store.graph["graph"])}
-    drifted_graph["graph"]["result_node_id"] = None
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+    store.graph = {**store.graph, "graph": dict(store.graph["graph"])}
+    store.graph["graph"]["result_node_id"] = None
 
     with pytest.raises(GovernedRuntimeError) as error:
-        coordinator._assert_durable_identity(  # noqa: SLF001
-            admitted,
-            graph=drifted_graph,
-            node=store.node,
-        )
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
 
     assert error.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
+    assert calls == []
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,6 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
@@ -33,6 +32,40 @@ from host_brain.persistence.worker_projection_repository import (
 )
 
 from .admission import AdmittedExecution, AdmittedTaskNode
+from .coordinator_records import (
+    _ParallelNodeOutcome,
+    _assert_durable_identity,
+    _evidence_refs,
+    _mapping,
+    _nested_mapping,
+    _node_input_refs,
+    _optional_record_non_negative_int,
+    _record_evidence_refs,
+    _record_non_negative_int,
+    _record_positive_int,
+    _required_record_text,
+    _reservation_result,
+    _review_evidence_refs,
+    _status,
+    _text,
+    _version,
+)
+from .coordinator_receipts import (
+    GovernedExecutionReceipt,
+    _digest_from_receipt_ref,
+    _worker_receipt_ref,
+    approved_commit_event,
+    build_execution_receipt,
+    terminal_event,
+)
+from .graph_cancellation_records import (
+    _cancellation_budget_projection,
+    _cancellation_budget_target,
+    _cancellation_final_node_states,
+    _cancellation_node_states,
+    _cancellation_requested_node_states,
+    _validated_graph_cancellation_intent,
+)
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
 from .errors import (
     GOVERNED_ACCEPTANCE_FAILED,
@@ -104,101 +137,8 @@ _TASK_STORE_CAS_CONFLICT = "TASK_STORE_CAS_CONFLICT"
 _TASK_STORE_OWNERSHIP_CONFLICT = "TASK_STORE_OWNERSHIP_CONFLICT"
 
 
-@dataclass(frozen=True, slots=True)
-class GovernedExecutionReceipt:
-    command_id: str
-    work_order_id: str
-    assignment_id: str
-    executor: str
-    worker_route: str
-    graph_id: str
-    graph_revision: int
-    node_id: str
-    attempt_id: str
-    reservation_id: str
-    receipt_ref: str | None
-    payload_digest: str | None
-    status: str
-    verification_status: str
-    accepted: bool
-    replayed: bool
-    reason_code: str | None = None
-    evidence_refs: tuple[str, ...] = ()
-    projection: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "command_id": self.command_id,
-            "work_order_id": self.work_order_id,
-            "assignment_id": self.assignment_id,
-            "executor": self.executor,
-            "worker_route": self.worker_route,
-            "graph_id": self.graph_id,
-            "graph_revision": self.graph_revision,
-            "node_id": self.node_id,
-            "attempt_id": self.attempt_id,
-            "reservation_id": self.reservation_id,
-            "receipt_ref": self.receipt_ref,
-            "payload_digest": self.payload_digest,
-            "status": self.status,
-            "verification_status": self.verification_status,
-            "accepted": self.accepted,
-            "replayed": self.replayed,
-            "reason_code": self.reason_code,
-            "evidence_refs": list(self.evidence_refs),
-            "projection": dict(self.projection),
-        }
 
 
-@dataclass(frozen=True, slots=True)
-class _ParallelNodeOutcome:
-    node_id: str
-    attempt_id: str
-    status: str
-    accepted: bool
-    reason_code: str | None
-    event: dict[str, Any]
-
-    @classmethod
-    def from_terminal_event(
-        cls,
-        *,
-        node_id: str,
-        event: Mapping[str, Any],
-    ) -> "_ParallelNodeOutcome":
-        receipt = event.get("execution_receipt")
-        if not isinstance(receipt, Mapping):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"parallel TaskNode {node_id} has no execution receipt",
-            )
-        receipt_node_id = _text(receipt.get("node_id"))
-        attempt_id = _text(receipt.get("attempt_id"))
-        status = _text(receipt.get("status")).upper()
-        accepted = receipt.get("accepted")
-        if (
-            receipt_node_id != node_id
-            or not attempt_id
-            or not status
-            or not isinstance(accepted, bool)
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"parallel TaskNode {node_id} returned an invalid terminal identity",
-            )
-        if accepted != (status == "ACCEPTED"):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"parallel TaskNode {node_id} returned an inconsistent acceptance status",
-            )
-        return cls(
-            node_id=node_id,
-            attempt_id=attempt_id,
-            status=status,
-            accepted=accepted,
-            reason_code=_text(receipt.get("reason_code")) or None,
-            event=dict(event),
-        )
 
 
 class GovernedTaskCoordinator:
@@ -479,7 +419,7 @@ class GovernedTaskCoordinator:
             )
             cancellation_replayed = True
 
-        intent = self._validated_graph_cancellation_intent(admitted, cancellation)
+        intent = _validated_graph_cancellation_intent(admitted, cancellation)
         requested_binding = {
             "request_id": str(request_id or "").strip(),
             "request_identity": str(request_identity or "").strip(),
@@ -522,31 +462,6 @@ class GovernedTaskCoordinator:
             replayed=cancellation_replayed,
         )
 
-    def _validated_graph_cancellation_intent(
-        self,
-        admitted: AdmittedExecution,
-        record: Mapping[str, Any],
-    ) -> Any:
-        try:
-            intent = normalize_graph_cancellation_intent(
-                _mapping(record.get("payload"), field_name="cancellation intent payload")
-            )
-        except (GraphCancellationContractError, GovernedRuntimeError) as exc:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"durable graph cancellation intent is invalid: {exc}",
-            ) from exc
-        if (
-            _text(record.get("intent_ref")) != intent.intent_ref
-            or intent.payload["graph_id"] != admitted.graph_id
-            or intent.payload["graph_revision"] != admitted.graph_revision
-            or _status(record) not in {"REQUESTED", "FINALIZED"}
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "durable graph cancellation identity drifted",
-            )
-        return intent
 
     async def _cancellation_nodes(
         self,
@@ -567,7 +482,7 @@ class GovernedTaskCoordinator:
                 ),
                 field_name=f"cancellation TaskNode {binding.node_id}",
             )
-            self._assert_durable_identity(node_admission, graph=graph, node=node)
+            _assert_durable_identity(node_admission, graph=graph, node=node)
             nodes[binding.node_id] = node
         return nodes
 
@@ -622,7 +537,7 @@ class GovernedTaskCoordinator:
         replayed: bool = False,
     ) -> dict[str, Any]:
         del command, work_order
-        intent = self._validated_graph_cancellation_intent(admitted, cancellation)
+        intent = _validated_graph_cancellation_intent(admitted, cancellation)
         intent_record = dict(cancellation)
         reconciliation_evidence_refs: tuple[str, ...] = ()
         if _status(intent_record) == "FINALIZED":
@@ -660,7 +575,7 @@ class GovernedTaskCoordinator:
                     advanced_intent = advanced_raw.get("intent")
                     if isinstance(advanced_intent, Mapping):
                         intent_record = dict(advanced_intent)
-                        intent = self._validated_graph_cancellation_intent(
+                        intent = _validated_graph_cancellation_intent(
                             admitted,
                             intent_record,
                         )
@@ -698,7 +613,7 @@ class GovernedTaskCoordinator:
                 "durable cancellation intent disappeared during continuation",
             )
         intent_record = dict(refreshed)
-        intent = self._validated_graph_cancellation_intent(admitted, intent_record)
+        intent = _validated_graph_cancellation_intent(admitted, intent_record)
         if _status(intent_record) == "FINALIZED":
             decision_record = await self._cancellation_decision_for_intent(
                 admitted,
@@ -905,7 +820,7 @@ class GovernedTaskCoordinator:
             finalized.get("decision"),
             field_name="final graph cancellation decision",
         )
-        self._validated_graph_cancellation_intent(admitted, final_intent)
+        _validated_graph_cancellation_intent(admitted, final_intent)
         await self._publish_outbox()
         return await self._graph_cancellation_terminal_event(
             admitted=admitted,
@@ -959,7 +874,7 @@ class GovernedTaskCoordinator:
         local_pending: Sequence[str] = (),
         replayed: bool,
     ) -> dict[str, Any]:
-        intent = self._validated_graph_cancellation_intent(admitted, intent_record)
+        intent = _validated_graph_cancellation_intent(admitted, intent_record)
         finalized = decision_record is not None
         decision_ref = None
         payload_digest = _text(intent_record.get("payload_sha256")) or None
@@ -1006,7 +921,7 @@ class GovernedTaskCoordinator:
             )
             if item
         )
-        receipt = self._receipt(
+        receipt = build_execution_receipt(
             selected,
             attempt_id=attempt_id,
             receipt_ref=decision_ref or intent.intent_ref,
@@ -1023,7 +938,7 @@ class GovernedTaskCoordinator:
             evidence_refs=evidence_refs,
             projection=projection,
         )
-        return self._terminal_event(receipt)
+        return terminal_event(receipt)
 
     async def execute(
         self,
@@ -1147,7 +1062,7 @@ class GovernedTaskCoordinator:
                         )
                     )
                 )
-                self._assert_durable_identity(node_admission, graph=graph, node=node)
+                _assert_durable_identity(node_admission, graph=graph, node=node)
                 durable_nodes[binding.node_id] = node
 
             graph_status = _status(graph)
@@ -1182,7 +1097,7 @@ class GovernedTaskCoordinator:
                     if attempts
                     else _attempt_id(recovery_admission, attempt_no=1)
                 )
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     recovery_admission,
                     attempt_id=attempt_id,
                     status="RECOVERY_REQUIRED",
@@ -1195,7 +1110,7 @@ class GovernedTaskCoordinator:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             reentry_terminal_statuses = {
@@ -1311,7 +1226,7 @@ class GovernedTaskCoordinator:
                     reason_code = GOVERNED_REVIEW_REQUIRED
                     status = "WAITING_APPROVAL"
                 await self._publish_outbox()
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=_attempt_id(review_admission, attempt_no=1),
                     status=status,
@@ -1324,7 +1239,7 @@ class GovernedTaskCoordinator:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             post_review_node_id = next(
@@ -1442,7 +1357,7 @@ class GovernedTaskCoordinator:
                         "graph_status": graph_status,
                         "decision_ref": decision_ref,
                     }
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=attempt_id,
                     receipt_ref=receipt_ref,
@@ -1462,7 +1377,7 @@ class GovernedTaskCoordinator:
                     ),
                     projection=projection,
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             if budget.status == "EXCEEDED":
@@ -1524,7 +1439,7 @@ class GovernedTaskCoordinator:
                                 )
                             )
                         )
-                        receipt = self._receipt(
+                        receipt = build_execution_receipt(
                             selected_admission,
                             attempt_id=_required_record_text(selected, "attempt_id"),
                             status="BUDGET_BLOCKED",
@@ -1541,9 +1456,9 @@ class GovernedTaskCoordinator:
                                 },
                             },
                         )
-                        yield self._terminal_event(receipt)
+                        yield terminal_event(receipt)
                         return
-                    receipt = self._receipt(
+                    receipt = build_execution_receipt(
                         final_admission,
                         attempt_id=_attempt_id(final_admission, attempt_no=1),
                         status="BUDGET_BLOCKED",
@@ -1552,7 +1467,7 @@ class GovernedTaskCoordinator:
                         reason_code=GOVERNED_BUDGET_EXCEEDED,
                         projection={"budget": budget.execution_payload()},
                     )
-                    yield self._terminal_event(receipt)
+                    yield terminal_event(receipt)
                     return
 
             if statuses and all(status == "ACCEPTED" for status in statuses.values()):
@@ -1841,7 +1756,7 @@ class GovernedTaskCoordinator:
                 )
                 review_refs = _review_evidence_refs(gate)
                 await self._publish_outbox()
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=_attempt_id(review_admission, attempt_no=1),
                     status="WAITING_APPROVAL",
@@ -1854,7 +1769,7 @@ class GovernedTaskCoordinator:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             # Atomic-success Graphs freeze their outer terminal authority in
@@ -2204,7 +2119,7 @@ class GovernedTaskCoordinator:
             outcomes.append(
                 _ParallelNodeOutcome.from_terminal_event(
                     node_id=binding.node_id,
-                    event=self._terminal_event(receipt),
+                    event=terminal_event(receipt),
                 )
             )
         return tuple(outcomes)
@@ -3135,7 +3050,7 @@ class GovernedTaskCoordinator:
                 "decision_ref": decision.decision_ref,
                 "result_node_id": result_node_id,
             }
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 result_admission,
                 attempt_id=result_attempt_id,
                 receipt_ref=result_receipt_ref,
@@ -3154,7 +3069,7 @@ class GovernedTaskCoordinator:
                 ),
                 projection=public_projection,
             )
-            return budget, self._approved_commit_event(public_projection, receipt)
+            return budget, approved_commit_event(public_projection, receipt)
 
         if graph_status != "ACTIVE" or budget.status != "ACTIVE":
             raise GovernedRuntimeError(
@@ -3354,7 +3269,7 @@ class GovernedTaskCoordinator:
             "decision_ref": decision.decision_ref,
             "result_node_id": result_node_id,
         }
-        receipt = self._receipt(
+        receipt = build_execution_receipt(
             result_admission,
             attempt_id=result_attempt_id,
             receipt_ref=result_receipt_ref,
@@ -3373,7 +3288,7 @@ class GovernedTaskCoordinator:
             ),
             projection=public_projection,
         )
-        return budget, self._approved_commit_event(public_projection, receipt)
+        return budget, approved_commit_event(public_projection, receipt)
 
     @staticmethod
     def _parallel_event_with_budget(
@@ -3424,12 +3339,12 @@ class GovernedTaskCoordinator:
         node = await _maybe_await(
             self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
         )
-        self._assert_durable_identity(admitted, graph=graph, node=node)
+        _assert_durable_identity(admitted, graph=graph, node=node)
 
         replay_receipt = await self._terminal_replay(admitted, graph=graph, node=node)
         if replay_receipt is not None:
             await self._publish_outbox()
-            yield self._terminal_event(replay_receipt)
+            yield terminal_event(replay_receipt)
             return
 
         graph_status = _status(graph)
@@ -3539,7 +3454,7 @@ class GovernedTaskCoordinator:
                 reason_code=GOVERNED_BUDGET_EXCEEDED,
                 defer_graph_terminal=True,
             )
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="BUDGET_BLOCKED",
@@ -3549,7 +3464,7 @@ class GovernedTaskCoordinator:
                 evidence_refs=(failure_ref,),
                 projection={"budget": refreshed_budget.execution_payload()},
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         budget = precharge.context
         if not precharge.accepted:
@@ -3563,7 +3478,7 @@ class GovernedTaskCoordinator:
                 pre_reservation_attempt=attempt,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         # This is the only automatic retry boundary.  Worker resolution is a
@@ -3594,7 +3509,7 @@ class GovernedTaskCoordinator:
                     defer_shared_terminal=defer_shared_terminal,
                 )
                 await self._publish_outbox()
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
                     status="FAILED",
@@ -3604,7 +3519,7 @@ class GovernedTaskCoordinator:
                     evidence_refs=(failure_ref,),
                     projection={"budget": budget.execution_payload()},
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             error_ref = "taskerror://" + hashlib.sha256(
@@ -3677,7 +3592,7 @@ class GovernedTaskCoordinator:
                         defer_shared_terminal=defer_shared_terminal,
                     )
                     await self._publish_outbox()
-                    receipt = self._receipt(
+                    receipt = build_execution_receipt(
                         admitted,
                         attempt_id=attempt_id,
                         status="FAILED",
@@ -3693,7 +3608,7 @@ class GovernedTaskCoordinator:
                             ),
                         },
                     )
-                    yield self._terminal_event(receipt)
+                    yield terminal_event(receipt)
                     return
             retry = _mapping(retry_raw, field_name="atomic retry schedule")
             retry_budget = _mapping(
@@ -3729,7 +3644,7 @@ class GovernedTaskCoordinator:
                         "accepted retry did not persist RETRY_PENDING with ACTIVE budget",
                     )
                 await self._publish_outbox()
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
                     status="RETRY_PENDING",
@@ -3743,7 +3658,7 @@ class GovernedTaskCoordinator:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
 
             retry_graph = _mapping(
@@ -3770,7 +3685,7 @@ class GovernedTaskCoordinator:
                 defer_shared_terminal=defer_shared_terminal,
             )
             await self._publish_outbox()
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="BUDGET_BLOCKED",
@@ -3786,7 +3701,7 @@ class GovernedTaskCoordinator:
                     "budget": budget.execution_payload(),
                 },
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         except Exception as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
@@ -3806,7 +3721,7 @@ class GovernedTaskCoordinator:
                 defer_shared_terminal=defer_shared_terminal,
             )
             await self._publish_outbox()
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="FAILED",
@@ -3816,7 +3731,7 @@ class GovernedTaskCoordinator:
                 evidence_refs=(failure_ref,),
                 projection={"budget": budget.execution_payload()},
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         reserved_raw = await _maybe_await(
@@ -3853,7 +3768,7 @@ class GovernedTaskCoordinator:
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="RECOVERY_REQUIRED",
@@ -3865,7 +3780,7 @@ class GovernedTaskCoordinator:
                     "budget": budget.execution_payload(),
                 },
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         if node_grant_ref is None:
             # Compatibility is limited to tests/legacy callers that have not
@@ -3935,7 +3850,7 @@ class GovernedTaskCoordinator:
         except Exception as exc:
             await _stop_heartbeat_after_interruption(heartbeat)
             await self._publish_outbox(best_effort=True)
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="RECOVERY_REQUIRED",
@@ -3947,7 +3862,7 @@ class GovernedTaskCoordinator:
                     "budget": budget.execution_payload(),
                 },
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         worker_commit: dict[str, Any] | None = None
@@ -4021,7 +3936,7 @@ class GovernedTaskCoordinator:
                 ),
             )
             await self._publish_outbox(best_effort=True)
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="RECOVERY_REQUIRED",
@@ -4033,7 +3948,7 @@ class GovernedTaskCoordinator:
                     "budget": budget.execution_payload(),
                 },
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         if worker_error is not None:
             exc = worker_error
@@ -4069,7 +3984,7 @@ class GovernedTaskCoordinator:
                     defer_shared_terminal=defer_shared_terminal,
                 )
                 if defer_shared_terminal:
-                    receipt = self._receipt(
+                    receipt = build_execution_receipt(
                         admitted,
                         attempt_id=attempt_id,
                         status="RECOVERY_REQUIRED",
@@ -4086,7 +4001,7 @@ class GovernedTaskCoordinator:
                             "budget": charge.context.execution_payload(),
                         },
                     )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
             worker_failure_reason = _exception_reason(exc, GOVERNED_WORKER_FAILED)
             if worker_failure_reason == GOVERNED_WORKER_SELF_CANCELLED:
@@ -4096,7 +4011,7 @@ class GovernedTaskCoordinator:
                 # safely declare the operation failed.  Leave the durable
                 # Attempt/Lease/reservation for normal recovery fencing.
                 await self._publish_outbox(best_effort=True)
-                receipt = self._receipt(
+                receipt = build_execution_receipt(
                     admitted,
                     attempt_id=attempt_id,
                     status="RECOVERY_REQUIRED",
@@ -4110,7 +4025,7 @@ class GovernedTaskCoordinator:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield self._terminal_event(receipt)
+                yield terminal_event(receipt)
                 return
             await self._mark_worker_failure(
                 admitted,
@@ -4124,7 +4039,7 @@ class GovernedTaskCoordinator:
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status=("RECOVERY_REQUIRED" if defer_shared_terminal else "FAILED"),
@@ -4142,7 +4057,7 @@ class GovernedTaskCoordinator:
                     "budget": budget.execution_payload(),
                 },
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         reservation_version = heartbeat.latest_reservation_version
@@ -4211,7 +4126,7 @@ class GovernedTaskCoordinator:
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 status="FAILED",
@@ -4220,7 +4135,7 @@ class GovernedTaskCoordinator:
                 reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
                 projection={"budget": budget.execution_payload()},
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         budget = charge.context
         if not charge.accepted:
@@ -4231,7 +4146,7 @@ class GovernedTaskCoordinator:
                 fencing_token=fencing_token,
                 defer_shared_terminal=defer_shared_terminal,
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
         execution_context["budget"] = budget.execution_payload()
 
@@ -4295,7 +4210,7 @@ class GovernedTaskCoordinator:
             if not defer_shared_terminal:
                 graph = await self._transition_graph(admitted, graph, "FAILED")
             await self._publish_outbox()
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 receipt_ref=receipt_ref,
@@ -4307,7 +4222,7 @@ class GovernedTaskCoordinator:
                 evidence_refs=verification_refs or evidence_refs,
                 projection=worker_commit,
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         node = await self._transition_node(
@@ -4368,7 +4283,7 @@ class GovernedTaskCoordinator:
             review_projection = dict(worker_commit)
             if review_gate is not None:
                 review_projection["review"] = review_gate.to_dict()
-            receipt = self._receipt(
+            receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
                 receipt_ref=receipt_ref,
@@ -4386,7 +4301,7 @@ class GovernedTaskCoordinator:
                 ),
                 projection=review_projection,
             )
-            yield self._terminal_event(receipt)
+            yield terminal_event(receipt)
             return
 
         node = await self._transition_node(
@@ -4434,7 +4349,7 @@ class GovernedTaskCoordinator:
                     except BaseException as exc:
                         graph = await self._transition_graph(admitted, graph, "FAILED")
                         await self._publish_outbox()
-                        receipt = self._receipt(
+                        receipt = build_execution_receipt(
                             admitted,
                             attempt_id=attempt_id,
                             receipt_ref=receipt_ref,
@@ -4449,12 +4364,12 @@ class GovernedTaskCoordinator:
                             evidence_refs=acceptance_refs,
                             projection=worker_commit,
                         )
-                        yield self._terminal_event(receipt)
+                        yield terminal_event(receipt)
                         return
                 else:
                     graph = await self._transition_graph(admitted, graph, "COMPLETED")
         await self._publish_outbox()
-        receipt = self._receipt(
+        receipt = build_execution_receipt(
             admitted,
             attempt_id=attempt_id,
             receipt_ref=receipt_ref,
@@ -4465,7 +4380,7 @@ class GovernedTaskCoordinator:
             evidence_refs=acceptance_refs,
             projection=worker_commit,
         )
-        yield self._approved_commit_event(worker_commit, receipt)
+        yield approved_commit_event(worker_commit, receipt)
 
     @staticmethod
     def _review_context(
@@ -4529,60 +4444,6 @@ class GovernedTaskCoordinator:
             diff_ref=_text(review_policy.get("diff_ref")) or None,
         )
 
-    def _assert_durable_identity(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        graph: Mapping[str, Any],
-        node: Mapping[str, Any],
-    ) -> None:
-        graph_payload = _nested_mapping(graph, "graph")
-        durable_graph_id = _text(graph.get("graph_id") or graph_payload.get("graph_id"))
-        durable_revision = int(graph.get("revision") or graph_payload.get("revision") or 0)
-        durable_root = _text(graph.get("root_work_order_id") or graph_payload.get("root_work_order_id"))
-        raw_durable_result_node_id = graph_payload.get("result_node_id")
-        durable_result_node_id = (
-            _text(raw_durable_result_node_id)
-            if raw_durable_result_node_id is not None
-            else None
-        )
-        raw_completion_policy = graph_payload.get("completion_policy")
-        durable_completion_policy = (
-            _text(raw_completion_policy)
-            if raw_completion_policy is not None
-            else None
-        )
-        node_payload = _nested_mapping(node, "node")
-        durable_node_id = _text(node.get("node_id") or node_payload.get("node_id"))
-        durable_route = _text(node.get("route") or node_payload.get("route"))
-        raw_dependencies = node_payload.get("dependencies")
-        durable_dependencies = tuple(
-            _text(item)
-            for item in (raw_dependencies if isinstance(raw_dependencies, list) else ())
-            if _text(item)
-        )
-        if (
-            durable_graph_id != admitted.graph_id
-            or durable_revision != admitted.graph_revision
-            or durable_root != admitted.work_order_id
-            or durable_result_node_id != admitted.result_node_id
-            or durable_completion_policy != admitted.completion_policy
-            or durable_node_id != admitted.node_id
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "durable graph/node identity differs from admitted command",
-            )
-        if durable_route != admitted.worker_route:
-            raise GovernedRuntimeError(
-                GOVERNED_ASSIGNMENT_CONFLICT,
-                "durable TaskNode.route differs from the frozen worker route",
-            )
-        if durable_dependencies != admitted.dependencies:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "durable TaskNode.dependencies differ from the frozen DAG",
-            )
 
     async def _matching_parallel_decision(
         self,
@@ -4758,7 +4619,7 @@ class GovernedTaskCoordinator:
                 "decision_ref": decision_ref,
             }
             projection = projected
-        return self._receipt(
+        return build_execution_receipt(
             admitted,
             attempt_id=attempt_id,
             receipt_ref=receipt_ref,
@@ -5040,7 +4901,7 @@ class GovernedTaskCoordinator:
         receipt_evidence = tuple(
             item for item in (charge.evidence_ref, charge.usage_id, failure_ref) if item
         )
-        return self._receipt(
+        return build_execution_receipt(
             admitted,
             attempt_id=attempt_id,
             status="BUDGET_BLOCKED",
@@ -5247,84 +5108,8 @@ class GovernedTaskCoordinator:
                 raise
         return dict(result) if isinstance(result, Mapping) else {"status": "OK"}
 
-    def _receipt(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        attempt_id: str,
-        status: str,
-        verification_status: str,
-        accepted: bool,
-        receipt_ref: str | None = None,
-        payload_digest: str | None = None,
-        replayed: bool | None = None,
-        reason_code: str | None = None,
-        evidence_refs: Sequence[str] = (),
-        projection: Mapping[str, Any] | None = None,
-    ) -> GovernedExecutionReceipt:
-        return GovernedExecutionReceipt(
-            command_id=admitted.command_id,
-            work_order_id=admitted.work_order_id,
-            assignment_id=admitted.assignment_id,
-            executor=admitted.executor,
-            worker_route=admitted.worker_route,
-            graph_id=admitted.graph_id,
-            graph_revision=admitted.graph_revision,
-            node_id=admitted.node_id,
-            attempt_id=attempt_id,
-            reservation_id=admitted.reservation_id,
-            receipt_ref=receipt_ref,
-            payload_digest=payload_digest,
-            status=str(status),
-            verification_status=str(verification_status),
-            accepted=bool(accepted),
-            replayed=admitted.replayed if replayed is None else bool(replayed),
-            reason_code=str(reason_code or "").strip() or None,
-            evidence_refs=tuple(dict.fromkeys(_text(item) for item in evidence_refs if _text(item))),
-            projection=dict(projection or {}),
-        )
 
-    @staticmethod
-    def _approved_commit_event(
-        worker_commit: Mapping[str, Any],
-        receipt: GovernedExecutionReceipt,
-    ) -> dict[str, Any]:
-        event = dict(worker_commit)
-        event.update(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "reason_code": None,
-                "governed": True,
-                "execution_receipt": receipt.to_dict(),
-            }
-        )
-        return event
 
-    @staticmethod
-    def _terminal_event(receipt: GovernedExecutionReceipt) -> dict[str, Any]:
-        if receipt.accepted:
-            event = dict(receipt.projection)
-            event.update({
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "reason_code": None,
-                "governed": True,
-                "replayed": receipt.replayed,
-                "execution_receipt": receipt.to_dict(),
-            })
-            return event
-        return {
-            "phase": "TERMINAL",
-            "done": True,
-            "decision": "REJECT",
-            "reason_code": receipt.reason_code or GOVERNED_DURABLE_STATE_CONFLICT,
-            "governed": True,
-            "replayed": receipt.replayed,
-            "execution_receipt": receipt.to_dict(),
-        }
 
 
 async def _worker_event_stream(
@@ -5375,20 +5160,8 @@ async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    serializer = getattr(value, "to_dict", None)
-    if callable(serializer):
-        payload = serializer()
-        if isinstance(payload, Mapping):
-            return dict(payload)
-    raise GovernedRuntimeError(GOVERNED_DURABLE_STATE_CONFLICT, f"{field_name} must be a mapping")
 
 
-def _nested_mapping(value: Mapping[str, Any], key: str) -> dict[str, Any]:
-    nested = value.get(key)
-    return dict(nested) if isinstance(nested, Mapping) else {}
 
 
 def _validated_node_grant_refs(
@@ -5470,157 +5243,22 @@ def _projection_route_authority(
     return frozen.kind, expected_target
 
 
-def _node_input_refs(node: Mapping[str, Any]) -> tuple[str, ...]:
-    raw = _nested_mapping(node, "node").get("input_refs")
-    if not isinstance(raw, (list, tuple)):
-        return ()
-    return tuple(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
 
-def _record_evidence_refs(record: Mapping[str, Any]) -> tuple[str, ...]:
-    raw = record.get("evidence_refs") if isinstance(record, Mapping) else None
-    if not isinstance(raw, (list, tuple)):
-        raw = _nested_mapping(record, "node").get("evidence_refs")
-    if not isinstance(raw, (list, tuple)):
-        return ()
-    return tuple(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
 
-def _review_evidence_refs(gate: TaskNodeReviewGate) -> tuple[str, ...]:
-    refs: list[str] = []
-    if _text(gate.review_id):
-        refs.append(f"review://{_text(gate.review_id)}")
-    if _text(gate.checkpoint_id):
-        refs.append(_text(gate.checkpoint_id))
-    return tuple(dict.fromkeys(refs))
 
 
-_CANCELLATION_TERMINAL_NODE_STATUSES = frozenset(
-    {"ACCEPTED", "FAILED", "VERIFICATION_FAILED", "CANCELLED"}
-)
-_CANCELLATION_DIRECT_NODE_STATUSES = frozenset(
-    {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW", "RETRY_PENDING"}
-)
-_CANCELLATION_REQUEST_NODE_STATUSES = frozenset(
-    {
-        "CREATED",
-        "BLOCKED",
-        "READY",
-        "LEASED",
-        "RUNNING",
-        "EXECUTED",
-        "VERIFYING",
-        "VERIFIED",
-    }
-)
 
 
-def _cancellation_node_states(
-    nodes: Mapping[str, Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    if not nodes:
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            "graph cancellation has no TaskNode snapshot",
-        )
-    return {
-        node_id: {
-            "status": _status(nodes[node_id]),
-            "status_version": _version(nodes[node_id]),
-        }
-        for node_id in sorted(nodes)
-    }
 
 
-def _cancellation_requested_node_states(
-    before: Mapping[str, Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    after: dict[str, dict[str, Any]] = {}
-    for node_id in sorted(before):
-        state = before[node_id]
-        status = _text(state.get("status")).upper()
-        version = int(state.get("status_version") or 0)
-        if status in _CANCELLATION_TERMINAL_NODE_STATUSES or status == "CANCEL_REQUESTED":
-            after[node_id] = {"status": status, "status_version": version}
-        elif status in _CANCELLATION_DIRECT_NODE_STATUSES:
-            after[node_id] = {
-                "status": "CANCELLED",
-                "status_version": version + 1,
-            }
-        elif status in _CANCELLATION_REQUEST_NODE_STATUSES:
-            after[node_id] = {
-                "status": "CANCEL_REQUESTED",
-                "status_version": version + 1,
-            }
-        else:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"TaskNode {node_id} cannot enter graph cancellation from {status}",
-            )
-    return after
 
 
-def _cancellation_final_node_states(
-    before: Mapping[str, Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    after: dict[str, dict[str, Any]] = {}
-    for node_id in sorted(before):
-        state = before[node_id]
-        status = _text(state.get("status")).upper()
-        version = int(state.get("status_version") or 0)
-        if status == "CANCEL_REQUESTED":
-            after[node_id] = {
-                "status": "CANCELLED",
-                "status_version": version + 1,
-            }
-        elif status in _CANCELLATION_TERMINAL_NODE_STATUSES:
-            after[node_id] = {"status": status, "status_version": version}
-        else:
-            raise GovernedRuntimeError(
-                GOVERNED_GRAPH_CANCELLATION_PENDING,
-                f"TaskNode {node_id} cancellation has not converged from {status}",
-            )
-    return after
 
 
-def _cancellation_budget_target(status: str | None) -> str | None:
-    if status is None:
-        return None
-    normalized = _text(status).upper()
-    targets = {
-        "PENDING": "CANCELLED",
-        "ACTIVE": "RELEASED",
-        "EXCEEDED": "RELEASED",
-        "RELEASED": "RELEASED",
-    }
-    target = targets.get(normalized)
-    if target is None:
-        raise GovernedRuntimeError(
-            GOVERNED_BUDGET_STATE_CONFLICT,
-            f"Budget cannot follow graph cancellation from {normalized}",
-        )
-    return target
 
 
-def _cancellation_budget_projection(
-    budget: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    if budget is None:
-        return None
-    return {
-        key: budget.get(key)
-        for key in (
-            "budget_id",
-            "scope",
-            "status",
-            "status_version",
-            "limits",
-            "consumed",
-            "remaining",
-            "exceeded_dimensions",
-        )
-        if key in budget
-    }
 
 
 def _canonical_parallel_outcome_reason_code(status: str) -> str | None:
@@ -5642,74 +5280,20 @@ def _canonical_parallel_outcome_reason_code(status: str) -> str | None:
     return reasons[normalized]
 
 
-def _text(value: Any) -> str:
-    return str(getattr(value, "value", value) or "").strip()
 
 
-def _status(record: Mapping[str, Any]) -> str:
-    if not isinstance(record, Mapping):
-        return ""
-    nested = record.get("node") if isinstance(record.get("node"), Mapping) else record.get("graph")
-    return _text(record.get("status") or (nested or {}).get("status")).upper()
 
 
-def _version(record: Mapping[str, Any]) -> int:
-    value = record.get("status_version") if isinstance(record, Mapping) else None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            "durable record lacks an exact non-negative status_version",
-        )
-    return value
 
 
-def _required_record_text(record: Mapping[str, Any], key: str) -> str:
-    value = _text(record.get(key)) if isinstance(record, Mapping) else ""
-    if not value:
-        raise GovernedRuntimeError(GOVERNED_DURABLE_STATE_CONFLICT, f"durable {key} is required")
-    return value
 
 
-def _record_positive_int(record: Mapping[str, Any], key: str) -> int:
-    value = record.get(key) if isinstance(record, Mapping) else None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise GovernedRuntimeError(GOVERNED_DURABLE_STATE_CONFLICT, f"durable {key} must be positive")
-    return value
 
 
-def _record_non_negative_int(record: Mapping[str, Any], key: str) -> int:
-    value = record.get(key) if isinstance(record, Mapping) else None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            f"durable {key} must be a non-negative integer",
-        )
-    return value
 
 
-def _optional_record_non_negative_int(
-    record: Mapping[str, Any],
-    key: str,
-) -> int | None:
-    value = record.get(key) if isinstance(record, Mapping) else None
-    if value is None:
-        return None
-    return _record_non_negative_int(record, key)
 
 
-def _reservation_result(value: Any) -> tuple[bool, dict[str, Any]]:
-    if isinstance(value, Mapping):
-        acquired = value.get("acquired")
-        reservation = value.get("reservation")
-    else:
-        acquired = getattr(value, "acquired", None)
-        reservation = getattr(value, "reservation", None)
-    if not isinstance(acquired, bool) or not isinstance(reservation, Mapping):
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            "reserve_operation returned an invalid result",
-        )
-    return acquired, dict(reservation)
 
 
 def _retry_attempt_available(
@@ -5777,22 +5361,8 @@ def _is_terminal_commit(event: Mapping[str, Any]) -> bool:
     return _text(event.get("phase")).upper() == "COMMIT" and bool(event.get("done"))
 
 
-def _worker_receipt_ref(event: Mapping[str, Any]) -> str | None:
-    direct = _text(event.get("receipt_ref"))
-    if direct:
-        return direct
-    nested = event.get("execution_receipt")
-    if isinstance(nested, Mapping):
-        value = _text(nested.get("receipt_ref"))
-        return value or None
-    return None
 
 
-def _evidence_refs(value: Mapping[str, Any]) -> tuple[str, ...]:
-    raw = value.get("evidence_refs") if isinstance(value, Mapping) else None
-    if not isinstance(raw, (list, tuple)):
-        return ()
-    return tuple(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
 
 def _exception_reason(exc: BaseException, default: str) -> str:
@@ -5832,13 +5402,6 @@ def _ref_token(value: Any) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "-" for char in text).strip("-") or "unknown"
 
 
-def _digest_from_receipt_ref(receipt_ref: str | None) -> str | None:
-    if not receipt_ref:
-        return None
-    tail = receipt_ref.rsplit("/", 1)[-1]
-    if len(tail) == 64 and all(char in "0123456789abcdef" for char in tail.lower()):
-        return "sha256:" + tail.lower()
-    return None
 
 
 __all__ = [

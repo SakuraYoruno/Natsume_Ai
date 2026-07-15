@@ -155,7 +155,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
-- 当前 mixed-file gate 仍明确为红，但已有十刀真实下降：Host authority 与 TaskStore types/codec/integrity/effect/parallel/cancellation/retry/failure 已迁入明确模块；DAG state 与 READY claim 又分别迁入约 0.35k/0.53k 行无状态 mixin。caller-owned graph/outbox insert 继续复用调用方事务，scheduler snapshot 保持单读事务，claim/replay 保持单写事务、三条 Outbox 与同连接精确重放。`task_repository.py` 由约 12.56k 降到 4,522 行，已低于既有 4.6k ceiling；静态 Gate 当前只剩 `coordinator.py` 5,860 行未分类这一项。禁止抬高白名单上限；下一刀拆 Coordinator 的共享 Outbox、持久执行记录与 cancellation runtime。当前 retry promotion 与 claim 仍是两个各自原子的事务，本轮结构拆分不能宣称已合并；
+- 当前 mixed-file gate 仍明确为红，但已有十一刀真实下降：Host authority 与 TaskStore focused modules 已让 `task_repository.py` 由约 12.56k 降到 4,522 行并低于既有 4.6k ceiling；Coordinator 的 record validation、不可变 receipt/terminal rendering 与 cancellation state projection 又迁入约 0.25k/0.16k/0.18k 行纯叶子模块，不持有 ports、锁、task 或 Coordinator，旧 receipt 导入 identity 不变。`coordinator.py` 由 5,860 降到 5,423 行；静态 Gate 仍只剩它未分类这一项。禁止抬高白名单上限；下一刀建立共享 `RuntimeOutbox` 与 `LocalGraphExecutionRegistry`，再迁 durable cancellation orchestration。当前 retry promotion 与 claim 仍是两个各自原子的事务，cancellation request/continue 也仍在 Coordinator，本轮结构拆分不能宣称已完成编排解耦；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；

@@ -113,6 +113,9 @@
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
+        "host_brain/task_runtime/coordinator_records.py",
+        "host_brain/task_runtime/coordinator_receipts.py",
+        "host_brain/task_runtime/graph_cancellation_records.py",
         "host_brain/task_runtime/heartbeat.py",
         "host_brain/integrations/runtime_events.py",
         "host_brain/task_runtime/dag_scheduler.py",

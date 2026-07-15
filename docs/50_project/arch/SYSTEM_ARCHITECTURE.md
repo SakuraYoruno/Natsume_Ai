@@ -117,6 +117,9 @@ flowchart TB
 主要代码：
 
 - `host_brain/task_runtime/coordinator.py`：节点推进、worker 调度、Verification 和 Acceptance。
+- `host_brain/task_runtime/coordinator_records.py`：durable record 校验、并行节点 outcome 与稳定字段读取；纯叶子模块。
+- `host_brain/task_runtime/coordinator_receipts.py`：不可变 execution receipt、构造器与 terminal/commit event rendering；纯叶子模块并保持旧导入 identity。
+- `host_brain/task_runtime/graph_cancellation_records.py`：取消 intent 校验、Node 状态投影与 Budget target/projection；不拥有取消编排 authority。
 - `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
 - `host_brain/task_runtime/budget_runtime.py`：预算预留、计量和结算。
 - `host_brain/task_runtime/review_runtime.py`：PRE/POST Review 与 continuation 材料。
@@ -143,7 +146,9 @@ flowchart TB
 
 当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。B1 在原子 claim/promotion 上增加了唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
 
-TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。当前静态架构 Gate 的唯一剩余问题是 5,860 行的 Coordinator 未分类。
+TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 已不再阻塞静态文件门禁，剩余问题集中在 Coordinator。
+
+Coordinator 的第一批纯边界也已拆出，主文件由 5,860 降到 5,423 行。三个新模块只拥有确定性 record/receipt/cancellation projection，不依赖 runtime ports、Store、锁、task 或 Coordinator；执行 Outbox、本地任务 registry 和 cancellation request/continue 仍在 Coordinator，因此静态 Gate 仍为红，不能把纯函数迁移写成编排解耦完成。
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
