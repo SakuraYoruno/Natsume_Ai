@@ -155,7 +155,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
-- 当前 mixed-file gate 仍明确为红，但已有两刀真实下降：Host authority/replay/fail-closed 校验迁入 `governed_task_authority.py`，adapter 退出大文件 inventory并修复 `chat/delegate` replay；TaskStore 的错误、状态枚举、Outbox/value records 与 payload-ref 构造迁入无 SQL/事务依赖的 `task_store_types.py`，旧 `task_repository` 导入保持同一对象身份，主文件约 12.56k → 12.33k 行。剩余红灯是 `task_repository.py` 仍超过既有 4.6k ceiling、`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；继续拆纯 row codec/decision integrity，再按 Graph/Attempt、Budget/settlement/cancellation 持久化边界和 admission/scheduling/execution/settlement 编排边界拆分；
+- 当前 mixed-file gate 仍明确为红，但已有三刀真实下降：Host authority 模块让 adapter 退出 inventory并修复 `chat/delegate` replay；TaskStore 值对象迁入 `task_store_types.py`；26 个确定性 JSON/Row codec 迁入约 1.01k 行的 `task_record_codec.py`。codec 不含 SQL、连接、时钟或事务，五个需要同事务快照的 decision integrity helper 保留在 repository；旧私有调用统一指向 canonical codec。`task_repository.py` 由约 12.56k 降到约 11.39k 行，但仍超过既有 4.6k ceiling；`coordinator.py` 仍是未分类大文件。禁止抬高白名单上限；下一刀拆 decision integrity，再按 Graph/Attempt、Budget/settlement/cancellation 持久化边界和 admission/scheduling/execution/settlement 编排边界拆分；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；

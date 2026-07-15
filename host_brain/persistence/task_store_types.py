@@ -16,6 +16,7 @@ import uuid
 
 
 TASK_STORE_INVALID = "TASK_STORE_INVALID"
+TASK_STORE_DURABLE_DATA_INVALID = "TASK_STORE_DURABLE_DATA_INVALID"
 
 _DURABLE_REFERENCE_PATTERN = re.compile(
     r"^[a-z][a-z0-9+.-]{1,31}://"
@@ -272,6 +273,7 @@ __all__ = [
     "OperationReservationResult",
     "OutboxMessage",
     "RecoveryReport",
+    "TASK_STORE_DURABLE_DATA_INVALID",
     "TASK_STORE_INVALID",
     "TaskStoreError",
     "build_outbox_payload_ref",
