@@ -265,7 +265,6 @@ def test_canon_boundary_policy_covers_all_production_python_roots_and_edge_clien
         "edge_client",
         "host_brain",
         "scripts",
-        "skills",
         "tools",
     ]
 

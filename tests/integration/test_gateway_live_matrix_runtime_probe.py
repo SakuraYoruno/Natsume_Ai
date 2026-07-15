@@ -124,9 +124,9 @@ def test_evaluate_case_fails_when_voice_proof_is_required_but_missing() -> None:
 
 def test_evaluate_case_fails_on_dispatch_error_and_extracts_request_id() -> None:
     case = probe.LiveCase(
-        case_id="hub_skill_list",
-        prompt="蓝蓝，列出技能",
-        expected_targets=("hub_skill_list",),
+        case_id="system_info",
+        prompt="蓝蓝，查看系统信息",
+        expected_targets=("system_info",),
     )
     log_chunk = "\n".join(
         [

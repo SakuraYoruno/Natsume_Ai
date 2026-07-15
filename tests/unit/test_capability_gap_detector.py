@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app.capability_gap_detector import detect_capability_gap
+from host_brain.executive_runtime.capability_gap import detect_capability_gap
 
 
 def test_detect_capability_gap_skips_executable_route() -> None:

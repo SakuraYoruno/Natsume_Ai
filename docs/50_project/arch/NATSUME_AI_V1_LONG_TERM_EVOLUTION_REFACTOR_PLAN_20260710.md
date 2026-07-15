@@ -56,9 +56,9 @@ M48-A 详细执行文档拆分为 26 个逻辑工作包，单人串行预估 58�
 |---|---|---|
 | `AgentWorkOrder` 已有 domain、run_mode、workspace、actions、acceptance、verification、approval、review | `host_brain/agent_runtime/work_order.py:48-109` | 在现有契约上版本化扩展，不另建同义 WorkOrder |
 | `SkillDagNode/SkillDagPlan` 已声明 dependencies、retry、idempotency、risk 和 execution batches | `host_brain/app/skill_dag_planner.py:15-73,150-264` | 它是 TaskGraph 契约种子，但 retry/idempotency 尚无完整运行时消费者 |
-| 普通复杂任务调用 `run_plan_graph()` 时没有把原 plan 作为执行真源 | `host_brain/app/executive_runtime_core.py:1377-1419` | 当前主链会二次规划；V1 需要只规划一次并持久化同一 revision |
+| 普通复杂任务调用 `run_plan_graph()` 时没有把原 plan 作为执行真源 | 历史提交中的 `host_brain/app/executive_runtime_core.py:1377-1419`（现迁至 `host_brain/executive_runtime/`） | 当时主链会二次规划；V1 需要只规划一次并持久化同一 revision |
 | `PlanGraph` 保存 depends_on，却把 dependency context 置空并将所有任务通过 `Send` 发出 | `host_brain/app/plan_graph.py:168-175,209-235` | 依赖语义在普通复杂任务路径不成立 |
-| 旧依赖感知执行分支已不可达 | `host_brain/app/executive_runtime_core.py:1453-1454` 及调用点检查 | 不能把死代码当作可靠 fallback |
+| 旧依赖感知执行分支已不可达 | 历史提交中的 `host_brain/app/executive_runtime_core.py:1453-1454`（现迁至 `host_brain/executive_runtime/`）及调用点检查 | 不能把死代码当作可靠 fallback |
 | 当前幂等 key 包含 plan/node 身份 | `host_brain/app/skill_dag_planner.py` 的 idempotency 生成逻辑 | 重规划会产生新 key；副作用需要稳定业务 scope/fingerprint |
 | Governed `GraphState` 已有 checkpoint、interrupt/resume、branch、barrier、artifact 和 Judge 字段 | `host_brain/integrations/graph_contract.py:97-176` | 它是单次执行控制态，不是任务/记忆/关系/知识共用领域图 |
 | LangGraph checkpoint 优先使用 SQLite，`CheckpointManager` 仍有占位部分 | `host_brain/integrations/graph_checkpoint.py:133-171,218-227` | 复用 checkpoint；补 durable Review 和真实 resume，不再造平行系统 |

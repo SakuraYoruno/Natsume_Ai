@@ -4,7 +4,7 @@
 # Natsume AI 封测执行报告（2026-03-16）
 
 **计划文档**：`docs/50_release/release_seal_test_plan_20260313.md`、`release_seal_test_plan_supplement_20260315.md`  
-**报告目录**：`docs/50_release/reports/release_seal_20260316/`
+**原报告目录**：逐批次原始报告已从工作树清理，需要时从 Git 历史追溯。
 
 ---
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -436,7 +437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
     else:
-        print(rendered, end="")
+        sys.stdout.write(rendered)
     return 0
 
 

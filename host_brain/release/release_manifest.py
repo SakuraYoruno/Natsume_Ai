@@ -120,11 +120,6 @@ def build_release_checklist(
         "assets": asset_list,
         "checksums": checksums,
         "required_services": required_service_rows,
-        "flow_refs": {
-            "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
-            "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
-            "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json",
-        },
         "config_snapshot_refs": config_refs,
         "model_plane": model_plane_meta,
         "model_plane_asset_digest": (model_plane_meta.get("digest") if isinstance(model_plane_meta, dict) else None),

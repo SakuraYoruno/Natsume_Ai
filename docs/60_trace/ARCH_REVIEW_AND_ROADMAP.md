@@ -61,7 +61,7 @@
 
 ## 3. 发布与状态基线（只看可验证事实）
 
-`configs/release` 当前扫描到里程碑文件 `m12` 到 `m29` 共 **17** 个（排除 `release_catalog.json` 与 `release_rollback_map.json`）。
+`configs/release` 当前扫描到里程碑文件 `m12` 到 `m29` 共 **17** 个（排除 `release_rollback_map.json` 等非里程碑配置）。
 
 - `configs/release/m*.json` 中发现状态标记总数：**109**
   - `DONE`：**100**

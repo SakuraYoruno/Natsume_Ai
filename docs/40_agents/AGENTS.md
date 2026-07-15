@@ -162,16 +162,7 @@ D) 风险点与回滚策略
 
 ---
 
-## 8. Flow 配置资产管理（仅规范约束，不包含操作步骤）
-- Flow 资产属于“可部署配置资产”，由 `flows/active.pointer` 与 `docs/60_trace/flows/index.md` 共同确定各环境生效版本。
-- 任何 Flow 行为变化必须满足：
-  1) 归档：导出物存在于 `flows/exports/`
-  2) 指针一致：`flows/active.pointer` 与 `docs/60_trace/flows/index.md` 一致
-  3) 回归覆盖：T-Flow-01、T-Flow-02 覆盖指针合法性与索引一致性
-
----
-
-## 9. 最小文件清单（仓库必须存在）
+## 8. 最小文件清单（仓库必须存在）
 - `docs/10_whitepaper/whitepaper_constitution_persona.md`
 - `docs/20_prd/PRD.md`
 - `docs/30_devspec/DevSpec.md`
@@ -182,7 +173,7 @@ D) 风险点与回滚策略
 
 ---
 
-## 10. 绝对禁止事项（零容忍）
+## 9. 绝对禁止事项（零容忍）
 1) 把讨论性文本/背景解释/愿景口号写进 DevTasks。  
 2) 在 PRD/白皮书/Project 文档写“请实现/请改代码/请提交”等可执行命令（应迁移到 DevTasks 或写任务卡）。  
 3) 引入旁路执行路径（绕过 Governor/Token/Skills/ToolBroker 执行入口）。  
@@ -191,7 +182,7 @@ D) 风险点与回滚策略
 
 ---
 
-## 11. 每次任务的默认步骤（描述口径，不含命令）
+## 10. 每次任务的默认步骤（描述口径，不含命令）
 1) 读取任务卡 → 锁定里程碑/约束/不变量  
 2) 定位受影响契约（Schema/Enum/Audit）→ 先改契约  
 3) 实现逻辑（全文件替换优先）  

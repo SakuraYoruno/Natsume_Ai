@@ -544,7 +544,7 @@ def soft_fail(
 
 - Counter：`context_soft_failure_total{stage, exc_type}`
 - 报表：`obs/ui` 新增"近 24 小时 SoftFailure Top N"，与 `chat_session_total` 联动
-- 告警：若某 stage 的 SoftFailure/总调用 比例 > 5%，触发告警（接入 [P7_HUMANOID_LOOP_ALERTING](./audits/SKILL_FIRST_EXECUTION_LOG_20260413_STAGE7H_HUMANOID_LOOP_ALERTING.md) 已有管线）
+- 告警：若某 stage 的 SoftFailure/总调用比例 > 5%，触发告警；具体接线以当前 Observability 代码和测试为准。
 
 #### 7.3 分批替换现有 `except Exception`
 
@@ -1195,7 +1195,7 @@ echo "ALL OPTIMIZATIONS VERIFIED ✅"
 - [GATEWAY_ARCH_REDESIGN.md](./GATEWAY_ARCH_REDESIGN.md)（OPT-8 的上游设计）
 - [ORGAN_TRIBE_UPGRADE_PLAN.md](./ORGAN_TRIBE_UPGRADE_PLAN.md)
 - [SELF_BUILT_MECHANISM_FIX_PLAN.md](./SELF_BUILT_MECHANISM_FIX_PLAN.md)
-- [audits/SKILL_FIRST_EXECUTION_LOG_20260413_STAGE7H_HUMANOID_LOOP_ALERTING.md](./audits/SKILL_FIRST_EXECUTION_LOG_20260413_STAGE7H_HUMANOID_LOOP_ALERTING.md)（OPT-3 告警管线复用）
+- 历史告警执行日志已从工作树清理；需要回放时从 Git 历史追溯。
 
 ---
 

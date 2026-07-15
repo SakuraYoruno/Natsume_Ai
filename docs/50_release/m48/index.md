@@ -1,4 +1,4 @@
-受众：MASTER / Release Operator
+受众：MASTER
 标题：M48-A 发布证据目录
 
 # M48-A 发布证据目录

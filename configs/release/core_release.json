@@ -4,8 +4,6 @@
   "asset_groups": {
     "packages": [
       "requirements.txt",
-      "package.json",
-      "package-lock.json",
       "host_brain/pyproject.toml",
       "edge_client/pyproject.toml",
       "natsume_contracts/pyproject.toml",

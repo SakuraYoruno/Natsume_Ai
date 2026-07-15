@@ -45,7 +45,6 @@ SKIP_SUBSTRINGS = (
     "/runtime/",
     "/runtime_logs/",
     "/models/",
-    "/docs/test_reports/",
     "/docs/45_testing/",
     "/tools/unity_avatar_runtime/Library/",
 )

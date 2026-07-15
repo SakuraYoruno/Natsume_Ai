@@ -1165,21 +1165,6 @@ _JEALOUSY_LOW_PRESSURE_MARKERS = (
     "才怪",
     "在意你",
 )
-_SURFACE_SCENE_QUALITY_SCORING_SCENES = frozenset(
-    {
-        "short_continue",
-        "tired",
-        "self_doubt",
-        "negative_feedback",
-        "lover_presence",
-        "lover_low_energy",
-        "ambiguous_affection",
-        "close_friend_care",
-        "low_intensity_sibling_distance",
-        "pushed_away_boundary",
-        "jealousy_low_pressure",
-    }
-)
 _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
     "familiar": RelationshipControlAxes(
         stage="familiar",

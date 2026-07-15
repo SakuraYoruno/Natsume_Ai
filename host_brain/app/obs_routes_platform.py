@@ -1,6 +1,6 @@
 """obs_routes_platform.py — 平台统计 + WebSocket（从 obs_routes.py 拆分）。
 
-包含：failure-events / gateway/stats / skills-hub/stats / ws/health
+包含：failure-events / gateway/stats / skill-catalog/stats / ws/health
 """
 from __future__ import annotations
 
@@ -481,33 +481,32 @@ def get_gateway_stats(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Skills Hub 统计 — GET /obs/skills-hub/stats
+# Skill Catalog 统计 — GET /obs/skill-catalog/stats
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SkillHubEntry(BaseModel):
+class SkillCatalogEntry(BaseModel):
     name: str
     version: str = ""
     author: str = ""
     clearance: str = "LOW"
     risk_level: int = 1
-    source: str = "local"  # local / github / external
+    source: str = "builtin"
     status: str = "loaded"
 
-class SkillHubStatsResponse(BaseModel):
+class SkillCatalogStatsResponse(BaseModel):
     schema_version: str = "Natsume.operator.skill_pack_catalog.v1"
-    hub_enabled: bool = True
+    catalog_available: bool = True
     total_skills: int = 0
     loaded_skills: int = 0
     failed_skills: int = 0
-    skills: List[SkillHubEntry] = Field(default_factory=list)
-    external_dirs_scanned: List[str] = Field(default_factory=list)
+    skills: List[SkillCatalogEntry] = Field(default_factory=list)
     domain_pack_count: int = 0
     domain_packs: List[Dict[str, Any]] = Field(default_factory=list)
     timestamp: int = 0
     projection: Dict[str, Any] = Field(default_factory=dict)
 
-@router.get("/skills-hub/stats", response_model=SkillHubStatsResponse)
-def get_skills_hub_stats():
+@router.get("/skill-catalog/stats", response_model=SkillCatalogStatsResponse)
+def get_skill_catalog_stats():
     """Read the durable Skill/Domain-Pack catalog; never scan on GET."""
     from host_brain.app.observability_runtime.domain_state_projection import (
         SKILL_PACK_CATALOG_KEY,
@@ -523,17 +522,16 @@ def get_skills_hub_stats():
     )
     body = dict(payload or {})
     body.setdefault("schema_version", "Natsume.operator.skill_pack_catalog.v1")
-    body.setdefault("hub_enabled", False)
+    body.setdefault("catalog_available", False)
     body.setdefault("total_skills", 0)
     body.setdefault("loaded_skills", 0)
     body.setdefault("failed_skills", 0)
     body.setdefault("skills", [])
-    body.setdefault("external_dirs_scanned", [])
     body.setdefault("domain_pack_count", 0)
     body.setdefault("domain_packs", [])
     body.setdefault("timestamp", 0)
     body["projection"] = projection
-    return SkillHubStatsResponse(**body)
+    return SkillCatalogStatsResponse(**body)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

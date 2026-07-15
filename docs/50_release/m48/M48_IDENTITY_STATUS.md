@@ -1,4 +1,4 @@
-受众：MASTER / Identity Reviewer
+受众：MASTER
 标题：M48-A Identity Continuity 状态
 
 # M48-A Identity Continuity 状态

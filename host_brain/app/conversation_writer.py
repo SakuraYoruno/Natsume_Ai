@@ -10,7 +10,7 @@ from host_brain.composition.process_services import (
     get_session_topic_ledger_store,
 )
 from host_brain.persona.context.soul_runtime import get_compiled_soul
-from host_brain.app.reply_envelope import can_persist
+from host_brain.input_runtime.reply_envelope import can_persist
 from host_brain.core.soft_fail import soft_fail
 from host_brain.conversation.memory_spine import append_visible_conversation_turn
 

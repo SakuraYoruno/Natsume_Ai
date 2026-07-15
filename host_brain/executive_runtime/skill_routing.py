@@ -36,10 +36,6 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
     "session_summary": "memory",
     "emotion_query": "emotion",
     "bond_query": "social",
-    "hub_skill_install": "system",
-    "hub_skill_search": "system",
-    "hub_skill_list": "system",
-    "hub_skill_remove": "system",
 }
 
 _DEFAULT_FAMILY_BY_AGENT_ID: dict[str, str] = {

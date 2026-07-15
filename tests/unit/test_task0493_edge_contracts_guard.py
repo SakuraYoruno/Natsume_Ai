@@ -7,7 +7,7 @@ import pytest
 
 from tools.architecture import edge_contracts_guard as guard
 from tools.static_scan import run_all
-from host_brain.app.executive.text_utils import _flatten_result_text
+from host_brain.executive_runtime.skill_execution import _flatten_result_text
 
 
 def _write(root: Path, relative: str, source: str) -> Path:

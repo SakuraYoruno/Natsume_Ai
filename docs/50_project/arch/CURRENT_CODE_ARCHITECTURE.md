@@ -98,7 +98,7 @@ sequenceDiagram
     participant CR as "chat_routes"
     participant CH as "chat_handler"
     participant AS as "agent_runtime_shared"
-    participant ER as "executive_runtime_core"
+    participant ER as "executive_runtime/runtime"
     participant SA as "surface_main_chain_adapter"
     participant SMC as "SurfaceMainChain"
 
@@ -123,7 +123,9 @@ sequenceDiagram
 | `host_brain/app/chat_routes.py` | `/v1/chat` request wrapper、immune gate、BioOps preflight |
 | `host_brain/app/chat_handler.py` | 主 SSE generator |
 | `host_brain/app/agent_runtime_shared.py` | 共享 runtime hub、检索预取、子 agent gateway |
-| `host_brain/app/executive_runtime_core.py` | skill-first 执行、硬规则路由、多步任务、sub-agent dispatch |
+| `host_brain/executive_runtime/runtime.py` | legacy Executive 运行核心与 route outcome 收口 |
+| `host_brain/executive_runtime/route_planning.py` | 硬规则路由与复杂计划判定 |
+| `host_brain/executive_runtime/skill_execution.py` | legacy Skill/Plan 执行 |
 | `host_brain/app/surface_main_chain_adapter.py` | App 层到 Persona Surface 主链的桥接 |
 | `host_brain/persona/surface_main_chain.py` | SurfaceMainChain 入口 |
 | `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |
@@ -185,11 +187,11 @@ SurfaceMainChain (surface_main_chain.py, 250 行)
   → SurfaceRuntime (surface_runtime.py, 2,668 行) — LLM 运行时编排
   → SurfaceMemoryRecall (surface_memory_recall.py, 4,539 行) — 记忆召回注入
   → SurfacePacketCompiler (surface_packet_compiler.py, 713 行) — 多包编译为统一输入
-  → CandidateScoring (surface/candidate_scoring.py, 1,912 行) — 候选评分与选择
+  → CandidateScoring (surface/candidate_scoring.py, 1,846 行) — 候选评分与选择
     → scoring/parse.py (262 行) — 候选解析、问题预算计数
     → scoring/stage_positions.py (406 行) — 场景位置评分（back/morning/low-energy/self-doubt/positive）
     → scoring/control_affect.py (398 行) — 情感控制评分（情绪基调 + 关系距离）
-    → scoring/texture.py (273 行) — 纹理评分（签名纹理命中 + 场景质量样本评分）
+    → scoring/texture.py — 纹理评分（签名纹理命中）
     → scoring/constants.py (37 行) — 本地评分常量
 ```
 
@@ -206,12 +208,12 @@ SurfaceMainChain (surface_main_chain.py, 250 行)
 
 | 模块 | 行数 | 职责 |
 |---|---|---|
-| `candidate_scoring.py` | 1,912 | 核心候选评分和选择管线 |
-| `scene_constants.py` | 1,587 | 场景标记常量（back/morning/low-energy 等） |
+| `candidate_scoring.py` | 1,846 | 核心候选评分和选择管线 |
+| `scene_constants.py` | 1,572 | 场景标记常量（back/morning/low-energy 等） |
 | `continuity_detectors.py` | 1,140 | 连续性/边界/场景相关性检测 |
-| `prompt_construction.py` | 717 | Surface LLM 调用的 prompt 构造 |
+| `prompt_construction.py` | 678 | Surface LLM 调用的 prompt 构造 |
 | `relationship_affect.py` | 360 | 关系距离和情感基调评分 |
-| `scoring_texture.py` | 251 | 纹理评分桥接 |
+| `scoring_texture.py` | 161 | 纹理评分桥接 |
 | `fact_handling.py` | 226 | Fact 处理与 must-not-do 合并 |
 | `data_models.py` | 210 | ReplyControlPacket、IsolatedSurfaceInput 等数据模型 |
 | `input_validation.py` | 112 | Surface 输入校验 |

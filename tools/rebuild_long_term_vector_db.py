@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-DEFAULT_CHROMA_DIR = ROOT / "data" / "chroma_db"
+DEFAULT_CHROMA_DIR = ROOT / "runtime" / "chroma" / "data"
 DEFAULT_LEDGER = ROOT / "host_brain" / "data" / "audit.sqlite3"
 DEFAULT_COLLECTION = "episodic"
 DEFAULT_DIM = 1024

@@ -127,11 +127,9 @@ def test_security_gets_never_initialize_agent(tmp_path, monkeypatch) -> None:  #
     assert incidents["projection"]["degraded_state"] == "HEALTHY"
 
 
-def test_skill_get_never_initializes_registry_or_scans_supply_chain(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+def test_skill_catalog_get_never_initializes_registry(tmp_path, monkeypatch) -> None:  # noqa: ANN001
     from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_platform as routes
-    from host_brain.skills import custom_provider_installer
-    from host_brain.skills.hub import hub_installer
 
     store = _store(tmp_path)
     now = int(time.time() * 1000)
@@ -140,12 +138,11 @@ def test_skill_get_never_initializes_registry_or_scans_supply_chain(tmp_path, mo
         SKILL_PACK_CATALOG_KEY,
         {
             "schema_version": "Natsume.operator.skill_pack_catalog.v1",
-            "hub_enabled": True,
+            "catalog_available": True,
             "total_skills": 1,
             "loaded_skills": 1,
             "failed_skills": 0,
             "skills": [{"name": "skill.one", "source": "builtin", "status": "loaded"}],
-            "external_dirs_scanned": [],
             "domain_pack_count": 1,
             "domain_packs": [{"pack_id": "research.browser", "version": "1.0.0"}],
             "timestamp": now,
@@ -156,13 +153,11 @@ def test_skill_get_never_initializes_registry_or_scans_supply_chain(tmp_path, mo
     _install_store(monkeypatch, store)
 
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("Skill GET touched registry or supply chain")
+        raise AssertionError("Skill Catalog GET initialized the registry")
 
     monkeypatch.setattr(dependencies, "get_skill_registry", forbidden)
-    monkeypatch.setattr(hub_installer, "list_installed_skills", forbidden)
-    monkeypatch.setattr(custom_provider_installer, "list_custom_provider_infos", forbidden)
 
-    response = routes.get_skills_hub_stats()
+    response = routes.get_skill_catalog_stats()
 
     assert response.loaded_skills == 1
     assert response.skills[0].name == "skill.one"
@@ -177,7 +172,7 @@ def test_empty_domain_gets_have_version_cursor_freshness_and_degraded(tmp_path, 
     _install_store(monkeypatch, store)
 
     immune = obs_routes_security_immune.get_security_immune_runtime()
-    skills = obs_routes_platform.get_skills_hub_stats()
+    skills = obs_routes_platform.get_skill_catalog_stats()
 
     for projection in (immune["projection"], skills.projection):
         assert projection["schema_version"] == "Natsume.operator.query_projection.v1"
@@ -197,12 +192,11 @@ def test_stale_skill_catalog_is_not_served_as_current(tmp_path, monkeypatch) -> 
         SKILL_PACK_CATALOG_KEY,
         {
             "schema_version": "Natsume.operator.skill_pack_catalog.v1",
-            "hub_enabled": True,
+            "catalog_available": True,
             "total_skills": 1,
             "loaded_skills": 1,
             "failed_skills": 0,
             "skills": [{"name": "stale.skill"}],
-            "external_dirs_scanned": [],
             "domain_pack_count": 0,
             "domain_packs": [],
             "timestamp": 1,
@@ -212,7 +206,7 @@ def test_stale_skill_catalog_is_not_served_as_current(tmp_path, monkeypatch) -> 
     )
     _install_store(monkeypatch, store)
 
-    response = obs_routes_platform.get_skills_hub_stats()
+    response = obs_routes_platform.get_skill_catalog_stats()
 
     assert response.skills == []
     assert response.loaded_skills == 0
@@ -222,7 +216,7 @@ def test_stale_skill_catalog_is_not_served_as_current(tmp_path, monkeypatch) -> 
     assert response.projection["degraded_state"] == "STALE"
 
 
-def test_background_loaders_project_canonical_life_and_skill_pack_catalog(monkeypatch) -> None:  # noqa: ANN001
+def test_background_loaders_project_canonical_life_and_skill_pack_catalog() -> None:
     life, life_cursor = load_life_evolution_projection_source(
         snapshot_reader=lambda person_id: {
             "person_id": person_id,
@@ -250,11 +244,8 @@ def test_background_loaders_project_canonical_life_and_skill_pack_catalog(monkey
             )
         ]
     )
-    monkeypatch.setenv("HOST_SKILL_SCAN_EXTERNAL", "false")
     catalog, cursor = load_skill_pack_catalog_projection_source(
         registry_provider=lambda: registry,
-        installed_skills_reader=lambda: [],
-        custom_provider_reader=lambda **_kwargs: [],
         domain_pack_reader=lambda: [{"pack_id": "pack.one", "version": "1.0.0"}],
     )
     assert cursor > 0
@@ -345,7 +336,7 @@ def test_domain_routes_reference_only_durable_readers() -> None:
 
     life_source = inspect.getsource(obs_routes_life_evolution._get_life_evolution_snapshot)
     immune_source = inspect.getsource(obs_routes_security_immune._runtime_state)
-    skill_source = inspect.getsource(obs_routes_platform.get_skills_hub_stats)
+    skill_source = inspect.getsource(obs_routes_platform.get_skill_catalog_stats)
     assert "_default_snapshot" not in life_source
     assert "get_security_immune_agent" not in immune_source
     assert "get_skill_registry" not in skill_source

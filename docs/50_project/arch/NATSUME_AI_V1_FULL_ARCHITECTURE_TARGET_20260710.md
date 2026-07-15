@@ -70,7 +70,7 @@ M48 只解决“系统能否安全地继续重构”：TaskStore、Verification�
 | `memory/life_memory/store.py` | 3275 | 多种 Memory 模型、SQL、事务、GC 和查询 |
 | `edge_client/runtime/voice_pipeline.py` | 3117 | ASR/TTS/播放/中断/资源/状态协调 |
 | `pentest/autonomous_kernel.py` | 3099 | 规划、运行、知识、Canon、报告和策略 |
-| `app/executive_runtime_core.py` | 2753 | 计划、路由、执行、fallback、聚合 |
+| `executive_runtime/`（历史上为 `app/executive_runtime_core.py`） | 已拆分 | 入口、计划、路由、执行、fallback 与聚合已按模块拆分，但生产 authority 尚未完全统一 |
 | `persona/inner_world.py` | 2565 | 数值状态、时间演化、LLM 叙事、私密文本、投影 |
 
 ---
@@ -101,7 +101,7 @@ M48 只解决“系统能否安全地继续重构”：TaskStore、Verification�
 
 ### 2.2 多套运行语义并存
 
-- Chat 主链经 `chat_handler → cortex_orchestrator → agent_runtime_shared → executive_runtime_core` 多层转发。
+- Chat 主链经 `chat_handler → cortex_orchestrator → agent_runtime_shared → app.executive_runtime → executive_runtime.runtime` 多层转发。
 - Governed Graph 有完整控制合同，但不是普通聊天的生产执行真源。
 - SkillDag、PlanGraph、Executive 和 Agent Runtime 各自拥有计划/状态语义。
 - `scheduler/NatsumeScheduler`、`app/automation/HostTaskScheduler` 和未来 Task Runtime 是三类不同 scheduler。

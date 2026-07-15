@@ -372,7 +372,7 @@ python tools/continuity_quality_report.py `
 
 - 独立 Chroma collection `surface_original_quotes`：保存原作中文台词向量、标签和风险分层，和长期记忆 collection 分开。
 - `tools/rebuild_surface_original_quote_vector_collection.py`：从 `artifacts/style_source/original_cn_all.jsonl` 重建 quote collection。
-- `data/style_bank/surface_original_quote_bank.jsonl` 已废除，运行时不读取。
+- 旧版 `surface_original_quote_bank.jsonl` 已废除，运行时不读取。
 
 隔离 harness 不再注入抽象派生风格特征，也不再使用 `style_reference_bank` 或泛化 style seed。
 

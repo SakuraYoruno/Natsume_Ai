@@ -23,7 +23,7 @@
 - `host_brain/app/agent_runtime_shared.py`
 - `host_brain/app/surface_reply_runtime.py`
 - `host_brain/app/surface_main_chain_adapter.py`
-- `host_brain/app/reply_envelope.py`
+- `host_brain/input_runtime/reply_envelope.py`
 - `host_brain/persona/surface_main_chain.py`
 - `host_brain/app/chat_retrieval_helpers.py`
 - `host_brain/retrieval/recall_fusion.py`

@@ -401,7 +401,7 @@ Pop-Location
 
 当前发现基线：93 个 Playwright tests（routes 65，interactions 28）。Vite build 会清空并重建 `host_brain/app/static/monitor`；只有 WP-70～WP-72 可把生成资产纳入变更。E2E 大量使用 API mock，不能替代 Host/Obs 真实集成测试。
 
-当前 `package.json` 没有 lint、typecheck、frontend unit 或 coverage script。WP-70 负责冻结并接入至少 lint、typecheck 和 read-model 单测口径；WP-80 还必须包含 Host/Obs 真实 read-model 集成检查，不能只用 Playwright mock 作为封板证据。
+Monitor UI 的 `package.json` 没有 lint、typecheck、frontend unit 或 coverage script。WP-70 负责冻结并接入至少 lint、typecheck 和 read-model 单测口径；WP-80 还必须包含 Host/Obs 真实 read-model 集成检查，不能只用 Playwright mock 作为封板证据。
 
 ---
 
@@ -559,11 +559,11 @@ Pop-Location
 
 - 状态：`DONE`（2026-07-10；same-revision adapters、dependency refs、Child WorkOrder request、shadow-only 与 T-NLE-05 通过）
 - 目标：PlanningAgent、SkillDag 和 PlanGraph 只生成/适配一个 canonical graph revision，停止普通复杂任务二次规划，并让 SubAgentRequest 由 Child WorkOrder lineage 构造。
-- 代码事实：`executive_runtime_core` 调用 `run_plan_graph()` 时未传原 plan；`PlanGraph` 虽保存 depends_on，却把所有子任务并发 Send 且 dependency_context 为空。
+- 当时的代码事实：历史 `app/executive_runtime_core.py` 调用 `run_plan_graph()` 时未传原 plan；该实现现已迁入 `host_brain/executive_runtime/` 分层包。`PlanGraph` 虽保存 depends_on，却把所有子任务并发 Send 且 dependency_context 为空。
 - 前置任务：TASK-0466。
 - In Scope：planner adapters、graph validation、dependency refs、revision lineage、cycle rejection、SubAgent registry view 与 Child WorkOrder request adapter。
 - Out of Scope：真实 Worker 调度和主链切换。
-- 主要路径：`host_brain/app/skill_dag_planner.py`、`host_brain/app/plan_graph.py`、`host_brain/app/executive_runtime_core.py`、`host_brain/app/sub_agent_protocol.py`、新 adapter/tests。
+- 当时的主要路径：`host_brain/app/skill_dag_planner.py`、`host_brain/app/plan_graph.py`、历史 `host_brain/app/executive_runtime_core.py`（现迁至 `host_brain/executive_runtime/`）、`host_brain/app/sub_agent_protocol.py`、新 adapter/tests。
 - 输出：同一 plan/revision 的持久化输入和 shadow comparison payload。
 - 验收：T-NLE-05；顺序/并行/混合 DAG 保持依赖；循环进入 `PLAN_CYCLE`；不得产生第二 graph id。
 - 关联需求/测试：FR-NLE-002；T-NLE-05。
@@ -643,7 +643,7 @@ Pop-Location
 - 前置任务：TASK-0471、TASK-0472。
 - In Scope：mode router、new-task assignment、legacy drain、canary metrics、kill switch。
 - Out of Scope：Runtime Event 全域 adapter、Life 能力、UI 重写。
-- 主要路径：`host_brain/app/executive_runtime_core.py`、`host_brain/agent_runtime/executor.py`、`task_scheduler.py`、startup/health adapters、tests。
+- 当时的主要路径：历史 `host_brain/app/executive_runtime_core.py`（现迁至 `host_brain/executive_runtime/`）、`host_brain/agent_runtime/executor.py`、`task_scheduler.py`、startup/health adapters、tests。
 - 输出：`legacy|shadow|canonical` 模式、canary、drain report。
 - 验收：T-NLE-11；重复副作用为 0；跨执行器 resume 为 0；canary 可回退；旧任务终态可对账。
 - 关联需求/测试：FR-NLE-002；FR-NLE-003；T-NLE-11。

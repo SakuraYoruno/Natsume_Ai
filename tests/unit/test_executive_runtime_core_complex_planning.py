@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from host_brain.app.capability_gap_detector import CapabilityGapDecision
+from host_brain.executive_runtime.capability_gap import CapabilityGapDecision
 from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
 from host_brain.executive_runtime._shared import _ExecutionOutcome, _RouteSelection
 from host_brain.executive_runtime.conversation_execution import (

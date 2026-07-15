@@ -69,8 +69,6 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "emotion_query",
     "frontend_component_value_audit",
     "frontend_route_audit",
-    "hub_skill_list",
-    "hub_skill_search",
     "file_list",
     "file_read",
     "memory_consolidate",
@@ -429,24 +427,9 @@ _SELF_EVOLVE_MARKERS = (
     "持续进化",
     "进化一下",
 )
-_HUB_SKILL_LIST_MARKERS = (
-    "列出技能",
-    "技能列表",
-    "看看技能",
-    "有什么技能",
-    "有哪些技能",
-    "list skills",
-    "show skills",
-    "show me skills",
-    "available skills",
-)
 _STEP_LEAD_IN_RE = re.compile(
     r"^\s*(?:请|请你|帮我|麻烦|旧角色|旧角色|natsume(?: blue)?|先|首先|first)\s*",
     re.IGNORECASE,
-)
-_HUB_SEARCH_PATTERNS = (
-    re.compile(r"(?:搜索技能|查找技能|搜技能)\s*[:：]?\s*(?P<query>.+)$", re.IGNORECASE),
-    re.compile(r"(?:search|find)\s+(?:skills?|skill)\s*(?:for|about)?\s*(?P<query>.+)$", re.IGNORECASE),
 )
 _EXPLICIT_MULTI_STEP_SPLITTERS = (
     ("再", re.compile(r"\s*(?:，|,|；|;)?\s*再\s*", re.IGNORECASE)),
@@ -1491,18 +1474,6 @@ def _strip_step_lead_in(text: str) -> str:
         stripped = next_value
 
 
-def _extract_hub_skill_search_query(text: str) -> str:
-    cleaned = _strip_step_lead_in(text)
-    for pattern in _HUB_SEARCH_PATTERNS:
-        match = pattern.search(cleaned)
-        if match is None:
-            continue
-        query = str(match.group("query") or "").strip(" \t,，;；:：。.!！？?")
-        if query:
-            return query
-    return ""
-
-
 def _infer_codex_runtime_mode(text: str) -> str | None:
     normalized = _normalize_match_text(text)
     if any(marker in normalized for marker in _SELF_EVOLVE_MARKERS):
@@ -2235,11 +2206,6 @@ def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
 def _build_step_payload(*, route: str, target_id: str, task_text: str, step_index: int, route_reason: str) -> dict[str, Any]:
     description = _normalize_text(task_text) or target_id or f"step-{step_index}"
     task_description = description
-    if target_id == "hub_skill_search":
-        query = _extract_hub_skill_search_query(task_text)
-        if query:
-            task_description = query
-            description = f"search skill {query}"
     return {
         "step_index": step_index,
         "route": route,
@@ -2261,11 +2227,6 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
     if _looks_like_conversational_opinion_chat(cleaned):
         return None
 
-    search_query = _extract_hub_skill_search_query(cleaned)
-    if search_query:
-        return ("skill", "hub_skill_search", "THALAMUS_RULE_HUB_SKILL_SEARCH")
-    if _contains_any(cleaned, _HUB_SKILL_LIST_MARKERS):
-        return ("skill", "hub_skill_list", "THALAMUS_RULE_HUB_SKILL_LIST")
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return ("skill", "session_summary", "THALAMUS_RULE_SESSION_SUMMARY")
     if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS) and not _looks_like_companion_open_chat(cleaned):
@@ -2558,36 +2519,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
                 "route_source": "thalamus.rule",
                 "planned_steps": planned_steps,
             }
-
-    search_query = _extract_hub_skill_search_query(cleaned)
-    if search_query:
-        return {
-            "route": "skill",
-            "target_id": "hub_skill_search",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_HUB_SKILL_SEARCH",
-            "confidence": 0.99,
-            "route_source": "thalamus.rule",
-            "args": {
-                "query": search_query,
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
-
-    if _contains_any(cleaned, _HUB_SKILL_LIST_MARKERS):
-        return {
-            "route": "skill",
-            "target_id": "hub_skill_list",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_HUB_SKILL_LIST",
-            "confidence": 0.99,
-            "route_source": "thalamus.rule",
-            "args": {
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
 
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return {

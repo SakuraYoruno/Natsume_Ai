@@ -8,8 +8,6 @@ initialize a domain singleton, or inspect a supply-chain directory.
 from __future__ import annotations
 
 from dataclasses import asdict
-import os
-from pathlib import Path
 import threading
 import time
 from collections.abc import Mapping
@@ -223,112 +221,40 @@ def _domain_pack_catalog() -> list[dict[str, Any]]:
 def load_skill_pack_catalog_projection_source(
     *,
     registry_provider: Callable[[], Any] | None = None,
-    installed_skills_reader: Callable[[], list[dict[str, Any]]] | None = None,
-    custom_provider_reader: Callable[..., list[Any]] | None = None,
     domain_pack_reader: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    """Background source allowed to inspect registries and supply-chain state."""
+    """Project the canonical built-in Skill registry and Domain Pack catalog."""
 
     if registry_provider is None:
         from host_brain.composition.process_services import get_skill_registry
 
         registry_provider = get_skill_registry
-    if installed_skills_reader is None:
-        from host_brain.skills.hub.hub_installer import list_installed_skills
-
-        installed_skills_reader = list_installed_skills
-    if custom_provider_reader is None:
-        from host_brain.skills.custom_provider_installer import list_custom_provider_infos
-
-        custom_provider_reader = list_custom_provider_infos
     if domain_pack_reader is None:
         domain_pack_reader = _domain_pack_catalog
 
     now = int(time.time() * 1000)
-    hub_enabled = str(os.environ.get("HOST_SKILL_HUB_ENABLED") or "true").lower() == "true"
-    active_skills = list(registry_provider().all()) if hub_enabled else []
-    active_names = {str(item.skill_name) for item in active_skills}
-    installed = list(installed_skills_reader() or []) if hub_enabled else []
-    installed_by_name = {
-        str(row.get("name") or "").strip(): dict(row)
-        for row in installed
-        if isinstance(row, Mapping) and str(row.get("name") or "").strip()
-    }
-    custom_infos = list(custom_provider_reader(active_skill_names=active_names) or []) if hub_enabled else []
-    custom_names = {
-        str(name).strip()
-        for info in custom_infos
-        for name in tuple(getattr(info, "declared_skill_names", ()) or ())
-        if str(name).strip()
-    }
-    failed_count = sum(1 for info in custom_infos if str(getattr(info, "status", "")).upper() == "ERROR")
-    skills: list[dict[str, Any]] = []
-    for meta in active_skills:
-        row = installed_by_name.get(str(meta.skill_name))
-        skills.append(
-            {
-                "name": str(meta.skill_name),
-                "version": str(row.get("version") or "") if row else "",
-                "author": str(row.get("author") or "") if row else "",
-                "clearance": str(meta.clearance or "LOW").upper(),
-                "risk_level": int(meta.risk_level or 1),
-                "source": (
-                    str(row.get("source") or "hub").strip().lower()
-                    if row
-                    else ("external" if str(meta.skill_name) in custom_names else "builtin")
-                ),
-                "status": "loaded",
-            }
-        )
-    loaded_names = {row["name"] for row in skills}
-    for row in installed:
-        name = str(row.get("name") or "").strip() if isinstance(row, Mapping) else ""
-        if not name or name in loaded_names:
-            continue
-        skills.append(
-            {
-                "name": name,
-                "version": str(row.get("version") or ""),
-                "author": str(row.get("author") or ""),
-                "clearance": "LOW",
-                "risk_level": 1,
-                "source": str(row.get("source") or "hub").strip().lower() or "hub",
-                "status": "installed",
-            }
-        )
-    seen: set[str] = set()
-    deduplicated_skills: list[dict[str, Any]] = []
-    for row in skills:
-        if row["name"] in seen:
-            continue
-        seen.add(row["name"])
-        deduplicated_skills.append(row)
-    skills = deduplicated_skills
-
-    external_dirs = {
-        str(Path(str(row.get("dir") or "")).parent)
-        for row in installed
-        if isinstance(row, Mapping) and str(row.get("dir") or "").strip()
-    }
-    if hub_enabled and str(os.environ.get("HOST_SKILL_SCAN_EXTERNAL") or "true").lower() == "true":
-        home = Path.home()
-        for path in (home / ".skillhub" / "skills", home / ".openclaw" / "skills", home / ".codebuddy" / "skills"):
-            if path.is_dir():
-                external_dirs.add(str(path))
-    for raw_path in str(os.environ.get("HOST_SKILL_EXTERNAL_DIRS") or "").split(","):
-        path = Path(raw_path.strip()).expanduser()
-        if raw_path.strip() and path.is_dir():
-            external_dirs.add(str(path))
+    active_skills = list(registry_provider().all())
+    skills = [
+        {
+            "name": str(meta.skill_name),
+            "version": "",
+            "author": "",
+            "clearance": str(meta.clearance or "LOW").upper(),
+            "risk_level": int(meta.risk_level or 1),
+            "source": "builtin",
+            "status": "loaded",
+        }
+        for meta in active_skills
+    ]
 
     domain_packs = list(domain_pack_reader() or [])
     payload = {
         "schema_version": "Natsume.operator.skill_pack_catalog.v1",
-        "hub_enabled": hub_enabled,
-        "total_skills": len(skills) + failed_count,
-        "loaded_skills": sum(1 for row in skills if row["status"] == "loaded"),
-        "failed_skills": failed_count,
+        "catalog_available": True,
+        "total_skills": len(skills),
+        "loaded_skills": len(skills),
+        "failed_skills": 0,
         "skills": skills,
-        "external_dirs_scanned": sorted(path for path in external_dirs if path.strip()),
         "domain_pack_count": len(domain_packs),
         "domain_packs": domain_packs,
         "timestamp": now,

@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from host_brain.app.reply_envelope import ReplyEnvelope
+from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.app.surface_reply_preprocessor import _build_deterministic_sub_agent_reply
 from host_brain.app.surface_main_chain_adapter import (
     surface_main_chain_sse_generator,

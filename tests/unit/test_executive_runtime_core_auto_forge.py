@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from host_brain.app.capability_gap_detector import CapabilityGapDecision
+from host_brain.executive_runtime.capability_gap import CapabilityGapDecision
 from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
 from host_brain.executive_runtime.skill_execution import _maybe_synthesize_runtime_capability
-from host_brain.app.runtime_capability_synthesizer import RuntimeCapabilityRegistry
+from host_brain.executive_runtime.capability_synthesis import RuntimeCapabilityRegistry
 
 
 def test_runtime_synthesis_attaches_auto_plan_result(monkeypatch) -> None:

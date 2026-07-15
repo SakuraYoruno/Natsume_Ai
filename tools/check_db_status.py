@@ -99,7 +99,7 @@ if not found_world:
 
 # 6. Artifact Vault
 print("\n[6] Artifact Vault")
-vault_dirs = [ROOT / "data" / "artifact_vault", ROOT / "data" / "vault", ROOT / "host_brain" / "lsp" / "vault"]
+vault_dirs = [ROOT / "runtime" / "artifact_vault", ROOT / "host_brain" / "data" / "vault"]
 found_vault = False
 for d in vault_dirs:
     if d.exists():
@@ -110,11 +110,11 @@ for d in vault_dirs:
 if not found_vault:
     print("  EMPTY - Artifact Vault dir not found")
 
-# 7. Full data/ tree
-print("\n[7] data/ directory overview")
-data_dir = ROOT / "data"
-if data_dir.exists():
-    for item in sorted(data_dir.iterdir()):
+# 7. Full runtime/ tree
+print("\n[7] runtime/ directory overview")
+runtime_dir = ROOT / "runtime"
+if runtime_dir.exists():
+    for item in sorted(runtime_dir.iterdir()):
         if item.is_dir():
             sub_files = [f for f in item.rglob("*") if f.is_file()]
             sub_total = sum(f.stat().st_size for f in sub_files)
@@ -122,6 +122,6 @@ if data_dir.exists():
         else:
             print(f"  {item.name}  ({item.stat().st_size:,} bytes)")
 else:
-    print("  data/ dir not found")
+    print("  runtime/ dir not found")
 
 print("\n" + "=" * 60)

@@ -17,7 +17,7 @@ from host_brain.persistence.markdown_kb_repository import MarkdownKbRepository
 from host_brain.retrieval.markdown_kb_settings import MarkdownKbSettings
 
 
-DEFAULT_KB_ROOT = Path("data") / "knowledge_bases"
+DEFAULT_KB_ROOT = Path("runtime") / "knowledge_bases"
 DEFAULT_KB_DB_NAME = "kb.sqlite3"
 ENV_ENABLED = "SEMANTIC_RECALL_MARKDOWN_KB_ENABLED"
 ENV_DB_PATHS = "SEMANTIC_RECALL_MARKDOWN_KB_DBS"

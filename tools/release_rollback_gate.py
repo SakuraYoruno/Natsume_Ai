@@ -15,14 +15,14 @@ from pathlib import Path
 from typing import Any, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_ROOT = ROOT / "docs" / "60_trace"
+ARTIFACTS_ROOT = ROOT / "artifacts" / "diagnostics"
 
 
 def _default_output_paths() -> tuple[Path, Path]:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return (
-        DOCS_ROOT / f"RELEASE_ROLLBACK_GATE_{stamp}.json",
-        DOCS_ROOT / f"RELEASE_ROLLBACK_GATE_{stamp}.md",
+        ARTIFACTS_ROOT / f"RELEASE_ROLLBACK_GATE_{stamp}.json",
+        ARTIFACTS_ROOT / f"RELEASE_ROLLBACK_GATE_{stamp}.md",
     )
 
 

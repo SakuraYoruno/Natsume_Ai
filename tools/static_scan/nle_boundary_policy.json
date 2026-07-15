@@ -45,7 +45,7 @@
     {
       "rule_id": "NLE-BND-WORLDCANON-RAW-MUTATION",
       "kind": "world_canon_mutation",
-      "source_roots": ["edge_client", "host_brain", "scripts", "skills", "tools"],
+      "source_roots": ["edge_client", "host_brain", "scripts", "tools"],
       "store_modules": ["host_brain.memory.canon_world_store"],
       "mutator_names": [
         "upsert",

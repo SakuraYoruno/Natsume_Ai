@@ -618,14 +618,14 @@
 - 覆盖状态：DONE
 
 ## R-60
-- 系统级需求：Flow 配置资产版本化与追溯——导出归档 + active.pointer 指针 + Trace 索引一致性
+- 系统级需求（已退役）：旧 Flow 导出资产版本化与指针追溯
 - PRD 需求编号（FR）：FR-FLOW-001
 - 来源：PRD 4.2
 - DevSpec 落点：DevSpec 1.5
 - DevTasks（TASK）：TASK-0000,TASK-0002,TASK-0062
-- 验收测试（T-xx）：T-Flow-01,T-Flow-02,T-Flow-03
-- 当前进展（2026-03-03）：TASK-0000（目录骨架+指针文件）、TASK-0002（Flow 归档+一致性断言）、TASK-0062（release_manifest 纳入 model_plane 资产）已完成；T-Flow-01~03 回归通过。
-- 覆盖状态：DONE
+- 历史验收测试（T-xx）：T-Flow-01,T-Flow-02；T-Flow-03 的 model plane 发布校验仍由现行发布合同覆盖
+- 退役说明（2026-07-15）：旧导出 Flow 从未接入生产聊天运行时，指针只引用不存在的 skeleton 资产；占位目录、索引和指针一致性测试已删除。
+- 覆盖状态：RETIRED
 
 ## R-61
 - 系统级需求：叙事与事实分离——叙事层不得自造执行事实；执行事实只来自审计链摘要字段

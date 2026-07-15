@@ -1,4 +1,4 @@
-受众：MASTER / Release Operator
+受众：MASTER
 标题：M48-A 回滚矩阵
 
 # M48-A 回滚矩阵

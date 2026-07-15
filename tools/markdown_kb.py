@@ -25,7 +25,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-DEFAULT_OUTPUT_DIR = Path("data") / "knowledge_bases"
+DEFAULT_OUTPUT_DIR = Path("runtime") / "knowledge_bases"
 DEFAULT_KB_ID = "agent_guide"
 DEFAULT_CHROMA_COLLECTION = "agent_guide_kb"
 DEFAULT_CHROMA_ENDPOINT = "http://127.0.0.1:18000"

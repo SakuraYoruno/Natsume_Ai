@@ -1,4 +1,3 @@
-import CustomSkillProviderInstaller from './CustomSkillProviderInstaller.jsx'
 import {
   ActionPlanStats,
   PermissionGuardStats,
@@ -44,7 +43,6 @@ export default function ToolsOperationsSection({
 
   return (
     <div className="space-y-4">
-      <CustomSkillProviderInstaller />
       <PermissionGuardStats
         data={permissionStats}
         loading={permissionLoading}

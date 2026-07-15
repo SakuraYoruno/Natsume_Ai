@@ -23,12 +23,13 @@
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
-- `host_brain/app/executive_router.py`
 - `host_brain/app/executive_runtime.py`
-- `host_brain/app/executive_runtime_core.py`
+- `host_brain/executive_runtime/runtime.py`
+- `host_brain/executive_runtime/route_planning.py`
+- `host_brain/executive_runtime/skill_execution.py`
 - `host_brain/app/surface_reply_runtime.py`
 - `host_brain/app/surface_main_chain_adapter.py`
-- `host_brain/app/reply_envelope.py`
+- `host_brain/input_runtime/reply_envelope.py`
 - `host_brain/app/input_routes.py`
 - `host_brain/app/agent_routes.py`
 - `host_brain/app/pentest_routes.py`
@@ -101,9 +102,8 @@ POST /v1/chat
   -> Governor.evaluate_intent（实际为 `engine.evaluate_intent` 封装）
   -> cortex_orchestrator_sse_generator
   -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl
-  -> executive_router_sse_generator
   -> executive_runtime_sse_generator
-  -> executive_runtime_core
+  -> executive_runtime.runtime._executive_runtime_core_impl
        -> chat
        -> skill
        -> delegate
@@ -126,10 +126,10 @@ POST /v1/chat
 | Governor | `host_brain/governor/decision.py` | 对 intent_draft 做审批与票据约束 |
 | Cortex 编排入口 | `host_brain/app/cortex_orchestrator.py` | 统一转交到共享运行时实现 |
 | 共享编排实现 | `host_brain/app/agent_runtime_shared.py` | 召回、bond、上下文、trace、后处理、SSE 贯通 |
-| Executive 路由 | `host_brain/app/executive_router.py` | 路由层薄门面 |
-| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | skill-first 路由、计划执行、恢复策略、chat 回落 |
+| Executive 路由 | `host_brain/app/executive_runtime.py` | canonical runtime 的应用层 composition 入口 |
+| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/executive_runtime/runtime.py` | skill-first 路由、计划执行、恢复策略、chat 回落 |
 | Surface 收口 | `host_brain/app/surface_reply_runtime.py` + `surface_main_chain_adapter.py` | normal chat 文本进入 SurfaceMainChain；兼容 fallback 与 deterministic sub-agent 结果在此收口 |
-| 最终表达 | `host_brain/persona/surface_main_chain.py` + `host_brain/app/reply_envelope.py` | SurfaceMainChain 生成最终文本，ReplyEnvelope 决定可发送、可持久化、可缓存 |
+| 最终表达 | `host_brain/persona/surface_main_chain.py` + `host_brain/input_runtime/reply_envelope.py` | SurfaceMainChain 生成最终文本，ReplyEnvelope 决定可发送、可持久化、可缓存 |
 
 ### 1.4 当前外部输入与独立 Agent Loop 入口
 
@@ -227,7 +227,7 @@ POST /v1/chat
 | 路径 | 当前模块 | 说明 |
 |---|---|---|
 | 严格票据执行 | `host_brain/skills/loader.py` | `SkillLoader.execute()`：Governor 票据校验、幂等保护、审计写入、executor 分发 |
-| Skill-first 运行时 | `host_brain/app/executive_runtime_core.py` | `/v1/chat` 主链的 skill route，按 skill family / executor 执行并记录 `skill_exec` |
+| Skill-first 运行时 | `host_brain/executive_runtime/skill_execution.py` | `/v1/chat` 主链的 skill route，按 skill family / executor 执行并记录 `skill_exec` |
 
 ### 3.3 当前执行器分发
 
@@ -310,7 +310,7 @@ POST /v1/chat
 
 当前 `host_brain` 应用层的主事实是：
 
-1. `/v1/chat` 主链已经收敛到 `asgi.chat_endpoint -> chat_routes.handle_v1_chat_route -> chat_handler.handle_chat -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core -> surface_reply_runtime -> surface_main_chain_adapter -> SurfaceMainChain -> ReplyEnvelope`。
+1. `/v1/chat` 主链已经收敛到 `asgi.chat_endpoint -> chat_routes.handle_v1_chat_route -> chat_handler.handle_chat -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> app.executive_runtime -> executive_runtime.runtime -> surface_reply_runtime -> surface_main_chain_adapter -> SurfaceMainChain -> ReplyEnvelope`。
 2. Audit 以 `SQLiteLedger` 为枢纽，但表结构与写接口已持续演进，不应再复用旧表数口径。
 3. Skills 以 `SkillRegistry + SkillLoader + executor_registry` 为当前执行契约，且来源是动态扩展的。
 4. Observability 采用“主应用兼容挂载 + 独立 Obs Backend + Monitor UI”三层结构。

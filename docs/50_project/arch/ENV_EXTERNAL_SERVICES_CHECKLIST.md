@@ -14,7 +14,7 @@
 - `.env` 可直接驱动 Host/Edge/Neo4j/Chroma/Gateway 启动
 - `.env` 缺失时，可由 `.env.example` 提供最小可运行降级配置
 - 统一消息网关六平台适配器可根据 `EDGE_GATEWAY_PLATFORMS` 按需启用
-- Skills Hub 可扫描外部 Skill 目录并自动注册
+- 外部 Skill 仅能通过签名 Intake 进入 Quarantine，不能扫描目录或自动注册
 - 密钥不落入版本库
 
 ---
@@ -48,8 +48,8 @@
 - `HOST_ENABLE_RETRIEVAL` / `HOST_ENABLE_VISION` / `HOST_ENABLE_EDGE_RPC`
 - `HOST_RATE_LIMIT_BACKEND` / `HOST_RATE_LIMIT_WINDOW_MS` / `HOST_RATE_LIMIT_MAX_REQUESTS`
 - `HOST_CHAT_HOST_14B_*`（本地 14B 最终兜底：ENABLED / MODEL_ID / BASE_URL / TIMEOUT_MS）
-- `HOST_SKILL_HUB_ENABLED` / `HOST_SKILL_HUB_DIR`（Skills Hub 开关与目录）
-- `HOST_SKILL_SCAN_EXTERNAL`（外部 Skill 目录扫描）
+- `HOST_SUPPLY_CHAIN_ACTIVATION_MODE`（默认 `BUILTINS_ONLY`）
+- `HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON`（专用 bundle signer 信任映射）
 
 ### 3.2 Edge
 

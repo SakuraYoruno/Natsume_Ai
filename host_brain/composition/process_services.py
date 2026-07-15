@@ -489,5 +489,4 @@ from host_brain.composition.process_runtime_services import (
     get_tool_broker,
     get_tool_catalog,
     get_tts_context_router,
-    refresh_skill_registry,
 )

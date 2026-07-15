@@ -8,7 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.response_feedback_store import (
+from host_brain.input_runtime.feedback import (
     detect_explicit_response_feedback,
     record_feedback_for_latest_persona_reply,
 )

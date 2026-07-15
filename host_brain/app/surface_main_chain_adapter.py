@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 from collections.abc import AsyncGenerator, Mapping, Sequence
-from host_brain.app.reply_envelope import ReplyEnvelope
+from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.persona.surface_main_chain import (
     SurfaceMainChain,
     SurfaceMainChainInput,

@@ -49,7 +49,7 @@ host_brain.app.asgi:app
       → Governor.evaluate_intent()
       → cortex_orchestrator_sse_generator()
       → agent_runtime_shared
-      → executive_router / executive_runtime / executive_runtime_core
+      → app.executive_runtime adapter / executive_runtime.runtime
         → surface_reply_runtime
           → surface_main_chain_adapter
             → SurfaceMainChain (normal chat 最终文本作者)
@@ -65,12 +65,13 @@ host_brain.app.asgi:app
 - `host_brain/governor/decision.py` — Governor 裁决入口。
 - `host_brain/app/cortex_orchestrator.py` — SSE 与 Cortex 编排。
 - `host_brain/app/agent_runtime_shared.py` — 共享运行时。
-- `host_brain/app/executive_router.py` — 执行路由。
-- `host_brain/app/executive_runtime.py` — 执行运行时。
-- `host_brain/app/executive_runtime_core.py` — 执行核心。
+- `host_brain/app/executive_runtime.py` — canonical Executive Runtime 的应用层 composition 入口。
+- `host_brain/executive_runtime/runtime.py` — legacy Executive 运行核心与结果收口。
+- `host_brain/executive_runtime/route_planning.py` — 路由选择与复杂计划判定。
+- `host_brain/executive_runtime/skill_execution.py` — legacy Skill/Plan 执行。
 - `host_brain/app/surface_reply_runtime.py` — 人格渲染路由者。
 - `host_brain/persona/surface_main_chain.py` — SurfaceMainChain。
-- `host_brain/persona/reply_envelope.py` — 最终输出收口。
+- `host_brain/input_runtime/reply_envelope.py` — 最终输出收口。
 
 ### 2.3 Input 回流链（`POST /v1/host/input`）
 

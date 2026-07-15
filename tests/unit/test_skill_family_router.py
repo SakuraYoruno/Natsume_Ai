@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from host_brain.app.skill_family_router import build_skill_route_decision
+from host_brain.executive_runtime.skill_routing import build_skill_route_decision
 
 
 class _FakeSkillRegistry:

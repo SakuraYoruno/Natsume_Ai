@@ -356,34 +356,8 @@ def get_skill_registry() -> SkillRegistry:
             parse_bool_env=_parse_bool_env,
             logger=_logger,
         )
-        # Hub Skills 加载：扫描 host_brain/skills/hub/ 下的外部 Skill
-        if _parse_bool_env("HOST_SKILL_HUB_ENABLED", default=True):
-            try:
-                from host_brain.skills.hub.hub_loader import load_hub_skills  # noqa: PLC0415
-                from host_brain.skills.executor_registry import get_builtin_tool_executor_registry  # noqa: PLC0415
-                _hub_result = load_hub_skills(
-                    _container().skill_registry,
-                    executor_registry=get_builtin_tool_executor_registry(),
-                )
-                if _hub_result.registered_count > 0:
-                    _logger.info(
-                        "Hub Skills loaded: %d registered, %d skipped, %d errors",
-                        _hub_result.registered_count,
-                        _hub_result.skipped_count,
-                        _hub_result.error_count,
-                    )
-            except Exception as _hub_exc:
-                _logger.warning("Hub Skills loading failed (degraded): %s", _hub_exc)
     _sync_mcp_skills_into_registry(_container().skill_registry)
     return _container().skill_registry
-
-
-def refresh_skill_registry() -> SkillRegistry:
-    """Clear cached registry-dependent singletons and rebuild skills."""
-    _container().skill_registry = None
-    _container().intent_engine = None
-    _container().capability_scorecard_provider = None
-    return get_skill_registry()
 
 
 def get_policy_cache() -> GovernorPolicyCache:

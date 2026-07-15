@@ -73,24 +73,12 @@ export function executeTool(body) {
   return endpointPost(execution.toolExecute, body, {}, {}, { timeoutMs: REQUEST_TIMEOUT_MS })
 }
 
-export function fetchCustomSkillProviders() {
-  return endpointGet(execution.customSkillProviders)
-}
-
-export function fetchCustomSkillProviderTemplate() {
-  return endpointGet(execution.customSkillProviderTemplate)
-}
-
-export function installCustomSkillProvider(body) {
-  return endpointPost(execution.customSkillProviderInstall, body, {}, {}, { timeoutMs: REQUEST_TIMEOUT_MS })
-}
-
 export function fetchActionPlanStats(params = {}) {
   return endpointGet(execution.actionPlanStats, params)
 }
 
-export function fetchSkillsHubStats() {
-  return endpointGet(execution.skillsHubStats)
+export function fetchSkillCatalogStats() {
+  return endpointGet(execution.skillCatalogStats)
 }
 
 export function fetchTribeBundle() {

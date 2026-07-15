@@ -24,8 +24,6 @@ def _ports() -> GovernedSkillExecutionPorts:
         resource_manager_provider=lambda **_kwargs: object(),
         episodic_store_provider=lambda: object(),
         semantic_recaller_provider=lambda: object(),
-        refresh_skill_registry=lambda: None,
-        activate_hub_skill=lambda **_kwargs: None,
     )
 
 
@@ -39,8 +37,6 @@ def test_governed_skill_ports_are_immutable_and_authority_minimal() -> None:
         "resource_manager_provider",
         "episodic_store_provider",
         "semantic_recaller_provider",
-        "refresh_skill_registry",
-        "activate_hub_skill",
     }
     with pytest.raises(FrozenInstanceError):
         ports.skill_registry = object()  # type: ignore[misc]

@@ -164,25 +164,6 @@ def test_compile_intent_draft_maps_progress_like_routes_to_exec_intent_for_gover
     assert "user_message" not in compiled["args"]
 
 
-def test_classify_and_compile_intent_draft_routes_hub_skill_list_from_natural_language() -> None:
-    agent = ThalamusAgent()
-
-    compiled = _run(
-        agent.classify_and_compile_intent_draft(
-            request_id="req-thalamus-hub-list",
-            session_id="session-thalamus-hub-list",
-            user_message="Blue, list skills for me",
-            source="chat_handler",
-            ts_ms=1776349003000,
-        )
-    )
-
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "hub_skill_list"
-    assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_LIST"
-    assert compiled["route_source"] == "thalamus.rule"
-
-
 def test_classify_and_compile_intent_draft_routes_proactive_reply_continuation() -> None:
     agent = ThalamusAgent()
 
@@ -214,25 +195,6 @@ def test_classify_and_compile_intent_draft_routes_proactive_reply_continuation()
     assert compiled["args"]["proactive_reply"] is True
     assert compiled["proactive_context"]["outbound_message_id"] == "evt_proactive_1"
     assert "proactive_context" in compiled["_thalamus_meta"]["extension_keys"]
-
-
-def test_classify_and_compile_intent_draft_routes_hub_skill_search_with_query() -> None:
-    agent = ThalamusAgent()
-
-    compiled = _run(
-        agent.classify_and_compile_intent_draft(
-            request_id="req-thalamus-hub-search",
-            session_id="session-thalamus-hub-search",
-            user_message="search skill weather",
-            source="chat_handler",
-            ts_ms=1776349003100,
-        )
-    )
-
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "hub_skill_search"
-    assert compiled["args"]["query"] == "weather"
-    assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_SEARCH"
 
 
 def test_classify_and_compile_intent_draft_routes_open_app_from_imperative_phrase() -> None:

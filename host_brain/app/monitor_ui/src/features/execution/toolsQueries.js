@@ -1,8 +1,6 @@
 import { useCallback } from 'react'
 import {
   fetchActionPlanStats,
-  fetchCustomSkillProviderTemplate,
-  fetchCustomSkillProviders,
   fetchPermissionStats,
   fetchToolHealth,
   fetchToolMetaPack,
@@ -132,65 +130,6 @@ export function useActionPlanStatsQuery({
     ...queryState,
     actionPlanStats: queryState.data?.data ?? null,
     statsError: queryState.data?.statsError ?? null,
-  }
-}
-
-export function useCustomSkillProvidersQuery() {
-  const queryFn = useCallback(async () => {
-    try {
-      const data = await fetchCustomSkillProviders()
-      return {
-        data,
-        providersError: null,
-      }
-    } catch (error) {
-      return {
-        data: null,
-        providersError: error?.message || '获取提供器列表失败',
-      }
-    }
-  }, [])
-
-  const queryState = useObservabilityQuery({
-    queryKey: OBS_QUERY_KEYS.customSkillProviders(),
-    queryFn,
-    staleTimeMs: OBS_STALE_TIMES.customSkillProviders,
-  })
-
-  return {
-    ...queryState,
-    providersData: queryState.data?.data ?? null,
-    providers: queryState.data?.data?.items ?? [],
-    providersError: queryState.data?.providersError ?? null,
-  }
-}
-
-export function useCustomSkillProviderTemplateQuery() {
-  const queryFn = useCallback(async () => {
-    try {
-      const data = await fetchCustomSkillProviderTemplate()
-      return {
-        data,
-        templateError: null,
-      }
-    } catch (error) {
-      return {
-        data: null,
-        templateError: error?.message || '加载模板失败',
-      }
-    }
-  }, [])
-
-  const queryState = useObservabilityQuery({
-    queryKey: OBS_QUERY_KEYS.customSkillProviderTemplate(),
-    queryFn,
-    staleTimeMs: OBS_STALE_TIMES.customSkillProviderTemplate,
-  })
-
-  return {
-    ...queryState,
-    templateData: queryState.data?.data ?? null,
-    templateError: queryState.data?.templateError ?? null,
   }
 }
 

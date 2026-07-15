@@ -378,18 +378,6 @@ _EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS = {
     "default": "状态还不错，心里很平稳，可以自然地聊下去",
 }
 
-_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES = {
-    "system_prompt": (
-        "你是轻量情感推理器。根据用户消息和上下文判断 user_emotion 与 natsume_emotion。"
-        "只输出 JSON，字段 user_emotion, natsume_emotion, reason, confidence。"
-    ),
-    "mood_state_line": "当前 mood_state：{mood_state}",
-    "emotion_tag_line": "当前 Natsume 情绪：{current_emotion_tag}",
-    "recent_conversation_header": "最近对话：",
-    "recent_conversation_item": "- {line}",
-    "latest_user_message_line": "最新用户消息：{user_message}",
-}
-
 _VISION_ACTION_PLANNER_PROMPT_TEMPLATES = {
     "system_prompt": (
         "你是一个谨慎的桌面视觉自动化规划器。只输出一个 JSON 对象，不要输出 Markdown 或额外解释。"
@@ -729,14 +717,6 @@ _SPECS: dict[str, PromptSpec] = {
         content=_EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS,
         category="agent_runtime_text",
         scope="emotion_context",
-    ),
-    "emotion_llm_inference.prompt_templates": _spec(
-        "emotion_llm_inference.prompt_templates",
-        purpose="emotion_llm_inference_prompt_templates",
-        output_type="json_object",
-        content=_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES,
-        category="agent_prompt",
-        scope="emotion_agent",
     ),
     "vision.action_planner.prompt_templates": _spec(
         "vision.action_planner.prompt_templates",
@@ -1392,16 +1372,6 @@ _SPECS.update(
                 "step_success": {"__with_result": "第{step_index}步 {description_or_target} 已完成。", "__default": "第{step_index}步 {description_or_target} 已完成。", "agent_worker": "第{step_index}步的子任务已完成。"},
                 "step_failure": {"base": "第{step_index}步 {description_or_target} 没走通。", "error_suffix": "原因：{error_text}。", "recovery_suffix": "恢复建议：{recovery_text}。"},
                 "summary": {"completed": "{success_count}/{total_steps} 个步骤已完成。", "partial": "完成 {success_count}/{total_steps} 个步骤。", "failed": "计划没有完成。"},
-            }, category="runtime_text", scope="surface_reply",
-        ),
-        "surface_reply.hub_skill.reply_templates": _spec(
-            "surface_reply.hub_skill.reply_templates", purpose="hub_skill_reply_texts", output_type="json_object",
-            content={
-                "install_success": "技能 {name} 已安装。", "install_failed": "技能 {name} 安装失败。",
-                "install_repair_failed": "自动修复也没有成功。", "install_message_suffix": " {message}",
-                "search_intro": "找到 {total} 个技能。", "search_preview_prefix": "包括：", "list_empty": "目前没有已安装技能。",
-                "list_with_preview": "共有 {total} 个：{preview}。", "list_total_only": "共有 {total} 个技能。",
-                "remove_success": "技能 {name} 已移除。", "remove_failed": "技能 {name} 移除失败。",
             }, category="runtime_text", scope="surface_reply",
         ),
         "surface_reply.system_skill.reply_templates": _spec(

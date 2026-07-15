@@ -6,7 +6,7 @@ from __future__ import annotations
 import subprocess, sys, time, pathlib, urllib.request
 
 ROOT = pathlib.Path(".").resolve()
-CHROMA_DATA = ROOT / "data" / "chroma_db"
+CHROMA_DATA = ROOT / "runtime" / "chroma" / "data"
 CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
 # 自动查找 chroma.exe：优先 .venv，其次系统 Python Scripts，最后 PATH

@@ -54,7 +54,6 @@
   tests/unit/test_person_memory_identity.py `
   tests/unit/test_episodic_memory_identity.py `
   tests/unit/test_chat_retrieval_helpers_surface_memory.py `
-  tests/unit/test_surface_memory_ab_tool.py `
   tests/unit/test_validate_surface_memory_emotion_loop.py
 ```
 

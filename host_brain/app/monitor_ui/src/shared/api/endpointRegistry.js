@@ -197,12 +197,9 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     toolMetaPack: { service: 'obs', path: '/tools/meta-pack', risk: 'low' },
     toolMeta: { service: 'obs', path: '/tools/:toolId', risk: 'low' },
     toolExecute: { commandId: 'tool.execute', risk: 'high' },
-    customSkillProviders: { service: 'obs', path: '/tools/skills/custom-providers', risk: 'low' },
-    customSkillProviderTemplate: { service: 'obs', path: '/tools/skills/custom-providers/template', risk: 'low' },
-    customSkillProviderInstall: { commandId: 'skill_provider.install', risk: 'medium' },
     permissionStats: SHARED_ENDPOINTS.permissionStats,
     actionPlanStats: { service: 'obs', path: '/obs/action-plan/stats', risk: 'low' },
-    skillsHubStats: { service: 'obs', path: '/obs/skills-hub/stats', risk: 'low' },
+    skillCatalogStats: { service: 'obs', path: '/obs/skill-catalog/stats', risk: 'low' },
   },
 })
 

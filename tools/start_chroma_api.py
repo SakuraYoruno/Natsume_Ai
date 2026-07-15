@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys, pathlib, time, urllib.request
 
 ROOT = pathlib.Path(".").resolve()
-CHROMA_DATA = ROOT / "data" / "chroma_db"
+CHROMA_DATA = ROOT / "runtime" / "chroma" / "data"
 CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
 HOST = "127.0.0.1"

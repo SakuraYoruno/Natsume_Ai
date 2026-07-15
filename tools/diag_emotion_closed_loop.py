@@ -5,7 +5,7 @@ Validates the chain on 10+ samples:
 2) prompt emotion binding contains expected tag/intensity
 3) VTS expression mapping resolves to deterministic expression
 
-Outputs JSON + Markdown reports under docs/60_trace.
+Outputs JSON + Markdown reports under artifacts/diagnostics.
 """
 
 from __future__ import annotations
@@ -374,10 +374,10 @@ def run_closed_loop_validation(
 
 
 def _write_reports(report: dict[str, object], *, output_stem: str) -> tuple[Path, Path]:
-    docs_root = ROOT / "docs" / "60_trace"
-    docs_root.mkdir(parents=True, exist_ok=True)
-    json_path = docs_root / f"{output_stem}.json"
-    md_path = docs_root / f"{output_stem}.md"
+    artifacts_root = ROOT / "artifacts" / "diagnostics"
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+    json_path = artifacts_root / f"{output_stem}.json"
+    md_path = artifacts_root / f"{output_stem}.md"
 
     json_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
@@ -443,7 +443,7 @@ def main() -> int:
     parser.add_argument(
         "--output-stem",
         default=f"EMOTION_CLOSED_LOOP_REPORT_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        help="Output file stem under docs/60_trace",
+        help="Output file stem under artifacts/diagnostics",
     )
     args = parser.parse_args()
 

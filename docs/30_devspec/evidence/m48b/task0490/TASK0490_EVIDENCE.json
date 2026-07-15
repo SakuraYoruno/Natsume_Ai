@@ -88,7 +88,7 @@
   ],
   "rollback": [
     "Set HOST_SUPPLY_CHAIN_ACTIVATION_MODE=BUILTINS_ONLY; absent and invalid values already converge to this fail-closed mode.",
-    "Keep HOST_SKILL_HUB_ENABLED=false, HOST_SKILL_CUSTOM_PROVIDERS_ENABLED=false, HOST_SKILL_EXTRA_PROVIDERS empty and HOST_SKILL_AUTO_REPAIR_ENABLED=false.",
+    "Keep HOST_SUPPLY_CHAIN_ACTIVATION_MODE=BUILTINS_ONLY unless a dedicated signed-intake rollout is explicitly approved.",
     "Retain the expand-only 0060 catalog, quarantine contents and audit references for reconciliation; do not delete evidence to permit a retry.",
     "Never roll back to raw Python source installation, Host-process external imports, package-manager auto-repair or an unsigned active-package overwrite."
   ],

@@ -55,8 +55,6 @@ class ExecutiveRuntimeApplicationPorts:
     get_resource_manager: Callable[..., Any]
     get_episodic_store: ServiceProvider
     get_semantic_recaller: ServiceProvider
-    refresh_skill_registry: ServiceProvider
-    activate_hub_skill: KeywordFactory
     emit_tribe_event: KeywordFactory
 
 
