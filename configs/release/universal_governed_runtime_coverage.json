@@ -104,16 +104,20 @@
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
       "stage": "PARTIAL_B1_SAFE_RETRY",
-      "wiring_progress": "The Coordinator enters schedule_retry only for explicit RetryableWorkerPreparationError before operation reservation. retry_count BudgetUsage, Budget, Attempt, Node, Lease, graph blocking, and outbox changes are atomic; a response lost after commit is exactly replayed only after strict aggregate, BudgetUsage, and related-Outbox validation, without a duplicate retry charge. Resolver cancellation propagates unchanged. Startup runs migration, task_store.recover_startup, publisher construction and recovery-outbox publication before later runtime activation, and recovery errors fail closed. Current built-in Host, Scheduler, and Internal resolvers emit no marker source; atomic terminal bundling for ordinary/final resolver failure, real classification, parallelism, heartbeat, takeover, and automatic continuation remain incomplete.",
+      "wiring_progress": "The Coordinator enters schedule_retry only for explicit RetryableWorkerPreparationError before operation reservation. retry_count BudgetUsage, Budget, Attempt, Node, Lease, graph blocking, and outbox changes are atomic; a response lost after commit is exactly replayed only after strict aggregate, BudgetUsage, and related-Outbox validation, without a duplicate retry charge. Ordinary/exhausted pre-reservation failures atomically close Attempt, Node, Graph, Lease and four evidence-bound Outboxes, while Budget finalization remains outside that bundle. After reservation, Lease then Reservation renewal, exact response-loss replay, stream/final checkpoints, and fail-closed RECOVERY_REQUIRED without COMMIT are wired. Startup runs recovery before activation and uses a construction-scoped execution owner. Current built-in resolvers emit no marker source; real classification, parallelism, post-reservation immediate reconciliation, online takeover, and automatic continuation remain incomplete.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
+        "host_brain/task_runtime/heartbeat.py",
         "host_brain/task_runtime/dag_scheduler.py",
         "host_brain/composition/task_runtime.py",
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "tests/unit/test_ne01_dag_scheduler.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_aw02_task_runtime_composition.py",
+        "tests/contract/test_ne01_atomic_failure_bundle.py",
+        "tests/contract/test_ne01_task_store_heartbeat_contract.py",
+        "tests/unit/test_ne01_task_runtime_heartbeat.py",
         "tests/integration/test_gr03a_governed_durable_dag.py"
       ]
     },

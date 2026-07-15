@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v1.1
+版本：v1.2
 核对日期：2026-07-15
 代码基线：`2b84ae9ad`
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -80,7 +80,7 @@
 | Runtime Contracts | WorkOrder、TaskGraph、Budget、Review、Verification、Acceptance 数据合同 | [`contracts/agent_runtime/`](../../../host_brain/contracts/agent_runtime)、[`natsume_contracts/task/v1.py`](../../../natsume_contracts/task/v1.py) | 标准库与纯类型 | app、persistence、provider 实现 | `WIRED`；Host/Scheduler/Internal canonical admission 用 V3，`AgentWorkOrder` 仅保留在 Agent ingress/executor 兼容边界 |
 | Orchestration | HostCommand admission、Governor grant 解析、计划图编译、revision 和 node grant | [`orchestration/governed_command.py`](../../../host_brain/orchestration/governed_command.py)、[`orchestration/planning_graph_compiler.py`](../../../host_brain/orchestration/planning_graph_compiler.py)、[`orchestration/node_grants.py`](../../../host_brain/orchestration/node_grants.py) | contracts、repository ports、PlanningSearch result | 领域 worker 实现、外部副作用 | Host 主链 `WIRED`；失败重规划和所有入口统一性仍 `PARTIAL` |
 | Governed Host Adapter | 把 `chat/skill/delegate/plan` 编译为 HostCommand + `WorkOrderV3` + immutable graph | [`app/governed_task_adapter.py`](../../../host_brain/app/governed_task_adapter.py) | Orchestration、Task Runtime、route worker | 执行期二次规划 | `WIRED`；是当前 Host canonical vertical slice |
-| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/dag_scheduler.py`](../../../host_brain/task_runtime/dag_scheduler.py)、[`task_runtime/budget_runtime.py`](../../../host_brain/task_runtime/budget_runtime.py)、[`task_runtime/review_runtime.py`](../../../host_brain/task_runtime/review_runtime.py) | Task repository ports、worker/verifier/acceptance ports | 路由意图识别、计划搜索 | `PARTIAL_B1_SAFE_RETRY`；reservation 前显式 marker 已接 atomic retry budget/attempt 2 与提交响应丢失 exact replay，resolver cancellation 不转普通失败；built-in resolver 尚无 marker source，普通/末次 resolver failure 原子 terminal bundle、真正并行、heartbeat/takeover 和 continuation 未闭环 |
+| Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/heartbeat.py`](../../../host_brain/task_runtime/heartbeat.py)、[`task_runtime/dag_scheduler.py`](../../../host_brain/task_runtime/dag_scheduler.py)、[`task_runtime/budget_runtime.py`](../../../host_brain/task_runtime/budget_runtime.py)、[`task_runtime/review_runtime.py`](../../../host_brain/task_runtime/review_runtime.py) | Task repository ports、worker/verifier/acceptance ports | 路由意图识别、计划搜索 | `PARTIAL_B1_SAFE_RETRY`；pre-reservation safe retry/原子失败收口、Lease/Reservation 心跳及 checkpoint 已接；心跳失败 `RECOVERY_REQUIRED` 且禁止 COMMIT。built-in resolver 尚无 marker source，Budget 尚未并入失败 bundle，真正并行、在线 takeover、即时 reconciliation 和 continuation 未闭环 |
 | Scheduler | 定义、occurrence、时钟、lease、模式/资源策略和定时 worker registry | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py) | Secure Ingress、Governor、Task Runtime、Scheduler Repository | 自建第二套 Task 状态机 | `WIRED`；Clock/Manual occurrence 已贯通 V3/Budget/child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent Runtime | 认证后的内部 Agent WorkOrder、结果持久化和 Review API | [`app/internal_task_runtime.py`](../../../host_brain/app/internal_task_runtime.py)、[`app/internal_agent_ingress.py`](../../../host_brain/app/internal_agent_ingress.py) | Secure Ingress、Agent Executor、Task Runtime | 绕过 HostCommand 权限 lineage | `WIRED`；边界 v2 编译 V3，完整 child grant、Budget、PRE/POST Review、Verification、Acceptance、Receipt 与 replay 已验证 |
 | Read Projection / Executive Guard | `task_progress`、`recent_turn` 的只读投影与 retired fail-close guard | [`agent_runtime/read_routes.py`](../../../host_brain/agent_runtime/read_routes.py)、[`executive_runtime/runtime.py`](../../../host_brain/executive_runtime/runtime.py) | Durable Task/Conversation projection | Task/Attempt、worker、状态写入 | `WIRED / RETIRED`；Executive 无生产入口，legacy SkillDag 执行和内存 registry 已删除 |
@@ -188,7 +188,7 @@ HTTP Chat / ASR / Gateway
 
 关键边界：Input Runtime 不执行工具，Cortex 不写 Task 第二真相，worker 不修改冻结图，外部副作用必须发生在 Acceptance 之后。
 
-Task composition 在开放运行时前依次完成 migration、`task_store.recover_startup`、publisher 构造与 recovery outbox 发布；任一恢复异常 fail closed。该启动门禁不会自动续跑 recoverable attempt，也不等价于 heartbeat/takeover 已完成。
+Task composition 在开放运行时前依次完成 migration、`task_store.recover_startup`、publisher 构造与 recovery outbox 发布；任一恢复异常 fail closed。ASGI 把逻辑 owner 派生为当前 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner。执行中 heartbeat 已续租 Lease/Reservation 并阻断失去所有权后的 COMMIT，但启动门禁和心跳都不会自动续跑 recoverable attempt，也不等价于在线 takeover 或即时 reconciliation 已完成。
 
 ### 6.2 定时任务和内部 Agent
 
@@ -286,7 +286,7 @@ Composition Root 只负责把两侧构造并连接
 |---|---|---|---|
 | P1 | 长时间 Review 的 child-grant renewal/derivation 尚未统一 | 等待超过 grant TTL 后的自动 continuation 仍缺明确授权时机 | Governed Execution |
 | P1 | Persona candidate 尚未进入统一 proposal/Review/版本激活 | 旧直写虽已封口，但人格长期演化仍不可用 | Persona Evolution Authority |
-| P0 | Task Runtime 未消费全部 retry/backoff/concurrency/continuation 策略 | 合同声明与运行时语义不一致 | Governed Execution |
+| P0 | Task Runtime 未消费全部 concurrency/takeover/continuation/reconciliation 策略 | heartbeat 已建立 fail-closed 续租，但尚不能自动接管或续跑 | Governed Execution |
 | P1 | 全局 ProcessServiceContainer 和 accessor 仍存在 | 资源归属、测试隔离和进程边界不清 | Composition Kernel |
 | P1 | Host Plan 不生成竞争路径 | 通用智能规划目标尚未实现 | Planning and Decision |
 | P1 | 核心包依赖图存在大型循环 | 模块无法独立演进、构造和验证 | 各 bounded context + Composition Kernel |

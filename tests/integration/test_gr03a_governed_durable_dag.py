@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -54,6 +56,15 @@ NOW = 1_900_000_000_000
 
 def _sha(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _elapsed_clock() -> Any:
+    started = time.monotonic()
+
+    def clock() -> int:
+        return NOW + int((time.monotonic() - started) * 1_000)
+
+    return clock
 
 
 def _migrated_db(tmp_path: Path) -> Path:
@@ -185,6 +196,58 @@ class _Worker:
         }
 
 
+class _SlowWorker(_Worker):
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        delay_seconds: float,
+    ) -> None:
+        super().__init__(calls, set())
+        self._delay_seconds = delay_seconds
+
+    async def execute_stream(self, **kwargs: Any):
+        await asyncio.sleep(self._delay_seconds)
+        async for event in super().execute_stream(**kwargs):
+            yield event
+
+
+class _StaticResolver:
+    def __init__(self, worker: _Worker) -> None:
+        self._worker = worker
+
+    def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+        assert executor == "canonical"
+        assert worker_route.startswith("worker:")
+        return self._worker
+
+
+class _FailingResolver:
+    def __init__(self) -> None:
+        self.resolve_count = 0
+
+    def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+        assert executor == "canonical"
+        assert worker_route.startswith("worker:")
+        self.resolve_count += 1
+        raise RuntimeError("worker registry is unavailable")
+
+
+class _FailingHeartbeatStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.heartbeat_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def heartbeat_lease(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self.heartbeat_calls += 1
+        if self.heartbeat_calls <= 2:
+            raise RuntimeError("lease heartbeat transport unavailable")
+        return self._delegate.heartbeat_lease(*args, **kwargs)
+
+
 class _Resolver:
     def __init__(self, calls: list[str], fail_nodes: set[str] | None = None) -> None:
         self._worker = _Worker(calls, fail_nodes or set())
@@ -276,10 +339,17 @@ def _coordinator(
     acceptance_decision: str = "ACCEPT",
     clock: Any = None,
     worker_resolver: Any = None,
+    task_store: Any = None,
+    lease_ttl_ms: int = 120_000,
+    operation_ttl_ms: int = 120_000,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
-        task_store=DurableTaskStore(db_path, clock=resolved_clock),
+        task_store=(
+            task_store
+            if task_store is not None
+            else DurableTaskStore(db_path, clock=resolved_clock)
+        ),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
         worker_resolver=(
@@ -291,6 +361,8 @@ def _coordinator(
         acceptance=_Acceptance(acceptance_decision),
         review_runtime=review_runtime,
         owner_id="gr03a-worker",
+        lease_ttl_ms=lease_ttl_ms,
+        operation_ttl_ms=operation_ttl_ms,
     )
 
 
@@ -506,6 +578,125 @@ async def test_gr03a_fan_out_fan_in_persists_and_executes_dependency_first(
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_outbox WHERE event_type = 'TASK_NODE_READY'"
         ).fetchone()[0] == 3
+
+
+@pytest.mark.asyncio
+async def test_ne01_coordinator_renews_long_execution_authority_until_acceptance(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    calls: list[str] = []
+    clock = _elapsed_clock()
+    store = DurableTaskStore(db_path, clock=clock)
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            clock=clock,
+            task_store=store,
+            worker_resolver=_StaticResolver(
+                _SlowWorker(calls, delay_seconds=0.32)
+            ),
+            lease_ttl_ms=200,
+            operation_ttl_ms=200,
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "ACCEPTED"
+    assert receipt["accepted"] is True
+    assert calls == ["root"]
+    snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert snapshot["active_leases"] == []
+    with sqlite3.connect(db_path) as conn:
+        heartbeat_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'TASK_LEASE_HEARTBEAT'
+            """
+        ).fetchone()[0]
+        renewal_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_RENEWED'
+            """
+        ).fetchone()[0]
+        reservation_status = conn.execute(
+            """
+            SELECT status FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ?
+            """,
+            (snapshot["attempts"][0]["attempt_id"],),
+        ).fetchone()[0]
+    assert heartbeat_count >= 1
+    assert renewal_count >= 1
+    assert reservation_status == "COMMITTED"
+
+
+@pytest.mark.asyncio
+async def test_ne01_coordinator_heartbeat_loss_blocks_operation_commit(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    calls: list[str] = []
+    clock = _elapsed_clock()
+    durable_store = DurableTaskStore(db_path, clock=clock)
+    failing_store = _FailingHeartbeatStore(durable_store)
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            clock=clock,
+            task_store=failing_store,
+            worker_resolver=_StaticResolver(
+                _SlowWorker(calls, delay_seconds=0.25)
+            ),
+            lease_ttl_ms=120,
+            operation_ttl_ms=120,
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["accepted"] is False
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert failing_store.heartbeat_calls == 2
+    with sqlite3.connect(db_path) as conn:
+        reservation_status = conn.execute(
+            "SELECT status FROM task_runtime_idempotency_reservation"
+        ).fetchone()[0]
+        commit_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_COMMITTED'
+            """
+        ).fetchone()[0]
+    assert reservation_status == "RESERVED"
+    assert commit_count == 0
 
 
 @pytest.mark.asyncio
@@ -1208,6 +1399,83 @@ async def test_ne01_b2_retry_budget_exhaustion_fails_closed_before_reservation(
     assert graph_blocked_outbox is not None
     assert graph_blocked_outbox[0] == snapshot["attempts"][0]["attempt_id"]
     assert retry_usages[0]["usage_id"] in json.loads(graph_blocked_outbox[1])
+
+
+@pytest.mark.asyncio
+async def test_ne01_pre_reservation_failure_closes_authority_atomically(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    resolver = _FailingResolver()
+
+    events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            [],
+            worker_resolver=resolver,
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "FAILED"
+    assert receipt["reason_code"] == "GOVERNED_WORKER_FAILED"
+    assert resolver.resolve_count == 1
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    attempt = snapshot["attempts"][0]
+    assert attempt["status"] == "FAILED"
+    assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert snapshot["graph_record"]["status"] == "FAILED"
+    assert snapshot["active_leases"] == []
+    with sqlite3.connect(db_path) as conn:
+        lease_status = conn.execute(
+            "SELECT status FROM task_runtime_lease WHERE attempt_id = ?",
+            (attempt["attempt_id"],),
+        ).fetchone()[0]
+        reservation_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_idempotency_reservation"
+        ).fetchone()[0]
+        failure_outboxes = conn.execute(
+            """
+            SELECT aggregate_type, event_type, attempt_id, evidence_refs_json
+            FROM task_runtime_outbox
+            WHERE event_type IN (
+                'TASK_ATTEMPT_FAILED',
+                'TASK_NODE_FAILED',
+                'TASK_GRAPH_FAILED',
+                'TASK_LEASE_RELEASED_TERMINAL'
+            )
+            ORDER BY aggregate_type
+            """
+        ).fetchall()
+    assert lease_status == "RELEASED"
+    assert reservation_count == 0
+    assert {row[1] for row in failure_outboxes} == {
+        "TASK_ATTEMPT_FAILED",
+        "TASK_NODE_FAILED",
+        "TASK_GRAPH_FAILED",
+        "TASK_LEASE_RELEASED_TERMINAL",
+    }
+    assert len(failure_outboxes) == 4
+    assert all(row[2] == attempt["attempt_id"] for row in failure_outboxes)
+    assert all(attempt["error_ref"] in json.loads(row[3]) for row in failure_outboxes)
 
 
 @pytest.mark.asyncio

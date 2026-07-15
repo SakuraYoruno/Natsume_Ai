@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.0
+版本：v2.1
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-15
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -630,6 +630,14 @@ flowchart LR
     O --> RC["Receipts / Projections"]
     F --> RT["Retry same node or Replan new revision"]
 ```
+
+#### 11.2.1 执行所有权、心跳与恢复
+
+Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次具体进程构造在某个 fence 下暂时拥有 Attempt”。因此 execution owner 必须绑定启动实例；仅复用配置中的逻辑 owner，会让重启后的新进程与旧进程在身份上不可区分。
+
+长执行必须同时保护两类权威：Lease 证明谁仍可执行，Operation Reservation 证明哪个副作用身份仍被该 Attempt 保留。一次续租应先延长 Lease、再延长 Reservation；提交 Worker 结果前必须经过 checkpoint，并使用最近一次续租后的 version。若心跳、所有权或 version 无法证明，唯一安全结果是 `RECOVERY_REQUIRED`，不是猜测成功、直接失败或继续 COMMIT。
+
+`RECOVERY_REQUIRED` 只说明结果不可安全提交。它还需要 reconciliation 判断副作用是否发生，再决定 release、reacquire、takeover 或新 revision；心跳本身不能替代这一恢复流程。operation reservation 之前的失败可以在单事务内关闭 Attempt/Node/Graph/Lease，但 Budget 等其他账本必须明确纳入同一事务或拥有可证明的补偿合同。
 
 ### 11.3 Verification、Acceptance 与 Receipt 不可合并
 

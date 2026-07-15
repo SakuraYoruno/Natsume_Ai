@@ -3,7 +3,7 @@
 
 # 当前需求可追溯矩阵
 
-版本：v3.1
+版本：v3.2
 核对日期：2026-07-15
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -40,7 +40,7 @@
 | TRACE-EXEC-01 | FR-ARCH-003 | Host 四路线必须共享 WorkOrderV3/TaskGraph | Cortex、GovernedHostRuntime | GR-05/06 receipt；T-GR-RUNTIME-01 | `WIRED` | NE-01 守卫 |
 | TRACE-EXEC-02 | FR-ARCH-003 | Scheduler 必须进入同一 admission | Scheduler governed runtime | production cutover integration；child grant/receipt lineage | `WIRED` | NE-01 已完成切片 |
 | TRACE-EXEC-03 | FR-ARCH-003 | Internal Agent 必须进入同一 admission | Internal task runtime | production cutover integration；principal/child grant/Review/receipt lineage | `WIRED` | NE-01 已完成切片 |
-| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry | coordinator/task store/task composition | B0 + atomic claim；pre-reservation retry/attempt 2、retry-budget exhaustion、commit-response-loss exact replay、cancellation propagation、startup recovery ordering | `PARTIAL_B1_SAFE_RETRY`；built-in resolver 无 marker source，普通/末次 resolver failure 原子 terminal bundle、heartbeat/takeover/continuation 未完成 | NE-01 B2 |
+| TRACE-EXEC-04 | FR-NLE-002 | 多节点依赖、Attempt、Lease、Retry | coordinator/heartbeat/task store/task composition | B0 + atomic claim；pre-reservation retry/attempt 2；Attempt/Node/Graph/Lease 原子 terminal failure；Lease/Reservation renewal + exact replay；heartbeat fail-closed recovery receipt；cancellation propagation；startup recovery ordering；boot-scoped owner | `PARTIAL_B1_SAFE_RETRY`；built-in resolver 无 marker source，Budget finalize 未并入 failure bundle，真正并行、reservation 后即时 reconciliation、在线 takeover/continuation 未完成 | NE-01 B2 |
 | TRACE-EXEC-05 | FR-NLE-002 | Budget 声明必须被 runtime 消费 | budget runtime/usage ledger | Host/Scheduler/Internal integrations | `PARTIAL_CORE_INGRESS` | NE-01 |
 | TRACE-EXEC-06 | FR-NLE-003 | Review token 后自动安全 continuation | ReviewStore/review runtime | Review tests/UI | `PARTIAL_MANUAL` | NE-01 |
 | TRACE-EXEC-07 | FR-ARCH-003 | 不得有第二任务真相 | Durable Task/Conversation projections | registry absence contract + code audit | `WIRED` | NE-01 已完成切片 |

@@ -754,9 +754,12 @@ def create_app() -> FastAPI:
                     episodic_projection_store=episodic_projection_store,
                 )
                 set_memory_service_container(memory)
-                canonical_owner = (
+                logical_canonical_owner = (
                     runtime_settings.task_runtime_canonical_owner
                     or "host-task-runtime"
+                )
+                canonical_owner = task_runtime.execution_owner_id(
+                    logical_canonical_owner
                 )
                 governed_runtime = build_governed_host_runtime(
                     task_runtime_container=task_runtime,

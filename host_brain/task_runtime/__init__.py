@@ -14,6 +14,11 @@ from .worker_budget_usage import (
     stable_worker_usage_id,
 )
 from .errors import RetryableWorkerPreparationError
+from .heartbeat import (
+    DurableExecutionHeartbeat,
+    DurableExecutionHeartbeatError,
+    DurableExecutionHeartbeatLifecycleError,
+)
 
 from .coordinator import (
     AdmittedExecution,
@@ -36,6 +41,9 @@ __all__ = [
     "GovernedRuntimeError",
     "GovernedTaskCoordinator",
     "RetryableWorkerPreparationError",
+    "DurableExecutionHeartbeat",
+    "DurableExecutionHeartbeatError",
+    "DurableExecutionHeartbeatLifecycleError",
     "WorkerBudgetUsage",
     "WorkerBudgetUsageError",
     "build_worker_budget_usage",

@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v1.1
+版本：v1.2
 
 核对日期：2026-07-15
 
@@ -51,7 +51,10 @@ flowchart TD
     Compile --> Admission["HostCommandRepository 原子 admission"]
     Admission --> Runtime["Durable Task Runtime"]
     Runtime --> Worker["Attempt + Lease + Grant + Budget + Worker"]
-    Worker --> VA["Verification + Acceptance"]
+    Worker --> HB["Durable heartbeat\nLease → Reservation"]
+    HB --> Checkpoint{"checkpoint 可提交?"}
+    Checkpoint -->|是| VA["COMMIT → Verification + Acceptance"]
+    Checkpoint -->|否| Recovery["RECOVERY_REQUIRED\n禁止 COMMIT"]
     VA --> Receipt["Execution receipt"]
     VA --> Effects["Acceptance effect intents"]
     Effects --> Conversation["Conversation / Life / Memory"]
@@ -64,15 +67,15 @@ flowchart TD
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Worker,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO wired;
-    class Plan,Runtime,Conversation,Delivery partial;
+    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO wired;
+    class Plan,Runtime,Recovery,Conversation,Delivery partial;
 ```
 
 上图的核心结论是：
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 已接原子 claim/promotion，并把显式 retryable preparation failure 限定在 operation reservation 之前。该 contract path 会原子写 retry_count BudgetUsage 与 retry 状态，超限 fail closed；提交响应丢失时只在 Attempt/Node/Lease/Graph/Budget/BudgetUsage/Outbox 精确一致后 replay，避免重复扣费。当前生产 resolver 尚无现实 marker 来源，执行仍顺序且 recovery 未完整。
+- Task Runtime 有持久状态、授权、预算、Review、Verification 和 Acceptance；B1 已接原子 claim/promotion，并把显式 retryable preparation failure 限定在 operation reservation 之前。普通/耗尽的 pre-reservation failure 以单事务关闭 Attempt/Node/Graph/Lease 和四条证据 Outbox；Budget finalize 仍在事务外。reservation 后会周期性按 Lease → Reservation 顺序续租，每个流事件和最终结果都过 checkpoint，心跳失败返回 `RECOVERY_REQUIRED` 且禁止 COMMIT。当前生产 resolver 尚无现实 marker 来源，执行仍顺序且 takeover/continuation 未完整。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 
@@ -208,9 +211,12 @@ claim runnable node
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
 | DAG 并发 | claim 有 durable concurrency fence，但 coordinator 当前仍串行执行 selected nodes | `NOT_IMPLEMENTED` |
-| Retry/backoff | Coordinator 仅对 reservation 前显式 marker 调用 `schedule_retry`；retry_count、Budget、Attempt/Node/Lease/Outbox 同事务提交，到期可重开 attempt 2，超限原子阻断；提交响应丢失 exact replay 不重复扣费，resolver cancellation 原样传播。生产 resolver 尚无现实 marker 来源，普通/末次 resolver failure 的原子 terminal bundle与 reconciliation 也未完成 | `PARTIAL_B1_SAFE_RETRY` |
+| Retry/backoff | Coordinator 仅对 reservation 前显式 marker 调用 `schedule_retry`；retry_count、Budget、Attempt/Node/Lease/Outbox 同事务提交，到期可重开 attempt 2，提交响应丢失 exact replay 不重复扣费，resolver cancellation 原样传播。生产 resolver 尚无现实 marker 来源 | `PARTIAL_B1_SAFE_RETRY` |
+| Pre-reservation failure | 普通/耗尽 failure 通过 `fail_running_attempt_bundle` 原子落 Attempt FAILED、Node FAILED、Graph FAILED/BLOCKED、Lease RELEASED 和四条 attempt/evidence-bound Outbox；已有 reservation 时拒绝，Budget finalize 在 bundle 外 | `WIRED_NARROW_BOUNDARY` |
+| 执行心跳 | reservation 后后台先续 Lease 再续 Reservation；流事件和最终结果均 checkpoint，停止/join 后才用最新 version COMMIT。续租同参响应丢失可精确重放 | `WIRED` |
+| 心跳失败 | 任一续租或版本检查失败返回 `RECOVERY_REQUIRED`，Worker 结果绝不 COMMIT；在线 takeover、即时 reconciliation 与自动 continuation 尚未实现 | `FAIL_CLOSED_PARTIAL_RECOVERY` |
 
-启动恢复数据流为 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation；恢复抛错会在 admission 可用前 fail closed。该顺序只持久化并发布恢复判定，不会自动 continuation，也没有补齐 heartbeat/takeover。
+启动恢复数据流为 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation；恢复抛错会在 admission 可用前 fail closed。ASGI 还会把配置逻辑 owner 派生为每次 container construction 唯一的 execution owner。该顺序只持久化并发布恢复判定，不会自动 continuation，也没有补齐在线 takeover 或即时 reconciliation。
 
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
@@ -453,7 +459,7 @@ All ingress sources
 
 从当前流程到目标流程的必要变更是：
 
-1. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，再实现真正并行 fan-out、promotion+claim 单事务、周期 heartbeat 与 mid-attempt takeover。
+1. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，再实现真正并行 fan-out、promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt 在线 takeover。
 2. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation，并明确长时间等待后的 child-grant renewal/derivation。
 3. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
 4. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。

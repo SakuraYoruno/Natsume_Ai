@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.2
+版本：v3.3
 核对日期：2026-07-15
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
@@ -118,4 +118,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。`PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget、提交响应丢失 exact replay 与 fail-closed 启动 recovery gate，resolver cancellation 不转普通失败；built-in resolver 尚无 marker source。NE-01 仍需完成普通/末次 resolver failure 原子 terminal bundle、现实失败分类、真正并行、heartbeat/takeover、自动 continuation、显式 composition 与最终 route matrix 验收。Executive 退役不能替代这些剩余条件。
+Executive 生产调用、legacy SkillDag 执行和进程内 registry 已归零；Scheduler 与 Internal 也已共享 canonical Task lineage。`PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget、Attempt/Node/Graph/Lease 原子 terminal bundle、Lease/Reservation heartbeat、提交响应丢失 exact replay 与 fail-closed 启动 recovery gate，resolver cancellation 不转普通失败；built-in resolver 尚无 marker source。NE-01 仍需完成 Budget 终态闭环、现实失败分类、真正并行、reservation 后即时 reconciliation、在线 takeover、自动 continuation、显式 composition 与最终 route matrix 验收。Executive 退役不能替代这些剩余条件。

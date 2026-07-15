@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构图册
 
-版本：v2.0
+版本：v2.1
 核对日期：2026-07-15
 文档类型：`CURRENT DIAGRAMS`
 

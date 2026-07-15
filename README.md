@@ -12,7 +12,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
 | Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
-| Durable Task Runtime | `PARTIAL_B1_SAFE_RETRY` | B1 durable claim/promotion 与 safe-retry exact replay 已接；Coordinator 只对 operation reservation 前显式标记的 retryable preparation failure 调用 `schedule_retry`，retry_count 与 Attempt/Node/Lease/Outbox 同事务落盘且超限 fail closed。当前生产 resolver 尚无现实异常源抛该 marker；真正并行、现实失败分类、heartbeat/takeover、Review continuation 未闭环 |
+| Durable Task Runtime | `PARTIAL_B1_SAFE_RETRY` | B1 durable claim/promotion、safe-retry exact replay、pre-reservation 原子失败收口和执行期 Lease/Reservation 心跳已接；心跳失败返回 `RECOVERY_REQUIRED` 且禁止 COMMIT。当前生产 resolver 尚无现实 retry marker；真正并行、在线 takeover、自动 continuation 与即时 reconciliation 未闭环 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_D0_PATH_FENCE` | scoped I/O 与 Verification 已统一拒绝路径逃逸；durable owner、隔离 worktree 和 OS/tenant 边界未完成 |
@@ -108,7 +108,11 @@ request
 
 当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；Executive 的生产入口、SkillDag 执行和内存任务 registry 已删除。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。
 
-Durable 启动门禁当前按 `migration → task_store.recover_startup → 构造 publisher → 发布 recovery outbox → 稍后激活 runtime` 执行；恢复步骤抛错会在路由开放前 fail closed。`schedule_retry` 提交后若仅丢失响应，同一确定性调用会严格核对 Attempt、Node、Lease、Graph、Budget、BudgetUsage 及关联 Outbox 后返回原决定，不会重复扣减 retry budget；任何状态漂移都会拒绝伪造 replay。resolver 的 `CancelledError` 会原样向上传播，不会被普通失败分支吞掉。这里仍不包含周期 heartbeat、takeover、自动 continuation；普通 resolver 失败和最后一次 resolver 失败的多聚合 terminal 写入也尚未合并为单事务。
+Durable 启动门禁当前按 `migration → task_store.recover_startup → 构造 publisher → 发布 recovery outbox → 稍后激活 runtime` 执行；恢复步骤抛错会在路由开放前 fail closed。ASGI 会把配置中的逻辑 owner 派生为每次 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner，避免重启后的旧 owner 身份复用。
+
+`schedule_retry` 提交后若仅丢失响应，同一确定性调用会严格核对 Attempt、Node、Lease、Graph、Budget、BudgetUsage 及关联 Outbox 后返回原决定，不重复扣减 retry budget。普通或重试耗尽的 pre-reservation resolver failure 通过 `fail_running_attempt_bundle` 在一个事务内落 `Attempt FAILED`、`Node FAILED`、`Graph FAILED/BLOCKED`、`Lease RELEASED` 和四条 attempt/evidence-bound Outbox；一旦已有 operation reservation，该边界拒绝接管。Budget finalize 仍在该事务之外。
+
+reservation 建立后，Coordinator 启动 `DurableExecutionHeartbeat`，每轮先续 Lease、再续 Operation Reservation，并在流事件及最终结果前执行 checkpoint；任一心跳失败只返回 `RECOVERY_REQUIRED`，绝不 COMMIT。两类续租支持同参响应丢失后的精确重放。当前仍缺在线 takeover、自动 continuation 和即时 reconciliation；生产 resolver 也尚未真实抛出 safe-retry marker，因此阶段仍是 `PARTIAL_B1_SAFE_RETRY`。
 
 ### Planning Search
 

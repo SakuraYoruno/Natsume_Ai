@@ -3,7 +3,7 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v1.2
+版本：v1.3
 日期：2026-07-15
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
@@ -33,7 +33,7 @@
 | Host `chat/skill/delegate/plan` | 已接 canonical runtime，作为可复用地基 |
 | Scheduler | `WIRED`：真实 occurrence 已贯通 `WorkOrderV3 + Budget + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED`：边界 v2 已立即编译为 V3，完整 Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已通过真实集成 |
-| Durable DAG | `PARTIAL_B1_SAFE_RETRY`：Coordinator 消费 B0、原子 READY claim 与到期 promotion；仅 operation reservation 前显式标记的 retryable preparation failure 会调用 `schedule_retry`，retry_count 与状态/Outbox 同事务写入并在超限时 fail closed。当前生产 resolver 尚无现实异常源抛该 marker；真正并行、现实失败分类、heartbeat/takeover 和 continuation 未实现 |
+| Durable DAG | `PARTIAL_B1_SAFE_RETRY`：Coordinator 消费 B0、原子 READY claim 与到期 promotion；pre-reservation safe retry/原子 terminal bundle、Lease/Reservation 周期续租与 fail-closed checkpoint 已接。当前生产 resolver 尚无现实 marker；Budget finalize 未并入 bundle，真正并行、在线 takeover、即时 reconciliation 和 continuation 未实现 |
 | Budget | Host/Scheduler/Internal 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
@@ -97,13 +97,15 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
 - Internal Agent 真实 `WorkOrderV3` admission、Secure Ingress principal、Budget、`delegate:agent_runtime` child grant、PRE/POST Review、Verification、Acceptance、Receipt 与 replay；
 - Durable DAG B1 safe-retry 子集：Coordinator 消费 B0，原子提交 claim 并执行到期 promotion；worker resolver 的显式 `RetryableWorkerPreparationError` 只会在 operation reservation 前进入 `schedule_retry`。retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox 在同一 `BEGIN IMMEDIATE` 内提交，超限则原子阻断 graph；真实 Coordinator 已证明 attempt 1 → RETRY_PENDING → 到期 attempt 2，且 reservation 后 worker 异常绝不 retry。提交后响应丢失只在 Attempt/Node/Lease/Graph/Budget/BudgetUsage/关联 Outbox 全部精确一致时 replay，不重复扣费；`CancelledError` 原样传播。当前生产 resolver 尚无现实异常源抛该 marker，因此这是已接 contract path，不是现实故障自动分类已完成；
-- Task Runtime 启动已按 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation 排序；恢复异常在 route activation 前 fail closed。它尚不包含 heartbeat、takeover、reconciliation completion 或自动 continuation；
+- pre-reservation 普通/耗尽 failure 已通过 `fail_running_attempt_bundle` 在单事务内关闭 Attempt、Node、Graph、Lease 并生成四条 attempt/evidence-bound Outbox；已有 operation reservation 时拒绝，精确重放会拒绝 fence、version、evidence 或 Outbox 漂移。Budget finalize 仍在 bundle 外；
+- operation reservation 后已启动 `DurableExecutionHeartbeat`：先续 Lease、再续 Reservation，流事件和最终结果均 checkpoint，stop/join 后才允许使用最新 reservation version COMMIT；续租同参响应丢失支持精确重放，失败返回 `RECOVERY_REQUIRED` 且绝不 COMMIT；
+- Task Runtime 启动已按 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation 排序；ASGI 将配置逻辑 owner 派生为每次 container construction 唯一的 execution owner。恢复异常在 route activation 前 fail closed。它尚不包含在线 takeover、即时 reconciliation 或自动 continuation；
 - 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
 - Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
 - Composition 两个安全切片累计删除 6 个生产零消费者全局槽位和 4 个死 accessor；第二刀额外收掉 7 个宽泛 façade 重导出及 `retrieval_pipeline` 的测试 reset 残留。排除 6 个 lock 与 `application_ports` 端口束后的可变服务引用由 59 降为 53，但全局 container 仍存在。
 
-Lane A 已完成；Lane B 已接窄化的 pre-reservation safe-retry contract path、原子 retry budget、exact replay 与启动恢复门禁，但现实 resolver 故障分类、普通/最后一次 resolver failure 的多聚合原子 terminal bundle、heartbeat/takeover 与真正并行仍未完成。Lane D 的 durable workspace authority/隔离 worktree/显式 composition 也未完成，因此 NE-01 不得封板。长时间人工 Review 超过 child-grant TTL 的统一 renewal/derivation 仍随 Review continuation 一并解决。
+Lane A 已完成；Lane B 已接窄化的 pre-reservation safe-retry contract path、原子 retry budget、pre-reservation terminal bundle、Lease/Reservation heartbeat、exact replay 与启动恢复门禁，但现实 resolver 故障分类、Budget 并入 terminal bundle、reservation 后即时 reconciliation、在线 takeover、真正并行与自动 continuation 仍未完成。Lane D 的 durable workspace authority/隔离 worktree/显式 composition 也未完成，因此 NE-01 不得封板。长时间人工 Review 超过 child-grant TTL 的统一 renewal/derivation 仍随 Review continuation 一并解决。
 
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 
@@ -118,11 +120,12 @@ Lane A 已完成；Lane B 已接窄化的 pre-reservation safe-retry contract pa
 
 #### Lane B：Durable DAG completion
 
-状态：`PARTIAL_B1_SAFE_RETRY / LANE_IN_PROGRESS`。当前证明 durable decision/claim、显式 pre-reservation retry contract path、原子 retry budget 与到期 continuation；生产 resolver 尚无现实 marker 来源，也不代表并行 fan-out 或运行中 takeover 已完成。
+状态：`PARTIAL_B1_SAFE_RETRY / LANE_IN_PROGRESS`。当前证明 durable decision/claim、显式 pre-reservation retry contract path、原子 retry budget、pre-reservation terminal bundle、Lease/Reservation heartbeat、fail-closed checkpoint 与到期 continuation；生产 resolver 尚无现实 marker 来源，也不代表并行 fan-out、在线 takeover、即时 reconciliation 或自动 continuation 已完成。
 
 - 调度所有依赖已满足节点，支持有界 fan-out/fan-in；
 - 把现实 resolver 的可证明瞬态准备失败映射到显式 marker；禁止扩大到 reservation 后异常；
 - 在现有 max-attempt/backoff/retry-budget 原子路径上补齐真实故障分类与运行观测；
+- 把 Budget finalize 纳入明确的终态事务/补偿合同，并补齐 reservation 后 `RECOVERY_REQUIRED` 的即时 reconciliation 与在线 takeover；
 - 实现 resume 后的自动 continuation，保证 checkpoint 后不重放已确认副作用；
 - 并发、retry、cancel、lease takeover、crash recovery 均产生同一 lineage。
 

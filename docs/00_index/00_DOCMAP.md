@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v8.0
+版本：v8.1
 维护日期：2026-07-15
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL`。
+- Durable DAG：`PARTIAL_B1_SAFE_RETRY`；pre-reservation 原子失败收口与 Lease/Reservation 心跳已接，在线 takeover、即时 reconciliation、真正并行和自动 continuation 未完成。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

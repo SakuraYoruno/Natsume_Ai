@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.1
+版本：v2.2
 核对日期：2026-07-15
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -58,6 +58,7 @@ sequenceDiagram
     participant R as HostCommandRepository
     participant T as DurableTaskStore
     participant C as GovernedTaskCoordinator
+    participant B as DurableExecutionHeartbeat
     participant W as Frozen Worker
     participant E as Effect Dispatcher
 
@@ -65,19 +66,34 @@ sequenceDiagram
     R->>T: persist graph revision and nodes
     H->>C: execute_stream(graph)
     C->>T: claim READY node / create Attempt and Lease
-    C->>T: reserve Budget and idempotency
-    C->>W: frozen node input + node-bound grant
-    W-->>C: execution events and result
-    C->>C: verify(result)
-    alt verified and accepted
-        C->>T: commit Acceptance + effect intents
-        C-->>H: accepted execution receipt
-        H->>E: dispatch_graph(graph_id, revision)
-        E->>T: commit or retain retryable effect receipt
-    else review required
-        C->>T: persist checkpoint + WAITING_REVIEW
-    else failed
-        C->>T: persist failed Attempt and evidence
+    C->>T: reserve Budget
+    alt pre-reservation resolver failed
+        C->>T: atomic Attempt/Node/Graph/Lease terminal bundle + 4 Outboxes
+        C-->>H: failed receipt
+    else resolver ready
+        C->>T: reserve operation idempotency
+        C->>B: start + attach reservation
+        C->>W: frozen node input + node-bound grant
+        loop worker execution
+            B->>T: renew Lease, then Reservation
+            W-->>C: execution event / final result
+            C->>B: checkpoint
+        end
+        C->>B: stop and join
+        alt heartbeat failed
+            C-->>H: RECOVERY_REQUIRED; never COMMIT
+        else heartbeat healthy
+            C->>T: COMMIT with latest Reservation version
+            C->>C: verify(result)
+            alt verified and accepted
+                C->>T: commit Acceptance + effect intents
+                C-->>H: accepted execution receipt
+                H->>E: dispatch_graph(graph_id, revision)
+                E->>T: commit or retain retryable effect receipt
+            else review required
+                C->>T: persist checkpoint + WAITING_REVIEW
+            end
+        end
     end
 ```
 
@@ -103,9 +119,9 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget/attempt 2、提交响应丢失 exact replay 与 resolver cancellation 传播；built-in resolver 尚无 marker source，普通/末次 resolver failure 原子 terminal bundle、真正并行、heartbeat/takeover 与 Review continuation 尚未完成。
+3. `PARTIAL_B1_SAFE_RETRY` 已接 reservation 前显式 marker、atomic retry budget/attempt 2、普通/耗尽 failure 的 Attempt/Node/Graph/Lease 原子 terminal bundle，以及 Lease/Reservation 心跳与 checkpoint；心跳失败返回 `RECOVERY_REQUIRED` 且禁止 COMMIT。built-in resolver 尚无 marker source，Budget finalize 仍在 bundle 外；真正并行、在线 takeover、即时 reconciliation 与 Review continuation 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；这不代表自动 continuation 或 takeover 已完成。
+5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
 
 ## 代码锚点
 
@@ -115,7 +131,7 @@ flowchart LR
 - Direct contracts：`host_brain/orchestration/host_route_contracts.py`
 - Plan search/compiler：`host_brain/orchestration/plan_intent_search.py`、`planning_graph_compiler.py`
 - Admission：`host_brain/orchestration/planning_admission.py`、`host_brain/persistence/host_command_repository.py`
-- Task execution：`host_brain/task_runtime/coordinator.py`、`host_brain/task_runtime/dag_scheduler.py`
+- Task execution：`host_brain/task_runtime/coordinator.py`、`host_brain/task_runtime/heartbeat.py`、`host_brain/task_runtime/dag_scheduler.py`
 - Read projection：`host_brain/agent_runtime/read_routes.py`
 - Node grant：`host_brain/orchestration/node_grants.py`
 - Acceptance effects：`host_brain/task_runtime/acceptance_effects.py`、`acceptance_effect_dispatcher.py`

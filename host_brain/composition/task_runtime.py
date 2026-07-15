@@ -180,6 +180,20 @@ class ProcessTaskRuntimeContainer:
     def construction_order(self) -> tuple[str, ...]:
         return _INFRASTRUCTURE_ORDER
 
+    def execution_owner_id(self, logical_owner_id: str) -> str:
+        """Bind a configured logical owner to this boot/construction instance."""
+
+        logical = str(logical_owner_id or "").strip()
+        if not logical:
+            raise TaskRuntimeContainerError(
+                TASK_RUNTIME_COORDINATOR_INVALID,
+                "logical task runtime owner is required",
+            )
+        instance_digest = hashlib.sha256(
+            self.recovery_id.encode("utf-8")
+        ).hexdigest()[:24]
+        return f"{logical}::runtime::{instance_digest}"
+
     def bind_runtime(self, coordinator: Any) -> None:
         """Bind, but do not activate, the future application coordinator."""
 

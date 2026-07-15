@@ -11,6 +11,7 @@ every dependency is ACCEPTED.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -54,6 +55,10 @@ from .review_runtime import (
     TaskNodeReviewContext,
     TaskNodeReviewGate,
     TaskNodeReviewRuntime,
+)
+from .heartbeat import (
+    DurableExecutionHeartbeat,
+    DurableExecutionHeartbeatError,
 )
 from .ports import (
     AcceptancePort,
@@ -857,7 +862,13 @@ class GovernedTaskCoordinator:
         budget = precharge.context
         if not precharge.accepted:
             receipt = await self._reject_budget_charge(
-                admitted, precharge, attempt_id=attempt_id, fencing_token=fencing_token
+                admitted,
+                precharge,
+                attempt_id=attempt_id,
+                fencing_token=fencing_token,
+                pre_reservation_graph=graph,
+                pre_reservation_node=node,
+                pre_reservation_attempt=attempt,
             )
             yield self._terminal_event(receipt)
             return
@@ -874,8 +885,11 @@ class GovernedTaskCoordinator:
         except RetryableWorkerPreparationError as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
             if not _retry_attempt_available(node, attempt_no=attempt_no):
-                await self._mark_worker_failure(
+                failure_ref = await self._mark_pre_reservation_failure(
                     admitted,
+                    graph=graph,
+                    node=node,
+                    attempt=attempt,
                     attempt_id=attempt_id,
                     fencing_token=fencing_token,
                     reason_code=reason_code,
@@ -884,6 +898,7 @@ class GovernedTaskCoordinator:
                     budget,
                     target_status=BudgetReservationStatus.RELEASED,
                 )
+                await self._publish_outbox()
                 receipt = self._receipt(
                     admitted,
                     attempt_id=attempt_id,
@@ -891,6 +906,7 @@ class GovernedTaskCoordinator:
                     verification_status="NOT_RUN",
                     accepted=False,
                     reason_code=reason_code,
+                    evidence_refs=(failure_ref,),
                     projection={"budget": budget.execution_payload()},
                 )
                 yield self._terminal_event(receipt)
@@ -941,8 +957,11 @@ class GovernedTaskCoordinator:
                             GOVERNED_DURABLE_STATE_CONFLICT,
                             "durable retry decision could not be exactly replayed",
                         ) from replay_exc
-                    await self._mark_worker_failure(
+                    failure_ref = await self._mark_pre_reservation_failure(
                         admitted,
+                        graph=graph,
+                        node=node,
+                        attempt=current_attempt,
                         attempt_id=attempt_id,
                         fencing_token=fencing_token,
                         reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
@@ -952,6 +971,7 @@ class GovernedTaskCoordinator:
                         budget,
                         target_status=BudgetReservationStatus.RELEASED,
                     )
+                    await self._publish_outbox()
                     receipt = self._receipt(
                         admitted,
                         attempt_id=attempt_id,
@@ -959,7 +979,7 @@ class GovernedTaskCoordinator:
                         verification_status="NOT_RUN",
                         accepted=False,
                         reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
-                        evidence_refs=(error_ref,),
+                        evidence_refs=(error_ref, failure_ref),
                         projection={
                             "budget": budget.execution_payload(),
                             "retry_schedule_error": _exception_reason(
@@ -1063,8 +1083,11 @@ class GovernedTaskCoordinator:
             return
         except Exception as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            await self._mark_worker_failure(
+            failure_ref = await self._mark_pre_reservation_failure(
                 admitted,
+                graph=graph,
+                node=node,
+                attempt=attempt,
                 attempt_id=attempt_id,
                 fencing_token=fencing_token,
                 reason_code=reason_code,
@@ -1073,6 +1096,7 @@ class GovernedTaskCoordinator:
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
             )
+            await self._publish_outbox()
             receipt = self._receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -1080,6 +1104,7 @@ class GovernedTaskCoordinator:
                 verification_status="NOT_RUN",
                 accepted=False,
                 reason_code=reason_code,
+                evidence_refs=(failure_ref,),
                 projection={"budget": budget.execution_payload()},
             )
             yield self._terminal_event(receipt)
@@ -1168,8 +1193,56 @@ class GovernedTaskCoordinator:
         if node_grant_ref is not None:
             execution_context["node_grant_ref"] = node_grant_ref
 
+        def heartbeat_outbox(**values: Any) -> Any:
+            values.pop("attempt_id", None)
+            return self._outbox(
+                admitted,
+                attempt_id=attempt_id,
+                **values,
+            )
+
+        heartbeat = DurableExecutionHeartbeat(
+            store=self._store,
+            outbox_builder=heartbeat_outbox,
+            attempt_id=attempt_id,
+            lease_id=lease_id,
+            owner_id=self._owner_id,
+            fencing_token=fencing_token,
+            lease_version=_version(lease),
+            lease_ttl_ms=self._lease_ttl_ms,
+            operation_ttl_ms=self._operation_ttl_ms,
+        )
+        try:
+            await heartbeat.start()
+            await heartbeat.attach_reservation(
+                reservation_id=admitted.reservation_id,
+                reservation_version=_version(reservation),
+            )
+        except asyncio.CancelledError:
+            await _stop_heartbeat_after_interruption(heartbeat)
+            raise
+        except Exception as exc:
+            await _stop_heartbeat_after_interruption(heartbeat)
+            await self._publish_outbox(best_effort=True)
+            receipt = self._receipt(
+                admitted,
+                attempt_id=attempt_id,
+                status="RECOVERY_REQUIRED",
+                verification_status="NOT_RUN",
+                accepted=False,
+                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                projection={
+                    "heartbeat_phase": _heartbeat_failure_phase(exc),
+                    "budget": budget.execution_payload(),
+                },
+            )
+            yield self._terminal_event(receipt)
+            return
+
         worker_commit: dict[str, Any] | None = None
         worker_started_ns = time.monotonic_ns()
+        worker_error: BaseException | None = None
+        heartbeat_error: BaseException | None = None
         try:
             commit_count = 0
             async for raw_event in _worker_event_stream(
@@ -1178,18 +1251,67 @@ class GovernedTaskCoordinator:
                 work_order=work_order,
                 execution_context=execution_context,
             ):
+                await heartbeat.checkpoint()
                 event = _mapping(raw_event, field_name="worker event")
                 if _is_terminal_commit(event):
                     commit_count += 1
                     worker_commit = event
                     continue
                 yield event
+            await heartbeat.checkpoint()
             if commit_count != 1 or worker_commit is None:
                 raise GovernedRuntimeError(
                     GOVERNED_WORKER_COMMIT_INVALID,
                     f"worker must produce exactly one final COMMIT, got {commit_count}",
                 )
         except BaseException as exc:
+            worker_error = exc
+        finally:
+            try:
+                await heartbeat.stop()
+            except BaseException as exc:
+                heartbeat_error = exc
+
+        if worker_error is not None and not isinstance(worker_error, Exception):
+            raise worker_error
+        if heartbeat_error is not None and not isinstance(heartbeat_error, Exception):
+            raise heartbeat_error
+        if heartbeat_error is not None:
+            _logger.error(
+                "Governed execution lost its durable heartbeat before commit",
+                extra={
+                    "request_id": command.request_id,
+                    "graph_id": admitted.graph_id,
+                    "graph_revision": admitted.graph_revision,
+                    "node_id": admitted.node_id,
+                    "attempt_id": attempt_id,
+                    "worker_route": admitted.worker_route,
+                    "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
+                    "exception_type": type(heartbeat_error).__name__,
+                },
+                exc_info=(
+                    type(heartbeat_error),
+                    heartbeat_error,
+                    heartbeat_error.__traceback__,
+                ),
+            )
+            await self._publish_outbox(best_effort=True)
+            receipt = self._receipt(
+                admitted,
+                attempt_id=attempt_id,
+                status="RECOVERY_REQUIRED",
+                verification_status="NOT_RUN",
+                accepted=False,
+                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                projection={
+                    "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
+                    "budget": budget.execution_payload(),
+                },
+            )
+            yield self._terminal_event(receipt)
+            return
+        if worker_error is not None:
+            exc = worker_error
             _logger.error(
                 "Governed worker execution failed",
                 extra={
@@ -1241,6 +1363,12 @@ class GovernedTaskCoordinator:
             yield self._terminal_event(receipt)
             return
 
+        reservation_version = heartbeat.latest_reservation_version
+        if reservation_version is None:
+            raise GovernedRuntimeError(
+                GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                "operation reservation was detached from its execution heartbeat",
+            )
         payload_digest = _payload_digest(worker_commit)
         digest_ref = f"sha256://execution/{payload_digest.split(':', 1)[1]}"
         receipt_ref = _worker_receipt_ref(worker_commit) or (
@@ -1258,13 +1386,13 @@ class GovernedTaskCoordinator:
                     lease_id=lease_id,
                     owner_id=self._owner_id,
                     fencing_token=fencing_token,
-                    expected_version=_version(reservation),
+                    expected_version=reservation_version,
                     receipt_ref=receipt_ref,
                     outbox=self._outbox(
                         admitted,
                         aggregate_type="OPERATION_RESERVATION",
                         aggregate_id=admitted.reservation_id,
-                        aggregate_version=_version(reservation) + 1,
+                        aggregate_version=reservation_version + 1,
                         event_type="OPERATION_COMMITTED",
                         attempt_id=attempt_id,
                         evidence_refs=evidence_refs,
@@ -1916,17 +2044,43 @@ class GovernedTaskCoordinator:
         *,
         attempt_id: str,
         fencing_token: int,
+        pre_reservation_graph: Mapping[str, Any] | None = None,
+        pre_reservation_node: Mapping[str, Any] | None = None,
+        pre_reservation_attempt: Mapping[str, Any] | None = None,
     ) -> GovernedExecutionReceipt:
-        await self._mark_worker_failure(
-            admitted,
-            attempt_id=attempt_id,
-            fencing_token=fencing_token,
-            reason_code=GOVERNED_BUDGET_EXCEEDED,
-            graph_target="BLOCKED",
-            evidence_refs=(charge.evidence_ref,),
+        pre_reservation_state = (
+            pre_reservation_graph,
+            pre_reservation_node,
+            pre_reservation_attempt,
         )
+        if all(isinstance(item, Mapping) for item in pre_reservation_state):
+            failure_ref = await self._mark_pre_reservation_failure(
+                admitted,
+                graph=pre_reservation_graph,
+                node=pre_reservation_node,
+                attempt=pre_reservation_attempt,
+                attempt_id=attempt_id,
+                fencing_token=fencing_token,
+                reason_code=GOVERNED_BUDGET_EXCEEDED,
+                graph_target="BLOCKED",
+                evidence_refs=(charge.evidence_ref,),
+            )
+        else:
+            await self._mark_worker_failure(
+                admitted,
+                attempt_id=attempt_id,
+                fencing_token=fencing_token,
+                reason_code=GOVERNED_BUDGET_EXCEEDED,
+                graph_target="BLOCKED",
+                evidence_refs=(charge.evidence_ref,),
+            )
+            failure_ref = None
         budget = await self._budgets.finalize(
             charge.context, target_status=BudgetReservationStatus.RELEASED
+        )
+        await self._publish_outbox()
+        receipt_evidence = tuple(
+            item for item in (charge.evidence_ref, failure_ref) if item
         )
         return self._receipt(
             admitted,
@@ -1935,7 +2089,7 @@ class GovernedTaskCoordinator:
             verification_status="NOT_RUN",
             accepted=False,
             reason_code=GOVERNED_BUDGET_EXCEEDED,
-            evidence_refs=(charge.evidence_ref,),
+            evidence_refs=receipt_evidence,
             projection={
                 "budget": budget.execution_payload(),
                 "exceeded_dimensions": list(charge.exceeded_dimensions),
@@ -1981,6 +2135,99 @@ class GovernedTaskCoordinator:
                 await self._transition_graph(admitted, graph, graph_target)
         finally:
             await self._publish_outbox(best_effort=True)
+
+    async def _mark_pre_reservation_failure(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        graph: Mapping[str, Any],
+        node: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+        attempt_id: str,
+        fencing_token: int,
+        reason_code: str,
+        graph_target: str = "FAILED",
+        evidence_refs: Sequence[str] = (),
+    ) -> str:
+        """Close the execution authority atomically before reservation.
+
+        The exact same mutation is replayed once because the first transaction
+        may have committed before its response was lost.  There is deliberately
+        no sequential fallback: a partial terminal state would be less safe
+        than surfacing a durable conflict.
+        """
+
+        error_ref = "taskerror://" + hashlib.sha256(
+            f"{attempt_id}\n{reason_code}".encode("utf-8")
+        ).hexdigest()
+        arguments = {
+            "owner_id": self._owner_id,
+            "fencing_token": fencing_token,
+            "expected_attempt_version": _version(attempt),
+            "expected_node_version": _version(node),
+            "expected_graph_version": _version(graph),
+            "error_ref": error_ref,
+            "graph_target_status": graph_target,
+            "attempt_outbox": self._outbox(
+                admitted,
+                aggregate_type="TASK_ATTEMPT",
+                aggregate_id=attempt_id,
+                aggregate_version=_version(attempt) + 1,
+                event_type="TASK_ATTEMPT_FAILED",
+                attempt_id=attempt_id,
+                evidence_refs=(error_ref, *evidence_refs),
+            ),
+        }
+        try:
+            result_raw = await _maybe_await(
+                self._store.fail_running_attempt_bundle(attempt_id, **arguments)
+            )
+        except Exception as first_exc:
+            try:
+                result_raw = await _maybe_await(
+                    self._store.fail_running_attempt_bundle(attempt_id, **arguments)
+                )
+            except Exception as replay_exc:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "pre-reservation terminal failure could not be committed or exactly replayed",
+                ) from replay_exc
+            _logger.warning(
+                "Replayed committed pre-reservation terminal failure",
+                extra={
+                    "attempt_id": attempt_id,
+                    "first_exception_type": type(first_exc).__name__,
+                },
+            )
+        result = _mapping(result_raw, field_name="atomic terminal failure")
+        failed_attempt = _mapping(
+            result.get("attempt"),
+            field_name="atomic terminal failure attempt",
+        )
+        failed_node = _mapping(
+            result.get("node"),
+            field_name="atomic terminal failure node",
+        )
+        failed_graph = _mapping(
+            result.get("graph"),
+            field_name="atomic terminal failure graph",
+        )
+        released_lease = _mapping(
+            result.get("lease"),
+            field_name="atomic terminal failure lease",
+        )
+        if (
+            _status(failed_attempt) != "FAILED"
+            or _status(failed_node) != "FAILED"
+            or _status(failed_graph) != graph_target
+            or _status(released_lease) != "RELEASED"
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "atomic terminal failure returned an incomplete durable state",
+            )
+        await self._publish_outbox()
+        return error_ref
 
     def _outbox(
         self,
@@ -2367,6 +2614,23 @@ def _evidence_refs(value: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _exception_reason(exc: BaseException, default: str) -> str:
     return _text(getattr(exc, "reason_code", None)) or _text(default) or exc.__class__.__name__.upper()
+
+
+def _heartbeat_failure_phase(exc: BaseException) -> str:
+    if isinstance(exc, DurableExecutionHeartbeatError):
+        return _text(exc.phase) or "renewal"
+    return _text(getattr(exc, "_heartbeat_phase", None)) or "lifecycle"
+
+
+async def _stop_heartbeat_after_interruption(
+    heartbeat: DurableExecutionHeartbeat,
+) -> None:
+    """Best-effort join without replacing the caller's original failure."""
+
+    try:
+        await heartbeat.stop()
+    except BaseException:
+        return
 
 
 def _precharged_tool_call_count(worker_route: str) -> int:

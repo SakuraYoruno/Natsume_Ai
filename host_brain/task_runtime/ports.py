@@ -36,6 +36,8 @@ class TaskStorePort(Protocol):
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
 
+    def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
+
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
@@ -160,6 +162,20 @@ class TaskStorePort(Protocol):
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
+    def fail_running_attempt_bundle(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        graph_target_status: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
     def acquire_lease(
         self,
         attempt_id: str,
@@ -167,6 +183,17 @@ class TaskStorePort(Protocol):
         owner_id: str,
         ttl_ms: int,
         expected_attempt_version: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def heartbeat_lease(
+        self,
+        lease_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_lease_version: int,
+        ttl_ms: int,
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
@@ -183,6 +210,19 @@ class TaskStorePort(Protocol):
         ttl_ms: int,
         outbox: Any,
     ) -> Any: ...
+
+    def renew_operation_reservation(
+        self,
+        reservation_id: str,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        ttl_ms: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
 
     def transition_attempt(
         self,

@@ -216,6 +216,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert container.outbox_publisher.task_store is container.task_store
     assert container.outbox_publisher.event_store is container.event_store
     assert container.recovery_report.recovery_id == container.recovery_id
+    execution_owner = container.execution_owner_id("configured-owner")
+    assert execution_owner.startswith("configured-owner::runtime::")
+    assert execution_owner == container.execution_owner_id("configured-owner")
+    assert container.recovery_id not in execution_owner
     recovery_id_parts = container.recovery_id.split("::")
     assert recovery_id_parts[0] == "task-runtime-startup"
     assert recovery_id_parts[1] == str(container.owner_process_id)
@@ -288,6 +292,20 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     ]
     assert events[2].startswith("task-store:recover:task-runtime-startup::")
     assert events[3:] == ["task-store:close", "migration:close"]
+
+
+def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
+    first_events: list[str] = []
+    second_events: list[str] = []
+    first = _build_fake_container(tmp_path, first_events)
+    second = _build_fake_container(tmp_path, second_events)
+
+    assert first.execution_owner_id("canonical") != second.execution_owner_id(
+        "canonical"
+    )
+
+    asyncio.run(first.aclose())
+    asyncio.run(second.aclose())
 
 
 def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
