@@ -261,7 +261,9 @@ flowchart LR
     LifeCmd -. effect order gate .-> Delivery
 
     Legacy["Noncanonical compatibility path"] -. create_task soft failure .-> LegacyPost["legacy post-process"]
-    DirectPersona["Bond / Interaction / Emergent writers"] -. direct mutation .-> Persona["PersonaEngine.apply_growth_delta"]
+    PersonaCandidate["Bond / Interaction / Emergent candidates"] --> PersonaFence["PersonaEngine central authority fence"]
+    PersonaFence -. reject legacy write .-> Persona["Production Persona traits"]
+    PersonaMigration["Explicit audited migration"] --> Persona
     Scene["SceneDecision"] -. flag default off .-> Surface["Surface / Proactive eligibility"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
@@ -269,7 +271,8 @@ flowchart LR
     classDef unsafe fill:#fde2e2,stroke:#b42318,color:#3d0b08;
     class Accept,Intents,UserTurn,LifeCmd,Reducer,Projection,Assistant,Memory wired;
     class Delivery,Legacy,LegacyPost,Scene,Surface partial;
-    class DirectPersona,Persona unsafe;
+    class PersonaCandidate,PersonaFence partial;
+    class PersonaMigration,Persona wired;
 ```
 
 [acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) 分别调用 durable conversation writer、提交 `LifeCommand` 和进入 Gateway delivery。[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py) 再由 Life projection 触发 `_async_post_process`。
@@ -370,14 +373,11 @@ Graph Acceptance
 
 ### 9.3 Persona
 
-[persona_engine.py](../../../host_brain/persona/persona_engine.py) 的 `apply_growth_delta()` 仍可被多个直接 writer 触发：
+[persona_engine.py](../../../host_brain/persona/persona_engine.py) 已把 `apply_growth_delta()` 变为中央 fail-close 兼容围栏。所有非迁移调用都会返回稳定的 `PERSONA_GROWTH_AUTHORITY_CLOSED`，且不会修改 trait 或写入变更日志。
 
-- [persona_growth.py](../../../host_brain/persona/persona_growth.py) 的 stage/milestone 和 interaction cycle；
-- [emergent_growth_engine.py](../../../host_brain/persona/emergent_growth_engine.py) 的 emergent growth；
-- [bond_stage_engine.py](../../../host_brain/bond/bond_stage_engine.py) 触发的 Bond stage/milestone 增长；
-- scheduler-allowed 的 emergent weekly 路径。
+[persona_growth.py](../../../host_brain/persona/persona_growth.py) 的 stage/milestone、interaction cycle，以及 [emergent_growth_engine.py](../../../host_brain/persona/emergent_growth_engine.py) 的 emergent weekly 当前只生成经过 drift guard 的 candidate；它们不会消费 one-time 标志、weekly cumulative、change history 或 feedback buffer。显式历史迁移只能通过带 `migration_id`、actor 和 evidence 的 `apply_migration_growth_delta()` 写入，并产生结构化审计。
 
-这些 writer 可能有幅度校验或 guard，但尚未统一经过 `proposal → Lab/shadow → Review → version activation → rollback`。当前定级为 `UNSAFE_DIRECT_WRITERS`，不是可安全长期演化的 Persona authority。
+`T-PERSONA-FENCE-01` 会拒绝生产代码重新调用 legacy writer、在迁移命名空间之外构造迁移 authority，或绕过引擎直接修改 `_user_traits`。当前定级为 `CENTRAL_FENCE_WIRED`：旧直写已归零，但 `proposal → Lab/shadow → Review → version activation → rollback` 尚待 NE-06 实现，因此人格长期演化仍不可用。
 
 [prefrontal_agent.py](../../../host_brain/tribe/prefrontal_agent.py) 对 `PersonaGrowthTracker.on_interaction_cycle()` 的调用参数与真实签名不匹配，`TypeError` 会被吞掉/降级。该 experience-feedback 分支是 `PARTIAL_BROKEN_PATH`，不能作为人格演化已闭环的证据。
 
@@ -390,7 +390,7 @@ Graph Acceptance
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|
 | Memory | typed recall → compressed packet → Surface | Acceptance → Life projection → assistant/Memory | `WIRED_POST_ACCEPTANCE_EVENTUAL` |
-| Persona | Surface/relationship 等多处读 | 多个 direct writer 可调 `apply_growth_delta()` | `UNSAFE_DIRECT_WRITERS` |
+| Persona | Surface/relationship 等多处读 | legacy 写入中央拒绝；仅显式审计迁移可写 | `CENTRAL_FENCE_WIRED` |
 | Scene | Surface/Proactive eligibility | 无 canonical scene write API | `PARTIAL_DEFAULT_OFF` |
 | World Model | read-only fact projection | 无生产 write API | `PARTIAL` |
 
@@ -450,7 +450,7 @@ All ingress sources
 5. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
 6. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation。
 7. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
-8. 删除 Persona direct writers，把长期变化改为 proposal、shadow、Review、版本激活和可回滚流程。
+8. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 9. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
 
 ## 13. 代码证据索引
@@ -482,7 +482,7 @@ Gateway durable transport                  WIRED_WITH_UNCERTAIN_DLQ
 Edge as sole physical actuator             WIRED
 All Host external effects via one outbox    NOT YET TRUE
 Memory canonical write path                 WIRED_EVENTUAL
-Persona evolution authority                UNSAFE_DIRECT_WRITERS
+Persona evolution authority                CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
 Scene context                               PARTIAL_DEFAULT_OFF
 Full Architecture                           INCOMPLETE
 ```

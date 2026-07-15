@@ -22,6 +22,10 @@ def run_static_scans(
     repo_root = Path(root).resolve()
     scanners = (
         lambda: _load_bond_scan_module().scan_repo(repo_root, include_tests=include_tests),
+        lambda: _load_persona_growth_scan_module().scan_repo(
+            repo_root,
+            include_tests=include_tests,
+        ),
         lambda: _load_no_rule_degrade_module().scan_repo(repo_root),
         lambda: _load_nle_boundary_scan_module().scan_repo(repo_root),
         lambda: _load_edge_contracts_guard_module().scan_repo(repo_root),
@@ -77,6 +81,19 @@ def main(argv: list[str] | None = None) -> int:
 def _load_bond_scan_module():
     script_path = Path(__file__).resolve().parent / "bond_ssot_scan.py"
     spec = importlib.util.spec_from_file_location("bond_ssot_scan", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load static scan script: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_persona_growth_scan_module():
+    script_path = Path(__file__).resolve().parent / "persona_growth_authority_scan.py"
+    spec = importlib.util.spec_from_file_location(
+        "persona_growth_authority_scan",
+        script_path,
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load static scan script: {script_path}")
     module = importlib.util.module_from_spec(spec)

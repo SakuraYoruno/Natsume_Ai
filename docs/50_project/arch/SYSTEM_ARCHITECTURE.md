@@ -320,7 +320,7 @@ flowchart LR
 | TaskGraph revision | Legacy `SkillDagPlan` |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
-| Proposal-driven evolution（目标） | Persona direct growth writers |
+| Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
 
 过渡期文档必须同时画出两侧，并明确哪一侧拥有 authority。隐藏兼容层会制造虚假的完成结论。
 

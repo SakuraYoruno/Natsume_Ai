@@ -18,6 +18,7 @@
 | `PARTIAL` | 有真实实现或局部接线，但缺少范围、策略或恢复语义 |
 | `BROKEN` | 看似接线，但真实首次调用会违反当前合同或失败 |
 | `UNSAFE_DIRECT_WRITERS` | 一个或多个生产 writer 绕过目标要求的 proposal、Review、版本激活或 rollback authority |
+| `CENTRAL_FENCE_WIRED` | 旧写入已在最终 authority 边界中央拒绝并有静态门禁，但替代的受治理写入闭环尚未建立 |
 | `SHADOW` | 只观察/模拟，不影响生产选择 |
 | `PLACEHOLDER` | 只有占位策略、字段或空壳接口 |
 | `MISSING` | 没有满足目标语义的实现 |
@@ -37,7 +38,7 @@
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
 | 单一任务真相 | `PARTIAL` | Durable projection | `LegacyRuntimeTaskRegistry` 仍被 Executive 写入 | NE-01 |
-| Persona 演化单一 authority | `UNSAFE_DIRECT_WRITERS` | `apply_growth_delta()` 调用审计：Bond stage/milestone、interaction cycle、emergent weekly | 多条生产可达或 scheduler-allowed 路径可直接修改 trait；未经过 proposal、shadow、Review、版本激活或 rollback | NE-01 中央封口全部入口；NE-06 全量替换 |
+| Persona 演化单一 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 运行时拒绝、`T-PERSONA-FENCE-01` 全仓扫描、无副作用候选回归 | legacy writer 已归零；proposal、shadow、Review、版本激活与 rollback 替代链尚未实现 | NE-01 围栏已完成；NE-06 全量替换 |
 | 通用 PlanningSearch 算法 | `WIRED` | `host_brain/planning_search/` | 内核可用，但不代表领域规划收益 | NE-02 |
 | Host 候选方案生成 | `MISSING` | `plan_intent_search.py` | 只重排上游已批准步骤，不生成竞争路径 | NE-02 |
 | Pentest L1/L2 | `WIRED` | `pentest/agent/agent_loop.py` | 仍需与 durable outcome/calibration 对齐 | NE-02 |
@@ -91,7 +92,7 @@ Core Infrastructure                         HISTORICAL_PASS / REUSABLE
 Host chat-skill-delegate-plan runtime        WIRED
 Scheduler/Internal governed runtime          BROKEN
 Universal execution scope                    PARTIAL
-Persona evolution authority                  UNSAFE_DIRECT_WRITERS
+Persona evolution authority                  CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
 Generic planning kernel                      AVAILABLE
 Generic intelligent planning                 INCOMPLETE
 Cross-domain production benefit              UNPROVEN

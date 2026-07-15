@@ -71,7 +71,7 @@ flowchart TD
 - Scheduler/Internal Agent：`BROKEN`。
 - Durable DAG：`PARTIAL`。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
-- Persona 演化：`UNSAFE_DIRECT_WRITERS`。
+- Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。
 
 机器状态：[current_architecture_status.json](../../configs/release/current_architecture_status.json)。摘要变化时必须先更新机器状态、Current 和 Gap，不能只改本地图。

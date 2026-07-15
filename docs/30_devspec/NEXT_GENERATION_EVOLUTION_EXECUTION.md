@@ -3,10 +3,10 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v1.0
+版本：v1.1
 日期：2026-07-15
-状态：`NE-00_COMPLETED / PROGRAM_INCOMPLETE`
-代码基线：`origin/dev@9b6db346`，叠加仓库清理 `f0cd1dfd`
+状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -35,7 +35,7 @@
 | Durable DAG | 多节点基础已实现；并发/retry/backoff 未实现 |
 | Budget | Host 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
-| Persona 演化 authority | `UNSAFE_DIRECT_WRITERS`：Bond stage/milestone、interaction cycle、emergent weekly 等路径可绕过 proposal/Review/版本激活直接修改 trait |
+| Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
 | Pentest L3 | shadow、非 durable 校准、不能生成 capability-unlocking 后继 |
 | Code/Research | 只有 synthetic benchmark，不是生产收益 |
@@ -85,6 +85,10 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 完成证据：权威文档链接、JSON、受众 lint、authority gate、全量 freshness、相关 contract 与全仓静态扫描均通过；旧计划和失真专项文档已归档或删除。
 
 ### NE-01：执行主链与显式 Composition 闭环
+
+状态：`IN_PROGRESS`
+
+当前已完成切片：Persona 中央写入围栏、迁移专用审计入口、stage/milestone/interaction/emergent 无副作用候选化，以及 `T-PERSONA-FENCE-01` 全仓静态门禁。Lane A、Lane B、其余 Lane C 和 Lane D 仍未完成，因此 NE-01 不得封板。
 
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 

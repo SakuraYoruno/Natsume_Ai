@@ -66,23 +66,29 @@ flowchart TD
     ROLLBACK["Rollback point"]
     TRAIT["Production Persona policy"]
 
-    LEGACY1["Bond stage/milestone writer"]
-    LEGACY2["interaction-cycle writer"]
-    LEGACY3["scheduler-allowed emergent writer"]
+    LEGACY1["Bond stage/milestone candidate"]
+    LEGACY2["interaction-cycle candidate"]
+    LEGACY3["scheduler-allowed emergent candidate"]
+    FENCE["Central authority fence"]
+    MIGRATION["Explicit audited migration"]
 
     FEEDBACK -."TARGET".-> PROPOSAL -.-> SHADOW -.-> REVIEW -.-> VERSION -.-> TRAIT
     VERSION -.-> ROLLBACK
-    LEGACY1 --> TRAIT
-    LEGACY2 --> TRAIT
-    LEGACY3 --> TRAIT
+    LEGACY1 --> FENCE
+    LEGACY2 --> FENCE
+    LEGACY3 --> FENCE
+    FENCE -. "legacy write rejected" .-> TRAIT
+    MIGRATION --> TRAIT
 
     style LEGACY1 fill:#ffd9d9,stroke:#b31d28
     style LEGACY2 fill:#ffd9d9,stroke:#b31d28
     style LEGACY3 fill:#ffd9d9,stroke:#b31d28
-    style TRAIT fill:#fff3cd,stroke:#b08800
+    style FENCE fill:#fff3cd,stroke:#b08800
+    style MIGRATION fill:#dff5e1,stroke:#1b7f3a
+    style TRAIT fill:#dff5e1,stroke:#1b7f3a
 ```
 
-红色路径是当前必须中央封禁的 direct writers。即使它们内部调用了 drift guard，也不等于已经通过 proposal、shadow、Review、版本激活和 rollback。
+红色节点现在只能形成候选，中央围栏拒绝其写入；`T-PERSONA-FENCE-01` 防止生产代码恢复 direct writer。绿色迁移路径只用于带 actor/evidence 的显式历史迁移。候选尚未进入 proposal、shadow、Review、版本激活和 rollback，所以“安全围栏已接通”不等于“人格演化已完成”。
 
 ## 主动行为
 
@@ -114,11 +120,11 @@ flowchart LR
 - Memory：`host_brain/memory/`、`host_brain/retrieval/`
 - Bond：`host_brain/bond/`、`host_brain/persistence/bond_*`
 - Organ influence：`host_brain/persona/surface_organ_influence.py`
-- Persona growth/direct writers：`host_brain/persona/persona_growth.py` 及 `apply_growth_delta()` 调用点
+- Persona growth authority：`host_brain/persona/persona_engine.py`、`host_brain/persona/persona_growth.py`、`tools/static_scan/persona_growth_authority_scan.py`
 
 ## 当前限制
 
 - `HOST_LIFE_PROJECTION_ENABLED` 生产默认关闭，使 Scene 消费链默认不完整。
 - World Model 只是只读事实投影，不具备预测、虚拟 transition 或统一 context resolver 语义。
-- Persona 存在多个 direct growth writer。
+- Persona direct growth writer 已被中央封口，但受治理 proposal/Review/版本激活链仍缺失。
 - Evolution Lab、统一 Feedback Proposal 和 Identity Migration 尚未形成生产闭环。

@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.0
+版本：v5.1
 核对日期：2026-07-15
-代码基线：`origin/dev@9b6db346`，叠加仓库清理 `f0cd1dfd`
+代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -28,7 +28,7 @@
 | Review/Resume | `MANUAL_CONTINUATION` | token 与 checkpoint 已持久化；resume 不会自动重新调度原图 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
 | Composition | `INCOMPLETE` | 仍有模块级 `ProcessServiceContainer` 和大量 `get_*()` service locator |
-| Persona 演化 authority | `UNSAFE_DIRECT_WRITERS` | Bond stage/milestone、interaction cycle 与 scheduler-allowed emergent weekly 等 legacy writers 仍可直接 `apply_growth_delta()`，绕过 proposal、shadow、version activation 与 rollback |
+| Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
 因此：历史 Core/GR 回执可以证明对应资产存在，不能证明 `Full Architecture DONE`。
@@ -205,7 +205,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | Capability Forge | `app/capability_forge.py` | 是 gap proposal/canary 服务，不是从文档/轨迹生成 SkillBundle 的 Skill Compiler |
 | Evolution Lab | `evolution_lab/policy.py` | 只有分支前缀守卫，尚无 scenario runner、experiment store 或 promotion gate |
 | Feedback | response/persona/recommendation feedback 资产 | 没有统一 proposal pipeline；Prefrontal 调用 `on_interaction_cycle()` 的参数与真实签名不符，`TypeError` 被吞掉 |
-| Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | stage/milestone/interaction/emergent 多条生产可达或已注册路径可直接调用 `apply_growth_delta()`，形成绕过 Review/版本激活/回滚的 legacy writers |
+| Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy 入口已被 `PersonaEngine` 中央围栏和静态扫描封禁；当前只产生经 drift guard 检查的无副作用 candidate，尚未接入 proposal/Review/版本激活 |
 | Knowledge OS | Memory、Retrieval、Canon、Markdown KB | 缺统一 provenance、版本、过期、冲突与 Decision Record 生命周期 |
 | Identity | `release/identity_snapshot.py` | snapshot/diff/review/rollback 合同存在；gate 默认关闭，未形成真实 migration executor |
 | Runtime Guardian | health、degradation、heartbeat、service catalog | degradation/recovery evidence 已接部分生产链；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与 SLO owner 不完整 |
@@ -220,11 +220,11 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 先中央 fail closed 所有 Persona 直接 trait writer（stage、milestone、interaction、emergent 及后续新增调用点），禁止任何演化绕过 proposal、Review、版本激活与 rollback。
-2. 修复 Scheduler/Internal 的 `WorkOrderV3 + Budget + node grant + Review` admission。
-3. 为 Durable DAG 实现真实 retry/backoff、并发调度与自动 continuation。
-4. 删除 Executive SkillDag 与 `LegacyRuntimeTaskRegistry` 的剩余生产写入。
-5. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
+1. 修复 Scheduler/Internal 的 `WorkOrderV3 + Budget + node grant + Review` admission。
+2. 为 Durable DAG 实现真实 retry/backoff、并发调度与自动 continuation。
+3. 删除 Executive SkillDag 与 `LegacyRuntimeTaskRegistry` 的剩余生产写入。
+4. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
+5. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
 6. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
 7. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
 

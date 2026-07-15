@@ -4,8 +4,8 @@
   1. Bond 阶段晋级时触发特质微调
   2. 里程碑事件触发特质微调
   3. 通过 TraitDriftGuard 进行安全校验
-  4. 通过 PersonaEngine.apply_growth_delta 应用变化
-  5. 记录完整的成长审计链
+  4. 在 NE-01 中只形成候选，不再直接修改 PersonaEngine
+  5. 等待 NE-06 proposal / Review / version activation 闭环
 
 设计原则：
   - 不直接修改特质，而是生成 TraitsDelta 后经过安全校验再应用
@@ -31,6 +31,19 @@ from host_brain.persona.trait_drift_guard import (
 )
 
 _logger = logging.getLogger("Natsume.persona_growth")
+
+PERSONA_GROWTH_PROPOSAL_REQUIRED = "PERSONA_GROWTH_PROPOSAL_REQUIRED"
+
+
+def _closed_authority_evidence(
+    *,
+    guard_result: GuardCheckResult,
+    delta: TraitsDelta,
+) -> dict[str, Any]:
+    payload = dict(guard_result.as_dict())
+    payload["authority_gate"] = PERSONA_GROWTH_PROPOSAL_REQUIRED
+    payload["candidate_delta"] = delta.as_dict()
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -387,51 +400,25 @@ class PersonaGrowthTracker:
                 reason=f"安全校验失败: {'; '.join(guard_result.violations)}",
             )
 
-        # 应用变化
-        new_traits = engine.apply_growth_delta(
+        # NE-01 中央封口：保留候选证据，但不消费 one_time、历史或周预算，
+        # 也不写 PersonaEngine。NE-06 将用正式 proposal/version 流替换。
+        _logger.warning(
+            "人格成长候选被 authority 封口: user=%s rule=%s delta=%s",
             uid,
-            delta,
-            reason=trigger,
-            ts_ms=ts_ms or _now_ms(),
+            rule_key,
+            delta.as_dict(),
         )
-
-        # 更新追踪状态
-        if rule.one_time:
-            if uid not in self._triggered_rules:
-                self._triggered_rules[uid] = set()
-            self._triggered_rules[uid].add(rule_key)
-
-        # 更新变化历史
-        if uid not in self._change_history:
-            self._change_history[uid] = []
-        self._change_history[uid].append(delta.as_dict())
-
-        # 更新每周累计
-        if uid not in self._weekly_cumulative:
-            self._weekly_cumulative[uid] = {n: 0.0 for n in TRAIT_NAMES}
-        for name in TRAIT_NAMES:
-            self._weekly_cumulative[uid][name] = (
-                self._weekly_cumulative[uid].get(name, 0.0)
-                + abs(delta.as_dict().get(name, 0.0))
-            )
-
-        _logger.info(
-            "人格成长应用: user=%s rule=%s delta=%s",
-            uid, rule_key, delta.as_dict(),
-        )
-
-        # 检查 Evolution 提案
-        if guard_result.evolution_proposal:
-            _logger.info(
-                "Canon Evolution 提案: %s", guard_result.evolution_proposal,
-            )
-
         return GrowthApplyResult(
-            applied=True,
+            applied=False,
             rule_trigger=trigger,
-            delta_applied=delta.as_dict(),
-            guard_result=guard_result.as_dict(),
-            reason=rule.description,
+            guard_result=_closed_authority_evidence(
+                guard_result=guard_result,
+                delta=delta,
+            ),
+            reason=(
+                f"{PERSONA_GROWTH_PROPOSAL_REQUIRED}: "
+                "候选未应用，等待 proposal/Review/version activation"
+            ),
         )
 
     # ── 交互驱动成长（Phase IX）─────────────────────────────────────────
@@ -507,8 +494,7 @@ class PersonaGrowthTracker:
                         "反馈修正叠加: user=%s feedback_signals=%d merged_delta=%s",
                         uid, fb_result.total_signals, delta.as_dict(),
                     )
-                    # 消费后清空反馈缓冲区
-                    feedback_collector.clear_buffer(uid)
+                    # authority 尚未允许应用，不得提前消费反馈缓冲区。
             except Exception as fb_exc:
                 _logger.warning("反馈修正失败（降级跳过）: %s", fb_exc)
 
@@ -540,42 +526,25 @@ class PersonaGrowthTracker:
                 reason=f"安全校验失败: {'; '.join(guard_result.violations)}",
             )
 
-        # 应用变化
-        engine.apply_growth_delta(
+        _logger.warning(
+            "交互成长候选被 authority 封口: user=%s total=%d dominant=%s delta=%s",
             uid,
-            delta,
-            reason=trigger,
-            ts_ms=ts_ms or _now_ms(),
+            analysis.total_interactions,
+            analysis.dominant_interaction,
+            delta.as_dict(),
         )
-
-        # 更新追踪状态
-        if uid not in self._change_history:
-            self._change_history[uid] = []
-        self._change_history[uid].append(delta.as_dict())
-
-        if uid not in self._weekly_cumulative:
-            self._weekly_cumulative[uid] = {n: 0.0 for n in TRAIT_NAMES}
-        for name in TRAIT_NAMES:
-            self._weekly_cumulative[uid][name] = (
-                self._weekly_cumulative[uid].get(name, 0.0)
-                + abs(delta.as_dict().get(name, 0.0))
-            )
-
-        _logger.info(
-            "交互驱动成长应用: user=%s total=%d dominant=%s delta=%s",
-            uid, analysis.total_interactions,
-            analysis.dominant_interaction, delta.as_dict(),
-        )
-
         return GrowthApplyResult(
-            applied=True,
+            applied=False,
             rule_trigger=trigger,
-            delta_applied=delta.as_dict(),
-            guard_result=guard_result.as_dict(),
+            guard_result=_closed_authority_evidence(
+                guard_result=guard_result,
+                delta=delta,
+            ),
             reason=(
-                f"交互驱动成长: {analysis.total_interactions}次交互, "
-                f"主导={analysis.dominant_interaction}, "
-                f"周期={lookback_days}天{feedback_detail}"
+                f"{PERSONA_GROWTH_PROPOSAL_REQUIRED}: "
+                f"{analysis.total_interactions}次交互候选未应用, "
+                f"主导={analysis.dominant_interaction}, 周期={lookback_days}天"
+                f"{feedback_detail}"
             ),
         )
 

@@ -74,7 +74,7 @@
 | TRACE-EVO-11 | FR-ARCH-005、FR-ARCH-010 | Knowledge provenance/version/conflict | Memory/Retrieval/Canon 基础 | `MISSING_KNOWLEDGE_OS` | NE-06 |
 | TRACE-EVO-12 | FR-NLE-005 | Identity snapshot 接 release | pure contract | `PARTIAL_DEFAULT_OFF` | NE-06 |
 | TRACE-EVO-13 | FR-ARCH-004、FR-ARCH-010 | Identity migration/regression/rollback | 无 executor | `MISSING` | NE-06 |
-| TRACE-EVO-14 | FR-NLE-005、FR-ARCH-010 | Persona trait 只能由 proposal→Lab→Review→版本激活写入 | stage/milestone/interaction/emergent 多条路径直接 `apply_growth_delta()`；T-PERSONA-FENCE-01 待实现 | `UNSAFE_DIRECT_WRITERS` | NE-01 中央封口全部入口；NE-06 由 TRACE-EVO-10 全量替换 |
+| TRACE-EVO-14 | FR-NLE-005、FR-ARCH-010 | Persona trait 只能由 proposal→Lab→Review→版本激活写入 | legacy writer 已中央拒绝，`T-PERSONA-FENCE-01` 已接入；当前入口只形成无副作用候选 | `FENCE_COMPLETE / PROPOSAL_MISSING` | NE-01 围栏完成；NE-06 由 TRACE-EVO-10 全量替换 |
 
 ## 6. 下一代执行波映射
 

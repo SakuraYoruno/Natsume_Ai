@@ -2,13 +2,13 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-15",
   "source_baseline": {
-    "dev_commit": "9b6db346b",
+    "dev_commit": "a6d7ae383",
     "repository_cleanup_commit": "f0cd1dfd7"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-00",
-  "active_wave_status": "COMPLETED",
-  "next_wave": "NE-01",
+  "active_wave": "NE-01",
+  "active_wave_status": "IN_PROGRESS",
+  "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "capabilities": {
@@ -138,14 +138,22 @@
       "reason": "Prefrontal calls PersonaGrowthTracker.on_interaction_cycle with arguments that do not match its signature; the TypeError is swallowed."
     },
     "persona_growth_authority": {
-      "status": "UNSAFE_DIRECT_WRITERS",
-      "known_entry_classes": [
-        "bond stage or milestone growth",
-        "interaction cycle growth",
-        "scheduler-allowed emergent weekly growth"
+      "status": "CENTRAL_FENCE_WIRED",
+      "legacy_direct_writers": "BLOCKED",
+      "migration_path": "EXPLICIT_AUDITED_ONLY",
+      "proposal_activation": "PENDING_NE_06",
+      "blocked_entry_classes": [
+        "bond stage or milestone candidate",
+        "interaction cycle candidate",
+        "scheduler-allowed emergent weekly candidate"
       ],
-      "reason": "Multiple production-reachable or registered paths can call apply_growth_delta directly without proposal, shadow, review, version activation, or rollback.",
-      "required_action": "CENTRAL_FAIL_CLOSED_ALL_ENTRIES_IN_NE_01_REPLACE_ALL_IN_NE_06"
+      "reason": "PersonaEngine centrally rejects every legacy runtime growth write; current stage, milestone, interaction, and emergent paths return candidates without mutating traits or consuming one-time/history state.",
+      "evidence_refs": [
+        "host_brain/persona/persona_engine.py",
+        "tools/static_scan/persona_growth_authority_scan.py",
+        "tests/unit/test_ne01_persona_growth_authority.py"
+      ],
+      "required_action": "REPLACE_BLOCKED_CANDIDATES_WITH_GOVERNED_PROPOSAL_PIPELINE_IN_NE_06"
     },
     "knowledge_os": {"status": "MISSING"},
     "identity_snapshot": {"status": "PARTIAL", "release_gate_default": "DISABLED"},

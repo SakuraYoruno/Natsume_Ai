@@ -3,9 +3,9 @@
 职责：
   1. 接收 InteractionPatternAnalyzer 的特质变化建议
   2. 通过 TraitDriftGuard 进行安全门控（幅度锁 + 趋势锁 + 不可变核心保护）
-  3. 将通过安全校验的建议应用到 PersonaEngine
-  4. 记录成长日志（"为什么变了"，而非"变了多少"）
-  5. 生成 emergent_growth_note，供 self_reflection_pulse 注入
+  3. 在 NE-01 中将通过安全校验的建议停在 authority 边界
+  4. 不生成“已经成长”的日志或叙事，避免把候选冒充事实
+  5. 等待 NE-06 proposal / Review / version activation 闭环
 
 设计原则：
   - 成长是"涌现"的——不是规则触发，而是从真实交互模式中自然浮现
@@ -342,62 +342,26 @@ class EmergentGrowthEngine:
         else:
             guard_result_dict = guard_result.as_dict()
 
-        # ── Step 6：应用特质变化 ──────────────────────────────────────────
-        try:
-            reason = (
-                f"emergent_growth:phase_xix:"
-                f"{getattr(pattern_result, 'dominant_theme', 'unknown')}"
-            )
-            engine.apply_growth_delta(
-                user_id,
-                delta,
-                reason=reason,
-                ts_ms=ts_ms,
-            )
-        except Exception as exc:
-            _logger.warning("应用特质变化失败: %s", exc)
-            return EmergentGrowthResult(
-                applied=False,
-                skip_reason=f"apply_growth_delta 失败: {exc}",
-            )
-
-        # ── Step 7：生成成长叙事 ──────────────────────────────────────────
-        dominant_theme = str(getattr(pattern_result, "dominant_theme", "日常陪伴"))
-        growth_narrative = self._generate_growth_narrative(
-            dominant_theme,
-            render_target_lang=render_target_lang,
-        )
-
-        # ── Step 8：记录成长日志 ──────────────────────────────────────────
-        delta_dict = delta.as_dict()
-        record = EmergentGrowthRecord(
-            user_id=user_id,
-            pattern_summary=str(getattr(pattern_result, "pattern_summary", "")),
-            dominant_theme=dominant_theme,
-            delta_applied={k: v for k, v in delta_dict.items() if abs(v) > 0.001},
-            delta_suggested={k: v for k, v in suggestions.items() if abs(v) > 0.001},
-            suggestion_reason=str(getattr(pattern_result, "suggestion_reason", "")),
-            growth_narrative=growth_narrative,
-            confidence=confidence,
-            analysis_method=str(getattr(pattern_result, "analysis_method", "unknown")),
-            guard_result=guard_result_dict,
-            ts_ms=ts_ms,
-        )
-        self._append_growth_log(user_id, record)
-
-        _logger.info(
-            "EmergentGrowthEngine [%s]: 涌现式成长应用成功 theme=%s "
-            "delta=%s confidence=%.2f",
+        # ── Step 6：NE-01 authority 封口 ─────────────────────────────────
+        # 这里不能写 PersonaEngine，也不能记录“已成长”叙事。候选将在 NE-06
+        # 进入 durable proposal / Lab / Review / version activation。
+        candidate_delta = {
+            key: value
+            for key, value in delta.as_dict().items()
+            if abs(value) > 0.001
+        }
+        _logger.warning(
+            "EmergentGrowthEngine [%s]: 候选被 persona authority 封口 delta=%s",
             user_id,
-            dominant_theme,
-            {k: v for k, v in delta_dict.items() if abs(v) > 0.001},
-            confidence,
+            candidate_delta,
         )
-
         return EmergentGrowthResult(
-            applied=True,
-            record=record,
-            emergent_growth_note=growth_narrative,
+            applied=False,
+            skip_reason=(
+                "PERSONA_GROWTH_PROPOSAL_REQUIRED: 候选未应用，等待 "
+                f"proposal/Review/version activation; candidate={candidate_delta}; "
+                f"guard={guard_result_dict}"
+            ),
         )
 
     # ── 成长日志管理 ──────────────────────────────────────────────────────
