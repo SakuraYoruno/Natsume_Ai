@@ -431,6 +431,133 @@ def _effect_fence(store: DurableTaskStore, effect_id: str) -> dict[str, object]:
     return dict(row)
 
 
+def _seed_legacy_retry_pending_effect(
+    store: DurableTaskStore,
+    *,
+    effect_id: str,
+) -> None:
+    """Seed a canonical row unreachable through the current production API.
+
+    A current dispatcher may claim only a SUCCEEDED Attempt on an ACCEPTED
+    Node (or a COMPLETED Graph).  Cancellation excludes the accepted NODE
+    authority, while a completed Graph is terminal.  This direct write models
+    legacy/corrupt durable state so cancellation must fail closed rather than
+    infer that the handler never ran.
+    """
+
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'PENDING', status_version = 2,
+                lease_owner = NULL, lease_expires_ts_ms = NULL,
+                fencing_token = 1, attempt_count = 1,
+                reason_code = 'ACCEPTANCE_EFFECT_HANDLER_FAILED',
+                last_error = 'legacy transport response was lost',
+                updated_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (NOW, effect_id),
+        )
+        conn.commit()
+
+
+def _effect_evidence_ref(
+    *,
+    effect_id: str,
+    status: str,
+    status_version: int,
+    resolution_status: str,
+) -> str:
+    material = json.dumps(
+        {
+            "effect_id": effect_id,
+            "status": status,
+            "status_version": status_version,
+            "resolution_status": resolution_status,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return "taskcancel-effect://sha256/" + hashlib.sha256(
+        material.encode("utf-8")
+    ).hexdigest()
+
+
+def _assert_direct_cancellation_finalization_blocked(
+    store: DurableTaskStore,
+    *,
+    requested: dict[str, object],
+    advanced: dict[str, object],
+    suffix: str,
+) -> None:
+    intent = requested["intent"]
+    assert isinstance(intent, dict)
+    decision_payload = {
+        "schema_version": GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+        "intent_ref": intent["intent_ref"],
+        "request_id": intent["payload"]["request_id"],
+        "request_identity": intent["payload"]["request_identity"],
+        "graph_id": "graph-cancel",
+        "graph_revision": 1,
+        "graph_status_before": "BLOCKED",
+        "graph_status_version_before": 2,
+        "graph_target_status": "CANCELLED",
+        "budget_id": "budget-cancel",
+        "budget_status_before": "ACTIVE",
+        "budget_status_version_before": 1,
+        "budget_target_status": "RELEASED",
+        "node_states_before": {
+            "node-1": {"status": "CANCEL_REQUESTED", "status_version": 1},
+        },
+        "node_states_after": {
+            "node-1": {"status": "CANCELLED", "status_version": 2},
+        },
+        "reconciliation_evidence_refs": list(
+            advanced["reconciliation_evidence_refs"]
+        ),
+        "graph_outbox_id": f"outbox-{suffix}-final",
+        "budget_outbox_id": f"outbox-{suffix}-budget",
+    }
+    decision = normalize_graph_cancellation_decision(decision_payload)
+    authority_evidence = (
+        decision.decision_ref,
+        intent["intent_ref"],
+        intent["payload"]["request_identity"],
+    )
+    with pytest.raises(TaskStoreError) as blocked:
+        store.finalize_graph_cancellation(
+            "graph-cancel",
+            1,
+            budget_id="budget-cancel",
+            expected_graph_version=2,
+            expected_budget_version=1,
+            expected_node_states=decision_payload["node_states_before"],
+            intent_ref=intent["intent_ref"],
+            decision_ref=decision.decision_ref,
+            decision_payload=decision_payload,
+            graph_outbox=_event(
+                "TASK_GRAPH",
+                "graph-cancel",
+                3,
+                "TASK_GRAPH_CANCELLED",
+                outbox_id=decision_payload["graph_outbox_id"],
+                evidence_refs=authority_evidence,
+            ),
+            budget_outbox=_event(
+                "BUDGET_RESERVATION",
+                "budget-cancel",
+                2,
+                "BUDGET_RESERVATION_RELEASED",
+                outbox_id=decision_payload["budget_outbox_id"],
+                evidence_refs=authority_evidence,
+            ),
+        )
+    assert blocked.value.reason_code == TASK_STORE_OWNERSHIP_CONFLICT
+
+
 def _insert_review(
     store: DurableTaskStore,
     *,
@@ -1371,6 +1498,92 @@ def test_unauthorized_pending_effect_is_fenced_from_dispatch(tmp_path: Path) -> 
             effect_id=effect_id,
         )
     assert exc_info.value.reason_code == TASK_STORE_CANCELLATION_CONFLICT
+    assert _effect_fence(store, effect_id) == {
+        "observed_status": "PENDING",
+        "resolution_status": "CANCELLED",
+        "observed_status_version": 0,
+        "resolved_ts_ms": NOW,
+    }
+
+
+def test_legacy_retry_pending_effect_fails_closed_and_cannot_finalize(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    effect_id = "effect://cancel/retry-pending"
+    _stage_effect(store, effect_id=effect_id, accepted=False)
+    # The canonical dispatcher cannot create this state: an unaccepted Node
+    # has no delivery authority.  Seed a legacy/corrupt but row-canonical
+    # retry epoch and verify that cancellation never treats it as virgin.
+    assert (
+        store.claim_acceptance_effect_intent(
+            owner_id="dispatcher-retry-pending",
+            effect_id=effect_id,
+        )
+        is None
+    )
+    _seed_legacy_retry_pending_effect(store, effect_id=effect_id)
+
+    requested = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+    replayed = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+    assert requested["replayed"] is False
+    assert replayed["replayed"] is True
+    assert replayed["graph"] == requested["graph"]
+    assert replayed["budget"] == requested["budget"]
+    assert replayed["nodes"] == requested["nodes"]
+    assert replayed["intent"] == requested["intent"]
+
+    assert _effect_fence(store, effect_id) == {
+        "observed_status": "PENDING",
+        "resolution_status": "RECONCILIATION_REQUIRED",
+        "observed_status_version": 2,
+        "resolved_ts_ms": None,
+    }
+    expected_effect_ref = _effect_evidence_ref(
+        effect_id=effect_id,
+        status="PENDING",
+        status_version=2,
+        resolution_status="RECONCILIATION_REQUIRED",
+    )
+    advanced_once = store.advance_graph_cancellation(
+        requested["intent"]["intent_ref"]
+    )
+    advanced_twice = store.advance_graph_cancellation(
+        requested["intent"]["intent_ref"]
+    )
+    for advanced in (advanced_once, advanced_twice):
+        assert advanced["ready_to_finalize"] is False
+        assert advanced["pending_effect_ids"] == (effect_id,)
+        assert effect_id in advanced["reconciliation_evidence_refs"]
+        assert expected_effect_ref in advanced["reconciliation_evidence_refs"]
+    assert (
+        advanced_twice["reconciliation_evidence_refs"]
+        == advanced_once["reconciliation_evidence_refs"]
+    )
+    assert _effect_fence(store, effect_id) == {
+        "observed_status": "PENDING",
+        "resolution_status": "RECONCILIATION_REQUIRED",
+        "observed_status_version": 2,
+        "resolved_ts_ms": None,
+    }
+    _assert_direct_cancellation_finalization_blocked(
+        store,
+        requested=requested,
+        advanced=advanced_twice,
+        suffix="legacy-retry-pending",
+    )
 
 
 def test_failed_effect_observed_at_cancel_requires_reconciliation(
@@ -1601,10 +1814,29 @@ def test_legacy_failed_evidence_fence_blocks_unfinalized_cancellation(
     assert blocked.value.reason_code == TASK_STORE_OWNERSHIP_CONFLICT
 
 
-def test_accepted_node_effect_remains_dispatchable_after_graph_cancel(tmp_path: Path) -> None:
+def test_accepted_node_retry_effect_remains_dispatchable_after_graph_cancel(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     effect_id = "effect://cancel/accepted-node"
     _stage_effect(store, effect_id=effect_id, accepted=True)
+    claimed = store.claim_acceptance_effect_intent(
+        owner_id="effect-dispatcher-first",
+        effect_id=effect_id,
+    )
+    assert claimed is not None
+    assert claimed["status"] == "CLAIMED"
+    retry = store.reschedule_acceptance_effect_intent(
+        effect_id,
+        owner_id="effect-dispatcher-first",
+        fencing_token=int(claimed["fencing_token"]),
+        reason_code="ACCEPTANCE_EFFECT_HANDLER_FAILED",
+        detail="retry remains owned by accepted NODE authority",
+        delay_ms=0,
+    )
+    assert retry["status"] == "PENDING"
+    assert retry["attempt_count"] == 1
+    assert retry["status_version"] == 2
     _request_snapshot(
         store,
         before_status="ACCEPTED",
@@ -1612,12 +1844,23 @@ def test_accepted_node_effect_remains_dispatchable_after_graph_cancel(tmp_path: 
         after_status="ACCEPTED",
         after_version=1,
     )
-    claimed = store.claim_acceptance_effect_intent(
-        owner_id="effect-dispatcher",
+    with sqlite3.connect(store.db_path) as conn:
+        fence_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_graph_cancellation_effect_fence
+            WHERE effect_id = ?
+            """,
+            (effect_id,),
+        ).fetchone()[0]
+    assert fence_count == 0
+    reclaimed = store.claim_acceptance_effect_intent(
+        owner_id="effect-dispatcher-second",
         effect_id=effect_id,
     )
-    assert claimed is not None
-    assert claimed["status"] == "CLAIMED"
+    assert reclaimed is not None
+    assert reclaimed["status"] == "CLAIMED"
+    assert reclaimed["attempt_count"] == 2
+    assert reclaimed["fencing_token"] == 2
 
 
 def test_review_revocation_is_scoped_to_exact_graph_revision(tmp_path: Path) -> None:

@@ -120,7 +120,7 @@ flowchart TD
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Cancellation Operator authority/入口与 Operation 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。Effect `FAILED` 的自动误收口已封死；Effect 签名对账、旧 `FAILED_EVIDENCE` 与其他历史修复、Budget 高竞争、部署凭据和真实 canary 尚缺，atomic/bounded/cancellation 均保持 OFF。
+- Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Cancellation Operator authority/入口与 Operation 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。Effect `FAILED` 的自动误收口已封死；PENDING classifier 仅允许 exact virgin tuple逻辑取消。Production authority 下 fenceable retry PENDING 不可达，防御分支只处理 legacy/imported/cross-table corruption。Effect 签名对账、旧 `FAILED_EVIDENCE`、历史 retry-PENDING + CANCELLED fence与其他历史修复、Budget 高竞争、部署凭据和真实 canary 尚缺；FINALIZED replay 不自动改写旧 evidence，atomic/bounded/cancellation 均保持 OFF。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
@@ -275,7 +275,7 @@ claim runnable node
 | PRE Review 观察 | `WAITING_APPROVAL` 已纳入统一 0090 outcome；合法无 worker Attempt，receipt/decision 使用 `attempt_id=null`，其它状态仍强制真实 Attempt | `WIRED_0096_OPTIONAL_ATTEMPT` |
 | atomic 成功 UoW | 全 Node Accepted 后单事务提交 Graph COMPLETED、Budget CONSUMED、两 Outbox、全图 effect intents 与 0091 decision；结果只取显式 result 的 canonical projection | `B5_SHADOW_WIRED` |
 | projection / replay | projection 重算 digest并绑定 command/request/route/target/graph/node/attempt/receipt/grant；completed replay 只读 0091、不重编 effects；双响应丢失重读 terminal authority | `B5_ADVERSARIAL_PROVEN_SHADOW` |
-| Durable Graph 取消 | `task_graph.cancel` 与 `task_operation.reconcile` 均经默认关闭的受控 Operator 入口；Operation service 已完成 composition、OBS 注册与公钥注入。一般 Effect `FAILED` 不代表无副作用，新路径保持 `RECONCILIATION_REQUIRED`；仅带 receipt 的 `COMMITTED` 自动收口。Effect 签名对账、旧 `FAILED_EVIDENCE` 修复、部署凭据/canary 未完成 | `B5C_WIRED_DEFAULT_OFF_PRODUCTION_OFF` |
+| Durable Graph 取消 | `task_graph.cancel` 与 `task_operation.reconcile` 均经默认关闭的受控 Operator 入口；Operation service 已完成 composition、OBS 注册与公钥注入。一般 Effect `FAILED` 不代表无副作用，新路径保持 `RECONCILIATION_REQUIRED`；仅带 receipt 的 `COMMITTED` 自动收口。PENDING 仅 exact virgin tuple可逻辑取消；current canonical authority 下 fenceable retry tuple不可达，遇到它只按 legacy/imported/corruption 保守阻断。Effect 签名对账、旧 `FAILED_EVIDENCE`、历史 retry-PENDING + CANCELLED fence修复/隔离、部署凭据/canary 未完成；FINALIZED replay 不得自动改写旧 evidence | `B5C_WIRED_DEFAULT_OFF_PRODUCTION_OFF` |
 | Outbox 并发发布 | 0093 持久化 owner/token/expiry/单调 fence 并支持 takeover。0095 按 `type + id + revision` 隔离 head；CREATED 用 HostCommand evidence，ACTIVE 等用 deterministic legacy ID/key 重算，无法解析则迁移阻断。升级保持 Outbox ID/key，新增 `@revision` payload；旧 payload 仅 replay 兼容。新 Event=`graph_id@revision`，旧 journal 经 source Outbox exact read；unique partial source-ref 防重复投影，Operator/Review exact revision。publisher 继续 claim→幂等 append→fenced complete；`DRAINED` 仅在 total_pending=0 | `WIRED_0093_CLAIM_0095_REVISION_IDENTITY` |
 | Budget 并发 CAS | B4 可由 child 记录 usage/`EXCEEDED`，outer 再统一 release；固定 CAS 重试上限及 `ALREADY_EXCEEDED` 在 concurrency > 4 下的唯一语义仍未收敛 | `P1_SEMANTICS_INCOMPLETE` |
 | Retry/backoff | Coordinator 仅对 reservation 前显式 marker 重试；并行 deferred child 使用 domain-separated node-only usage identity 与 `schedule_retry_node_outcome`，保持 Graph ACTIVE，提交响应丢失 exact replay 不重复扣费；预算拒绝只落 Budget `EXCEEDED` 与 node-local terminal，再交 outer 裁决。生产 resolver 尚无现实 marker 来源 | `PARTIAL_B4_SAFE_RETRY` |
@@ -321,7 +321,7 @@ worker 不能提供这些 effect 的 authority 或 idempotency key。Compiler �
 
 [acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py) 使用 durable queue、lease 和 fence 按以下语义顺序提交：
 
-取消并发下必须区分“成功证据”和“失败不确定性”：`COMMITTED + durable receipt` 是正向证据，可自动解除 cancellation fence；普通 handler/transport `FAILED` 可能发生在外部副作用之后，不能推导 `NO_SIDE_EFFECT`。因此取消前已失败及取消后 in-flight 失败都保持 `RECONCILIATION_REQUIRED`。当前数据结构没有可信的本地前置失败证明，旧 `FAILED_EVIDENCE` 只兼容读取并等待历史修复；签名 Effect 对账尚未接通。
+取消并发下必须区分“成功证据”和“失败不确定性”：`COMMITTED + durable receipt` 是正向证据，可自动解除 cancellation fence；普通 handler/transport `FAILED` 可能发生在外部副作用之后，不能推导 `NO_SIDE_EFFECT`。因此取消前已失败及取消后 in-flight 失败都保持 `RECONCILIATION_REQUIRED`。当前数据结构没有可信的本地前置失败证明，旧 `FAILED_EVIDENCE` 只兼容读取并等待历史修复；签名 Effect 对账尚未接通。PENDING tuple 的附加防线只把 exact virgin epoch分类为 CANCELLED；canonical claim/fence authority 不会把 handler-run retry epoch带进此路径，因此 retry 分支是 legacy/imported/cross-table corruption hardening，不是正常 reschedule/cancel 竞态。历史 retry-PENDING + CANCELLED fence必须在 production enablement 前 audit/repair/quarantine，已有 FINALIZED decision 不得被 replay 自动改写。
 
 ```text
 conversation.user_turn

@@ -157,10 +157,12 @@ flowchart TD
     CANCEL_ADMISSION -.-> CANCEL_RECON
     CANCEL_RECON -.->|"durable facts 未收敛"| CANCEL_DEFER["durable defer\n不伪造 cancellation 完成"]
     EFFECT_FAILED["Effect FAILED\nhandler/transport 失败 ≠ NO_SIDE_EFFECT"] -.-> CANCEL_RECON
+    EFFECT_RETRY["legacy/imported/corrupt retry PENDING\ncanonical fence path 不可达；fail closed"] -.-> CANCEL_RECON
+    EFFECT_VIRGIN["virgin PENDING\ncount/fence/version=0，无 reason/error"] -.-> EFFECT_RULE
     EFFECT_FAILED -.-> CANCEL_DEFER
     EFFECT_COMMITTED["Effect COMMITTED + durable receipt\n自动 COMMITTED_EVIDENCE"] -.-> CANCEL_RECON
     OP_RECON["Operation 签名对账 WIRED_DEFAULT_OFF\nservice + composition + OBS + public key"] -.-> CANCEL_RECON
-    LEGACY_EFFECT["legacy FAILED_EVIDENCE\n兼容读取；待历史修复/隔离"] -.-> HISTORY
+    LEGACY_EFFECT["legacy FAILED_EVIDENCE 或 retry-PENDING+CANCELLED\n待审计、修复/隔离；FINALIZED replay 不改写"] -.-> HISTORY
     CANCEL_DEFER -.-> CANCEL_SCAN
     CANCEL_RECON -.-> CANCEL_FINAL["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
     CANCEL_FINAL -.-> CANCEL_COMPLETE["0092 FINALIZED + decision 后\n清理 0094 协调行"]
@@ -194,6 +196,8 @@ flowchart TD
     style CANCEL_RECON fill:#fff3cd,stroke:#a87500
     style CANCEL_DEFER fill:#fff3cd,stroke:#a87500
     style EFFECT_FAILED fill:#fff3cd,stroke:#a87500
+    style EFFECT_RETRY fill:#fff3cd,stroke:#a87500
+    style EFFECT_VIRGIN fill:#d1e7dd,stroke:#177245
     style EFFECT_COMMITTED fill:#d1e7dd,stroke:#177245
     style OP_RECON fill:#fff3cd,stroke:#a87500
     style LEGACY_EFFECT fill:#fff3cd,stroke:#a87500
@@ -211,7 +215,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。Operation 签名对账为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账和旧 `FAILED_EVIDENCE` 修复仍缺，整体 cancellation 继续 OFF。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。PENDING tuple 只有 exact virgin epoch可逻辑取消；claim 所需的 accepted NODE effect会被 cancellation 排除，completed GRAPH已终态，所以 fenceable retry PENDING不是正常 reschedule/cancel 竞态，只是 legacy/imported/corruption 防线。历史 retry-PENDING + CANCELLED fence与旧 `FAILED_EVIDENCE` 均需显式 repair/quarantine，FINALIZED replay不自动改 evidence。Operation 签名对账为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账和历史修复仍缺，整体 cancellation 继续 OFF。
 
 ## Plan 分支的真实边界
 
