@@ -84,7 +84,10 @@ def _store(tmp_path: Path, *, clock: MutableClock | None = None) -> DurableTaskS
         request_id="gr06-effect-contract"
     )
     assert migrated.success is True, migrated.as_dict()
-    assert migrated.summary["current_version"] == 95
+    assert (
+        migrated.summary["current_version"]
+        == migrated.summary["latest_version"]
+    )
     store = DurableTaskStore(db_path, clock=clock or MutableClock())
     store.assert_acceptance_effect_intent_ready()
     return store
