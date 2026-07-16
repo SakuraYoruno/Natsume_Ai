@@ -23,6 +23,9 @@ from host_brain.task_runtime import (
     GovernedRuntimeError,
     GovernedTaskCoordinator,
 )
+from host_brain.task_runtime.local_graph_execution_registry import (
+    LocalGraphExecutionRegistry,
+)
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
     HostCommandSurface,
@@ -448,6 +451,7 @@ def _coordinator(
     *,
     coordinator_type: type[GovernedTaskCoordinator] = GovernedTaskCoordinator,
     outbox_publisher: Any | None = None,
+    execution_registry: LocalGraphExecutionRegistry | None = None,
 ) -> GovernedTaskCoordinator:
     coordinator = coordinator_type(
         task_store=store,  # type: ignore[arg-type]
@@ -460,6 +464,7 @@ def _coordinator(
         worker_resolver=object(),  # type: ignore[arg-type]
         verifier=object(),  # type: ignore[arg-type]
         acceptance=object(),  # type: ignore[arg-type]
+        execution_registry=execution_registry,
         owner_id="worker-b5c",
     )
     if isinstance(coordinator, _BlockingCoordinator):
@@ -550,6 +555,55 @@ async def test_durable_intent_precedes_local_cancel_and_pending_is_not_finalized
     assert receipt["status"] == "CANCEL_REQUESTED"
     assert receipt["reason_code"] == "GOVERNED_GRAPH_CANCELLATION_PENDING"
     assert receipt["projection"]["graph_cancellation"]["graph_status"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_process_shared_registry_joins_execution_owned_by_another_coordinator() -> None:
+    command, work_order, assignment, graph = _contracts()
+    admitted = AdmittedExecution.from_contracts(
+        command=command,
+        assignment=assignment,
+        graph=graph,
+    )
+    order: list[str] = []
+    store = _CancellationStore(graph, order, ready_to_finalize=False)
+    registry = LocalGraphExecutionRegistry()
+    executor = _coordinator(
+        store,
+        order,
+        coordinator_type=_BlockingCoordinator,
+        execution_registry=registry,
+    )
+    canceller = _coordinator(
+        store,
+        order,
+        execution_registry=registry,
+    )
+    assert isinstance(executor, _BlockingCoordinator)
+    execution = asyncio.create_task(
+        _drain_execution(
+            executor,
+            admitted=admitted,
+            command=command,
+            work_order=work_order,
+        ),
+        name="shared-registry-executor",
+    )
+    await executor.execution_started.wait()
+
+    event = await canceller.request_graph_cancellation(
+        admitted=admitted,
+        command=command,
+        work_order=work_order,
+        request_id="request-b5c-shared-registry",
+        request_identity="authority://verified/principal-b5c",
+        source="USER",
+        reason_code="USER_REQUESTED",
+    )
+
+    assert execution.cancelled()
+    assert event["execution_receipt"]["status"] == "CANCEL_REQUESTED"
+    assert store.finalize_calls == 0
 
 
 @pytest.mark.asyncio

@@ -129,6 +129,7 @@ flowchart TB
 - `host_brain/task_runtime/graph_cancellation_records.py`：取消 intent 校验、Node 状态投影与 Budget target/projection；不拥有取消编排 authority。
 - `host_brain/task_runtime/graph_cancellation_runtime.py`：两阶段取消 request/continue、exact replay、advance/finalize 与本地 cancel/join 编排；只依赖同一 Store、共享 Outbox/Registry、lease TTL 和只读 Projection。
 - `host_brain/task_runtime/graph_cancellation_projection.py`：读取取消 intent、Graph/Node/Budget/Attempt/decision durable facts并构造 terminal receipt；只持 Store，不拥有 mutation authority。
+- `host_brain/task_runtime/graph_cancellation_continuation_worker.py`：0094 composition-owned pending-intent scanner；持久 claim/heartbeat/defer/expired takeover，从 exact HostCommand admission 重建 replay 上下文后重入既有 GraphCancellationRuntime，不拥有业务取消状态。
 - `host_brain/task_runtime/runtime_outbox.py`：每个 Coordinator 唯一的 Outbox message factory/publisher/limit/发布锁；不持有 Store 或 Coordinator。
 - `host_brain/task_runtime/local_graph_execution_registry.py`：graph revision 级本地 task tracking 与 bounded cancel/join；只作 durable cancellation 的进程内加速器。
 - `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
@@ -142,6 +143,7 @@ flowchart TB
 - `host_brain/persistence/task_store_types.py`：TaskStore 错误、状态枚举、Outbox 与稳定 value records；无连接、SQL 或事务，并由 repository 兼容重导出。
 - `host_brain/persistence/task_record_codec.py`：确定性 JSON/SQLite Row 校验与合同重建；不执行 SQL，依赖方向固定为 repository → codec → types/contracts。
 - `host_brain/persistence/task_outbox_delivery_store.py`：0093 Task Runtime Outbox 的跨进程 claim、expired takeover、同 aggregate 有序投递、fenced complete/release 和失败 backoff；只借用主 Store 连接、时钟与事务 authority。
+- `host_brain/persistence/task_graph_cancellation_continuation_store.py`：0094 cancellation coordination claim、heartbeat、defer、complete 与 expired takeover；只保存租约/重试元数据并借用主 Store authority，0092 intent/decision 仍是唯一业务真相。
 - `host_brain/persistence/task_decision_integrity.py`：decision/outbox lineage 的只读绑定校验；只借用 repository 当前事务连接执行 `SELECT`，不取得连接、事务或 mutation authority。
 - `host_brain/persistence/task_acceptance_effect_staging.py`：Acceptance Effect 规范化、staging，以及 Node/Graph acceptance 与 effect 的原子同事务提交；只借用主 Store 当前事务。
 - `host_brain/persistence/task_acceptance_effect_delivery.py`：Acceptance Effect schema、查询、claim、commit/fail/reschedule 与 fencing；不创建独立 Store、连接或事务 owner。
@@ -158,9 +160,9 @@ flowchart TB
 
 当前 Task Runtime 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。`DurableNodeExecutionRuntime` 在 B1 原子 claim/promotion 上保留唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
 
-TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 不再阻塞静态文件门禁；第十七刀后 Coordinator 也降到门槛内，mixed-file Gate 已转绿。
+TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,544 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 不再阻塞静态文件门禁；第十七刀后 Coordinator 也降到门槛内，mixed-file Gate 已转绿。
 
-执行层已完成十八刀结构拆分，Coordinator 主文件由 5,860 降到 257 行。第十八刀新增 1,172 行 `DurableDagSchedulingRuntime` 与 38 行纯 `dag_scheduling_records.py`，从冻结 HEAD 65219 迁出 execute_stream（原 988 行）、reentered outcomes、supports 与 run_claimed_node，并冻结规范化/精确 AST hash。Runtime 只注入同 Store、共享 Outbox/Budget/Lifecycle/NodeExecution/Projection/0090/0091/Cancellation/Review、flags/reader/buffer，无 Coordinator callback、新锁或第二 persistence authority；矩阵为 Store9/Budget9/Lifecycle18/NodeProjection12/NodeExecution6/Settlement4/Success1/Review4/Cancellation1/Outbox 1 build+6 publish+0 best-effort，全局 Outbox 仍为 27/31/58/5。Coordinator 只保留 composition、公开 cancel/supports/execute facade 与 registry track。mixed-file Gate 继续 green；1,172 行 Runtime 是临时 outer orchestrator，仍集中 review、terminal-state 与 fanout 协调并列为后续结构拆分，不能据此宣称 mixed-responsibility 或跨进程完成。下一步是 reconciliation/takeover/continuation，整体状态仍为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
+执行层已完成十八刀结构拆分，Coordinator 主文件由 5,860 降到 257 行。第十八刀新增 1,172 行 `DurableDagSchedulingRuntime` 与 38 行纯 `dag_scheduling_records.py`，从冻结 HEAD 65219 迁出 execute_stream（原 988 行）、reentered outcomes、supports 与 run_claimed_node，并冻结规范化/精确 AST hash。Runtime 只注入同 Store、共享 Outbox/Budget/Lifecycle/NodeExecution/Projection/0090/0091/Cancellation/Review、flags/reader/buffer，无 Coordinator callback、新锁或第二 persistence authority；矩阵为 Store9/Budget9/Lifecycle18/NodeProjection12/NodeExecution6/Settlement4/Success1/Review4/Cancellation1/Outbox 1 build+6 publish+0 best-effort，全局 Outbox 仍为 27/31/58/5。Coordinator 只保留 composition、公开 cancel/supports/execute facade 与 registry track。mixed-file Gate 继续 green；1,172 行 Runtime 是临时 outer orchestrator，仍集中 review、terminal-state 与 fanout 协调并列为后续结构拆分。0094 增加跨进程 cancellation coordination，但没有完成 operation/effect 业务 reconciliation；整体状态仍为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
 
 0093 已完成 Task Runtime Outbox 投递的跨进程 authority：每个 claim 持久化 owner、token、expiry 和单调递增 fencing token，过期后可由新 owner takeover，旧 owner 的 complete/release 会被 fence。Store 以 aggregate version、created timestamp 与 outbox id 阻止同 aggregate 后续消息越过未发布 predecessor。`RuntimeOutboxPublisher` 逐条 `claim → idempotent append_task_outbox → fenced complete`；append 失败则以同一 claim fenced release，并落 retry deadline/backoff 与 last_error。Composition 使用 boot/construction-scoped `recovery_id::outbox` 唯一 owner，在 startup publish 后启动可关闭后台 worker；worker 按 aggregate-head backlog 的最早 available/claim-expiry 与有界轮询自动续投。显式 drain 只有 canonical total_pending=0 才返回 DRAINED，仍有 claim/backoff/blocked predecessor 时返回 DEFERRED。`list_pending_outbox` 保留完整 PENDING inventory，delivery-ready 只由 aggregate-head claim/backlog 表达。Readiness 是每个 Store 实例的缓存 mode，热路径不重扫，显式诊断 force-revalidate 例外；进程内锁仅是降噪。
 
@@ -176,9 +178,11 @@ B5C 以迁移 0092 建立 canonical cancellation intent/decision/effect fence。
 
 phase 2 只在 active ownership 与 operation/effect/review 不确定性全部 reconciliation 后提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 和 canonical decision。`ACCEPTED` Node + `SUCCEEDED` Attempt 对应的 NODE effect 已拥有 acceptance authority，取消后继续 delivery；其余 NODE effect 与未完成 Graph 的 GRAPH effect被 fence。0091 success 与 0092 cancellation first-writer-wins，请求与封口响应丢失 exact replay；shutdown/disconnect 不自动变成业务取消。
 
+0094 在该业务状态机之外增加 composition-owned continuation worker。`ProcessTaskRuntimeContainer` 拥有一个 process-shared `LocalGraphExecutionRegistry`，Host、Internal、Scheduler Coordinator 与 worker 的 GraphCancellationRuntime 共用它确认本进程 quiescence，但它不是 durable authority。0094 readiness/codec 要求 exact frozen columns，拒绝额外 `status` 等业务字段；`intent_ref` 必须是 `TEXT NOT NULL PRIMARY KEY` 的物理 identity，不接受 SQLite rowid PK NULL/复合 FK 豁免幽灵行。worker 以 `recovery_id::graph-cancellation` owner 扫描 0092 `REQUESTED` 且无 decision 的 intent，持久 claim/heartbeat/defer，并在 lease 过期后以更高 fence takeover；claim/heartbeat/defer/complete 在 `BEGIN IMMEDIATE` 获得写锁后才采样时钟。worker 从 HostCommandRepository 精确重建 command、work order、assignment、graph 与 replay admission，再调用现有 GraphCancellationRuntime。Runtime 未显式获得 `local_pending` 时必先 `cancel_and_join`；本地 task 非静默时不得 advance/finalize，只 durable defer。只有 0092 intent 已 `FINALIZED` 且 decision 存在时才 complete 协调行；operation/effect/review 尚未收敛时同样只 durable defer。0094 表不是取消状态副本。
+
 完整历史 `taskbatch` marker 缺行/错绑扫描只在 single-revision graph ID 上安全。legacy TaskGraph Outbox 没有 `graph_revision`，multi-revision 时不能可靠把同一 graph ID 下的历史 marker 分配到 revision；此时读取仍对返回 decision row 自身做 digest/Outbox/Attempt/usage 精确校验。revisioned TaskGraph Outbox identity 是尚未完成的结构边界。
 
-这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。0093 收口的是 Task Runtime Outbox delivery，不是 cancellation continuation。B5C 的生产 verifier/受控入口/canary 仍未完成，0092 pending intent 仍缺跨进程 scanner、claim、reconciliation、online takeover 与 continuation；revisioned 0090、历史半提交修复、统一 `WAITING_APPROVAL` 与 Budget 高竞争也仍是缺口。整体状态保持 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
+这些仍只是默认关闭的 shadow 机制证据，不是 production wiring。0093 收口 Task Runtime Outbox delivery，0094 收口 cancellation continuation 的跨进程扫描与协调租约；二者都不替代 0092 业务 reconciliation。B5C 的生产 verifier、受控 HTTP/UI 入口和 canary 仍未完成，operation/effect 等事实的完整自动收敛、revisioned 0090、历史半提交修复、统一 `WAITING_APPROVAL` 与 Budget 高竞争也仍是缺口。整体状态保持 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
 
 ### 3.5 模型与能力执行层
 
@@ -234,7 +238,9 @@ host_brain.__main__
 
 `host_brain/composition/task_runtime.py::ProcessTaskRuntimeContainer` 已显式拥有 TaskStore、ReviewStore、CommandRepository、EventStore 和 lifecycle，是当前较清晰的 composition 范例。
 
-它的启动门禁已固定为 migration → TaskStore 0093 readiness → `task_store.recover_startup` → publisher 构造 → recovery outbox publish → Outbox 后台 worker → 稍后 runtime activation；恢复异常会终止容器构造并阻止路由开放。配置中的逻辑 owner 会经 `ProcessTaskRuntimeContainer.execution_owner_id()` 派生为绑定当前 construction/recovery id 的唯一 execution owner，重启不会沿用旧进程 owner 身份。0093 worker 可以在 expiry 后自动 takeover Outbox claim；这里没有宣称 recoverable Attempt 或 0092 cancellation 已自动 continuation，也没有补齐它们的在线 takeover 或即时 reconciliation。
+它的启动门禁已固定为 migration → TaskStore 0093/0094 readiness → `task_store.recover_startup` → publisher 构造 → recovery outbox publish → Outbox 后台 worker → runtime activation 与 cancellation continuation worker；恢复异常会终止容器构造并阻止路由开放。配置中的逻辑 owner 会经 `ProcessTaskRuntimeContainer.execution_owner_id()` 派生为绑定当前 construction/recovery id 的唯一 execution owner，重启不会沿用旧进程 owner 身份。worker start 失败会触发反向 stop/join 和 Coordinator close；只有回滚全部成功才 unbind，失败时保留 bound handle 供 `aclose` 重试，Runtime Group 也保留关闭失败 child。shutdown 给 worker 有界 grace 后 cancel 并有界 join，如 worker 抑制取消则有界 fail closed 并保持 Task/Command Store 打开供重试。0093 worker 可在 expiry 后 takeover Outbox claim；0094 worker 使用独立 recovery-scoped owner takeover pending cancellation coordination。后者未解决本地 quiescence 或 operation/effect 等业务 reconciliation 时只 durable defer，这里没有宣称完整跨进程业务收敛已经完成。
+
+activation rollback 或 `aclose` quiescence 任一未完成都返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，容器随即拒绝 bind/activate，只允许 `aclose` 重试。Coordinator admission close、drain 或 `aclose` 中任一步失败时，Task/Command Store 及其他 infrastructure 均保持打开；只有 Coordinator 和 worker 都已静默后才能 drain Outbox 并进入反向关闭。
 
 但整个 Host 尚未完成显式对象图迁移：两轮已静态证明并删除 6 个零消费者槽位和 4 个死 accessor，第二轮另收掉 7 个宽泛重导出及测试 reset 残留；当前仍有 60 个 container 字段，排除 6 个 lock 与 `application_ports` 端口束后是 53 个可变服务引用。`process_services.py` 与 `process_runtime_services.py` 继续暴露大量全局 accessor，部分 `host_brain.app` 文件仍同时承担 adapter 和 service factory。新代码不应继续扩大这条 Service Locator 路径。
 
@@ -371,9 +377,9 @@ flowchart LR
 | 新主干 | 待退役/修复 |
 |---|---|
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
-| Durable TaskStore | 无第二 task registry；仍缺统一自动 continuation |
+| Durable TaskStore | 无第二 task registry；0094 已提供 cancellation intent continuation，仍缺 recoverable Attempt/Review 等统一自动 continuation |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 atomic success、0092 两阶段 cancellation 与 0093 Outbox durable claim/CAS 已有证据；verified cancellation entry 尚未注入生产 verifier，无 HTTP/UI 和 pending-intent scanner/claim/reconciliation/takeover/continuation。atomic/bounded/cancellation 及三处生产 composition 均 OFF；revisioned 0090、Budget 高竞争与 canary 未接线 |
+| TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 atomic success、0092 两阶段 cancellation、0093 Outbox durable delivery 与 0094 pending-intent scanner/coordination 已有证据；0094 通过 exact HostCommand admission 重入既有 Runtime，未收敛业务事实时 durable defer。verified cancellation entry 尚未注入生产 verifier，无 HTTP/UI/canary；atomic/bounded/cancellation 及三处生产 composition 均 OFF，revisioned 0090、Budget 高竞争与完整 operation/effect reconciliation 未闭环 |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

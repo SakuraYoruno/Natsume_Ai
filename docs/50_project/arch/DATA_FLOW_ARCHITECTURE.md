@@ -80,9 +80,20 @@ flowchart TD
 
     CancelCaller["受控内部 cancellation caller\nshadow，暂无 HTTP/UI"] -.-> CancelVerify["authority verifier\nexact request/principal/Graph revision\n生产 composition 未注入"]
     CancelVerify -.-> CancelIntent["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    LocalRegistry["process-shared LocalGraphExecutionRegistry\nHost / Internal / Scheduler / 0094 worker\nquiescence only，非 durable authority"]
+    Runtime -.-> LocalRegistry
+    SchedulerWO -.-> LocalRegistry
+    InternalWO -.-> LocalRegistry
     CancelIntent -.-> LocalJoin["intent 提交后才 cancel/join\n本进程 child + heartbeat"]
-    CancelIntent -.-> CancelReconcile["active ownership / operation / effect / review\nadvance + reconciliation gate"]
+    LocalRegistry -.-> LocalJoin
+    LocalJoin -.-> CancelReconcile["active ownership / operation / effect / review\nadvance + reconciliation gate"]
+    CancelScan["0094 composition-owned scanner\nrecovery-scoped worker"] -.-> CancelClaim["协调 claim + heartbeat\nexpired takeover / stale fence"]
+    CancelClaim -.-> CancelAdmission["HostCommandRepository exact revision\n重建 replay admission\nBEGIN IMMEDIATE 后采样 lease 时钟"]
+    CancelAdmission -.-> LocalJoin
+    CancelReconcile -.->|"本地 pending 非空或 durable facts 未收敛"| CancelDefer["0094 durable defer\n不伪造业务完成"]
+    CancelDefer -.-> CancelScan
     CancelReconcile -.-> CancelFinal["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
+    CancelFinal -.-> CancelComplete["0092 FINALIZED + decision 后\n才清理 0094 协调行"]
     CancelFinal -.-> Receipt
 
     Scheduler["Scheduler"] --> SchedulerWO["WorkOrderV3 + Budget + child grant"]
@@ -93,14 +104,15 @@ flowchart TD
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Schema,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO wired;
-    class Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalJoin,CancelReconcile,CancelFinal partial;
+    class Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete partial;
 ```
 
 上图的核心结论是：
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。0091 成功封口继续有效；0092 已建立 verified internal entry、durable intent/fence、reconciliation gate 与 final decision，且 success/cancel first-writer-wins。accepted NODE effect 保留 delivery authority，其他未授权 effect 被 fence。生产 verifier/入口和跨进程自动 reconciliation/takeover/continuation 尚缺，atomic/bounded/cancellation 均保持 OFF。
+- Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。0091 成功封口继续有效；0092 已建立 verified internal entry、durable intent/fence、reconciliation gate 与 final decision，且 success/cancel first-writer-wins。0094 composition worker 已能跨进程扫描、claim/heartbeat/defer、过期接管并按 exact HostCommand admission 重入既有 Runtime；Host/Internal/Scheduler/worker 共用 process-local registry，未显式获得 `local_pending` 的 Runtime 必须先 `cancel_and_join`，本地未静默或 operation/effect/review 未收敛时只 durable defer。0092 intent/decision 仍是唯一业务 authority。生产 verifier、HTTP/UI 入口和 canary 尚缺，atomic/bounded/cancellation 均保持 OFF。
+- Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 

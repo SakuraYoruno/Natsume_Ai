@@ -1,7 +1,7 @@
 """Composition facade for governed durable DAG execution.
 
-The coordinator owns process-scoped wiring, public entry points, and the local
-execution registry; it does not own DAG scheduling or durable mutation logic.
+The coordinator owns process-scoped wiring and public entry points; production
+injects one process-shared local registry.  It does not own durable mutation.
 Admission must already have atomically persisted the command and graph.  The
 injected runtimes preserve outbox-bound transitions, frozen node routes,
 verification-before-commit, acceptance, cancellation, and exact replay.  The
@@ -72,6 +72,7 @@ class GovernedTaskCoordinator:
         bounded_fanout_enabled: bool = False,
         atomic_graph_success_enabled: bool = False,
         fanout_event_buffer_size: int = 32,
+        execution_registry: LocalGraphExecutionRegistry | None = None,
         owner_id: str,
         lease_ttl_ms: int = 120_000,
         operation_ttl_ms: int = 120_000,
@@ -102,10 +103,9 @@ class GovernedTaskCoordinator:
         self._owner_id = owner
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
-        # Process-local task handles only accelerate an already-durable graph
-        # cancellation request.  They are never consulted as cancellation
-        # authority and may be empty after restart or in another process.
-        self._execution_registry = LocalGraphExecutionRegistry()
+        # Local handles prove process quiescence but never cancellation authority.
+        # Isolated callers get a private registry; production injects one shared.
+        self._execution_registry = execution_registry or LocalGraphExecutionRegistry()
         self._graph_cancellations = GraphCancellationRuntime(
             task_store=task_store,
             runtime_outbox=self._runtime_outbox,

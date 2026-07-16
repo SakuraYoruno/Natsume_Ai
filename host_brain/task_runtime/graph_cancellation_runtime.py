@@ -311,11 +311,22 @@ class GraphCancellationRuntime:
         command: HostCommand,
         work_order: Any,
         cancellation: Mapping[str, Any],
-        local_pending: Sequence[str] = (),
+        local_pending: Sequence[str] | None = None,
         replayed: bool = False,
     ) -> dict[str, Any]:
         del command, work_order
         intent = _validated_graph_cancellation_intent(admitted, cancellation)
+        if local_pending is None:
+            # Cross-process continuation must still quiesce executors owned by
+            # this process.  Callers that already performed the bounded join
+            # pass its exact result explicitly, including an empty tuple.
+            local_pending = await self._execution_registry.cancel_and_join(
+                graph_id=admitted.graph_id,
+                graph_revision=admitted.graph_revision,
+                intent_ref=intent.intent_ref,
+                timeout_seconds=self._lease_ttl_ms / 1000.0,
+            )
+        local_pending = tuple(local_pending)
         intent_record = dict(cancellation)
         reconciliation_evidence_refs: tuple[str, ...] = ()
         if _status(intent_record) == "FINALIZED":

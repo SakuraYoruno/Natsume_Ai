@@ -164,6 +164,9 @@ from host_brain.persistence.task_graph_cancellation_request import (
 from host_brain.persistence.task_graph_cancellation_finalization import (
     TaskGraphCancellationFinalizationMixin,
 )
+from host_brain.persistence.task_graph_cancellation_continuation_store import (
+    TaskGraphCancellationContinuationStoreMixin,
+)
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
@@ -476,6 +479,7 @@ def build_reconciliation_attestation_binding(
 
 class DurableTaskStore(
     TaskOutboxDeliveryStoreMixin,
+    TaskGraphCancellationContinuationStoreMixin,
     TaskAcceptanceEffectStagingMixin,
     TaskAcceptanceEffectDeliveryMixin,
     TaskParallelSuccessStoreMixin,
@@ -509,6 +513,7 @@ class DurableTaskStore(
         if verify_schema:
             self.assert_schema_ready()
             self._initialize_outbox_delivery_capability()
+            self._initialize_graph_cancellation_continuation_capability()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(
@@ -652,8 +657,19 @@ class DurableTaskStore(
             )
 
 
-    def assert_graph_cancellation_ready(self) -> None:
+    def assert_graph_cancellation_ready(
+        self,
+        *,
+        force_revalidate: bool = False,
+    ) -> None:
         """Require the NE-01 B5C graph-cancellation authority journal."""
+
+        if (
+            not force_revalidate
+            and getattr(self, "_graph_cancellation_schema_ready", False)
+        ):
+            return
+        self._graph_cancellation_schema_ready = False
 
         conn = self._connect()
         try:
@@ -694,6 +710,7 @@ class DurableTaskStore(
                 f"intent={missing_intent}, decision={missing_decision}, "
                 f"effect_fence={missing_effect_fence}",
             )
+        self._graph_cancellation_schema_ready = True
 
 
     # -- Graph and node persistence -------------------------------------------------

@@ -763,6 +763,121 @@ def _graph_cancellation_intent_record(
     return record
 
 
+def _graph_cancellation_continuation_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate coordination metadata without inventing cancellation status.
+
+    The returned record deliberately contains no business ``status``.  Callers
+    must read the canonical 0092 intent/decision for that truth.
+    """
+
+    record = dict(row)
+    required = {
+        "intent_ref",
+        "graph_id",
+        "graph_revision",
+        "claim_owner",
+        "claim_token",
+        "claim_expires_ts_ms",
+        "claim_fencing_token",
+        "attempt_count",
+        "available_ts_ms",
+        "last_error",
+        "status_version",
+        "created_ts_ms",
+        "updated_ts_ms",
+    }
+    actual = set(record)
+    if actual != required:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation columns differ from the frozen shape",
+        )
+
+    intent_ref = record.get("intent_ref")
+    graph_id = record.get("graph_id")
+    if (
+        not isinstance(intent_ref, str)
+        or not intent_ref.strip()
+        or not isinstance(graph_id, str)
+        or not graph_id.strip()
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation identity is invalid",
+        )
+
+    integer_fields = (
+        "graph_revision",
+        "claim_fencing_token",
+        "attempt_count",
+        "available_ts_ms",
+        "status_version",
+        "created_ts_ms",
+        "updated_ts_ms",
+    )
+    if any(type(record.get(field)) is not int for field in integer_fields):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation counters require integer storage",
+        )
+    graph_revision = int(record["graph_revision"])
+    fence = int(record["claim_fencing_token"])
+    attempts = int(record["attempt_count"])
+    available = int(record["available_ts_ms"])
+    status_version = int(record["status_version"])
+    created = int(record["created_ts_ms"])
+    updated = int(record["updated_ts_ms"])
+    if (
+        graph_revision < 1
+        or fence < 0
+        or attempts < 0
+        or attempts != fence
+        or available < 0
+        or status_version < 0
+        or created < 0
+        or updated < created
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation counters are incoherent",
+        )
+
+    owner = record.get("claim_owner")
+    token = record.get("claim_token")
+    expires = record.get("claim_expires_ts_ms")
+    empty_claim = owner is None and token is None and expires is None
+    live_claim = (
+        isinstance(owner, str)
+        and bool(owner.strip())
+        and len(owner) <= 255
+        and isinstance(token, str)
+        and bool(token.strip())
+        and len(token) <= 512
+        and type(expires) is int
+        and int(expires) >= 0
+        and fence > 0
+    )
+    if not empty_claim and not live_claim:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation claim is partial or invalid",
+        )
+
+    last_error = record.get("last_error")
+    if last_error is not None and (
+        not isinstance(last_error, str)
+        or not last_error.strip()
+        or len(last_error) > 2_000
+    ):
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "graph cancellation continuation last_error is invalid",
+        )
+    return record
+
+
 def _graph_cancellation_decision_record(
     row: sqlite3.Row | Mapping[str, Any],
 ) -> dict[str, Any]:

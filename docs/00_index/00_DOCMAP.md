@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision verified internal entry、durable intent/fence、reconciliation gate 与 final cancellation decision。0093 已收口 Task Runtime Outbox 的跨进程 claim/CAS、后台过期 takeover、同 aggregate 顺序、`DRAINED/DEFERRED`、inventory/ready 分离和 per-Store readiness。该 Outbox liveness 不等于 cancellation continuation；生产 composition 尚未注入 verifier，也无 HTTP/UI 入口或 0092 pending-intent scanner/claim/reconciliation/takeover/continuation；atomic、bounded 与 cancellation 均保持 OFF。
+- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision verified internal entry、durable intent/fence、reconciliation gate 与 final cancellation decision。0093 已收口 Task Runtime Outbox 跨进程投递；0094 新增 composition-owned pending-intent scanner、持久 claim/heartbeat/defer/expired takeover、exact HostCommand admission 重建并重入既有 GraphCancellationRuntime。0094 只是协调层，0092 intent/decision 仍是唯一业务真相；未解决 operation/effect reconciliation 时只 durable defer。生产 verifier、HTTP/UI 入口和 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

@@ -6,6 +6,7 @@ imports the ASGI/app layer and does not hide dependencies behind globals.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import hashlib
@@ -17,7 +18,11 @@ import threading
 from typing import Any
 import uuid
 
-from host_brain.persistence.task_repository import DurableTaskStore, RecoveryReport
+from host_brain.persistence.task_repository import (
+    DurableTaskStore,
+    OutboxMessage,
+    RecoveryReport,
+)
 from host_brain.audit.migration_runner import (
     MigrationBatchResult,
     SQLiteMigrationRunner,
@@ -36,6 +41,16 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
 )
+from host_brain.task_runtime.graph_cancellation_continuation_worker import (
+    GraphCancellationContinuationWorker,
+)
+from host_brain.task_runtime.graph_cancellation_runtime import (
+    GraphCancellationRuntime,
+)
+from host_brain.task_runtime.local_graph_execution_registry import (
+    LocalGraphExecutionRegistry,
+)
+from host_brain.task_runtime.runtime_outbox import RuntimeOutbox
 
 
 TASK_RUNTIME_CANONICAL_DB_PATH_INVALID = "TASK_RUNTIME_CANONICAL_DB_PATH_INVALID"
@@ -47,6 +62,7 @@ TASK_RUNTIME_ALREADY_BOUND = "TASK_RUNTIME_ALREADY_BOUND"
 TASK_RUNTIME_COORDINATOR_INVALID = "TASK_RUNTIME_COORDINATOR_INVALID"
 TASK_RUNTIME_COORDINATOR_NOT_BOUND = "TASK_RUNTIME_COORDINATOR_NOT_BOUND"
 TASK_RUNTIME_ACTIVATION_FAILED = "TASK_RUNTIME_ACTIVATION_FAILED"
+TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED = "TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED"
 TASK_RUNTIME_DRAIN_FAILED = "TASK_RUNTIME_DRAIN_FAILED"
 TASK_RUNTIME_CLOSE_ALREADY_RUNNING = "TASK_RUNTIME_CLOSE_ALREADY_RUNNING"
 TASK_RUNTIME_CLOSE_FAILED = "TASK_RUNTIME_CLOSE_FAILED"
@@ -117,6 +133,7 @@ _INFRASTRUCTURE_ORDER = (
     "scheduler_result_repository",
     "event_store",
     "outbox_publisher",
+    "cancellation_continuation_worker",
 )
 
 
@@ -139,10 +156,17 @@ class ProcessTaskRuntimeContainer:
     scheduler_result_repository: SchedulerExecutionResultRepository
     event_store: RuntimeEventStore
     outbox_publisher: RuntimeOutboxPublisher
+    graph_execution_registry: LocalGraphExecutionRegistry
+    cancellation_continuation_worker: GraphCancellationContinuationWorker
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
     _activated: bool = field(default=False, init=False, repr=False)
+    _lifecycle_retry_required: bool = field(
+        default=False,
+        init=False,
+        repr=False,
+    )
     _closed: bool = field(default=False, init=False, repr=False)
     _closing: bool = field(default=False, init=False, repr=False)
     _lifecycle_lock: threading.Lock = field(
@@ -204,6 +228,11 @@ class ProcessTaskRuntimeContainer:
                     TASK_RUNTIME_COORDINATOR_INVALID,
                     "cannot bind a closed task runtime container",
                 )
+            if self._lifecycle_retry_required:
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED,
+                    "task runtime lifecycle requires close retry before binding",
+                )
             if self._bound_runtime is not None:
                 raise TaskRuntimeContainerError(
                     TASK_RUNTIME_ALREADY_BOUND,
@@ -224,6 +253,17 @@ class ProcessTaskRuntimeContainer:
 
     async def activate_runtime(self) -> None:
         self._assert_process_owner()
+        with self._lifecycle_lock:
+            if self._closed or self._closing:
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_ACTIVATION_FAILED,
+                    "cannot activate a closing or closed task runtime container",
+                )
+            if self._lifecycle_retry_required:
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED,
+                    "task runtime lifecycle requires close retry before activation",
+                )
         if self._activated:
             return
         coordinator = self._bound_runtime
@@ -239,12 +279,35 @@ class ProcessTaskRuntimeContainer:
             result = activate()
             if inspect.isawaitable(result):
                 await result
+            await self.cancellation_continuation_worker.start()
+        except asyncio.CancelledError:
+            rollback_succeeded = await _rollback_runtime_activation(
+                coordinator=coordinator,
+                cancellation_worker=self.cancellation_continuation_worker,
+            )
+            with self._lifecycle_lock:
+                if rollback_succeeded and self._bound_runtime is coordinator:
+                    self._bound_runtime = None
+                self._activated = False
+                self._lifecycle_retry_required = not rollback_succeeded
+            raise
         except Exception as exc:
+            rollback_succeeded = await _rollback_runtime_activation(
+                coordinator=coordinator,
+                cancellation_worker=self.cancellation_continuation_worker,
+            )
+            with self._lifecycle_lock:
+                if rollback_succeeded and self._bound_runtime is coordinator:
+                    self._bound_runtime = None
+                self._activated = False
+                self._lifecycle_retry_required = not rollback_succeeded
             raise TaskRuntimeContainerError(
                 TASK_RUNTIME_ACTIVATION_FAILED,
                 "bound task runtime coordinator activation failed",
             ) from exc
-        self._activated = True
+        with self._lifecycle_lock:
+            self._activated = True
+            self._lifecycle_retry_required = False
 
     async def drain_outbox(
         self,
@@ -327,12 +390,13 @@ class ProcessTaskRuntimeContainer:
         )
 
     async def aclose(self) -> None:
-        """Stop admission, drain durable outbox, then close in reverse order."""
+        """Quiesce every producer, drain durable outbox, then close stores."""
 
         self._assert_process_owner()
         if not self._begin_close():
             return
         failures: list[TaskRuntimeCloseFailure] = []
+        infrastructure_closed = False
         try:
             coordinator = self._bound_runtime
             if coordinator is not None:
@@ -349,6 +413,48 @@ class ProcessTaskRuntimeContainer:
                     failures=failures,
                 )
             try:
+                await self.cancellation_continuation_worker.stop()
+                await self.cancellation_continuation_worker.join()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failures.append(
+                    TaskRuntimeCloseFailure(
+                        component="graph_cancellation_continuation_quiescence",
+                        reason_code=TASK_RUNTIME_CLOSE_FAILED,
+                    )
+                )
+                # A continuation may still be using TaskStore/CommandStore.
+                # Never close those stores underneath a non-quiescent worker;
+                # report a bounded failure and allow a later shutdown retry.
+                raise TaskRuntimeContainerCloseError(tuple(failures))
+
+            if coordinator is not None:
+                close = getattr(coordinator, "aclose", None) or getattr(
+                    coordinator,
+                    "close",
+                    None,
+                )
+                try:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    failures.append(
+                        TaskRuntimeCloseFailure(
+                            component="runtime_coordinator_quiescence",
+                            reason_code=TASK_RUNTIME_CLOSE_FAILED,
+                        )
+                    )
+                if failures:
+                    # Admission, drain, and close are all quiescence proofs.
+                    # Preserve every Store until a later retry proves all
+                    # coordinator children have stopped.
+                    raise TaskRuntimeContainerCloseError(tuple(failures))
+
+            try:
                 await self.drain_outbox()
             except Exception:
                 failures.append(
@@ -358,19 +464,21 @@ class ProcessTaskRuntimeContainer:
                     )
                 )
 
-            close_order: list[tuple[str, Any]] = []
-            if coordinator is not None:
-                close_order.append(("runtime_coordinator", coordinator))
-            close_order.extend(
+            close_order = list(
                 (name, getattr(self, name))
                 for name in reversed(self.construction_order)
             )
             for name, component in close_order:
                 await _close_component(name, component, failures)
+            infrastructure_closed = True
         finally:
             with self._lifecycle_lock:
                 self._activated = False
-                self._closed = True
+                if infrastructure_closed:
+                    self._closed = True
+                    self._lifecycle_retry_required = False
+                else:
+                    self._lifecycle_retry_required = True
                 self._closing = False
         if failures:
             raise TaskRuntimeContainerCloseError(tuple(failures))
@@ -418,6 +526,33 @@ async def _call_optional_lifecycle(
                 )
             )
         return
+
+
+async def _rollback_runtime_activation(
+    *,
+    coordinator: Any,
+    cancellation_worker: Any,
+) -> bool:
+    """Best-effort reverse activation without exposing a half-live runtime."""
+
+    succeeded = True
+    for target, method_names in (
+        (cancellation_worker, ("stop",)),
+        (cancellation_worker, ("join",)),
+        (coordinator, ("aclose", "close")),
+    ):
+        for method_name in method_names:
+            method = getattr(target, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                result = method()
+                if inspect.isawaitable(result):
+                    await result
+            except (Exception, asyncio.CancelledError):
+                succeeded = False
+            break
+    return succeeded
 
 
 async def _close_component(
@@ -578,6 +713,7 @@ def build_process_task_runtime_container(
         task_store = task_store_builder(canonical)
         constructed.append(("task_store", task_store))
         task_store.assert_outbox_delivery_ready()
+        task_store.assert_graph_cancellation_continuation_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         review_store = review_store_builder(canonical)
@@ -608,6 +744,27 @@ def build_process_task_runtime_container(
             limit=max(1, int(startup_outbox_limit))
         )
         outbox_publisher.start()
+        graph_execution_registry = LocalGraphExecutionRegistry()
+        cancellation_runtime_outbox = RuntimeOutbox(
+            publisher=outbox_publisher,
+            factory=OutboxMessage,
+            publish_limit=200,
+        )
+        cancellation_runtime = GraphCancellationRuntime(
+            task_store=task_store,
+            runtime_outbox=cancellation_runtime_outbox,
+            execution_registry=graph_execution_registry,
+            lease_ttl_ms=120_000,
+        )
+        cancellation_continuation_worker = GraphCancellationContinuationWorker(
+            task_store=task_store,
+            command_repository=command_repository,
+            cancellation_runtime=cancellation_runtime,
+            worker_id=f"{recovery_id}::graph-cancellation",
+        )
+        constructed.append(
+            ("cancellation_continuation_worker", cancellation_continuation_worker)
+        )
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)
         raise TaskRuntimeContainerConstructionError(
@@ -639,6 +796,8 @@ def build_process_task_runtime_container(
         scheduler_result_repository=scheduler_result_repository,
         event_store=event_store,
         outbox_publisher=outbox_publisher,
+        graph_execution_registry=graph_execution_registry,
+        cancellation_continuation_worker=cancellation_continuation_worker,
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
     )
@@ -656,6 +815,7 @@ __all__ = [
     "TASK_RUNTIME_COORDINATOR_NOT_BOUND",
     "TASK_RUNTIME_DRAIN_FAILED",
     "TASK_RUNTIME_MIGRATION_FAILED",
+    "TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED",
     "TASK_RUNTIME_PROCESS_SCOPE_VIOLATION",
     "ProcessTaskRuntimeContainer",
     "TaskRuntimeCloseFailure",

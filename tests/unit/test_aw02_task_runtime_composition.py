@@ -12,13 +12,18 @@ from host_brain.persistence.task_repository import DurableTaskStore, RecoveryRep
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import (
+    TASK_RUNTIME_ACTIVATION_FAILED,
     TASK_RUNTIME_CANONICAL_DB_PATH_MISMATCH,
     TASK_RUNTIME_CONSTRUCTION_FAILED,
     TASK_RUNTIME_MIGRATION_FAILED,
+    TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED,
     ProcessTaskRuntimeContainer,
+    TaskRuntimeContainerCloseError,
     TaskRuntimeContainerConstructionError,
+    TaskRuntimeContainerError,
     build_process_task_runtime_container,
 )
+from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
@@ -112,6 +117,12 @@ class _TaskStore(_Closeable):
 
     def assert_outbox_delivery_ready(self) -> None:
         self.events.append("task-store:outbox-ready")
+
+    def assert_graph_cancellation_continuation_ready(self) -> None:
+        self.events.append("task-store:cancellation-continuation-ready")
+
+    def claim_pending_graph_cancellations(self, **_kwargs: Any) -> list[dict[str, Any]]:
+        return []
 
     def recover_startup(self, *, recovery_id: str) -> RecoveryReport:
         self.events.append(f"task-store:recover:{recovery_id}")
@@ -212,6 +223,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "migration:apply:startup::task-runtime",
         "task-store:build",
         "task-store:outbox-ready",
+        "task-store:cancellation-continuation-ready",
         f"task-store:recover:{container.recovery_id}",
         "review-store:build",
         "worker-projection-store:build",
@@ -232,6 +244,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert container.outbox_publisher.task_store is container.task_store
     assert container.outbox_publisher.event_store is container.event_store
     assert container.outbox_publisher.worker_id == f"{container.recovery_id}::outbox"
+    assert container.cancellation_continuation_worker.worker_id == (
+        f"{container.recovery_id}::graph-cancellation"
+    )
+    assert container.graph_execution_registry is not None
     assert container.recovery_report.recovery_id == container.recovery_id
     execution_owner = container.execution_owner_id("configured-owner")
     assert execution_owner.startswith("configured-owner::runtime::")
@@ -302,14 +318,15 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 6
+    assert len(events) == 7
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
     ]
     assert events[2] == "task-store:outbox-ready"
-    assert events[3].startswith("task-store:recover:task-runtime-startup::")
-    assert events[4:] == ["task-store:close", "migration:close"]
+    assert events[3] == "task-store:cancellation-continuation-ready"
+    assert events[4].startswith("task-store:recover:task-runtime-startup::")
+    assert events[5:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -367,8 +384,9 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         "task-store:build",
     ]
     assert events[2] == "task-store:outbox-ready"
-    assert events[3].startswith("task-store:recover:task-runtime-startup::")
-    assert events[4:] == [
+    assert events[3] == "task-store:cancellation-continuation-ready"
+    assert events[4].startswith("task-store:recover:task-runtime-startup::")
+    assert events[5:] == [
         "review-store:build",
         "worker-projection-store:build",
         "repository:build",
@@ -400,16 +418,21 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
 
     coordinator = Coordinator()
     container.bind_runtime(coordinator)
-    asyncio.run(container.activate_runtime())
-    events.clear()
 
-    asyncio.run(container.aclose())
+    async def activate_and_close() -> None:
+        await container.activate_runtime()
+        assert container.cancellation_continuation_worker.running
+        events.clear()
+        await container.aclose()
+        assert not container.cancellation_continuation_worker.running
+
+    asyncio.run(activate_and_close())
 
     assert events == [
         "coordinator:admission-close",
         "coordinator:drain",
-        "publisher:publish:1000",
         "coordinator:close",
+        "publisher:publish:1000",
         "publisher:close",
         "event-store:close",
         "scheduler-result:close",
@@ -425,6 +448,247 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
     assert not container.activated
     asyncio.run(container.aclose())
     assert len(events) == 14
+
+
+def test_worker_start_failure_rolls_back_and_detaches_activated_coordinator(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    container = _build_fake_container(tmp_path, events)
+
+    class Coordinator:
+        async def activate(self) -> None:
+            events.append("coordinator:activate")
+
+        async def aclose(self) -> None:
+            events.append("coordinator:rollback-close")
+
+    class FailingWorker:
+        async def start(self) -> None:
+            events.append("worker:start")
+            raise RuntimeError("private readiness detail")
+
+        async def stop(self) -> None:
+            events.append("worker:rollback-stop")
+
+        async def join(self) -> None:
+            events.append("worker:rollback-join")
+
+    coordinator = Coordinator()
+    container.cancellation_continuation_worker = FailingWorker()  # type: ignore[assignment]
+    container.bind_runtime(coordinator)
+    events.clear()
+
+    with pytest.raises(TaskRuntimeContainerError) as caught:
+        asyncio.run(container.activate_runtime())
+
+    assert caught.value.reason_code == TASK_RUNTIME_ACTIVATION_FAILED
+    assert "private readiness detail" not in caught.value.detail
+    assert events == [
+        "coordinator:activate",
+        "worker:start",
+        "worker:rollback-stop",
+        "worker:rollback-join",
+        "coordinator:rollback-close",
+    ]
+    assert not container.activated
+    assert container.bound_runtime is None
+
+    asyncio.run(container.aclose())
+
+
+def test_failed_activation_rollback_retains_runtime_until_close_retry(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    container = _build_fake_container(tmp_path, events)
+
+    class Coordinator:
+        fail_close = True
+
+        async def activate(self) -> None:
+            events.append("coordinator:activate")
+
+        async def aclose(self) -> None:
+            events.append("coordinator:close")
+            if self.fail_close:
+                raise RuntimeError("close failed")
+
+    class FailingWorker:
+        async def start(self) -> None:
+            raise RuntimeError("worker start failed")
+
+        async def stop(self) -> None:
+            return None
+
+        async def join(self) -> None:
+            return None
+
+    coordinator = Coordinator()
+    container.cancellation_continuation_worker = FailingWorker()  # type: ignore[assignment]
+    container.bind_runtime(coordinator)
+
+    with pytest.raises(TaskRuntimeContainerError) as caught:
+        asyncio.run(container.activate_runtime())
+
+    assert caught.value.reason_code == TASK_RUNTIME_ACTIVATION_FAILED
+    assert container.bound_runtime is coordinator
+    assert not container.activated
+
+    with pytest.raises(TaskRuntimeContainerError) as retry:
+        asyncio.run(container.activate_runtime())
+    assert retry.value.reason_code == TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED
+    assert events.count("coordinator:activate") == 1
+
+    with pytest.raises(TaskRuntimeContainerCloseError) as close_failure:
+        asyncio.run(container.aclose())
+    assert close_failure.value.failures[-1].component == (
+        "runtime_coordinator_quiescence"
+    )
+    assert not container.closed
+    assert "task-store:close" not in events
+
+    coordinator.fail_close = False
+    asyncio.run(container.aclose())
+    assert events.count("coordinator:close") == 3
+    assert container.closed
+
+
+def test_runtime_group_retries_only_children_that_failed_to_close() -> None:
+    class Runtime:
+        def __init__(self, *, fail_close: bool) -> None:
+            self.fail_close = fail_close
+            self.close_calls = 0
+
+        async def activate(self) -> None:
+            return None
+
+        async def close_admission(self) -> None:
+            return None
+
+        async def drain(self) -> None:
+            return None
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            if self.fail_close:
+                raise RuntimeError("close failed")
+
+    healthy = Runtime(fail_close=False)
+    retriable = Runtime(fail_close=True)
+    group = GovernedRuntimeGroup({"healthy": healthy, "retriable": retriable})
+
+    async def close_with_retry() -> None:
+        await group.activate()
+        with pytest.raises(RuntimeError, match="GOVERNED_RUNTIME_GROUP_CLOSE_FAILED"):
+            await group.aclose()
+        retriable.fail_close = False
+        await group.aclose()
+
+    asyncio.run(close_with_retry())
+    assert healthy.close_calls == 1
+    assert retriable.close_calls == 2
+
+
+def test_nonquiescent_cancellation_worker_keeps_durable_stores_open(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    container = _build_fake_container(tmp_path, events)
+
+    class RetriableWorker:
+        fail = True
+
+        async def start(self) -> None:
+            events.append("worker:start")
+
+        async def stop(self) -> None:
+            events.append("worker:stop")
+            if self.fail:
+                raise RuntimeError("still running")
+
+        async def join(self) -> None:
+            events.append("worker:join")
+
+        async def aclose(self) -> None:
+            events.append("worker:close")
+
+    worker = RetriableWorker()
+    container.cancellation_continuation_worker = worker  # type: ignore[assignment]
+    container.bind_runtime(
+        SimpleNamespace(
+            activate=lambda: None,
+            aclose=lambda: None,
+        )
+    )
+    events.clear()
+
+    async def close_with_retry() -> None:
+        await container.activate_runtime()
+        events.clear()
+        with pytest.raises(TaskRuntimeContainerCloseError) as caught:
+            await container.aclose()
+        assert caught.value.failures[-1].component == (
+            "graph_cancellation_continuation_quiescence"
+        )
+        assert events == ["worker:stop"]
+        assert not container.closed
+        assert container.infrastructure_ready
+        with pytest.raises(TaskRuntimeContainerError) as retry:
+            await container.activate_runtime()
+        assert retry.value.reason_code == TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED
+        worker.fail = False
+        await container.aclose()
+
+    asyncio.run(close_with_retry())
+    assert container.closed
+    assert "task-store:close" in events
+
+
+@pytest.mark.parametrize("failure_phase", ["admission", "drain"])
+def test_coordinator_quiescence_failure_keeps_stores_open_for_retry(
+    tmp_path: Path,
+    failure_phase: str,
+) -> None:
+    events: list[str] = []
+    container = _build_fake_container(tmp_path, events)
+
+    class Coordinator:
+        fail = True
+
+        async def activate(self) -> None:
+            return None
+
+        async def close_admission(self) -> None:
+            if self.fail and failure_phase == "admission":
+                raise RuntimeError("admission close failed")
+
+        async def drain(self) -> None:
+            if self.fail and failure_phase == "drain":
+                raise RuntimeError("drain failed")
+
+        async def aclose(self) -> None:
+            return None
+
+    coordinator = Coordinator()
+    container.bind_runtime(coordinator)
+
+    async def close_with_retry() -> None:
+        await container.activate_runtime()
+        events.clear()
+        with pytest.raises(TaskRuntimeContainerCloseError):
+            await container.aclose()
+        assert not container.closed
+        assert "task-store:close" not in events
+        with pytest.raises(TaskRuntimeContainerError) as retry:
+            await container.activate_runtime()
+        assert retry.value.reason_code == TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED
+        coordinator.fail = False
+        await container.aclose()
+
+    asyncio.run(close_with_retry())
+    assert container.closed
+    assert "task-store:close" in events
 
 
 def test_drain_outbox_reports_deferred_when_pending_row_is_not_claimable(

@@ -739,6 +739,11 @@ def build_governed_internal_runtime(
         acceptance=_AgentResultAcceptance(),
         projection_reader=_AgentProjectionReader(result_repository),
         review_runtime=TaskNodeReviewRuntime(review_store),
+        execution_registry=getattr(
+            task_runtime_container,
+            "graph_execution_registry",
+            None,
+        ),
         owner_id=owner_id,
     )
     application = GovernedCommandApplication(

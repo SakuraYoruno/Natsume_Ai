@@ -37,7 +37,7 @@ def _store(tmp_path: Path, clock: _Clock) -> DurableTaskStore:
         ts_ms=clock.value,
     )
     assert migrated.success is True, migrated.as_dict()
-    assert migrated.summary["current_version"] == 93
+    assert migrated.summary["current_version"] == 94
     return DurableTaskStore(db_path, clock=clock)
 
 

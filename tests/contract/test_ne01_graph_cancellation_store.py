@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
 import json
 import sqlite3
+from threading import Event
+import time
 from urllib.parse import quote
 
 import pytest
@@ -38,6 +41,7 @@ from host_brain.persistence.task_repository import (
     OutboxMessage,
     TASK_STORE_CANCELLATION_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
+    TASK_STORE_LEASE_CONFLICT,
     TaskStoreError,
     build_acceptance_effect_payload_digest,
     build_outbox_payload_ref,
@@ -54,6 +58,11 @@ class Clock:
 
     def __call__(self) -> int:
         return self.value
+
+
+class RealtimeClock:
+    def __call__(self) -> int:
+        return time.time_ns() // 1_000_000
 
 
 def _event(
@@ -460,6 +469,457 @@ def _insert_review(
         conn.commit()
 
 
+def _writer_lock(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(db_path), timeout=5, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("BEGIN IMMEDIATE")
+    return conn
+
+
+def _signal_next_store_connection(store: DurableTaskStore) -> Event:
+    entered = Event()
+    original_connect = store._connect
+
+    def signalled_connect() -> sqlite3.Connection:
+        conn = original_connect()
+        entered.set()
+        return conn
+
+    store._connect = signalled_connect  # type: ignore[method-assign]
+    return entered
+
+
+def test_graph_cancellation_claim_lease_starts_after_writer_lock_acquisition(
+    tmp_path: Path,
+) -> None:
+    seeded = _store(tmp_path)
+    _request(seeded)
+    clock = RealtimeClock()
+    store = DurableTaskStore(seeded.db_path, clock=clock)
+    entered = _signal_next_store_connection(store)
+    writer = _writer_lock(store.db_path)
+    lease_ms = 80
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                store.claim_pending_graph_cancellations,
+                "lock-wait-worker",
+                lease_ms,
+                limit=1,
+            )
+            assert entered.wait(timeout=2)
+            time.sleep((lease_ms + 80) / 1_000)
+            released_ts_ms = clock()
+            writer.commit()
+            claimed = future.result(timeout=2)[0]
+    finally:
+        writer.close()
+
+    assert claimed["claim_expires_ts_ms"] >= released_ts_ms + lease_ms
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "defer", "complete"])
+def test_graph_cancellation_settlement_resamples_time_after_writer_lock_wait(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    seeded = _store(tmp_path)
+    requested, _ = _request(seeded)
+    intent_ref = requested["intent"]["intent_ref"]
+    clock = RealtimeClock()
+    store = DurableTaskStore(seeded.db_path, clock=clock)
+    lease_ms = 100
+    claim = store.claim_pending_graph_cancellations(
+        "lock-wait-worker",
+        lease_ms,
+        limit=1,
+    )[0]
+    entered = _signal_next_store_connection(store)
+    writer = _writer_lock(store.db_path)
+
+    def mutate_claim() -> dict:
+        common = {
+            "worker_id": "lock-wait-worker",
+            "claim_token": claim["claim_token"],
+            "fencing_token": claim["claim_fencing_token"],
+            "expected_version": claim["status_version"],
+        }
+        if operation == "heartbeat":
+            return store.heartbeat_graph_cancellation(
+                intent_ref,
+                lease_ms=lease_ms,
+                **common,
+            )
+        if operation == "defer":
+            return store.defer_graph_cancellation(
+                intent_ref,
+                retry_delay_ms=lease_ms,
+                last_error="LOCK_WAIT_RETRY:TimeoutError",
+                **common,
+            )
+        return store.complete_graph_cancellation(intent_ref, **common)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(mutate_claim)
+            assert entered.wait(timeout=2)
+            time.sleep((lease_ms + 80) / 1_000)
+            writer.commit()
+            with pytest.raises(TaskStoreError) as failure:
+                future.result(timeout=2)
+    finally:
+        writer.close()
+
+    assert failure.value.reason_code == TASK_STORE_LEASE_CONFLICT
+
+
+def test_graph_cancellation_continuation_claim_heartbeat_defer_and_takeover(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    requested, _ = _request(store)
+    intent_ref = requested["intent"]["intent_ref"]
+
+    claimed = store.claim_pending_graph_cancellations(
+        "worker-a",
+        100,
+        limit=2,
+    )
+    assert len(claimed) == 1
+    first = claimed[0]
+    assert first["intent_ref"] == intent_ref
+    assert first["intent"]["status"] == "REQUESTED"
+    assert first["claim_owner"] == "worker-a"
+    assert first["claim_fencing_token"] == 1
+    assert first["attempt_count"] == 1
+    assert first["status_version"] == 1
+    assert store.claim_pending_graph_cancellations("worker-b", 100) == []
+
+    heartbeat = store.heartbeat_graph_cancellation(
+        intent_ref,
+        "worker-a",
+        first["claim_token"],
+        first["claim_fencing_token"],
+        200,
+        first["status_version"],
+    )
+    assert heartbeat["status_version"] == first["status_version"] + 1
+    assert heartbeat["claim_expires_ts_ms"] == NOW + 200
+    with pytest.raises(TaskStoreError, match="stale expected version"):
+        store.heartbeat_graph_cancellation(
+            intent_ref,
+            "worker-a",
+            first["claim_token"],
+            first["claim_fencing_token"],
+            200,
+            first["status_version"],
+        )
+
+    assert isinstance(store._clock, Clock)
+    store._clock.value = NOW + 200
+    takeover_store = DurableTaskStore(store.db_path, clock=store._clock)
+    takeover = takeover_store.claim_pending_graph_cancellations(
+        "worker-b",
+        100,
+        limit=1,
+    )[0]
+    assert takeover["claim_fencing_token"] == 2
+    assert takeover["attempt_count"] == 2
+    assert takeover["status_version"] == heartbeat["status_version"] + 1
+
+    with pytest.raises(TaskStoreError, match="owned by another worker"):
+        store.defer_graph_cancellation(
+            intent_ref,
+            "worker-a",
+            first["claim_token"],
+            first["claim_fencing_token"],
+            50,
+            "CANCELLATION_NOT_STABLE:RuntimeError",
+            takeover["status_version"],
+        )
+
+    deferred = takeover_store.defer_graph_cancellation(
+        intent_ref,
+        "worker-b",
+        takeover["claim_token"],
+        takeover["claim_fencing_token"],
+        50,
+        "CANCELLATION_NOT_STABLE:RuntimeError",
+        takeover["status_version"],
+    )
+    assert deferred["claim_owner"] is None
+    assert deferred["claim_token"] is None
+    assert deferred["claim_expires_ts_ms"] is None
+    assert deferred["available_ts_ms"] == NOW + 250
+    assert takeover_store.claim_pending_graph_cancellations("worker-c", 100) == []
+
+    store._clock.value = NOW + 250
+    reclaimed = takeover_store.claim_pending_graph_cancellations(
+        "worker-c",
+        100,
+        limit=1,
+    )[0]
+    assert reclaimed["claim_fencing_token"] == 3
+    assert reclaimed["attempt_count"] == 3
+    assert reclaimed["intent"]["intent_ref"] == intent_ref
+    with pytest.raises(TaskStoreError, match="before its canonical decision"):
+        takeover_store.complete_graph_cancellation(
+            intent_ref,
+            "worker-c",
+            reclaimed["claim_token"],
+            reclaimed["claim_fencing_token"],
+            reclaimed["status_version"],
+        )
+
+
+def test_graph_cancellation_continuation_claim_is_single_owner_across_connections(
+    tmp_path: Path,
+) -> None:
+    first_store = _store(tmp_path)
+    _request(first_store)
+    second_store = DurableTaskStore(first_store.db_path, clock=Clock())
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            first_store.claim_pending_graph_cancellations,
+            "worker-a",
+            1_000,
+            limit=1,
+        )
+        second = executor.submit(
+            second_store.claim_pending_graph_cancellations,
+            "worker-b",
+            1_000,
+            limit=1,
+        )
+        results = (first.result(), second.result())
+
+    assert sorted(len(result) for result in results) == [0, 1]
+    winner = next(result[0] for result in results if result)
+    assert winner["claim_owner"] in {"worker-a", "worker-b"}
+    assert winner["claim_fencing_token"] == 1
+
+
+def test_graph_cancellation_schema_readiness_is_cached_per_store(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    store.assert_graph_cancellation_ready()
+    store.assert_graph_cancellation_continuation_ready()
+
+    def unexpected_connect():
+        raise AssertionError("cached readiness must not reopen SQLite")
+
+    store._connect = unexpected_connect  # type: ignore[method-assign]
+    store.assert_graph_cancellation_ready()
+    store.assert_graph_cancellation_continuation_ready()
+    with pytest.raises(AssertionError, match="must not reopen"):
+        store.assert_graph_cancellation_ready(force_revalidate=True)
+
+
+def test_graph_cancellation_continuation_rejects_weakened_table_guards(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        table_sql = conn.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_graph_cancellation_continuation'
+            """
+        ).fetchone()[0]
+        weakened = str(table_sql).replace(
+            "last_error TEXT CHECK(\n"
+            "        last_error IS NULL\n"
+            "        OR (\n"
+            "            typeof(last_error) = 'text'\n"
+            "            AND length(trim(last_error)) > 0\n"
+            "            AND length(last_error) <= 2000\n"
+            "        )\n"
+            "    )",
+            "last_error TEXT",
+        )
+        weakened = weakened.replace(
+            "intent_ref TEXT NOT NULL PRIMARY KEY",
+            "intent_ref TEXT PRIMARY KEY",
+        )
+        weakened = weakened.replace(
+            "graph_id TEXT NOT NULL",
+            "graph_id TEXT",
+        )
+        assert weakened != table_sql
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE task_runtime_graph_cancellation_continuation")
+        conn.execute(weakened)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX
+                uq_task_runtime_graph_cancellation_continuation_graph
+            ON task_runtime_graph_cancellation_continuation(
+                graph_id, graph_revision
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX idx_task_runtime_graph_cancellation_continuation_ready
+            ON task_runtime_graph_cancellation_continuation(
+                available_ts_ms, claim_expires_ts_ms,
+                graph_id, graph_revision, intent_ref
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_continuation(
+                intent_ref, graph_id, graph_revision,
+                claim_owner, claim_token, claim_expires_ts_ms,
+                claim_fencing_token, attempt_count, available_ts_ms,
+                last_error, status_version, created_ts_ms, updated_ts_ms
+            ) VALUES (
+                NULL, 'ghost-graph', 1,
+                NULL, NULL, NULL,
+                0, 0, 0,
+                NULL, 0, 0, 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_continuation(
+                intent_ref, graph_id, graph_revision,
+                claim_owner, claim_token, claim_expires_ts_ms,
+                claim_fencing_token, attempt_count, available_ts_ms,
+                last_error, status_version, created_ts_ms, updated_ts_ms
+            ) VALUES (
+                'ghost-intent', NULL, 1,
+                NULL, NULL, NULL,
+                0, 0, 0,
+                NULL, 0, 0, 0
+            )
+            """
+        )
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as failure:
+        DurableTaskStore(store.db_path, clock=Clock())
+
+    assert failure.value.reason_code == "TASK_STORE_SCHEMA_NOT_READY"
+
+
+@pytest.mark.parametrize(
+    ("intent_ref", "graph_id"),
+    ((None, "ghost-graph"), ("ghost-intent", None)),
+)
+def test_graph_cancellation_continuation_identity_is_not_nullable(
+    tmp_path: Path,
+    intent_ref: str | None,
+    graph_id: str | None,
+) -> None:
+    store = _store(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph_cancellation_continuation(
+                    intent_ref, graph_id, graph_revision,
+                    claim_owner, claim_token, claim_expires_ts_ms,
+                    claim_fencing_token, attempt_count, available_ts_ms,
+                    last_error, status_version, created_ts_ms, updated_ts_ms
+                ) VALUES (
+                    ?, ?, 1,
+                    NULL, NULL, NULL,
+                    0, 0, 0,
+                    NULL, 0, 0, 0
+                )
+                """,
+                (intent_ref, graph_id),
+            )
+
+
+def test_graph_cancellation_continuation_rejects_extra_business_status_column(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            ALTER TABLE task_runtime_graph_cancellation_continuation
+            ADD COLUMN status TEXT NOT NULL DEFAULT 'COMPLETED'
+            """
+        )
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as failure:
+        store.assert_graph_cancellation_continuation_ready(force_revalidate=True)
+
+    assert failure.value.reason_code == "TASK_STORE_SCHEMA_NOT_READY"
+
+
+def test_graph_cancellation_continuation_rejects_split_foreign_keys(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        table_sql = str(
+            conn.execute(
+                """
+                SELECT sql FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_graph_cancellation_continuation'
+                """
+            ).fetchone()[0]
+        )
+        composite = (
+            "FOREIGN KEY (intent_ref, graph_id, graph_revision)\n"
+            "        REFERENCES task_runtime_graph_cancellation_intent(\n"
+            "            intent_ref, graph_id, graph_revision\n"
+            "        ) ON DELETE RESTRICT"
+        )
+        split = (
+            "FOREIGN KEY (intent_ref)\n"
+            "        REFERENCES task_runtime_graph_cancellation_intent(intent_ref) "
+            "ON DELETE RESTRICT,\n"
+            "    FOREIGN KEY (graph_id)\n"
+            "        REFERENCES task_runtime_graph_cancellation_intent(graph_id) "
+            "ON DELETE RESTRICT,\n"
+            "    FOREIGN KEY (graph_revision)\n"
+            "        REFERENCES task_runtime_graph_cancellation_intent(graph_revision) "
+            "ON DELETE RESTRICT"
+        )
+        weakened = table_sql.replace(composite, split)
+        assert weakened != table_sql
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE task_runtime_graph_cancellation_continuation")
+        conn.execute(weakened)
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX
+                uq_task_runtime_graph_cancellation_continuation_graph
+            ON task_runtime_graph_cancellation_continuation(
+                graph_id, graph_revision
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX idx_task_runtime_graph_cancellation_continuation_ready
+            ON task_runtime_graph_cancellation_continuation(
+                available_ts_ms, claim_expires_ts_ms,
+                graph_id, graph_revision, intent_ref
+            )
+            """
+        )
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as failure:
+        store.assert_graph_cancellation_continuation_ready(force_revalidate=True)
+
+    assert failure.value.reason_code == "TASK_STORE_SCHEMA_NOT_READY"
+
+
 def test_graph_cancellation_request_advance_finalize_and_response_loss_replay(
     tmp_path: Path,
 ) -> None:
@@ -468,6 +928,11 @@ def test_graph_cancellation_request_advance_finalize_and_response_loss_replay(
     assert requested["graph"]["graph"]["status"] == "BLOCKED"
     assert requested["nodes"][0]["status"] == "CANCEL_REQUESTED"
     intent = requested["intent"]
+    continuation = store.claim_pending_graph_cancellations(
+        "worker-finalizer",
+        60_000,
+        limit=1,
+    )[0]
     advanced = store.advance_graph_cancellation(intent["intent_ref"])
     assert advanced["ready_to_finalize"] is True
     assert advanced["reconciliation_evidence_refs"] == (intent["intent_ref"],)
@@ -533,6 +998,40 @@ def test_graph_cancellation_request_advance_finalize_and_response_loss_replay(
     assert store.get_graph_cancellation_decision_for_intent(intent["intent_ref"])[
         "decision_ref"
     ] == decision.decision_ref
+    completed_continuation = store.complete_graph_cancellation(
+        intent["intent_ref"],
+        "worker-finalizer",
+        continuation["claim_token"],
+        continuation["claim_fencing_token"],
+        continuation["status_version"],
+    )
+    assert completed_continuation["claim_owner"] is None
+    assert completed_continuation["intent"]["status"] == "FINALIZED"
+    assert completed_continuation["decision_ref"] == decision.decision_ref
+    assert store.get_graph_cancellation_continuation(intent["intent_ref"]) is None
+    assert store.claim_pending_graph_cancellations("worker-replay", 100) == []
+
+    # Simulate a process that committed the 0092 decision, then died before
+    # its 0094 complete call.  The next scan removes the expired coordination
+    # residue; the durable intent/decision remain the sole completion truth.
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_continuation(
+                intent_ref, graph_id, graph_revision,
+                claim_owner, claim_token, claim_expires_ts_ms,
+                claim_fencing_token, attempt_count, available_ts_ms,
+                last_error, status_version, created_ts_ms, updated_ts_ms
+            ) VALUES (?, 'graph-cancel', 1, 'crashed-worker', 'crashed-token', ?,
+                      1, 1, ?, NULL, 1, ?, ?)
+            """,
+            (intent["intent_ref"], NOW + 1, NOW, NOW, NOW),
+        )
+        conn.commit()
+    assert isinstance(store._clock, Clock)
+    store._clock.value = NOW + 1
+    assert store.claim_pending_graph_cancellations("cleanup-worker", 100) == []
+    assert store.get_graph_cancellation_continuation(intent["intent_ref"]) is None
 
     replay = store.finalize_graph_cancellation("graph-cancel", 1, **kwargs)
     assert replay["replayed"] is True

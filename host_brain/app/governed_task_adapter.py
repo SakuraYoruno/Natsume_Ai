@@ -967,6 +967,11 @@ def build_governed_host_runtime(
             else None
         ),
         acceptance_effects_enabled=True,
+        execution_registry=getattr(
+            task_runtime_container,
+            "graph_execution_registry",
+            None,
+        ),
         owner_id=owner_id,
     )
     application = GovernedCommandApplication(
