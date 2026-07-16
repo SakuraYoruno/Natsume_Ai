@@ -18,7 +18,6 @@ RECORD_NAMES = (
     "_attempt_id",
     "_assert_durable_identity",
     "_evidence_refs",
-    "_exception_reason",
     "_mapping",
     "_nested_mapping",
     "_node_input_refs",
@@ -37,7 +36,6 @@ RECEIPT_NAMES = (
     "GovernedExecutionReceipt",
     "_digest_from_receipt_ref",
     "_worker_receipt_ref",
-    "approved_commit_event",
     "build_execution_receipt",
     "terminal_event",
 )
@@ -220,7 +218,6 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
     }
     assert {
         "_assert_durable_identity",
-        "approved_commit_event",
         "build_execution_receipt",
         "terminal_event",
     } <= free_calls

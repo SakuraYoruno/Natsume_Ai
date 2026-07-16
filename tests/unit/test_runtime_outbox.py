@@ -16,6 +16,9 @@ from host_brain.task_runtime import (
     parallel_settlement_runtime as parallel_settlement_runtime_module,
 )
 from host_brain.task_runtime import (
+    parallel_success_runtime as parallel_success_runtime_module,
+)
+from host_brain.task_runtime import (
     node_lifecycle_runtime as node_lifecycle_runtime_module,
 )
 from host_brain.task_runtime import (
@@ -34,6 +37,10 @@ def _outbox_owners() -> tuple[ast.ClassDef, ...]:
         (
             parallel_settlement_runtime_module,
             "ParallelSettlementRuntime",
+        ),
+        (
+            parallel_success_runtime_module,
+            "ParallelSuccessRuntime",
         ),
         (
             node_lifecycle_runtime_module,
@@ -410,5 +417,5 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
     assert len(rows) == 58
     assert best_effort_count == 5
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "26a1d181a473eb17d48b5cc01d9782e202d4fcf47e09c198f74d406514db95b6"
+        "baba4d0824808b761c56b88131402ffc8848d598cf2654feffed303ae11785b9"
     )

@@ -597,7 +597,7 @@ async def test_b5_completed_restart_replays_frozen_decision_without_recompiling_
         raise AssertionError("completed Graph must use its frozen 0091 authority")
 
     monkeypatch.setattr(
-        "host_brain.task_runtime.node_execution_runtime.compile_graph_acceptance_effects",
+        "host_brain.task_runtime.parallel_success_runtime.compile_graph_acceptance_effects",
         forbidden_effect_recompile,
     )
     forbidden_resolver = _FailingResolver()
@@ -637,7 +637,7 @@ async def test_b5_tampered_reader_projection_fails_before_outer_commit(
 ) -> None:
     fixture = _b5_fixture(tmp_path, delays={"left": 0.01, "right": 0.0})
     db_path, contracts, projection_store, store, runtime, _, calls, _ = fixture
-    runtime._projection_reader = _TamperedProjectionReader(  # noqa: SLF001
+    runtime._parallel_success._projection_reader = _TamperedProjectionReader(  # noqa: SLF001
         projection_store,
         field_name=field_name,
         value=value,
