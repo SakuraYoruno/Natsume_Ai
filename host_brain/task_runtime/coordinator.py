@@ -62,9 +62,10 @@ from .coordinator_receipts import (
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
 from .local_graph_execution_registry import LocalGraphExecutionRegistry
+from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .parallel_settlement_runtime import ParallelSettlementRuntime
 from .runtime_outbox import RuntimeOutbox
-from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
+from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
 from .errors import (
     GOVERNED_ACCEPTANCE_FAILED,
     GOVERNED_ADMISSION_INVALID,
@@ -186,6 +187,12 @@ class GovernedTaskCoordinator:
             lease_ttl_ms=self._lease_ttl_ms,
         )
         self._budgets = DurableBudgetRuntime(task_store=task_store, outbox_factory=outbox_factory)
+        self._node_lifecycle = DurableNodeLifecycleRuntime(
+            task_store=task_store,
+            budget_runtime=self._budgets,
+            runtime_outbox=self._runtime_outbox,
+            owner_id=self._owner_id,
+        )
         self._parallel_settlement = ParallelSettlementRuntime(
             task_store=task_store,
             budget_runtime=self._budgets,
@@ -450,7 +457,7 @@ class GovernedTaskCoordinator:
                 review_admission = admitted.for_node(pre_review_node_id)
                 review_node = durable_nodes[pre_review_node_id]
                 if graph_status in {"CREATED", "ACTIVE"}:
-                    graph = await self._transition_graph(review_admission, graph, "BLOCKED")
+                    graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
@@ -468,14 +475,14 @@ class GovernedTaskCoordinator:
                     dict.fromkeys((*_record_evidence_refs(review_node), *review_refs))
                 )
                 if gate.allowed:
-                    await self._transition_node(
+                    await self._node_lifecycle.transition_node(
                         review_admission,
                         review_node,
                         "READY",
                         evidence_refs=pre_review_refs,
                     )
                     if graph_status == "BLOCKED":
-                        graph = await self._transition_graph(
+                        graph = await self._node_lifecycle.transition_graph(
                             review_admission,
                             graph,
                             "ACTIVE",
@@ -483,13 +490,13 @@ class GovernedTaskCoordinator:
                     await self._runtime_outbox.publish_pending()
                     continue
                 if gate.disposition == "REVIEW_DENIED":
-                    await self._cancel_waiting_review_node(
+                    await self._node_lifecycle.cancel_waiting_review_node(
                         review_admission,
                         review_node,
                         evidence_refs=pre_review_refs,
                     )
                     if graph_status == "BLOCKED":
-                        await self._transition_graph(review_admission, graph, "CANCELLED")
+                        await self._node_lifecycle.transition_graph(review_admission, graph, "CANCELLED")
                     budget = await self._budgets.finalize(
                         budget, target_status=BudgetReservationStatus.RELEASED
                     )
@@ -531,7 +538,7 @@ class GovernedTaskCoordinator:
                 review_admission = admitted.for_node(post_review_node_id)
                 review_node = durable_nodes[post_review_node_id]
                 if graph_status == "ACTIVE":
-                    graph = await self._transition_graph(review_admission, graph, "BLOCKED")
+                    graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
                 attempts = await self._attempts_for_node(review_admission)
                 if not attempts:
@@ -555,7 +562,7 @@ class GovernedTaskCoordinator:
                     dict.fromkeys((*_record_evidence_refs(review_node), *review_refs))
                 )
                 if gate.allowed:
-                    await self._transition_node(
+                    await self._node_lifecycle.transition_node(
                         review_admission,
                         review_node,
                         "ACCEPTED",
@@ -580,20 +587,20 @@ class GovernedTaskCoordinator:
                         },
                     )
                     if graph_status == "BLOCKED":
-                        await self._transition_graph(review_admission, graph, "ACTIVE")
+                        await self._node_lifecycle.transition_graph(review_admission, graph, "ACTIVE")
                     await self._runtime_outbox.publish_pending()
                     continue
                 reservation = await self._try_operation(review_admission.reservation_id)
                 receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.disposition == "REVIEW_DENIED":
-                    await self._transition_node(
+                    await self._node_lifecycle.transition_node(
                         review_admission,
                         review_node,
                         "FAILED",
                         evidence_refs=post_review_refs,
                     )
                     if graph_status == "BLOCKED":
-                        graph = await self._transition_graph(
+                        graph = await self._node_lifecycle.transition_graph(
                             review_admission,
                             graph,
                             "FAILED",
@@ -655,7 +662,7 @@ class GovernedTaskCoordinator:
 
             if budget.status == "EXCEEDED":
                 if graph_status in {"CREATED", "ACTIVE"}:
-                    graph = await self._transition_graph(final_admission, graph, "BLOCKED")
+                    graph = await self._node_lifecycle.transition_graph(final_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
                 budget = await self._budgets.finalize(
                     budget, target_status=BudgetReservationStatus.RELEASED
@@ -764,7 +771,7 @@ class GovernedTaskCoordinator:
                         "accepted TaskGraph lacks a consumed budget",
                     )
                 if graph_status == "ACTIVE":
-                    graph = await self._transition_graph(final_admission, graph, "COMPLETED")
+                    graph = await self._node_lifecycle.transition_graph(final_admission, graph, "COMPLETED")
                     graph_status = _status(graph)
                 if graph_status != "COMPLETED":
                     raise GovernedRuntimeError(
@@ -809,7 +816,7 @@ class GovernedTaskCoordinator:
                     terminal_node_id = _required_record_text(selected, "node_id")
                 terminal_admission = admitted.for_node(terminal_node_id or admitted.node_id)
                 if graph_status == "ACTIVE":
-                    graph = await self._transition_graph(
+                    graph = await self._node_lifecycle.transition_graph(
                         terminal_admission,
                         graph,
                         "FAILED" if failed_node_id is not None else "BLOCKED",
@@ -924,7 +931,7 @@ class GovernedTaskCoordinator:
 
             if decision.dependency_ready_node_ids or decision.retry_due_node_ids:
                 for node_id in decision.dependency_ready_node_ids:
-                    await self._transition_node(
+                    await self._node_lifecycle.transition_node(
                         admitted.for_node(node_id),
                         durable_nodes[node_id],
                         "READY",
@@ -1010,12 +1017,12 @@ class GovernedTaskCoordinator:
             if review_binding is not None:
                 binding = review_binding
                 review_admission = admitted.for_node(binding.node_id)
-                review_node = await self._transition_node(
+                review_node = await self._node_lifecycle.transition_node(
                     review_admission,
                     durable_nodes[binding.node_id],
                     "WAITING_APPROVAL",
                 )
-                graph = await self._transition_graph(review_admission, graph, "BLOCKED")
+                graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
                     context=self._review_context(
@@ -1050,7 +1057,7 @@ class GovernedTaskCoordinator:
             # or a sequential deferred child starts; no child is allowed to
             # own the shared Graph/Budget terminal transition.
             if parallel_success_enabled and graph_status == "CREATED":
-                graph = await self._transition_graph(
+                graph = await self._node_lifecycle.transition_graph(
                     admitted.for_node(claimable[0].node_id),
                     graph,
                     "ACTIVE",
@@ -1071,7 +1078,7 @@ class GovernedTaskCoordinator:
                 and (has_unaccepted_successor or parallel_success_enabled)
             ):
                 if graph_status == "CREATED":
-                    graph = await self._transition_graph(
+                    graph = await self._node_lifecycle.transition_graph(
                         admitted.for_node(claimable[0].node_id),
                         graph,
                         "ACTIVE",
@@ -1838,7 +1845,7 @@ class GovernedTaskCoordinator:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     "parallel node execution requires an outer-activated TaskGraph",
                 )
-            graph = await self._transition_graph(admitted, graph, "ACTIVE")
+            graph = await self._node_lifecycle.transition_graph(admitted, graph, "ACTIVE")
 
         attempt_no = len(attempt_numbers) + 1
         attempt_id = _attempt_id(admitted, attempt_no=attempt_no)
@@ -1888,8 +1895,8 @@ class GovernedTaskCoordinator:
         )
         lease_id = _required_record_text(lease, "lease_id")
         fencing_token = _record_positive_int(lease, "fencing_token")
-        node = await self._transition_node(admitted, node, "RUNNING")
-        attempt = await self._transition_attempt(
+        node = await self._node_lifecycle.transition_node(admitted, node, "RUNNING")
+        attempt = await self._node_lifecycle.transition_attempt(
             admitted,
             attempt,
             lease_id=lease_id,
@@ -1907,7 +1914,7 @@ class GovernedTaskCoordinator:
             refreshed_budget = await self._budgets.refresh(budget)
             if not defer_shared_terminal or refreshed_budget.status != "EXCEEDED":
                 raise
-            failure_ref = await self._mark_pre_reservation_failure(
+            failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
                 admitted,
                 graph=graph,
                 node=node,
@@ -1931,7 +1938,7 @@ class GovernedTaskCoordinator:
             return
         budget = precharge.context
         if not precharge.accepted:
-            receipt = await self._reject_budget_charge(
+            receipt = await self._node_lifecycle.reject_budget_charge(
                 admitted,
                 precharge,
                 attempt_id=attempt_id,
@@ -1956,7 +1963,7 @@ class GovernedTaskCoordinator:
         except RetryableWorkerPreparationError as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
             if not _retry_attempt_available(node, attempt_no=attempt_no):
-                failure_ref = await self._mark_pre_reservation_failure(
+                failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
                     admitted,
                     graph=graph,
                     node=node,
@@ -1966,7 +1973,7 @@ class GovernedTaskCoordinator:
                     reason_code=reason_code,
                     defer_graph_terminal=defer_shared_terminal,
                 )
-                budget = await self._finalize_node_budget(
+                budget = await self._node_lifecycle.finalize_node_budget(
                     budget,
                     target_status=BudgetReservationStatus.RELEASED,
                     defer_shared_terminal=defer_shared_terminal,
@@ -2038,7 +2045,7 @@ class GovernedTaskCoordinator:
                             GOVERNED_DURABLE_STATE_CONFLICT,
                             "durable retry decision could not be exactly replayed",
                         ) from replay_exc
-                    failure_ref = await self._mark_pre_reservation_failure(
+                    failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
                         admitted,
                         graph=graph,
                         node=node,
@@ -2049,7 +2056,7 @@ class GovernedTaskCoordinator:
                         evidence_refs=(error_ref,),
                         defer_graph_terminal=defer_shared_terminal,
                     )
-                    budget = await self._finalize_node_budget(
+                    budget = await self._node_lifecycle.finalize_node_budget(
                         budget,
                         target_status=BudgetReservationStatus.RELEASED,
                         defer_shared_terminal=defer_shared_terminal,
@@ -2142,7 +2149,7 @@ class GovernedTaskCoordinator:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     "retry budget rejection did not fail closed",
                 )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
@@ -2168,7 +2175,7 @@ class GovernedTaskCoordinator:
             return
         except Exception as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            failure_ref = await self._mark_pre_reservation_failure(
+            failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
                 admitted,
                 graph=graph,
                 node=node,
@@ -2178,7 +2185,7 @@ class GovernedTaskCoordinator:
                 reason_code=reason_code,
                 defer_graph_terminal=defer_shared_terminal,
             )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
@@ -2219,14 +2226,14 @@ class GovernedTaskCoordinator:
         )
         reservation_acquired, reservation = _reservation_result(reserved_raw)
         if not reservation_acquired:
-            await self._mark_worker_failure(
+            await self._node_lifecycle.mark_worker_failure(
                 admitted,
                 attempt_id=attempt_id,
                 fencing_token=fencing_token,
                 reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
                 graph_target=(None if defer_shared_terminal else "BLOCKED"),
             )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
@@ -2439,7 +2446,7 @@ class GovernedTaskCoordinator:
             )
             budget = charge.context
             if not charge.accepted:
-                receipt = await self._reject_budget_charge(
+                receipt = await self._node_lifecycle.reject_budget_charge(
                     admitted,
                     charge,
                     attempt_id=attempt_id,
@@ -2490,14 +2497,14 @@ class GovernedTaskCoordinator:
                 )
                 yield terminal_event(receipt)
                 return
-            await self._mark_worker_failure(
+            await self._node_lifecycle.mark_worker_failure(
                 admitted,
                 attempt_id=attempt_id,
                 fencing_token=fencing_token,
                 reason_code=worker_failure_reason,
                 graph_target=(None if defer_shared_terminal else "FAILED"),
             )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
@@ -2577,14 +2584,14 @@ class GovernedTaskCoordinator:
                 ),
             )
         except BaseException as exc:
-            await self._mark_worker_failure(
+            await self._node_lifecycle.mark_worker_failure(
                 admitted,
                 attempt_id=attempt_id,
                 fencing_token=fencing_token,
                 reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
                 graph_target=(None if defer_shared_terminal else "FAILED"),
             )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
@@ -2602,7 +2609,7 @@ class GovernedTaskCoordinator:
             return
         budget = charge.context
         if not charge.accepted:
-            receipt = await self._reject_budget_charge(
+            receipt = await self._node_lifecycle.reject_budget_charge(
                 admitted,
                 charge,
                 attempt_id=attempt_id,
@@ -2613,7 +2620,7 @@ class GovernedTaskCoordinator:
             return
         execution_context["budget"] = budget.execution_payload()
 
-        attempt = await self._transition_attempt(
+        attempt = await self._node_lifecycle.transition_attempt(
             admitted,
             attempt,
             lease_id=lease_id,
@@ -2621,13 +2628,13 @@ class GovernedTaskCoordinator:
             target_status="SUCCEEDED",
             evidence_refs=evidence_refs,
         )
-        node = await self._transition_node(
+        node = await self._node_lifecycle.transition_node(
             admitted,
             node,
             "EXECUTED",
             evidence_refs=evidence_refs,
         )
-        node = await self._transition_node(
+        node = await self._node_lifecycle.transition_node(
             admitted,
             node,
             "VERIFYING",
@@ -2658,20 +2665,20 @@ class GovernedTaskCoordinator:
             verification_status = "FAIL"
 
         if verification_status != "PASS":
-            node = await self._transition_node(
+            node = await self._node_lifecycle.transition_node(
                 admitted,
                 node,
                 "VERIFICATION_FAILED",
                 evidence_refs=verification_refs or evidence_refs,
                 verification_result=verification,
             )
-            budget = await self._finalize_node_budget(
+            budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
                 target_status=BudgetReservationStatus.RELEASED,
                 defer_shared_terminal=defer_shared_terminal,
             )
             if not defer_shared_terminal:
-                graph = await self._transition_graph(admitted, graph, "FAILED")
+                graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
             await self._runtime_outbox.publish_pending()
             receipt = build_execution_receipt(
                 admitted,
@@ -2688,7 +2695,7 @@ class GovernedTaskCoordinator:
             yield terminal_event(receipt)
             return
 
-        node = await self._transition_node(
+        node = await self._node_lifecycle.transition_node(
             admitted,
             node,
             "VERIFIED",
@@ -2720,14 +2727,14 @@ class GovernedTaskCoordinator:
             acceptance_refs = _evidence_refs(acceptance)
 
         if not accepted:
-            node = await self._transition_node(
+            node = await self._node_lifecycle.transition_node(
                 admitted,
                 node,
                 "WAITING_ACCEPTANCE_REVIEW",
                 evidence_refs=acceptance_refs or verification_refs,
             )
             if not defer_shared_terminal:
-                graph = await self._transition_graph(admitted, graph, "BLOCKED")
+                graph = await self._node_lifecycle.transition_graph(admitted, graph, "BLOCKED")
             review_gate: TaskNodeReviewGate | None = None
             review_refs: tuple[str, ...] = ()
             if self._reviews is not None:
@@ -2767,7 +2774,7 @@ class GovernedTaskCoordinator:
             yield terminal_event(receipt)
             return
 
-        node = await self._transition_node(
+        node = await self._node_lifecycle.transition_node(
             admitted,
             node,
             "ACCEPTED",
@@ -2804,13 +2811,13 @@ class GovernedTaskCoordinator:
                             attempt_id=attempt_id,
                             worker_commit=worker_commit,
                         )
-                        graph = await self._transition_graph_with_acceptance_effects(
+                        graph = await self._node_lifecycle.transition_graph_with_acceptance_effects(
                             admitted,
                             graph,
                             effect_intents=effect_intents,
                         )
                     except BaseException as exc:
-                        graph = await self._transition_graph(admitted, graph, "FAILED")
+                        graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
                         await self._runtime_outbox.publish_pending()
                         receipt = build_execution_receipt(
                             admitted,
@@ -2830,7 +2837,7 @@ class GovernedTaskCoordinator:
                         yield terminal_event(receipt)
                         return
                 else:
-                    graph = await self._transition_graph(admitted, graph, "COMPLETED")
+                    graph = await self._node_lifecycle.transition_graph(admitted, graph, "COMPLETED")
         await self._runtime_outbox.publish_pending()
         receipt = build_execution_receipt(
             admitted,
@@ -3140,391 +3147,6 @@ class GovernedTaskCoordinator:
                 return None
             raise
         return dict(value) if isinstance(value, Mapping) else None
-
-    async def _transition_graph(
-        self,
-        admitted: AdmittedExecution,
-        graph: Mapping[str, Any],
-        target_status: str,
-    ) -> dict[str, Any]:
-        version = _version(graph)
-        return dict(
-            await _maybe_await(
-                self._store.transition_graph(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                    expected_version=version,
-                    target_status=target_status,
-                    outbox=self._runtime_outbox.build(
-                        command_id=admitted.command_id,
-                        aggregate_type="TASK_GRAPH",
-                        aggregate_id=admitted.graph_id,
-                        aggregate_version=version + 1,
-                        event_type=f"TASK_GRAPH_{target_status}",
-                    ),
-                )
-            )
-        )
-
-    async def _transition_node(
-        self,
-        admitted: AdmittedExecution,
-        node: Mapping[str, Any],
-        target_status: str,
-        *,
-        evidence_refs: Sequence[str] = (),
-        verification_result: Mapping[str, Any] | None = None,
-        acceptance_judgement: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        version = _version(node)
-        return dict(
-            await _maybe_await(
-                self._store.transition_node(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                    admitted.node_id,
-                    expected_version=version,
-                    target_status=target_status,
-                    outbox=self._runtime_outbox.build(
-                        command_id=admitted.command_id,
-                        aggregate_type="TASK_NODE",
-                        aggregate_id=(
-                            f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}"
-                        ),
-                        aggregate_version=version + 1,
-                        event_type=f"TASK_NODE_{target_status}",
-                        evidence_refs=evidence_refs,
-                    ),
-                    verification_result=verification_result,
-                    acceptance_judgement=acceptance_judgement,
-                )
-            )
-        )
-
-    async def _transition_graph_with_acceptance_effects(
-        self,
-        admitted: AdmittedExecution,
-        graph: Mapping[str, Any],
-        *,
-        effect_intents: Sequence[Any],
-    ) -> dict[str, Any]:
-        version = _version(graph)
-        result = await _maybe_await(
-            self._store.transition_graph_and_stage_acceptance_effects(
-                admitted.graph_id,
-                admitted.graph_revision,
-                expected_version=version,
-                outbox=self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="TASK_GRAPH",
-                    aggregate_id=admitted.graph_id,
-                    aggregate_version=version + 1,
-                    event_type="TASK_GRAPH_COMPLETED",
-                ),
-                effect_intents=effect_intents,
-            )
-        )
-        projected = _mapping(
-            result,
-            field_name="atomic graph acceptance effect result",
-        )
-        completed = projected.get("graph")
-        if not isinstance(completed, Mapping):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "atomic graph acceptance did not return its completed graph",
-            )
-        return dict(completed)
-
-    async def _cancel_waiting_review_node(
-        self,
-        admitted: AdmittedExecution,
-        node: Mapping[str, Any],
-        *,
-        evidence_refs: Sequence[str] = (),
-    ) -> dict[str, Any]:
-        version = _version(node)
-        return dict(
-            await _maybe_await(
-                self._store.request_cancel_node(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                    admitted.node_id,
-                    expected_version=version,
-                    outbox=self._runtime_outbox.build(
-                        command_id=admitted.command_id,
-                        aggregate_type="TASK_NODE",
-                        aggregate_id=(
-                            f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}"
-                        ),
-                        aggregate_version=version + 1,
-                        event_type="TASK_NODE_CANCELLED",
-                        evidence_refs=evidence_refs,
-                    ),
-                )
-            )
-        )
-
-    async def _transition_attempt(
-        self,
-        admitted: AdmittedExecution,
-        attempt: Mapping[str, Any],
-        *,
-        lease_id: str,
-        fencing_token: int,
-        target_status: str,
-        evidence_refs: Sequence[str] = (),
-        error_ref: str | None = None,
-    ) -> dict[str, Any]:
-        del lease_id  # binding is checked by the durable store through the active lease
-        attempt_id = _required_record_text(attempt, "attempt_id")
-        version = _version(attempt)
-        return dict(
-            await _maybe_await(
-                self._store.transition_attempt(
-                    attempt_id,
-                    owner_id=self._owner_id,
-                    fencing_token=fencing_token,
-                    expected_version=version,
-                    target_status=target_status,
-                    error_ref=error_ref,
-                    outbox=self._runtime_outbox.build(
-                        command_id=admitted.command_id,
-                        aggregate_type="TASK_ATTEMPT",
-                        aggregate_id=attempt_id,
-                        aggregate_version=version + 1,
-                        event_type=f"TASK_ATTEMPT_{target_status}",
-                        attempt_id=attempt_id,
-                        evidence_refs=evidence_refs,
-                    ),
-                )
-            )
-        )
-
-    async def _finalize_node_budget(
-        self,
-        budget: BudgetRuntimeContext,
-        *,
-        target_status: BudgetReservationStatus,
-        defer_shared_terminal: bool,
-    ) -> BudgetRuntimeContext:
-        if defer_shared_terminal:
-            return await self._budgets.refresh(budget)
-        return await self._budgets.finalize(
-            budget,
-            target_status=target_status,
-        )
-
-    async def _reject_budget_charge(
-        self,
-        admitted: AdmittedExecution,
-        charge: BudgetCharge,
-        *,
-        attempt_id: str,
-        fencing_token: int,
-        pre_reservation_graph: Mapping[str, Any] | None = None,
-        pre_reservation_node: Mapping[str, Any] | None = None,
-        pre_reservation_attempt: Mapping[str, Any] | None = None,
-        defer_shared_terminal: bool = False,
-    ) -> GovernedExecutionReceipt:
-        pre_reservation_state = (
-            pre_reservation_graph,
-            pre_reservation_node,
-            pre_reservation_attempt,
-        )
-        if all(isinstance(item, Mapping) for item in pre_reservation_state):
-            failure_ref = await self._mark_pre_reservation_failure(
-                admitted,
-                graph=pre_reservation_graph,
-                node=pre_reservation_node,
-                attempt=pre_reservation_attempt,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=GOVERNED_BUDGET_EXCEEDED,
-                graph_target=(None if defer_shared_terminal else "BLOCKED"),
-                evidence_refs=(charge.evidence_ref, charge.usage_id),
-                defer_graph_terminal=defer_shared_terminal,
-            )
-        else:
-            await self._mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=GOVERNED_BUDGET_EXCEEDED,
-                graph_target=(None if defer_shared_terminal else "BLOCKED"),
-                evidence_refs=(charge.evidence_ref, charge.usage_id),
-            )
-            failure_ref = None
-        budget = await self._finalize_node_budget(
-            charge.context,
-            target_status=BudgetReservationStatus.RELEASED,
-            defer_shared_terminal=defer_shared_terminal,
-        )
-        await self._runtime_outbox.publish_pending()
-        receipt_evidence = tuple(
-            item for item in (charge.evidence_ref, charge.usage_id, failure_ref) if item
-        )
-        return build_execution_receipt(
-            admitted,
-            attempt_id=attempt_id,
-            status="BUDGET_BLOCKED",
-            verification_status="NOT_RUN",
-            accepted=False,
-            reason_code=GOVERNED_BUDGET_EXCEEDED,
-            evidence_refs=receipt_evidence,
-            projection={
-                "budget": budget.execution_payload(),
-                "exceeded_dimensions": list(charge.exceeded_dimensions),
-                "requested_action": budget.policy.on_exceeded.value,
-                "enforced_action": "BLOCK",
-            },
-        )
-
-    async def _mark_worker_failure(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        attempt_id: str,
-        fencing_token: int,
-        reason_code: str,
-        graph_target: str | None = "FAILED",
-        evidence_refs: Sequence[str] = (),
-    ) -> None:
-        error_ref = "taskerror://" + hashlib.sha256(
-            f"{attempt_id}\n{reason_code}".encode("utf-8")
-        ).hexdigest()
-        try:
-            attempt = await _maybe_await(self._store.get_attempt(attempt_id))
-            if _status(attempt) == "RUNNING":
-                await self._transition_attempt(
-                    admitted,
-                    attempt,
-                    lease_id="",
-                    fencing_token=fencing_token,
-                    target_status="FAILED",
-                    error_ref=error_ref,
-                    evidence_refs=(error_ref, *evidence_refs),
-                )
-            node = await _maybe_await(
-                self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
-            )
-            if _status(node) == "RUNNING":
-                await self._transition_node(
-                    admitted, node, "FAILED", evidence_refs=(error_ref, *evidence_refs)
-                )
-            if graph_target is not None:
-                graph = await _maybe_await(
-                    self._store.get_graph(admitted.graph_id, admitted.graph_revision)
-                )
-                if _status(graph) == "ACTIVE":
-                    await self._transition_graph(admitted, graph, graph_target)
-        finally:
-            await self._runtime_outbox.publish_pending(best_effort=True)
-
-    async def _mark_pre_reservation_failure(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        graph: Mapping[str, Any],
-        node: Mapping[str, Any],
-        attempt: Mapping[str, Any],
-        attempt_id: str,
-        fencing_token: int,
-        reason_code: str,
-        graph_target: str | None = "FAILED",
-        evidence_refs: Sequence[str] = (),
-        defer_graph_terminal: bool = False,
-    ) -> str:
-        """Close the execution authority atomically before reservation.
-
-        The exact same mutation is replayed once because the first transaction
-        may have committed before its response was lost.  There is deliberately
-        no sequential fallback: a partial terminal state would be less safe
-        than surfacing a durable conflict.
-        """
-
-        error_ref = "taskerror://" + hashlib.sha256(
-            f"{attempt_id}\n{reason_code}".encode("utf-8")
-        ).hexdigest()
-        arguments = {
-            "owner_id": self._owner_id,
-            "fencing_token": fencing_token,
-            "expected_attempt_version": _version(attempt),
-            "expected_node_version": _version(node),
-            "expected_graph_version": _version(graph),
-            "error_ref": error_ref,
-            "attempt_outbox": self._runtime_outbox.build(
-                command_id=admitted.command_id,
-                aggregate_type="TASK_ATTEMPT",
-                aggregate_id=attempt_id,
-                aggregate_version=_version(attempt) + 1,
-                event_type="TASK_ATTEMPT_FAILED",
-                attempt_id=attempt_id,
-                evidence_refs=(error_ref, *evidence_refs),
-            ),
-        }
-        if defer_graph_terminal:
-            graph_target = None
-            fail_attempt = self._store.fail_running_attempt_node_bundle
-        else:
-            if graph_target is None:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "inline failure requires a Graph terminal target",
-                )
-            arguments["graph_target_status"] = graph_target
-            fail_attempt = self._store.fail_running_attempt_bundle
-        try:
-            result_raw = await _maybe_await(
-                fail_attempt(attempt_id, **arguments)
-            )
-        except Exception as first_exc:
-            try:
-                result_raw = await _maybe_await(
-                    fail_attempt(attempt_id, **arguments)
-                )
-            except Exception as replay_exc:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "pre-reservation terminal failure could not be committed or exactly replayed",
-                ) from replay_exc
-            _logger.warning(
-                "Replayed committed pre-reservation terminal failure",
-                extra={
-                    "attempt_id": attempt_id,
-                    "first_exception_type": type(first_exc).__name__,
-                },
-            )
-        result = _mapping(result_raw, field_name="atomic terminal failure")
-        failed_attempt = _mapping(
-            result.get("attempt"),
-            field_name="atomic terminal failure attempt",
-        )
-        failed_node = _mapping(
-            result.get("node"),
-            field_name="atomic terminal failure node",
-        )
-        failed_graph = _mapping(
-            result.get("graph"),
-            field_name="atomic terminal failure graph",
-        )
-        released_lease = _mapping(
-            result.get("lease"),
-            field_name="atomic terminal failure lease",
-        )
-        if (
-            _status(failed_attempt) != "FAILED"
-            or _status(failed_node) != "FAILED"
-            or _status(failed_graph)
-            != ("ACTIVE" if defer_graph_terminal else graph_target)
-            or _status(released_lease) != "RELEASED"
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "atomic terminal failure returned an incomplete durable state",
-            )
-        await self._runtime_outbox.publish_pending()
-        return error_ref
 
 async def _worker_event_stream(
     worker: Any,
