@@ -12,12 +12,9 @@ every dependency is ACCEPTED.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import json
 import logging
-import time
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
@@ -62,6 +59,9 @@ from .coordinator_receipts import (
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
 from .local_graph_execution_registry import LocalGraphExecutionRegistry
+from .node_execution_projection import NodeExecutionProjection
+from .node_execution_records import build_review_context
+from .node_execution_runtime import DurableNodeExecutionRuntime
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .parallel_settlement_runtime import ParallelSettlementRuntime
 from .runtime_outbox import RuntimeOutbox
@@ -78,28 +78,17 @@ from .errors import (
     GOVERNED_RECEIPT_COMMIT_FAILED,
     GOVERNED_REVIEW_DENIED,
     GOVERNED_REVIEW_REQUIRED,
-    GOVERNED_VERIFICATION_EVIDENCE_MISSING,
     GOVERNED_VERIFICATION_FAILED,
     GOVERNED_WORKER_COMMIT_INVALID,
     GOVERNED_WORKER_FAILED,
-    GOVERNED_WORKER_SELF_CANCELLED,
     GovernedRuntimeError,
-    RetryableWorkerPreparationError,
 )
 from .dag_scheduler import (
     DagNodeScheduleCandidate,
     DagScheduleInputError,
     compute_dag_schedule,
 )
-from .review_runtime import (
-    TaskNodeReviewContext,
-    TaskNodeReviewGate,
-    TaskNodeReviewRuntime,
-)
-from .heartbeat import (
-    DurableExecutionHeartbeat,
-    DurableExecutionHeartbeatError,
-)
+from .review_runtime import TaskNodeReviewRuntime
 from .ports import (
     AcceptancePort,
     ExecutionProjectionReaderPort,
@@ -111,10 +100,6 @@ from .ports import (
 )
 from .worker_registry import GovernedWorkerRoute
 from .acceptance_effects import compile_graph_acceptance_effects
-from host_brain.contracts.agent_runtime.parallel_settlement import (
-    ParallelSettlementContractError,
-    normalize_parallel_settlement_decision,
-)
 from host_brain.contracts.agent_runtime.parallel_success import (
     ParallelSuccessContractError,
     normalize_parallel_success_decision,
@@ -122,10 +107,6 @@ from host_brain.contracts.agent_runtime.parallel_success import (
 _logger = logging.getLogger("Natsume.task_runtime.coordinator")
 _TASK_STORE_CAS_CONFLICT = "TASK_STORE_CAS_CONFLICT"
 _TASK_STORE_OWNERSHIP_CONFLICT = "TASK_STORE_OWNERSHIP_CONFLICT"
-
-
-
-
 
 
 class GovernedTaskCoordinator:
@@ -192,6 +173,25 @@ class GovernedTaskCoordinator:
             budget_runtime=self._budgets,
             runtime_outbox=self._runtime_outbox,
             owner_id=self._owner_id,
+        )
+        self._node_execution_projection = NodeExecutionProjection(
+            task_store=task_store,
+            projection_reader=projection_reader,
+        )
+        self._node_execution = DurableNodeExecutionRuntime(
+            task_store=task_store,
+            runtime_outbox=self._runtime_outbox,
+            budget_runtime=self._budgets,
+            node_lifecycle=self._node_lifecycle,
+            worker_resolver=self._workers,
+            verifier=self._verifier,
+            acceptance=self._acceptance,
+            review_runtime=self._reviews,
+            projection=self._node_execution_projection,
+            owner_id=self._owner_id,
+            lease_ttl_ms=self._lease_ttl_ms,
+            operation_ttl_ms=self._operation_ttl_ms,
+            acceptance_effects_enabled=self._acceptance_effects_enabled,
         )
         self._parallel_settlement = ParallelSettlementRuntime(
             task_store=task_store,
@@ -361,7 +361,7 @@ class GovernedTaskCoordinator:
                 }:
                     continue
                 failed_admission = admitted.for_node(binding.node_id)
-                reservation = await self._try_operation(
+                reservation = await self._node_execution_projection.try_operation(
                     failed_admission.reservation_id
                 )
                 if _status(reservation or {}) in {"RESERVED", "RECOVERY_REQUIRED"}:
@@ -369,7 +369,7 @@ class GovernedTaskCoordinator:
                     break
             if unresolved_failure is not None:
                 recovery_admission, reservation = unresolved_failure
-                attempts = await self._attempts_for_node(recovery_admission)
+                attempts = await self._node_execution_projection.attempts_for_node(recovery_admission)
                 attempt_id = (
                     _required_record_text(attempts[-1], "attempt_id")
                     if attempts
@@ -461,7 +461,7 @@ class GovernedTaskCoordinator:
                     graph_status = _status(graph)
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
-                    context=self._review_context(
+                    context=build_review_context(
                         admitted=review_admission,
                         command=command,
                         work_order=work_order,
@@ -540,7 +540,7 @@ class GovernedTaskCoordinator:
                 if graph_status == "ACTIVE":
                     graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
-                attempts = await self._attempts_for_node(review_admission)
+                attempts = await self._node_execution_projection.attempts_for_node(review_admission)
                 if not attempts:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
@@ -548,7 +548,7 @@ class GovernedTaskCoordinator:
                     )
                 attempt_id = _required_record_text(attempts[-1], "attempt_id")
                 gate = self._reviews.post_execution_acceptance_gate(
-                    context=self._review_context(
+                    context=build_review_context(
                         admitted=review_admission,
                         command=command,
                         work_order=work_order,
@@ -590,7 +590,7 @@ class GovernedTaskCoordinator:
                         await self._node_lifecycle.transition_graph(review_admission, graph, "ACTIVE")
                     await self._runtime_outbox.publish_pending()
                     continue
-                reservation = await self._try_operation(review_admission.reservation_id)
+                reservation = await self._node_execution_projection.try_operation(review_admission.reservation_id)
                 receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.disposition == "REVIEW_DENIED":
                     await self._node_lifecycle.transition_node(
@@ -615,13 +615,13 @@ class GovernedTaskCoordinator:
                     reason_code = GOVERNED_REVIEW_REQUIRED
                     status = "WAITING_ACCEPTANCE_REVIEW"
                 await self._runtime_outbox.publish_pending()
-                decision = await self._matching_parallel_decision(
+                decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,
                     graph=graph,
                 )
                 decision_ref: str | None = None
                 if decision is not None:
-                    selected = self._selected_parallel_decision_outcome(decision)
+                    selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                     if _required_record_text(selected, "node_id") != review_admission.node_id:
                         raise GovernedRuntimeError(
                             GOVERNED_DURABLE_STATE_CONFLICT,
@@ -674,7 +674,7 @@ class GovernedTaskCoordinator:
                         "released budget belongs to a non-terminal TaskGraph",
                     )
                 if graph_status == "BLOCKED":
-                    decision = await self._matching_parallel_decision(
+                    decision = await self._node_execution_projection.matching_parallel_decision(
                         admitted,
                         graph=graph,
                     )
@@ -683,12 +683,12 @@ class GovernedTaskCoordinator:
                             decision.get("payload"),
                             field_name="parallel BLOCKED replay decision",
                         )
-                        selected = self._selected_parallel_decision_outcome(decision)
+                        selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                         selected_admission = admitted.for_node(
                             _required_record_text(selected, "node_id")
                         )
                         if _text(payload.get("decision_kind")) != "BUDGET":
-                            async for event in self._execute_node_stream(
+                            async for event in self._node_execution.execute_stream(
                                 admitted=selected_admission,
                                 command=command,
                                 work_order=work_order,
@@ -778,7 +778,7 @@ class GovernedTaskCoordinator:
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "all TaskNodes are ACCEPTED but TaskGraph is not ACTIVE/COMPLETED",
                     )
-                async for event in self._execute_node_stream(
+                async for event in self._node_execution.execute_stream(
                     admitted=final_admission,
                     command=command,
                     work_order=work_order,
@@ -807,12 +807,12 @@ class GovernedTaskCoordinator:
             )
             if blocked_node_id is not None or failed_node_id is not None:
                 terminal_node_id = failed_node_id or blocked_node_id
-                decision = await self._matching_parallel_decision(
+                decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,
                     graph=graph,
                 )
                 if decision is not None:
-                    selected = self._selected_parallel_decision_outcome(decision)
+                    selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                     terminal_node_id = _required_record_text(selected, "node_id")
                 terminal_admission = admitted.for_node(terminal_node_id or admitted.node_id)
                 if graph_status == "ACTIVE":
@@ -825,7 +825,7 @@ class GovernedTaskCoordinator:
                     budget = await self._budgets.finalize(
                         budget, target_status=BudgetReservationStatus.RELEASED
                     )
-                async for event in self._execute_node_stream(
+                async for event in self._node_execution.execute_stream(
                     admitted=terminal_admission,
                     command=command,
                     work_order=work_order,
@@ -840,12 +840,12 @@ class GovernedTaskCoordinator:
                     budget = await self._budgets.finalize(
                         budget, target_status=BudgetReservationStatus.RELEASED
                     )
-                decision = await self._matching_parallel_decision(
+                decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,
                     graph=graph,
                 )
                 if decision is not None:
-                    selected = self._selected_parallel_decision_outcome(decision)
+                    selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                     terminal_admission = admitted.for_node(
                         _required_record_text(selected, "node_id")
                     )
@@ -858,7 +858,7 @@ class GovernedTaskCoordinator:
                         ),
                         final_admission,
                     )
-                async for event in self._execute_node_stream(
+                async for event in self._node_execution.execute_stream(
                     admitted=terminal_admission,
                     command=command,
                     work_order=work_order,
@@ -996,7 +996,7 @@ class GovernedTaskCoordinator:
                     prior_gate = None
                     if _version(candidate_node) > 0:
                         prior_gate = self._reviews.lookup_pre_execution_gate(
-                            context=self._review_context(
+                            context=build_review_context(
                                 admitted=admitted.for_node(candidate.node_id),
                                 command=command,
                                 work_order=work_order,
@@ -1025,7 +1025,7 @@ class GovernedTaskCoordinator:
                 graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
-                    context=self._review_context(
+                    context=build_review_context(
                         admitted=review_admission,
                         command=command,
                         work_order=work_order,
@@ -1099,7 +1099,7 @@ class GovernedTaskCoordinator:
                     node_admission = admitted.for_node(binding.node_id)
                     terminal_event: dict[str, Any] | None = None
                     try:
-                        async for event in self._execute_node_stream(
+                        async for event in self._node_execution.execute_stream(
                             admitted=node_admission,
                             command=command,
                             work_order=work_order,
@@ -1223,7 +1223,7 @@ class GovernedTaskCoordinator:
             for binding in claimable:
                 node_admission = admitted.for_node(binding.node_id)
                 node_terminal: dict[str, Any] | None = None
-                async for event in self._execute_node_stream(
+                async for event in self._node_execution.execute_stream(
                     admitted=node_admission,
                     command=command,
                     work_order=work_order,
@@ -1269,7 +1269,6 @@ class GovernedTaskCoordinator:
                     return
 
 
-
     async def _reentered_parallel_outcomes(
         self,
         *,
@@ -1291,7 +1290,7 @@ class GovernedTaskCoordinator:
             if not isinstance(node, Mapping) or _status(node) not in reconstructable:
                 continue
             node_admission = admitted.for_node(binding.node_id)
-            receipt = await self._terminal_replay(
+            receipt = await self._node_execution_projection.terminal_replay(
                 node_admission,
                 graph=graph,
                 node=node,
@@ -1308,9 +1307,6 @@ class GovernedTaskCoordinator:
                 )
             )
         return tuple(outcomes)
-
-
-
 
 
     async def _complete_parallel_success(
@@ -1408,7 +1404,7 @@ class GovernedTaskCoordinator:
                     f"parallel success node lacks latest SUCCEEDED Attempt: {binding.node_id}",
                 )
             attempt_id = _required_record_text(attempt, "attempt_id")
-            reservation = await self._try_operation(
+            reservation = await self._node_execution_projection.try_operation(
                 admitted.for_node(binding.node_id).reservation_id
             )
             receipt_ref = _text((reservation or {}).get("receipt_ref"))
@@ -1786,1418 +1782,8 @@ class GovernedTaskCoordinator:
         return budget, approved_commit_event(public_projection, receipt)
 
 
-    async def _execute_node_stream(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        command: HostCommand,
-        work_order: Any,
-        budget: BudgetRuntimeContext | None = None,
-        node_grant_ref: str | None = None,
-        defer_shared_terminal: bool = False,
-    ) -> AsyncIterator[dict[str, Any]]:
-        admitted.validate()
-        if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
-            raise GovernedRuntimeError(
-                GOVERNED_ADMISSION_INVALID,
-                "runtime command differs from admitted command",
-            )
-        if budget is None:
-            budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
-
-        graph = await _maybe_await(self._store.get_graph(admitted.graph_id, admitted.graph_revision))
-        node = await _maybe_await(
-            self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
-        )
-        _assert_durable_identity(admitted, graph=graph, node=node)
-
-        replay_receipt = await self._terminal_replay(admitted, graph=graph, node=node)
-        if replay_receipt is not None:
-            await self._runtime_outbox.publish_pending()
-            yield terminal_event(replay_receipt)
-            return
-
-        graph_status = _status(graph)
-        node_status = _status(node)
-        if graph_status not in {"CREATED", "ACTIVE"} or node_status != "READY":
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"admission must expose CREATED/ACTIVE graph and READY node, got {graph_status}/{node_status}",
-            )
-
-        attempts = await self._attempts_for_node(admitted)
-        attempt_numbers = [int(item.get("attempt_no") or 0) for item in attempts]
-        if attempt_numbers != list(range(1, len(attempt_numbers) + 1)):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "durable TaskAttempt journal is not contiguous",
-            )
-        existing_reservation = await self._try_operation(admitted.reservation_id)
-        if existing_reservation is not None:
-            raise GovernedRuntimeError(
-                GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                "an existing operation reservation has no complete durable terminal projection",
-            )
-
-        if graph_status == "CREATED":
-            if defer_shared_terminal:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel node execution requires an outer-activated TaskGraph",
-                )
-            graph = await self._node_lifecycle.transition_graph(admitted, graph, "ACTIVE")
-
-        attempt_no = len(attempt_numbers) + 1
-        attempt_id = _attempt_id(admitted, attempt_no=attempt_no)
-        claimed_raw = await _maybe_await(
-            self._store.claim_ready_node(
-                attempt_id=attempt_id,
-                graph_id=admitted.graph_id,
-                graph_revision=admitted.graph_revision,
-                node_id=admitted.node_id,
-                expected_node_version=_version(node),
-                expected_attempt_count=len(attempt_numbers),
-                owner_id=self._owner_id,
-                lease_ttl_ms=self._lease_ttl_ms,
-                budget_id=budget.budget_id,
-                operation_scope=admitted.business_scope,
-                operation_fingerprint=admitted.operation_fingerprint,
-                attempt_created_outbox=self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="TASK_ATTEMPT",
-                    aggregate_id=attempt_id,
-                    aggregate_version=0,
-                    event_type="TASK_ATTEMPT_CREATED",
-                    attempt_id=attempt_id,
-                ),
-                attempt_leased_outbox=self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="TASK_ATTEMPT",
-                    aggregate_id=attempt_id,
-                    aggregate_version=1,
-                    event_type="TASK_ATTEMPT_LEASED",
-                    attempt_id=attempt_id,
-                ),
-            )
-        )
-        claimed = _mapping(claimed_raw, field_name="atomic READY claim")
-        attempt = _mapping(
-            claimed.get("attempt"),
-            field_name="atomic READY claim attempt",
-        )
-        lease = _mapping(
-            claimed.get("lease"),
-            field_name="atomic READY claim lease",
-        )
-        node = _mapping(
-            claimed.get("node"),
-            field_name="atomic READY claim node",
-        )
-        lease_id = _required_record_text(lease, "lease_id")
-        fencing_token = _record_positive_int(lease, "fencing_token")
-        node = await self._node_lifecycle.transition_node(admitted, node, "RUNNING")
-        attempt = await self._node_lifecycle.transition_attempt(
-            admitted,
-            attempt,
-            lease_id=lease_id,
-            fencing_token=fencing_token,
-            target_status="RUNNING",
-        )
-        try:
-            precharge = await self._budgets.precharge(
-                budget,
-                node_id=admitted.node_id,
-                attempt_id=attempt_id,
-                tool_call_count=_precharged_tool_call_count(admitted.worker_route),
-            )
-        except GovernedRuntimeError:
-            refreshed_budget = await self._budgets.refresh(budget)
-            if not defer_shared_terminal or refreshed_budget.status != "EXCEEDED":
-                raise
-            failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
-                admitted,
-                graph=graph,
-                node=node,
-                attempt=attempt,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=GOVERNED_BUDGET_EXCEEDED,
-                defer_graph_terminal=True,
-            )
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="BUDGET_BLOCKED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_BUDGET_EXCEEDED,
-                evidence_refs=(failure_ref,),
-                projection={"budget": refreshed_budget.execution_payload()},
-            )
-            yield terminal_event(receipt)
-            return
-        budget = precharge.context
-        if not precharge.accepted:
-            receipt = await self._node_lifecycle.reject_budget_charge(
-                admitted,
-                precharge,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                pre_reservation_graph=graph,
-                pre_reservation_node=node,
-                pre_reservation_attempt=attempt,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            yield terminal_event(receipt)
-            return
-
-        # This is the only automatic retry boundary.  Worker resolution is a
-        # side-effect-free preparation step and no operation reservation exists
-        # yet.  After reserve_operation() succeeds, every exception follows the
-        # terminal/reconciliation path and is never passed to schedule_retry().
-        try:
-            worker = self._workers.resolve(
-                executor=admitted.executor,
-                worker_route=admitted.worker_route,
-            )
-        except RetryableWorkerPreparationError as exc:
-            reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            if not _retry_attempt_available(node, attempt_no=attempt_no):
-                failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
-                    admitted,
-                    graph=graph,
-                    node=node,
-                    attempt=attempt,
-                    attempt_id=attempt_id,
-                    fencing_token=fencing_token,
-                    reason_code=reason_code,
-                    defer_graph_terminal=defer_shared_terminal,
-                )
-                budget = await self._node_lifecycle.finalize_node_budget(
-                    budget,
-                    target_status=BudgetReservationStatus.RELEASED,
-                    defer_shared_terminal=defer_shared_terminal,
-                )
-                await self._runtime_outbox.publish_pending()
-                receipt = build_execution_receipt(
-                    admitted,
-                    attempt_id=attempt_id,
-                    status="FAILED",
-                    verification_status="NOT_RUN",
-                    accepted=False,
-                    reason_code=reason_code,
-                    evidence_refs=(failure_ref,),
-                    projection={"budget": budget.execution_payload()},
-                )
-                yield terminal_event(receipt)
-                return
-
-            error_ref = "taskerror://" + hashlib.sha256(
-                f"{attempt_id}\n{reason_code}".encode("utf-8")
-            ).hexdigest()
-            expected_retry_usage_id = _retry_usage_id(
-                budget_id=budget.budget_id,
-                attempt_id=attempt_id,
-                node_only=defer_shared_terminal,
-            )
-            retry_arguments = {
-                "budget_id": budget.budget_id,
-                "owner_id": self._owner_id,
-                "fencing_token": fencing_token,
-                "expected_attempt_version": _version(attempt),
-                "error_ref": error_ref,
-                "outbox": self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="TASK_ATTEMPT",
-                    aggregate_id=attempt_id,
-                    aggregate_version=_version(attempt) + 1,
-                    event_type="TASK_ATTEMPT_FAILED",
-                    attempt_id=attempt_id,
-                    evidence_refs=(error_ref, expected_retry_usage_id),
-                ),
-            }
-            if defer_shared_terminal:
-                retry_arguments["expected_graph_version"] = _version(graph)
-            schedule_retry = (
-                self._store.schedule_retry_node_outcome
-                if defer_shared_terminal
-                else self._store.schedule_retry
-            )
-            try:
-                retry_raw = await _maybe_await(
-                    schedule_retry(attempt_id, **retry_arguments)
-                )
-            except Exception as first_exc:
-                # The first call may have committed before its response was
-                # lost.  schedule_retry() therefore provides exact replay for
-                # the same deterministic retry decision.  One immediate
-                # replay also covers a transient failure before BEGIN/COMMIT.
-                try:
-                    retry_raw = await _maybe_await(
-                        schedule_retry(attempt_id, **retry_arguments)
-                    )
-                except Exception as replay_exc:
-                    current_attempt = await _maybe_await(
-                        self._store.get_attempt(attempt_id)
-                    )
-                    if _status(current_attempt) != "RUNNING":
-                        raise GovernedRuntimeError(
-                            GOVERNED_DURABLE_STATE_CONFLICT,
-                            "durable retry decision could not be exactly replayed",
-                        ) from replay_exc
-                    failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
-                        admitted,
-                        graph=graph,
-                        node=node,
-                        attempt=current_attempt,
-                        attempt_id=attempt_id,
-                        fencing_token=fencing_token,
-                        reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
-                        evidence_refs=(error_ref,),
-                        defer_graph_terminal=defer_shared_terminal,
-                    )
-                    budget = await self._node_lifecycle.finalize_node_budget(
-                        budget,
-                        target_status=BudgetReservationStatus.RELEASED,
-                        defer_shared_terminal=defer_shared_terminal,
-                    )
-                    await self._runtime_outbox.publish_pending()
-                    receipt = build_execution_receipt(
-                        admitted,
-                        attempt_id=attempt_id,
-                        status="FAILED",
-                        verification_status="NOT_RUN",
-                        accepted=False,
-                        reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
-                        evidence_refs=(error_ref, failure_ref),
-                        projection={
-                            "budget": budget.execution_payload(),
-                            "retry_schedule_error": _exception_reason(
-                                first_exc,
-                                GOVERNED_DURABLE_STATE_CONFLICT,
-                            ),
-                        },
-                    )
-                    yield terminal_event(receipt)
-                    return
-            retry = _mapping(retry_raw, field_name="atomic retry schedule")
-            retry_budget = _mapping(
-                retry.get("budget"),
-                field_name="atomic retry schedule budget",
-            )
-            budget = budget.refreshed(retry_budget)
-            retry_accepted = retry.get("accepted")
-            if not isinstance(retry_accepted, bool):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "atomic retry schedule has no boolean accepted outcome",
-                )
-            retry_usage_id = _required_record_text(retry, "retry_usage_id")
-            if retry_usage_id != expected_retry_usage_id:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "atomic retry schedule returned a different BudgetUsage identity",
-                )
-            retry_evidence = (error_ref, retry_usage_id)
-            if retry_accepted:
-                retry_node = _mapping(
-                    retry.get("node"),
-                    field_name="atomic retry schedule node",
-                )
-                retry_not_before_ms = _record_non_negative_int(
-                    retry,
-                    "retry_not_before_ms",
-                )
-                if _status(retry_node) != "RETRY_PENDING" or budget.status != "ACTIVE":
-                    raise GovernedRuntimeError(
-                        GOVERNED_DURABLE_STATE_CONFLICT,
-                        "accepted retry did not persist RETRY_PENDING with ACTIVE budget",
-                    )
-                await self._runtime_outbox.publish_pending()
-                receipt = build_execution_receipt(
-                    admitted,
-                    attempt_id=attempt_id,
-                    status="RETRY_PENDING",
-                    verification_status="NOT_RUN",
-                    accepted=False,
-                    reason_code=GOVERNED_EXECUTION_IN_PROGRESS,
-                    evidence_refs=retry_evidence,
-                    projection={
-                        "retry_not_before_ms": retry_not_before_ms,
-                        "retry_usage_id": retry_usage_id,
-                        "budget": budget.execution_payload(),
-                    },
-                )
-                yield terminal_event(receipt)
-                return
-
-            retry_graph = _mapping(
-                retry.get("graph"),
-                field_name="atomic retry schedule graph",
-            )
-            retry_node = _mapping(
-                retry.get("node"),
-                field_name="atomic retry schedule node",
-            )
-            if (
-                budget.status != "EXCEEDED"
-                or _status(retry_graph)
-                != ("ACTIVE" if defer_shared_terminal else "BLOCKED")
-                or _status(retry_node) != "FAILED"
-            ):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "retry budget rejection did not fail closed",
-                )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            await self._runtime_outbox.publish_pending()
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="BUDGET_BLOCKED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_BUDGET_EXCEEDED,
-                evidence_refs=retry_evidence,
-                projection={
-                    "retry_usage_id": retry_usage_id,
-                    "exceeded_dimensions": list(
-                        retry.get("exceeded_dimensions") or ()
-                    ),
-                    "budget": budget.execution_payload(),
-                },
-            )
-            yield terminal_event(receipt)
-            return
-        except Exception as exc:
-            reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            failure_ref = await self._node_lifecycle.mark_pre_reservation_failure(
-                admitted,
-                graph=graph,
-                node=node,
-                attempt=attempt,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=reason_code,
-                defer_graph_terminal=defer_shared_terminal,
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            await self._runtime_outbox.publish_pending()
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="FAILED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=reason_code,
-                evidence_refs=(failure_ref,),
-                projection={"budget": budget.execution_payload()},
-            )
-            yield terminal_event(receipt)
-            return
-
-        reserved_raw = await _maybe_await(
-            self._store.reserve_operation(
-                reservation_id=admitted.reservation_id,
-                business_scope=admitted.business_scope,
-                operation_fingerprint=admitted.operation_fingerprint,
-                attempt_id=attempt_id,
-                lease_id=lease_id,
-                owner_id=self._owner_id,
-                fencing_token=fencing_token,
-                ttl_ms=self._operation_ttl_ms,
-                outbox=self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="OPERATION_RESERVATION",
-                    aggregate_id=admitted.reservation_id,
-                    aggregate_version=0,
-                    event_type="OPERATION_RESERVED",
-                    attempt_id=attempt_id,
-                ),
-            )
-        )
-        reservation_acquired, reservation = _reservation_result(reserved_raw)
-        if not reservation_acquired:
-            await self._node_lifecycle.mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                graph_target=(None if defer_shared_terminal else "BLOCKED"),
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="RECOVERY_REQUIRED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                projection={
-                    "reservation_status": _status(reservation) or "OWNED",
-                    "budget": budget.execution_payload(),
-                },
-            )
-            yield terminal_event(receipt)
-            return
-        if node_grant_ref is None:
-            # Compatibility is limited to tests/legacy callers that have not
-            # opted into node grants. Production GovernedCommandApplication
-            # supplies an exact grant for every admitted node.
-            node_target_id = command.target_id
-        else:
-            frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
-            node_target_id = frozen_route.target_id or command.target_id
-        execution_context = {
-            "execution_mode": "governed_task_runtime",
-            "command_id": admitted.command_id,
-            "request_id": command.request_id,
-            "principal_id": command.principal_id,
-            "target_id": node_target_id,
-            "command_target_id": command.target_id,
-            "work_order_id": admitted.work_order_id,
-            "assignment_id": admitted.assignment_id,
-            "executor": admitted.executor,
-            "worker_route": admitted.worker_route,
-            "graph_id": admitted.graph_id,
-            "graph_revision": admitted.graph_revision,
-            "node_id": admitted.node_id,
-            "attempt_id": attempt_id,
-            "lease_id": lease_id,
-            "lease_owner_id": self._owner_id,
-            "fencing_token": fencing_token,
-            "reservation_id": admitted.reservation_id,
-            "business_scope": admitted.business_scope,
-            "operation_fingerprint": admitted.operation_fingerprint,
-            "parent_grant_ref": str(command.governor_grant_ref or "").strip(),
-            "budget": budget.execution_payload(),
-            "node_input_refs": list(_node_input_refs(node)),
-            "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
-        }
-        if node_grant_ref is not None:
-            execution_context["node_grant_ref"] = node_grant_ref
-
-        def heartbeat_outbox(**values: Any) -> Any:
-            values.pop("attempt_id", None)
-            return self._runtime_outbox.build(
-                command_id=admitted.command_id,
-                attempt_id=attempt_id,
-                **values,
-            )
-
-        heartbeat = DurableExecutionHeartbeat(
-            store=self._store,
-            outbox_builder=heartbeat_outbox,
-            attempt_id=attempt_id,
-            lease_id=lease_id,
-            owner_id=self._owner_id,
-            fencing_token=fencing_token,
-            lease_version=_version(lease),
-            lease_ttl_ms=self._lease_ttl_ms,
-            operation_ttl_ms=self._operation_ttl_ms,
-        )
-        try:
-            await heartbeat.start()
-            await heartbeat.attach_reservation(
-                reservation_id=admitted.reservation_id,
-                reservation_version=_version(reservation),
-            )
-        except asyncio.CancelledError:
-            await _stop_heartbeat_after_interruption(heartbeat)
-            raise
-        except Exception as exc:
-            await _stop_heartbeat_after_interruption(heartbeat)
-            await self._runtime_outbox.publish_pending(best_effort=True)
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="RECOVERY_REQUIRED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                projection={
-                    "heartbeat_phase": _heartbeat_failure_phase(exc),
-                    "budget": budget.execution_payload(),
-                },
-            )
-            yield terminal_event(receipt)
-            return
-
-        worker_commit: dict[str, Any] | None = None
-        worker_started_ns = time.monotonic_ns()
-        worker_error: BaseException | None = None
-        heartbeat_error: BaseException | None = None
-        try:
-            commit_count = 0
-            async for raw_event in _worker_event_stream(
-                worker,
-                command=command,
-                work_order=work_order,
-                execution_context=execution_context,
-            ):
-                await heartbeat.checkpoint()
-                event = _mapping(raw_event, field_name="worker event")
-                if _is_terminal_commit(event):
-                    commit_count += 1
-                    worker_commit = event
-                    continue
-                yield event
-            await heartbeat.checkpoint()
-            if commit_count != 1 or worker_commit is None:
-                raise GovernedRuntimeError(
-                    GOVERNED_WORKER_COMMIT_INVALID,
-                    f"worker must produce exactly one final COMMIT, got {commit_count}",
-                )
-        except BaseException as exc:
-            worker_error = exc
-        finally:
-            try:
-                await heartbeat.stop()
-            except BaseException as exc:
-                heartbeat_error = exc
-
-        if isinstance(worker_error, asyncio.CancelledError):
-            executing_task = asyncio.current_task()
-            if executing_task is not None and executing_task.cancelling() == 0:
-                # A worker that raises CancelledError itself does not own the
-                # caller/task lifecycle.  Treat it as a worker interruption so
-                # it follows the durable post-reservation recovery path.  A
-                # real task cancellation (disconnect, shutdown, or an already
-                # persisted graph cancellation) keeps propagating unchanged.
-                worker_error = GovernedRuntimeError(
-                    GOVERNED_WORKER_SELF_CANCELLED,
-                    "worker cancelled itself without a caller cancellation request",
-                )
-            else:
-                raise worker_error
-        if worker_error is not None and not isinstance(worker_error, Exception):
-            raise worker_error
-        if heartbeat_error is not None and not isinstance(heartbeat_error, Exception):
-            raise heartbeat_error
-        if heartbeat_error is not None:
-            _logger.error(
-                "Governed execution lost its durable heartbeat before commit",
-                extra={
-                    "request_id": command.request_id,
-                    "graph_id": admitted.graph_id,
-                    "graph_revision": admitted.graph_revision,
-                    "node_id": admitted.node_id,
-                    "attempt_id": attempt_id,
-                    "worker_route": admitted.worker_route,
-                    "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
-                    "exception_type": type(heartbeat_error).__name__,
-                },
-                exc_info=(
-                    type(heartbeat_error),
-                    heartbeat_error,
-                    heartbeat_error.__traceback__,
-                ),
-            )
-            await self._runtime_outbox.publish_pending(best_effort=True)
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="RECOVERY_REQUIRED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                projection={
-                    "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
-                    "budget": budget.execution_payload(),
-                },
-            )
-            yield terminal_event(receipt)
-            return
-        if worker_error is not None:
-            exc = worker_error
-            _logger.error(
-                "Governed worker execution failed",
-                extra={
-                    "request_id": command.request_id,
-                    "graph_id": admitted.graph_id,
-                    "graph_revision": admitted.graph_revision,
-                    "node_id": admitted.node_id,
-                    "attempt_id": attempt_id,
-                    "worker_route": admitted.worker_route,
-                    "reason_code": _exception_reason(exc, GOVERNED_WORKER_FAILED),
-                    "exception_type": type(exc).__name__,
-                },
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
-            elapsed_ms = max(0, (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000)
-            charge = await self._budgets.settle_worker(
-                budget,
-                node_id=admitted.node_id,
-                attempt_id=attempt_id,
-                worker_commit=None,
-                elapsed_ms=elapsed_ms,
-            )
-            budget = charge.context
-            if not charge.accepted:
-                receipt = await self._node_lifecycle.reject_budget_charge(
-                    admitted,
-                    charge,
-                    attempt_id=attempt_id,
-                    fencing_token=fencing_token,
-                    defer_shared_terminal=defer_shared_terminal,
-                )
-                if defer_shared_terminal:
-                    receipt = build_execution_receipt(
-                        admitted,
-                        attempt_id=attempt_id,
-                        status="RECOVERY_REQUIRED",
-                        verification_status="NOT_RUN",
-                        accepted=False,
-                        reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                        evidence_refs=(charge.evidence_ref,),
-                        projection={
-                            "worker_failure_reason_code": _exception_reason(
-                                exc,
-                                GOVERNED_WORKER_FAILED,
-                            ),
-                            "reservation_status": "RESERVED",
-                            "budget": charge.context.execution_payload(),
-                        },
-                    )
-                yield terminal_event(receipt)
-                return
-            worker_failure_reason = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            if worker_failure_reason == GOVERNED_WORKER_SELF_CANCELLED:
-                # The reservation may already represent an external side
-                # effect.  A worker cannot convert its own interruption into
-                # graph/business cancellation authority, and it also cannot
-                # safely declare the operation failed.  Leave the durable
-                # Attempt/Lease/reservation for normal recovery fencing.
-                await self._runtime_outbox.publish_pending(best_effort=True)
-                receipt = build_execution_receipt(
-                    admitted,
-                    attempt_id=attempt_id,
-                    status="RECOVERY_REQUIRED",
-                    verification_status="NOT_RUN",
-                    accepted=False,
-                    reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    evidence_refs=(charge.evidence_ref,),
-                    projection={
-                        "worker_failure_reason_code": worker_failure_reason,
-                        "reservation_status": "RESERVED",
-                        "budget": budget.execution_payload(),
-                    },
-                )
-                yield terminal_event(receipt)
-                return
-            await self._node_lifecycle.mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=worker_failure_reason,
-                graph_target=(None if defer_shared_terminal else "FAILED"),
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status=("RECOVERY_REQUIRED" if defer_shared_terminal else "FAILED"),
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=(
-                    GOVERNED_OPERATION_RECOVERY_REQUIRED
-                    if defer_shared_terminal
-                    else worker_failure_reason
-                ),
-                evidence_refs=(charge.evidence_ref,),
-                projection={
-                    "worker_failure_reason_code": worker_failure_reason,
-                    "reservation_status": "RESERVED",
-                    "budget": budget.execution_payload(),
-                },
-            )
-            yield terminal_event(receipt)
-            return
-
-        reservation_version = heartbeat.latest_reservation_version
-        if reservation_version is None:
-            raise GovernedRuntimeError(
-                GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                "operation reservation was detached from its execution heartbeat",
-            )
-        payload_digest = _payload_digest(worker_commit)
-        digest_ref = f"sha256://execution/{payload_digest.split(':', 1)[1]}"
-        receipt_ref = _worker_receipt_ref(worker_commit) or (
-            "taskreceipt://"
-            f"{_ref_token(admitted.graph_id)}/{admitted.graph_revision}/"
-            f"{_ref_token(admitted.node_id)}/{_ref_token(attempt_id)}/"
-            f"{payload_digest.split(':', 1)[1]}"
-        )
-        evidence_refs = (receipt_ref, digest_ref)
-        try:
-            reservation = await _maybe_await(
-                self._store.commit_operation(
-                    admitted.reservation_id,
-                    attempt_id=attempt_id,
-                    lease_id=lease_id,
-                    owner_id=self._owner_id,
-                    fencing_token=fencing_token,
-                    expected_version=reservation_version,
-                    receipt_ref=receipt_ref,
-                    outbox=self._runtime_outbox.build(
-                        command_id=admitted.command_id,
-                        aggregate_type="OPERATION_RESERVATION",
-                        aggregate_id=admitted.reservation_id,
-                        aggregate_version=reservation_version + 1,
-                        event_type="OPERATION_COMMITTED",
-                        attempt_id=attempt_id,
-                        evidence_refs=evidence_refs,
-                    ),
-                )
-            )
-        except BaseException as exc:
-            await self._runtime_outbox.publish_pending(best_effort=True)
-            raise GovernedRuntimeError(
-                GOVERNED_RECEIPT_COMMIT_FAILED,
-                f"worker receipt could not be committed before terminal state: {_exception_reason(exc, 'UNKNOWN')}",
-            ) from exc
-
-        try:
-            charge = await self._budgets.settle_worker(
-                budget,
-                node_id=admitted.node_id,
-                attempt_id=attempt_id,
-                worker_commit=worker_commit,
-                elapsed_ms=max(
-                    0, (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000
-                ),
-            )
-        except BaseException as exc:
-            await self._node_lifecycle.mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
-                graph_target=(None if defer_shared_terminal else "FAILED"),
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                status="FAILED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
-                projection={"budget": budget.execution_payload()},
-            )
-            yield terminal_event(receipt)
-            return
-        budget = charge.context
-        if not charge.accepted:
-            receipt = await self._node_lifecycle.reject_budget_charge(
-                admitted,
-                charge,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            yield terminal_event(receipt)
-            return
-        execution_context["budget"] = budget.execution_payload()
-
-        attempt = await self._node_lifecycle.transition_attempt(
-            admitted,
-            attempt,
-            lease_id=lease_id,
-            fencing_token=fencing_token,
-            target_status="SUCCEEDED",
-            evidence_refs=evidence_refs,
-        )
-        node = await self._node_lifecycle.transition_node(
-            admitted,
-            node,
-            "EXECUTED",
-            evidence_refs=evidence_refs,
-        )
-        node = await self._node_lifecycle.transition_node(
-            admitted,
-            node,
-            "VERIFYING",
-            evidence_refs=evidence_refs,
-        )
-
-        verification_raw = await _maybe_await(
-            self._verifier.verify(
-                command=command,
-                work_order=work_order,
-                execution_context=execution_context,
-                worker_commit=worker_commit,
-                evidence_refs=evidence_refs,
-            )
-        )
-        verification = _mapping(verification_raw, field_name="verification result")
-        verification_refs = _evidence_refs(verification)
-        verification_status = _text(verification.get("status")).upper()
-        missing_verification_refs = tuple(ref for ref in evidence_refs if ref not in verification_refs)
-        if verification_status == "PASS" and missing_verification_refs:
-            verification = {
-                **verification,
-                "status": "FAIL",
-                "reason_code": GOVERNED_VERIFICATION_EVIDENCE_MISSING,
-                "evidence_refs": list(dict.fromkeys((*verification_refs, *evidence_refs))),
-            }
-            verification_refs = _evidence_refs(verification)
-            verification_status = "FAIL"
-
-        if verification_status != "PASS":
-            node = await self._node_lifecycle.transition_node(
-                admitted,
-                node,
-                "VERIFICATION_FAILED",
-                evidence_refs=verification_refs or evidence_refs,
-                verification_result=verification,
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            if not defer_shared_terminal:
-                graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
-            await self._runtime_outbox.publish_pending()
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                receipt_ref=receipt_ref,
-                payload_digest=payload_digest,
-                status="VERIFICATION_FAILED",
-                verification_status=verification_status or "ERROR",
-                accepted=False,
-                reason_code=_text(verification.get("reason_code")) or GOVERNED_VERIFICATION_FAILED,
-                evidence_refs=verification_refs or evidence_refs,
-                projection=worker_commit,
-            )
-            yield terminal_event(receipt)
-            return
-
-        node = await self._node_lifecycle.transition_node(
-            admitted,
-            node,
-            "VERIFIED",
-            evidence_refs=verification_refs,
-            verification_result=verification,
-        )
-        acceptance_raw = await _maybe_await(
-            self._acceptance.judge(
-                command=command,
-                work_order=work_order,
-                execution_context=execution_context,
-                worker_commit=worker_commit,
-                verification_result=verification,
-                evidence_refs=verification_refs,
-            )
-        )
-        acceptance = _mapping(acceptance_raw, field_name="acceptance judgement")
-        acceptance_refs = _evidence_refs(acceptance)
-        accepted = _text(acceptance.get("decision")).upper() == "ACCEPT"
-        missing_acceptance_refs = tuple(ref for ref in evidence_refs if ref not in acceptance_refs)
-        if accepted and missing_acceptance_refs:
-            accepted = False
-            acceptance = {
-                **acceptance,
-                "decision": "REVIEW",
-                "reason_code": GOVERNED_ACCEPTANCE_FAILED,
-                "evidence_refs": list(dict.fromkeys((*acceptance_refs, *evidence_refs))),
-            }
-            acceptance_refs = _evidence_refs(acceptance)
-
-        if not accepted:
-            node = await self._node_lifecycle.transition_node(
-                admitted,
-                node,
-                "WAITING_ACCEPTANCE_REVIEW",
-                evidence_refs=acceptance_refs or verification_refs,
-            )
-            if not defer_shared_terminal:
-                graph = await self._node_lifecycle.transition_graph(admitted, graph, "BLOCKED")
-            review_gate: TaskNodeReviewGate | None = None
-            review_refs: tuple[str, ...] = ()
-            if self._reviews is not None:
-                review_gate = self._reviews.post_execution_acceptance_gate(
-                    context=self._review_context(
-                        admitted=admitted,
-                        command=command,
-                        work_order=work_order,
-                        node=node,
-                        attempt_id=attempt_id,
-                        reason="Acceptance policy requires durable post-execution review",
-                    )
-                )
-                review_refs = _review_evidence_refs(review_gate)
-            await self._runtime_outbox.publish_pending()
-            review_projection = dict(worker_commit)
-            if review_gate is not None:
-                review_projection["review"] = review_gate.to_dict()
-            receipt = build_execution_receipt(
-                admitted,
-                attempt_id=attempt_id,
-                receipt_ref=receipt_ref,
-                payload_digest=payload_digest,
-                status="WAITING_ACCEPTANCE_REVIEW",
-                verification_status="PASS",
-                accepted=False,
-                reason_code=(
-                    GOVERNED_REVIEW_REQUIRED
-                    if review_gate is not None
-                    else _text(acceptance.get("reason_code")) or GOVERNED_ACCEPTANCE_FAILED
-                ),
-                evidence_refs=tuple(
-                    dict.fromkeys((*(acceptance_refs or verification_refs), *review_refs))
-                ),
-                projection=review_projection,
-            )
-            yield terminal_event(receipt)
-            return
-
-        node = await self._node_lifecycle.transition_node(
-            admitted,
-            node,
-            "ACCEPTED",
-            evidence_refs=acceptance_refs,
-            acceptance_judgement=acceptance,
-        )
-        all_nodes_accepted = not defer_shared_terminal
-        if all_nodes_accepted:
-            for binding in admitted.nodes:
-                durable_node = await _maybe_await(
-                    self._store.get_node(
-                        admitted.graph_id,
-                        admitted.graph_revision,
-                        binding.node_id,
-                    )
-                )
-                if _status(durable_node) != "ACCEPTED":
-                    all_nodes_accepted = False
-                    break
-        if all_nodes_accepted:
-            budget = await self._budgets.finalize(
-                budget, target_status=BudgetReservationStatus.CONSUMED
-            )
-            graph = await _maybe_await(
-                self._store.get_graph(admitted.graph_id, admitted.graph_revision)
-            )
-            if _status(graph) == "ACTIVE":
-                if self._acceptance_effects_enabled:
-                    try:
-                        effect_intents = compile_graph_acceptance_effects(
-                            command=command,
-                            work_order=work_order,
-                            node_id=admitted.node_id,
-                            attempt_id=attempt_id,
-                            worker_commit=worker_commit,
-                        )
-                        graph = await self._node_lifecycle.transition_graph_with_acceptance_effects(
-                            admitted,
-                            graph,
-                            effect_intents=effect_intents,
-                        )
-                    except BaseException as exc:
-                        graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
-                        await self._runtime_outbox.publish_pending()
-                        receipt = build_execution_receipt(
-                            admitted,
-                            attempt_id=attempt_id,
-                            receipt_ref=receipt_ref,
-                            payload_digest=payload_digest,
-                            status="ACCEPTANCE_EFFECT_FAILED",
-                            verification_status="PASS",
-                            accepted=False,
-                            reason_code=_exception_reason(
-                                exc,
-                                "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID",
-                            ),
-                            evidence_refs=acceptance_refs,
-                            projection=worker_commit,
-                        )
-                        yield terminal_event(receipt)
-                        return
-                else:
-                    graph = await self._node_lifecycle.transition_graph(admitted, graph, "COMPLETED")
-        await self._runtime_outbox.publish_pending()
-        receipt = build_execution_receipt(
-            admitted,
-            attempt_id=attempt_id,
-            receipt_ref=receipt_ref,
-            payload_digest=payload_digest,
-            status="ACCEPTED",
-            verification_status="PASS",
-            accepted=True,
-            evidence_refs=acceptance_refs,
-            projection=worker_commit,
-        )
-        yield approved_commit_event(worker_commit, receipt)
-
-    @staticmethod
-    def _review_context(
-        *,
-        admitted: AdmittedExecution,
-        command: HostCommand,
-        work_order: Any,
-        node: Mapping[str, Any],
-        attempt_id: str | None,
-        reason: str,
-        node_status_version: int | None = None,
-    ) -> TaskNodeReviewContext:
-        node_payload = _nested_mapping(node, "node")
-        side_effects = tuple(
-            _text(item)
-            for item in tuple(getattr(work_order, "allowed_actions", ()) or ())
-            if _text(item)
-        )
-        input_refs = tuple(
-            _text(item)
-            for item in tuple(getattr(work_order, "input_refs", ()) or ())
-            if _text(item)
-        )
-        evidence_refs = tuple(
-            dict.fromkeys((*input_refs, *_record_evidence_refs(node)))
-        )
-        review_policy = getattr(work_order, "review_policy", {})
-        review_policy = dict(review_policy) if isinstance(review_policy, Mapping) else {}
-        root_work_order_id = _text(
-            getattr(work_order, "root_work_order_id", None)
-            or getattr(work_order, "work_order_id", None)
-            or admitted.work_order_id
-        )
-        return TaskNodeReviewContext(
-            work_order_id=admitted.work_order_id,
-            root_work_order_id=root_work_order_id,
-            graph_id=admitted.graph_id,
-            graph_revision=admitted.graph_revision,
-            node_id=admitted.node_id,
-            node_status_version=(
-                _version(node)
-                if node_status_version is None
-                else int(node_status_version)
-            ),
-            attempt_id=attempt_id,
-            requester=command.principal_id,
-            reason=reason,
-            risk_level=max(
-                1,
-                min(
-                    5,
-                    int(
-                        node_payload.get("risk_level")
-                        or getattr(work_order, "risk_level", 1)
-                        or 1
-                    ),
-                ),
-            ),
-            side_effects=side_effects,
-            evidence_refs=evidence_refs,
-            diff_ref=_text(review_policy.get("diff_ref")) or None,
-        )
-
-
-    async def _matching_parallel_decision(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        graph: Mapping[str, Any],
-    ) -> dict[str, Any] | None:
-        graph_status = _status(graph)
-        if (
-            len(admitted.nodes) <= 1
-            or graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}
-        ):
-            return None
-        raw = await _maybe_await(
-            self._store.get_latest_parallel_settlement_decision(
-                admitted.graph_id,
-                admitted.graph_revision,
-            )
-        )
-        if raw is None:
-            return None
-        if not isinstance(raw, Mapping):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement decision record is invalid",
-            )
-        payload = raw.get("payload")
-        try:
-            decision = normalize_parallel_settlement_decision(payload)
-        except (ParallelSettlementContractError, TypeError) as exc:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"parallel settlement replay decision is invalid: {exc}",
-            ) from exc
-        if (
-            _text(raw.get("decision_ref")) != decision.decision_ref
-            or decision.payload["graph_id"] != admitted.graph_id
-            or decision.payload["graph_revision"] != admitted.graph_revision
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement replay decision identity drifted",
-            )
-        if (
-            decision.payload["graph_target_status"] != graph_status
-            or decision.payload["graph_status_version_before"] + 1
-            != _version(graph)
-        ):
-            return None
-        selected = self._selected_parallel_decision_outcome(
-            {"payload": decision.payload}
-        )
-        selected_admission = admitted.for_node(
-            _required_record_text(selected, "node_id")
-        )
-        attempts = await self._attempts_for_node(selected_admission)
-        if (
-            not attempts
-            or _required_record_text(attempts[-1], "attempt_id")
-            != _required_record_text(selected, "attempt_id")
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement replay selected Attempt is not latest",
-            )
-        record = dict(raw)
-        record["decision_ref"] = decision.decision_ref
-        record["payload"] = decision.payload
-        return record
-
-    @staticmethod
-    def _selected_parallel_decision_outcome(
-        decision: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        payload = _mapping(
-            decision.get("payload"),
-            field_name="parallel settlement replay payload",
-        )
-        selected_node_id = _required_record_text(payload, "selected_node_id")
-        raw_outcomes = payload.get("outcomes")
-        if not isinstance(raw_outcomes, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement replay outcomes are invalid",
-            )
-        selected = [
-            dict(outcome)
-            for outcome in raw_outcomes
-            if isinstance(outcome, Mapping)
-            and _text(outcome.get("node_id")) == selected_node_id
-        ]
-        if len(selected) != 1:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement replay selected outcome is missing",
-            )
-        return selected[0]
-
-    async def _terminal_replay(
-        self,
-        admitted: AdmittedExecution,
-        *,
-        graph: Mapping[str, Any],
-        node: Mapping[str, Any],
-    ) -> GovernedExecutionReceipt | None:
-        graph_status = _status(graph)
-        node_status = _status(node)
-        waiting_acceptance_review = (
-            graph_status in {"ACTIVE", "BLOCKED"}
-            and node_status == "WAITING_ACCEPTANCE_REVIEW"
-        )
-        terminal = (
-            graph_status in {"COMPLETED", "FAILED", "CANCELLED"}
-            or node_status in {
-                "ACCEPTED",
-                "FAILED",
-                "RETRY_PENDING",
-                "VERIFICATION_FAILED",
-                "CANCELLED",
-            }
-            or waiting_acceptance_review
-        )
-        if not terminal:
-            return None
-        reservation = await self._try_operation(admitted.reservation_id)
-        attempts = await self._attempts_for_node(admitted)
-        latest = attempts[-1] if attempts else {}
-        attempt_id = _text(latest.get("attempt_id")) or _attempt_id(admitted, attempt_no=1)
-        reservation_status = _status(reservation or {})
-        receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
-        accepted = node_status == "ACCEPTED" and graph_status in {"ACTIVE", "COMPLETED"}
-        if accepted and (reservation_status != "COMMITTED" or not receipt_ref):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "accepted graph lacks its committed operation receipt",
-            )
-        if waiting_acceptance_review and (
-            reservation_status != "COMMITTED" or not receipt_ref
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "acceptance-review graph lacks its committed operation receipt",
-            )
-        projection: Mapping[str, Any] | None = None
-        if accepted and receipt_ref and self._projection_reader is not None:
-            loaded = await _maybe_await(self._projection_reader.load(receipt_ref))
-            if not isinstance(loaded, Mapping):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "accepted receipt has no durable public projection",
-                )
-            projection = dict(loaded)
-        decision = await self._matching_parallel_decision(admitted, graph=graph)
-        if decision is not None:
-            selected = self._selected_parallel_decision_outcome(decision)
-            selected_node_id = _required_record_text(selected, "node_id")
-            if selected_node_id != admitted.node_id:
-                decision = None
-            elif _required_record_text(selected, "attempt_id") != attempt_id:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel settlement replay selected Attempt drifted",
-                )
-        decision_ref = (
-            _required_record_text(decision, "decision_ref")
-            if decision is not None
-            else None
-        )
-        if decision_ref is not None:
-            projected = dict(projection or {})
-            projected["parallel_settlement"] = {
-                "graph_status": graph_status,
-                "decision_ref": decision_ref,
-            }
-            projection = projected
-        return build_execution_receipt(
-            admitted,
-            attempt_id=attempt_id,
-            receipt_ref=receipt_ref,
-            payload_digest=_digest_from_receipt_ref(receipt_ref),
-            status=node_status or graph_status,
-            verification_status=(
-                "PASS"
-                if accepted or waiting_acceptance_review
-                else "FAIL"
-                if node_status == "VERIFICATION_FAILED"
-                else "UNKNOWN"
-            ),
-            accepted=accepted,
-            replayed=True,
-            reason_code=None if accepted else f"GOVERNED_REPLAY_{node_status or graph_status}",
-            evidence_refs=tuple(
-                dict.fromkeys(
-                    reference
-                    for reference in (
-                        *_record_evidence_refs(node),
-                        _text(latest.get("error_ref")),
-                        receipt_ref,
-                        decision_ref,
-                    )
-                    if reference
-                )
-            ),
-            projection=projection,
-        )
-
-    async def _attempts_for_node(self, admitted: AdmittedExecution) -> list[dict[str, Any]]:
-        snapshot = await _maybe_await(
-            self._store.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
-        )
-        attempts = snapshot.get("attempts") if isinstance(snapshot, Mapping) else None
-        if not isinstance(attempts, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "durable scheduler snapshot does not expose attempts",
-            )
-        rows = [
-            dict(item)
-            for item in attempts
-            if isinstance(item, Mapping) and _text(item.get("node_id")) == admitted.node_id
-        ]
-        rows.sort(key=lambda item: (int(item.get("attempt_no") or 0), _text(item.get("attempt_id"))))
-        return rows
-
-    async def _try_operation(self, reservation_id: str) -> dict[str, Any] | None:
-        try:
-            value = await _maybe_await(self._store.get_operation_reservation(reservation_id))
-        except Exception as exc:
-            reason = _exception_reason(exc, "")
-            if reason in {"TASK_STORE_NOT_FOUND", "NOT_FOUND", "OPERATION_NOT_FOUND"}:
-                return None
-            raise
-        return dict(value) if isinstance(value, Mapping) else None
-
-async def _worker_event_stream(
-    worker: Any,
-    *,
-    command: HostCommand,
-    work_order: Any,
-    execution_context: Mapping[str, Any],
-) -> AsyncIterator[Mapping[str, Any]]:
-    stream_method = getattr(worker, "execute_stream", None)
-    if callable(stream_method):
-        stream = stream_method(
-            command=command,
-            work_order=work_order,
-            execution_context=execution_context,
-        )
-        if inspect.isawaitable(stream):
-            stream = await stream
-        if hasattr(stream, "__aiter__"):
-            async for event in stream:
-                yield event
-            return
-        if isinstance(stream, Sequence) and not isinstance(stream, (str, bytes, bytearray)):
-            for event in stream:
-                yield event
-            return
-        raise GovernedRuntimeError(GOVERNED_WORKER_FAILED, "worker stream is not iterable")
-
-    execute_method = getattr(worker, "execute", None)
-    if not callable(execute_method):
-        raise GovernedRuntimeError(
-            GOVERNED_WORKER_FAILED,
-            "selected worker exposes neither execute_stream nor execute",
-        )
-    result = execute_method(
-        command=command,
-        work_order=work_order,
-        execution_context=execution_context,
-    )
-    result = await _maybe_await(result)
-    payload = _mapping(result, field_name="worker result")
-    if not _is_terminal_commit(payload):
-        payload = {**payload, "phase": "COMMIT", "done": True}
-    yield payload
-
-
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
-
-
-
-
 
 
 def _validated_node_grant_refs(
@@ -3277,138 +1863,6 @@ def _projection_route_authority(
                 f"parallel success WorkOrder route binding drifted: {binding.node_id}",
             )
     return frozen.kind, expected_target
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _retry_attempt_available(
-    node: Mapping[str, Any],
-    *,
-    attempt_no: int,
-) -> bool:
-    payload = node.get("node")
-    retry_policy = payload.get("retry_policy") if isinstance(payload, Mapping) else None
-    max_attempts = retry_policy.get("max_attempts") if isinstance(retry_policy, Mapping) else None
-    if (
-        isinstance(attempt_no, bool)
-        or not isinstance(attempt_no, int)
-        or attempt_no < 1
-        or isinstance(max_attempts, bool)
-        or not isinstance(max_attempts, int)
-        or max_attempts < 1
-    ):
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            "durable TaskNode has an invalid retry attempt policy",
-        )
-    return attempt_no < max_attempts
-
-
-def _retry_usage_id(
-    *,
-    budget_id: str,
-    attempt_id: str,
-    node_only: bool = False,
-) -> str:
-    material = f"{_text(budget_id)}\n{_text(attempt_id)}\nretry"
-    if node_only:
-        material += "\nnode-only"
-    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
-    return f"budget-usage://{digest}"
-
-
-def _payload_digest(value: Mapping[str, Any]) -> str:
-    try:
-        encoded = json.dumps(
-            dict(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
-        raise GovernedRuntimeError(
-            GOVERNED_WORKER_COMMIT_INVALID,
-            "worker COMMIT is not canonical finite JSON",
-        ) from exc
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
-def _is_terminal_commit(event: Mapping[str, Any]) -> bool:
-    return _text(event.get("phase")).upper() == "COMMIT" and bool(event.get("done"))
-
-
-
-
-
-
-def _heartbeat_failure_phase(exc: BaseException) -> str:
-    if isinstance(exc, DurableExecutionHeartbeatError):
-        return _text(exc.phase) or "renewal"
-    return _text(getattr(exc, "_heartbeat_phase", None)) or "lifecycle"
-
-
-async def _stop_heartbeat_after_interruption(
-    heartbeat: DurableExecutionHeartbeat,
-) -> None:
-    """Best-effort join without replacing the caller's original failure."""
-
-    try:
-        await heartbeat.stop()
-    except BaseException:
-        return
-
-
-def _precharged_tool_call_count(worker_route: str) -> int:
-    """Charge only routes that actually cross a tool/delegate boundary.
-
-    Unknown compatibility routes keep the historical one-call precharge;
-    canonical chat is model work and must not be misreported as a tool call.
-    """
-
-    kind = str(worker_route or "").strip().partition(":")[0].lower()
-    return 0 if kind == "chat" else 1
-
-
-def _ref_token(value: Any) -> str:
-    text = _text(value)
-    return "".join(char if char.isalnum() or char in "._-" else "-" for char in text).strip("-") or "unknown"
-
-
 
 
 __all__ = [

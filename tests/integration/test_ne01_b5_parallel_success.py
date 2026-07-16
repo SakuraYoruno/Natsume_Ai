@@ -597,7 +597,7 @@ async def test_b5_completed_restart_replays_frozen_decision_without_recompiling_
         raise AssertionError("completed Graph must use its frozen 0091 authority")
 
     monkeypatch.setattr(
-        "host_brain.task_runtime.coordinator.compile_graph_acceptance_effects",
+        "host_brain.task_runtime.node_execution_runtime.compile_graph_acceptance_effects",
         forbidden_effect_recompile,
     )
     forbidden_resolver = _FailingResolver()

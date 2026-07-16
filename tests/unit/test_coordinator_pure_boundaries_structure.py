@@ -10,6 +10,7 @@ from host_brain.task_runtime import coordinator_records
 from host_brain.task_runtime import graph_cancellation_projection
 from host_brain.task_runtime import graph_cancellation_records
 from host_brain.task_runtime import graph_cancellation_runtime
+from host_brain.task_runtime import node_execution_runtime
 
 
 RECORD_NAMES = (
@@ -235,10 +236,24 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
             for node in ast.walk(method)
         )
     }
-    assert identity_call_owners == {
-        "_execute_node_stream",
-        "_execute_stream_impl",
-    }
+    assert identity_call_owners == {"_execute_stream_impl"}
+    node_execution_owner = next(
+        node
+        for node in _module_tree(node_execution_runtime).body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "DurableNodeExecutionRuntime"
+    )
+    assert {
+        method.name
+        for method in node_execution_owner.body
+        if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_assert_durable_identity"
+            for node in ast.walk(method)
+        )
+    } == {"execute_stream"}
     projection_tree = _module_tree(graph_cancellation_projection)
     projection_owner = next(
         node

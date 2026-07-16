@@ -7,6 +7,7 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_lifecycle_runtime
 from host_brain.task_runtime.node_lifecycle_runtime import (
     DurableNodeLifecycleRuntime,
@@ -35,6 +36,23 @@ _COORDINATOR_CALL_MATRIX = {
     "reject_budget_charge": 3,
     "mark_worker_failure": 3,
     "mark_pre_reservation_failure": 4,
+}
+
+_NODE_EXECUTION_CALL_MATRIX = {
+    "transition_graph": 5,
+    "transition_node": 7,
+    "transition_graph_with_acceptance_effects": 1,
+    "transition_attempt": 2,
+    "finalize_node_budget": 8,
+    "reject_budget_charge": 3,
+    "mark_worker_failure": 3,
+    "mark_pre_reservation_failure": 4,
+}
+
+_REMAINING_COORDINATOR_CALL_MATRIX = {
+    "transition_graph": 12,
+    "transition_node": 5,
+    "cancel_waiting_review_node": 1,
 }
 
 _MIGRATED_AST_DIGESTS = {
@@ -277,10 +295,26 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
         coordinator_methods
     )
 
-    service_calls = _self_dependency_calls(owner, "_node_lifecycle")
-    call_matrix = Counter(call.func.attr for call in service_calls)
-    assert call_matrix == Counter(_COORDINATOR_CALL_MATRIX)
-    assert sum(call_matrix.values()) == 51
+    coordinator_calls = _self_dependency_calls(owner, "_node_lifecycle")
+    coordinator_matrix = Counter(call.func.attr for call in coordinator_calls)
+    assert coordinator_matrix == Counter(_REMAINING_COORDINATOR_CALL_MATRIX)
+
+    node_execution_owner = _class(
+        node_execution_runtime,
+        "DurableNodeExecutionRuntime",
+    )
+    node_execution_calls = _self_dependency_calls(
+        node_execution_owner,
+        "_node_lifecycle",
+    )
+    node_execution_matrix = Counter(
+        call.func.attr for call in node_execution_calls
+    )
+    assert node_execution_matrix == Counter(_NODE_EXECUTION_CALL_MATRIX)
+    assert coordinator_matrix + node_execution_matrix == Counter(
+        _COORDINATOR_CALL_MATRIX
+    )
+    assert len(coordinator_calls) + len(node_execution_calls) == 51
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:

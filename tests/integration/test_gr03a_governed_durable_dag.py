@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -2999,7 +3000,7 @@ async def test_ne01_parallel_terminal_receipt_must_match_durable_node_state(
         calls,
         bounded_fanout_enabled=True,
     )
-    execute_node_stream = runtime._execute_node_stream  # noqa: SLF001
+    execute_node_stream = runtime._node_execution.execute_stream  # noqa: SLF001
 
     async def forge_left_terminal(**kwargs: Any):
         async for raw_event in execute_node_stream(**kwargs):
@@ -3016,7 +3017,9 @@ async def test_ne01_parallel_terminal_receipt_must_match_durable_node_state(
                 event["execution_receipt"] = receipt
             yield event
 
-    runtime._execute_node_stream = forge_left_terminal  # type: ignore[method-assign]  # noqa: SLF001
+    runtime._node_execution = SimpleNamespace(  # type: ignore[assignment]  # noqa: SLF001
+        execute_stream=forge_left_terminal
+    )
     record = HostCommandRepository(db_path, clock=lambda: NOW).admit(*contracts)
     admitted = AdmittedExecution.from_contracts(
         command=record["command"],
@@ -3634,7 +3637,7 @@ async def test_gr03a_restart_resumes_after_accepted_predecessor_without_reexecut
 
     first_events = [
         event
-        async for event in first_runtime._execute_node_stream(  # noqa: SLF001
+        async for event in first_runtime._node_execution.execute_stream(  # noqa: SLF001
             admitted=admitted.for_node("root"),
             command=record["command"],
             work_order=record["work_order"],
@@ -4535,7 +4538,9 @@ async def test_gr03b_usage_replay_is_exact_and_competing_cas_has_one_winner(
     )
     _ = [
         event
-        async for event in _coordinator(db_path, [])._execute_node_stream(  # noqa: SLF001
+        async for event in _coordinator(  # noqa: SLF001
+            db_path, []
+        )._node_execution.execute_stream(
             admitted=admitted.for_node("root"),
             command=record["command"],
             work_order=record["work_order"],

@@ -116,7 +116,10 @@ flowchart TB
 
 主要代码：
 
-- `host_brain/task_runtime/coordinator.py`：DAG 执行循环、worker 调度、Verification/Acceptance，以及对窄 runtime service 的直接调用。
+- `host_brain/task_runtime/coordinator.py`：DAG 外层调度、并行结果解释和对窄 runtime service 的直接调用。
+- [`host_brain/task_runtime/node_execution_runtime.py`](../../../host_brain/task_runtime/node_execution_runtime.py)：完整节点 worker/heartbeat/retry/Budget/verification/acceptance/review 编排；共享既有 authority，不建立第二事务或锁。
+- [`host_brain/task_runtime/node_execution_projection.py`](../../../host_brain/task_runtime/node_execution_projection.py)：节点 terminal replay、Attempt/Reservation 等 durable read；只读，不拥有 mutation authority。
+- [`host_brain/task_runtime/node_execution_records.py`](../../../host_brain/task_runtime/node_execution_records.py)：节点执行的纯构造、digest、retry identity 与 record 校验。
 - `host_brain/task_runtime/coordinator_records.py`：durable record 校验、并行节点 outcome 与稳定字段读取；纯叶子模块。
 - `host_brain/task_runtime/coordinator_receipts.py`：不可变 execution receipt、构造器与 terminal/commit event rendering；纯叶子模块并保持旧导入 identity。
 - `host_brain/task_runtime/parallel_settlement_projection.py`：0090 active re-entry、rejected Budget outcome 与 outcome snapshot 的 durable read/validation；只持同一 Store，无 mutation authority。
@@ -150,11 +153,11 @@ flowchart TB
 
 执行器只接收冻结节点输入和 node-bound grant。任何失败后的计划变化都应生成新 graph revision，不能在 worker 内静默修改原图。
 
-当前 Coordinator 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。B1 在原子 claim/promotion 上增加了唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
+当前 Task Runtime 已消费 B0 的 `{max_attempts, retry_backoff_ms}` 与无副作用调度决策。`DurableNodeExecutionRuntime` 在 B1 原子 claim/promotion 上保留唯一自动重试边界：worker resolver 在 operation reservation 前显式抛 `RetryableWorkerPreparationError`。TaskStore 在同一 `BEGIN IMMEDIATE` 中写 retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox；允许时到期创建 attempt 2，超限时 fail closed，reservation 后异常绝不 retry。提交响应丢失时，exact replay 会严格校验上述聚合、BudgetUsage 与关联 Outbox，避免重复扣费；resolver `CancelledError` 原样传播。
 
 TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 已不再阻塞静态文件门禁，剩余问题集中在 Coordinator。
 
-执行层已完成十五刀结构拆分，Coordinator 主文件由 5,860 降到 3,430 行。确定性 records/receipts/cancellation payload helpers 不依赖 runtime authority；RuntimeOutbox 在 Coordinator、GraphCancellationRuntime、ParallelSettlementRuntime 与 DurableNodeLifecycleRuntime 间保持同一实例和 27 build/31 publish/58 calls/5 best-effort 的联合矩阵；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join。取消与 0090 settlement 的冻结边界保持不变；438 行 DurableNodeLifecycleRuntime 只持同一 Store、共享 BudgetRuntime/RuntimeOutbox 与 owner id，接管九个 transition、Budget 和 failure-closure 方法，不反向持有 Coordinator、callback、worker/review authority、TTL 或新锁。其规范化 AST 与迁移前一致，pre-reservation failure 仍以同一原子 bundle 最多 exact replay 一次且没有 sequential fallback，deferred child 只 refresh 共享 Budget。该服务 Outbox 子矩阵为 6 build/3 publish/1 best-effort，DurableTaskStore 仍是唯一 mutation/UoW authority。发布锁仍不覆盖跨进程 claim/CAS，也没有 pending-intent scanner/takeover/continuation，因此静态 Gate 仍仅因 Coordinator 未分类且超过 1.5k 为红；下一阶段拆 DAG scheduling 与 worker/verification/acceptance orchestration，不能把进程内拆分写成生产恢复闭环完成。
+执行层已完成十六刀结构拆分，Coordinator 主文件由 5,860 降到 1,884 行。第十六刀把完整节点 worker/heartbeat/retry/Budget/verification/acceptance/review 编排迁入 1,267 行 `DurableNodeExecutionRuntime`，其规范化 AST 与迁移前完全一致；291 行 `NodeExecutionProjection` 只持读取依赖，178 行 `node_execution_records` 为纯模块。Runtime 复用同一个 Store、RuntimeOutbox、BudgetRuntime、NodeLifecycle、worker/verifier/acceptance/review authority 与既有 TTL，不持有 Coordinator callback，也没有新锁或第二 persistence authority。Node Runtime Outbox 子矩阵为 6 build/14 publish/4 best-effort，联合矩阵仍为 27 build/31 publish/58 calls/5 best-effort。发布锁仍不覆盖跨进程 claim/CAS，也没有 pending-intent scanner/takeover/continuation；静态 Gate 仍仅因 Coordinator 未分类且超过 1.5k 为红。下一刀为 `ParallelSuccessRuntime` 与 DAG scheduling，不能把进程内拆分写成生产恢复闭环完成，整体状态继续保持 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
