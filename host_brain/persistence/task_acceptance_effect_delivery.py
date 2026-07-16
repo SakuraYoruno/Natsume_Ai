@@ -446,15 +446,12 @@ class TaskAcceptanceEffectDeliveryMixin:
             failed = _acceptance_effect_record(
                 self._require_acceptance_effect_intent(conn, effect_ref)
             )
-            conn.execute(
-                """
-                UPDATE task_runtime_graph_cancellation_effect_fence
-                SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
-                WHERE effect_id = ?
-                  AND resolution_status = 'RECONCILIATION_REQUIRED'
-                """,
-                (ts_ms, effect_ref),
-            )
+            # Failure only proves that the dispatcher did not obtain a
+            # successful durable receipt.  The handler or downstream
+            # transport may already have produced the external side effect,
+            # so a concurrent cancellation fence must remain unresolved.
+            # A future signed reconciliation path may establish
+            # NO_SIDE_EFFECT; the 0087 row alone cannot.
             failed["replayed"] = False
             return failed
 

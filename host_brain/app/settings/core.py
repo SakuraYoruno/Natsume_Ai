@@ -12,17 +12,119 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from functools import lru_cache
+import json
 from pathlib import Path
+import re
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .base import SettingsFieldReport, inspect_setting
 
 LogLevel = Literal["DEBUG", "INFO", "WARN", "WARNING", "ERROR"]
 RuntimeEnv = Literal["dev", "test", "prod"]
+
+_RECONCILIATION_PUBLIC_KEY_PREFIX = "ed25519:"
+_RECONCILIATION_PUBLIC_KEY_VALUE_PATTERN = re.compile(
+    r"^[A-Za-z0-9_-]{43}$"
+)
+_RECONCILIATION_KEY_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+)
+_MAX_RECONCILIATION_PUBLIC_KEYS = 64
+
+
+def _reject_duplicate_json_object_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    parsed: dict[str, object] = {}
+    for key, value in pairs:
+        if key in parsed:
+            raise ValueError(f"duplicate key_id {key!r}")
+        parsed[key] = value
+    return parsed
+
+
+def parse_task_reconciliation_public_keys(raw: str) -> dict[str, bytes]:
+    """Parse one strict, rotation-capable Ed25519 public-key ring.
+
+    The environment contract is a JSON object whose values use the canonical
+    ``ed25519:<unpadded-base64url>`` representation.  Only raw 32-byte public
+    keys are returned; this boundary intentionally has no private-key or
+    signing-key format.
+    """
+
+    supplied = str(raw or "").strip()
+    if not supplied:
+        return {}
+    try:
+        parsed = json.loads(
+            supplied,
+            object_pairs_hook=_reject_duplicate_json_object_keys,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: expected unique-key JSON object"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: top-level value must be an object"
+        )
+    if len(parsed) > _MAX_RECONCILIATION_PUBLIC_KEYS:
+        raise ValueError(
+            "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: too many active public keys"
+        )
+
+    public_keys: dict[str, bytes] = {}
+    seen_key_material: set[bytes] = set()
+    for key_id, value in parsed.items():
+        if not _RECONCILIATION_KEY_ID_PATTERN.fullmatch(key_id):
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: invalid key_id"
+            )
+        if not isinstance(value, str) or not value.startswith(
+            _RECONCILIATION_PUBLIC_KEY_PREFIX
+        ):
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: "
+                "public key must use ed25519:<unpadded-base64url>"
+            )
+        encoded = value.removeprefix(_RECONCILIATION_PUBLIC_KEY_PREFIX)
+        if not _RECONCILIATION_PUBLIC_KEY_VALUE_PATTERN.fullmatch(encoded):
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: "
+                "Ed25519 public key encoding is not canonical"
+            )
+        try:
+            key_bytes = base64.b64decode(
+                f"{encoded}=",
+                altchars=b"-_",
+                validate=True,
+            )
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: invalid base64url public key"
+            ) from exc
+        if len(key_bytes) != 32 or (
+            base64.urlsafe_b64encode(key_bytes).decode("ascii").rstrip("=")
+            != encoded
+        ):
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: "
+                "Ed25519 public key must contain exactly 32 bytes"
+            )
+        if key_bytes in seen_key_material:
+            raise ValueError(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID: "
+                "duplicate Ed25519 public key material"
+            )
+        seen_key_material.add(key_bytes)
+        public_keys[key_id] = key_bytes
+    return public_keys
 
 
 class CoreSettings(BaseSettings):
@@ -71,6 +173,14 @@ class CoreSettings(BaseSettings):
         default=False,
         alias="HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED",
     )
+    task_operation_reconciliation_operator_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED",
+    )
+    task_reconciliation_ed25519_public_keys_json: str = Field(
+        default="",
+        alias="HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON",
+    )
     runtime_event_replay_enabled: bool = Field(
         default=False, alias="HOST_RUNTIME_EVENT_REPLAY_ENABLED"
     )
@@ -84,6 +194,34 @@ class CoreSettings(BaseSettings):
         default=False, alias="HOST_NLE_GOVERNANCE_VIEWS_ENABLED"
     )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
+
+    @model_validator(mode="after")
+    def _validate_task_reconciliation_authority(self) -> CoreSettings:
+        public_keys = parse_task_reconciliation_public_keys(
+            self.task_reconciliation_ed25519_public_keys_json
+        )
+        if (
+            self.task_graph_cancellation_operator_enabled
+            or self.task_operation_reconciliation_operator_enabled
+        ) and not public_keys:
+            raise ValueError(
+                "TASK_RECONCILIATION_OPERATOR_REQUIRES_PUBLIC_KEYS"
+            )
+        if (
+            self.task_graph_cancellation_operator_enabled
+            and not self.task_operation_reconciliation_operator_enabled
+        ):
+            raise ValueError(
+                "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION"
+            )
+        return self
+
+    def task_reconciliation_public_keys(self) -> dict[str, bytes]:
+        """Return a fresh verification-only public-key ring."""
+
+        return parse_task_reconciliation_public_keys(
+            self.task_reconciliation_ed25519_public_keys_json
+        )
 
     @classmethod
     def readiness_fields(cls) -> list[SettingsFieldReport]:
@@ -136,6 +274,25 @@ class CoreSettings(BaseSettings):
                 default_value=False,
                 current_value=s.task_graph_cancellation_operator_enabled,
                 is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_operation_reconciliation_operator_enabled",
+                env_key="HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED",
+                default_value=False,
+                current_value=s.task_operation_reconciliation_operator_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_reconciliation_ed25519_public_keys_json",
+                env_key="HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON",
+                default_value="",
+                current_value=s.task_reconciliation_ed25519_public_keys_json,
+                is_required=(
+                    s.task_graph_cancellation_operator_enabled
+                    or s.task_operation_reconciliation_operator_enabled
+                ),
             ),
             inspect_setting(
                 domain=domain, field_name="runtime_event_replay_enabled",

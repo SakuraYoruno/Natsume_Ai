@@ -156,6 +156,11 @@ flowchart TD
     CANCEL_CLAIM -.-> CANCEL_ADMISSION["HostCommandRepository exact revision\n重建 replay admission"]
     CANCEL_ADMISSION -.-> CANCEL_RECON
     CANCEL_RECON -.->|"durable facts 未收敛"| CANCEL_DEFER["durable defer\n不伪造 cancellation 完成"]
+    EFFECT_FAILED["Effect FAILED\nhandler/transport 失败 ≠ NO_SIDE_EFFECT"] -.-> CANCEL_RECON
+    EFFECT_FAILED -.-> CANCEL_DEFER
+    EFFECT_COMMITTED["Effect COMMITTED + durable receipt\n自动 COMMITTED_EVIDENCE"] -.-> CANCEL_RECON
+    OP_RECON["Operation 签名对账 WIRED_DEFAULT_OFF\nservice + composition + OBS + public key"] -.-> CANCEL_RECON
+    LEGACY_EFFECT["legacy FAILED_EVIDENCE\n兼容读取；待历史修复/隔离"] -.-> HISTORY
     CANCEL_DEFER -.-> CANCEL_SCAN
     CANCEL_RECON -.-> CANCEL_FINAL["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
     CANCEL_FINAL -.-> CANCEL_COMPLETE["0092 FINALIZED + decision 后\n清理 0094 协调行"]
@@ -188,6 +193,10 @@ flowchart TD
     style CANCEL_ADMISSION fill:#fff3cd,stroke:#a87500
     style CANCEL_RECON fill:#fff3cd,stroke:#a87500
     style CANCEL_DEFER fill:#fff3cd,stroke:#a87500
+    style EFFECT_FAILED fill:#fff3cd,stroke:#a87500
+    style EFFECT_COMMITTED fill:#d1e7dd,stroke:#177245
+    style OP_RECON fill:#fff3cd,stroke:#a87500
+    style LEGACY_EFFECT fill:#fff3cd,stroke:#a87500
     style CANCEL_FINAL fill:#fff3cd,stroke:#a87500
     style CANCEL_COMPLETE fill:#fff3cd,stroke:#a87500
     style EFFECT_RULE fill:#fff3cd,stroke:#a87500
@@ -202,7 +211,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination；0095 收口 revisioned Graph Outbox/Event/Operator identity；0096 收口 task-bound Review continuation；0097 收口 node-grant batch 跨进程唯一性。ReviewStore 的终态 mutation 与 coordination enqueue 原子提交，worker 按原 surface 重入；PRE 不造 Attempt，POST 不重跑 worker。credential 覆盖 budget window，但 READY 与首次 worker 校验仍受 live claim fence 约束，随后由 Task lease 管已开始执行。0092 intent/decision 仍是取消业务 authority；operation/effect/review cancellation facts 未 reconciliation 时只 durable defer。Cancellation 的共享生产 verifier、Gateway/BFF/UI 与 exact surface 路由已接线但默认 OFF；部署凭据与真实 canary仍缺。Review 决策已有独立 `review:decide` policy，但真实 canary 也未完成。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。Operation 签名对账为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账和旧 `FAILED_EVIDENCE` 修复仍缺，整体 cancellation 继续 OFF。
 
 ## Plan 分支的真实边界
 

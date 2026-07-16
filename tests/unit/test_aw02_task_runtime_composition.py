@@ -24,6 +24,9 @@ from host_brain.composition.task_runtime import (
     build_process_task_runtime_container,
 )
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
+)
 from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
@@ -253,6 +256,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert container.outbox_publisher.worker_id == f"{container.recovery_id}::outbox"
     assert container.cancellation_continuation_worker.worker_id == (
         f"{container.recovery_id}::graph-cancellation"
+    )
+    assert isinstance(
+        container.operation_reconciliation_service,
+        GraphCancellationOperationReconciliationService,
     )
     assert container.graph_execution_registry is not None
     assert container.recovery_report.recovery_id == container.recovery_id

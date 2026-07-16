@@ -8,6 +8,8 @@
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
     "durable_cancellation": "OFF",
+    "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
+    "effect_reconciliation": "MISSING",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "budget": "PARTIAL",
     "production_canary": "NOT_RUN"
@@ -120,7 +122,9 @@
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
       "stage": "PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW",
-      "wiring_progress": "PRODUCTION_OFF. Eighteen structural cuts remain green. DurableDagSchedulingRuntime remains the temporary outer orchestrator and coordinator.py also injects the node-grant preclaim verifier. Migrations 0093/0094/0095 close Outbox delivery, cancellation coordination, and revision identity. Migration 0096 closes task-bound Review continuation with exact Task-authority hand-off, and 0097 closes cross-process node-grant batch uniqueness. Cancellation production authority, exact-revision task_graph.cancel Operator Gateway/BFF/UI, immutable-surface routing across Host/Internal/Scheduler, and post-error durable-intent certainty checks are WIRED_DEFAULT_OFF; enabling requires Secure Ingress ENFORCE and an available enabled Operator Gateway. Settled claim authorities are rejected from bearer reuse, and only the closed OBS port error contract may report definite non-execution; arbitrary dependency failures remain uncertain. Complete signed operation/effect business reconciliation, historical half-state repair, Budget contention, deployed credentials, and real canaries remain missing. Review decisions use a separate review:decide policy, but their real Operator deployment/canary is likewise not run. Atomic, bounded, and cancellation production paths remain OFF; overall status remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF.",
+      "wiring_progress": "PRODUCTION_OFF. Eighteen structural cuts remain green. DurableDagSchedulingRuntime remains the temporary outer orchestrator and coordinator.py also injects the node-grant preclaim verifier. Migrations 0093/0094/0095 close Outbox delivery, cancellation coordination, and revision identity. Migration 0096 closes task-bound Review continuation with exact Task-authority hand-off, and 0097 closes cross-process node-grant batch uniqueness. Cancellation production authority, exact-revision task_graph.cancel Operator Gateway/BFF/UI, immutable-surface routing across Host/Internal/Scheduler, and post-error durable-intent certainty checks are WIRED_DEFAULT_OFF. Signed Operation reconciliation is also WIRED_DEFAULT_OFF: ProcessTaskRuntimeContainer constructs the restricted service, ASGI registers it, OBS exposes the scoped command, and verification-only Ed25519 public keys are injected; startup requires Secure Ingress ENFORCE and an executable Gateway. Acceptance Effect FAILED remains uncertain: corrected paths retain RECONCILIATION_REQUIRED, while only COMMITTED plus a durable receipt closes the fence automatically. Legacy FAILED_EVIDENCE is compatibility-only and remains a historical-repair gap. Signed Effect reconciliation, historical half-state repair, Budget contention, deployed credentials, and real canaries remain missing. Atomic, bounded, and cancellation production paths remain OFF; overall status remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF.",
+      "acceptance_effect_cancellation_boundary": "General handler or transport FAILED does not prove NO_SIDE_EFFECT. A FAILED row observed at cancellation and a live CLAIMED row that later fails both remain RECONCILIATION_REQUIRED. Only COMMITTED with a durable receipt becomes COMMITTED_EVIDENCE automatically. Existing FAILED_EVIDENCE remains readable for legacy compatibility but is not emitted by the corrected path and requires historical repair or quarantine before production enablement.",
+      "operation_reconciliation_boundary": "WIRED_DEFAULT_OFF / CANARY_NOT_RUN: ProcessTaskRuntimeContainer constructs the restricted signed Operation service, ASGI registers it in Operator Runtime state, OBS exposes the scoped command, and TaskStore receives verification-only Ed25519 public keys. The feature is default off; startup requires Secure Ingress ENFORCE and an executable Gateway. This does not provide signed Effect reconciliation or enable cancellation.",
       "cancellation_continuation_schema": "0094 readiness and codec require the exact frozen coordination column set and reject extra business fields such as status. PRAGMA table_info name/type/notnull/default/pk metadata must match exactly, and foreign_key_list must contain exactly one id=0 composite FK with seq 0/1/2 for intent_ref/graph_id/graph_revision; split or extra FKs fail closed. intent_ref must have TEXT NOT NULL PRIMARY KEY identity, and every required identity/counter/timestamp remains NOT NULL; SQLite rowid-primary-key NULL and composite-FK NULL exemptions are rejected to prevent ghost coordination rows.",
       "revisioned_graph_outbox_boundary": "Migration 0095 adds nullable graph_revision while preserving the legacy governed outbox_id and idempotency_key byte-for-byte, so response-loss replay remains stable. SQLiteMigrationRunner registers deterministic natsume_sha256_hex; backfill accepts exact decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or recomputation of the revision-bound command's legacy governed ID/key for ACTIVE and other non-attempt transitions. Conflicts or unresolved custom-producer rows abort the whole migration. New TASK_GRAPH payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts the legacy ref and new insert/update triggers reject it. Readiness and receipt-loss gates freeze graph_revision as INTEGER/nullable/no-default/non-PK, payload trigger shape, revision delivery index, the unique partial TASK_STORE_OUTBOX source_ref index, and persisted bindings. Claim/head ordering uses aggregate_type + aggregate_id + graph_revision. New Runtime Events use graph_id@revision; immutable legacy journal rows are not rewritten and exact-revision queries resolve them through source Outbox. The unique source fence permits retry after legacy event append but before Outbox confirmation only when an existing event exactly reconstructs, preventing duplicate projection. For created_ts_ms=0, timestamp compatibility may apply to either the current revisioned or legacy unrevisioned candidate because both historical append paths may have substituted the clock; all fields other than timestamp remain exact. Scheduler snapshot Outbox loading is opt-in and defaults false; PlanningRecovery alone requests include_graph_outboxes=true in the same read transaction, uses the actual matching terminal payload_ref and preserves legacy refs. Revisioned synthesis is allowed only when an older or alternative Store omits the optional graph_outboxes extension; production DurableTaskStore supplies it when requested, and malformed, missing, or ambiguous present inventory fails closed. Operator and ReviewStore filter exact revision, and marker scans cover multi-revision histories.",
       "review_continuation_boundary": "Migration 0096 closes task-bound Review continuation without creating a second Review or Task truth. ReviewStore atomically queues CONSUMED, REJECTED, and EXPIRED decisions and validates create-time Task bindings; expiration, reconciliation, and claim processing isolate poison rows. Fixed-field secret-free authority is checked in the READY Attempt/Lease transaction and at first worker entry with exact owner/fence. Credentials cover budget time plus child TTL up to 24 hours but cannot replace the live hand-off. After first worker verification, Task Attempt/Lease owns an already-started blocking call; Review heartbeat loss cannot revoke external effects or authorize stale completion. PRE uses null Attempt and POST does not rerun the reviewed worker. Denial refs, legacy POST claim repair, and review.operator/review:decide identity are exact. Migration 0097 makes all node grants atomic and unique across processes. Real production canary remains NOT_RUN.",
@@ -142,6 +146,8 @@
         "host_brain/task_runtime/graph_cancellation_runtime.py",
         "host_brain/task_runtime/graph_cancellation_projection.py",
         "host_brain/task_runtime/graph_cancellation_continuation_worker.py",
+        "host_brain/task_runtime/graph_cancellation_operation_reconciliation.py",
+        "host_brain/persistence/task_operation_reconciliation_store.py",
         "host_brain/task_runtime/review_continuation_worker.py",
         "host_brain/task_runtime/review_command_service.py",
         "host_brain/secure_ingress/surfaces.py",
@@ -173,6 +179,7 @@
         "host_brain/contracts/agent_runtime/parallel_settlement.py",
         "host_brain/contracts/agent_runtime/parallel_success.py",
         "host_brain/contracts/agent_runtime/graph_cancellation.py",
+        "host_brain/contracts/agent_runtime/operation_reconciliation.py",
         "tests/integration/test_ne01_review_automatic_continuation.py",
         "tests/unit/test_ne01_review_ingress_lifecycle_regressions.py",
         "tests/security/test_internal_scheduler_ingress_authority.py",
@@ -248,11 +255,18 @@
     },
     "conversation_acceptance_outbox": {
       "status": "PASS",
+      "cancellation_failure_boundary": "General handler or transport FAILED remains RECONCILIATION_REQUIRED and cannot prove NO_SIDE_EFFECT. Only COMMITTED with a durable receipt closes the fence automatically.",
+      "signed_effect_reconciliation": "MISSING",
+      "legacy_failed_evidence": "HISTORICAL_REPAIR_OR_QUARANTINE_REQUIRED",
       "evidence_refs": [
         "host_brain/task_runtime/acceptance_effects.py",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
         "host_brain/app/acceptance_effect_handlers.py",
-        "tests/integration/test_gr06_acceptance_effect_dispatcher.py"
+        "host_brain/persistence/task_acceptance_effect_delivery.py",
+        "host_brain/persistence/task_graph_cancellation_request.py",
+        "host_brain/persistence/task_graph_cancellation_finalization.py",
+        "tests/integration/test_gr06_acceptance_effect_dispatcher.py",
+        "tests/contract/test_ne01_graph_cancellation_store.py"
       ]
     },
     "composition_without_global_service_locator": {

@@ -167,6 +167,9 @@ from host_brain.persistence.task_graph_cancellation_finalization import (
 from host_brain.persistence.task_graph_cancellation_continuation_store import (
     TaskGraphCancellationContinuationStoreMixin,
 )
+from host_brain.persistence.task_operation_reconciliation_store import (
+    TaskOperationReconciliationStoreMixin,
+)
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
@@ -360,7 +363,10 @@ class Ed25519ReconciliationProofVerifier:
             )
         except (binascii.Error, ValueError):
             return False
-        if len(signature_bytes) != 64:
+        if (
+            len(signature_bytes) != 64
+            or base64.urlsafe_b64encode(signature_bytes).decode("ascii") != encoded
+        ):
             return False
         try:
             key.verify(signature_bytes, bytes(message))
@@ -489,6 +495,7 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
+    TaskOperationReconciliationStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
 ):
@@ -2770,6 +2777,7 @@ class DurableTaskStore(
         attestation_key_id: str | None = None,
         attestation_signature: str | None = None,
         ttl_ms: int | None = None,
+        _required_cancellation_intent_ref: str | None = None,
     ) -> dict[str, Any]:
         try:
             recovery_action = IdempotencyRecoveryAction(str(action).strip().upper())
@@ -2813,6 +2821,17 @@ class DurableTaskStore(
             )
         if recovery_action is IdempotencyRecoveryAction.REACQUIRE and int(ttl_ms or 0) <= 0:
             raise TaskStoreError(TASK_STORE_INVALID, "REACQUIRE requires positive ttl_ms")
+        required_cancellation_ref = str(
+            _required_cancellation_intent_ref or ""
+        ).strip() or None
+        if (
+            required_cancellation_ref is not None
+            and recovery_action is IdempotencyRecoveryAction.REACQUIRE
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CANCELLATION_CONFLICT,
+                "cancellation reconciliation cannot REACQUIRE an operation",
+            )
 
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -2824,6 +2843,41 @@ class DurableTaskStore(
                     TASK_STORE_INVALID,
                     f"reservation {reservation_id} is not RECOVERY_REQUIRED",
                 )
+            if required_cancellation_ref is not None:
+                original_attempt_ref = str(row["attempt_id"] or "").strip()
+                if not original_attempt_ref:
+                    raise TaskStoreError(
+                        TASK_STORE_OWNERSHIP_CONFLICT,
+                        "cancellation reconciliation requires an attempt-bound reservation",
+                    )
+                original_attempt = self._require_attempt(conn, original_attempt_ref)
+                intent_row = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_graph_cancellation_intent
+                    WHERE intent_ref = ?
+                    """,
+                    (required_cancellation_ref,),
+                ).fetchone()
+                if intent_row is None:
+                    raise TaskStoreError(
+                        TASK_STORE_NOT_FOUND,
+                        f"graph cancellation intent not found: {required_cancellation_ref}",
+                    )
+                intent = _graph_cancellation_intent_record(intent_row)
+                if str(intent["status"]) != "REQUESTED":
+                    raise TaskStoreError(
+                        TASK_STORE_CANCELLATION_CONFLICT,
+                        "operation reconciliation requires an exact REQUESTED cancellation intent",
+                    )
+                if (
+                    str(intent["graph_id"]) != str(original_attempt["graph_id"])
+                    or int(intent["graph_revision"])
+                    != int(original_attempt["graph_revision"])
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_OWNERSHIP_CONFLICT,
+                        "operation reservation does not belong to the cancelling graph revision",
+                    )
             proof_binding = build_reconciliation_attestation_binding(
                 reservation_id=str(row["reservation_id"]),
                 business_scope=str(row["business_scope"]),

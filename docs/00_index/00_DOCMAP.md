@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision cancellation。0093 收口 Outbox 跨进程投递；0094 提供 pending-intent scanner/claim/takeover/continuation；0095 收口 revisioned Graph Outbox/Event/Operator identity；0096 收口 task-bound Review 自动 continuation 与精确 Task-authority hand-off；0097 收口 node-grant batch 跨进程唯一性。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`：Host/Internal/Scheduler 共用 Secure Ingress verifier，`task_graph.cancel` 经 Operator Gateway/BFF/UI 精确提交 graph revision；开关默认关闭，开启时要求 Secure Ingress `ENFORCE` 且 Gateway 可用，否则启动 fail closed。0092 intent/decision 仍是取消业务真相；未解决 operation/effect reconciliation 时只 durable defer。业务对账、历史修复、Budget 高竞争、部署凭据与真实 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
+- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision cancellation。Cancellation Operator authority/入口与 Operation 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`，开启时要求 Secure Ingress `ENFORCE`、可用 Gateway 和 verification-only Ed25519 公钥。普通 Acceptance Effect `FAILED` 不能证明无副作用；新路径保持 `RECONCILIATION_REQUIRED`，只有带 durable receipt 的 `COMMITTED` 自动收口。旧 `FAILED_EVIDENCE` 仅兼容读取并列入历史修复。Effect 签名对账、历史修复、Budget 高竞争、部署凭据与真实 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

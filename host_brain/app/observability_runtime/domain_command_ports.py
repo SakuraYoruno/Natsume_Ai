@@ -21,6 +21,9 @@ from host_brain.observability.command_ports import (
     ObsCommandPortRegistry,
 )
 from host_brain.composition.runtime_group import GraphCancellationOperatorError
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationError,
+)
 from host_brain.observability.operator_command_gateway import operator_runtime_value
 
 
@@ -551,6 +554,46 @@ async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> An
     }
 
 
+async def _task_operation_reconcile(
+    payload: Mapping[str, Any],
+    _request_id: str,
+) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_operation_reconciliation_command_service")
+    reconcile = getattr(service, "reconcile_graph_cancellation_operation", None)
+    if not callable(reconcile):
+        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_UNAVAILABLE")
+    try:
+        result = reconcile(
+            intent_ref=_required_text(payload, "intent_ref"),
+            reservation_id=_required_text(payload, "reservation_id"),
+            expected_version=int(payload["expected_version"]),
+            action=_required_text(payload, "action").upper(),
+            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
+            downstream_receipt_ref=_optional_text(
+                payload,
+                "downstream_receipt_ref",
+            ),
+            attestation_ref=_required_text(payload, "attestation_ref"),
+            attestation_key_id=_required_text(payload, "attestation_key_id"),
+            attestation_signature=_required_text(payload, "attestation_signature"),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except GraphCancellationOperationReconciliationError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "reconciliation": dict(result),
+    }
+
+
 def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
     service = _task_review_service()
     review_id = _required_text(payload, "review_id")
@@ -641,6 +684,7 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "edge.command.push": _edge_command_push,
     "security.hunt.run_once": _security_hunt,
     "task_graph.cancel": _task_graph_cancel,
+    "task_operation.reconcile": _task_operation_reconcile,
     "task_review.approve": _task_review_approve,
     "task_review.reject": _task_review_reject,
     "task_review.resume": _task_review_resume,

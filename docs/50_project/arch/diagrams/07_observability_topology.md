@@ -112,7 +112,9 @@ sequenceDiagram
     B-->>U: refresh durable TaskGraph detail
 ```
 
-该命令要求 `obs:write + task-runtime:cancel`，Host、Internal、Scheduler 共享同一个 verifier；Application 不接受 UI/调用方自报 request identity 或 source。`HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED` 默认 `false`，显式开启时 Secure Ingress 必须为 `ENFORCE` 且 Operator Command Gateway 必须可用，否则 ASGI 在开放路由前启动失败。这里证明的是 `WIRED_DEFAULT_OFF`，不是 cancellation 已完成或已生产启用；签名业务对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺。
+取消命令要求 `obs:write + task-runtime:cancel`；Operation 对账命令要求 `obs:write + task-runtime:reconcile`，认证 actor 由服务端绑定。两个开关默认关闭，开启 cancellation 时必须同时开启 Operation 对账；还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环。这里证明的是 `WIRED_DEFAULT_OFF`，不是 production enablement。
+
+业务对账的观测口径必须保守：一般 Acceptance Effect `FAILED` 仍可能已经产生副作用，UI/Operator 只能显示 `RECONCILIATION_REQUIRED`，不得把它渲染成“未执行”或“可安全取消”；只有 `COMMITTED + durable receipt` 可显示正向完成证据。旧 `FAILED_EVIDENCE` 属历史兼容与修复缺口。Operation 签名对账已完成 service、composition、OBS command 和 verification-only 公钥注入，定级 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺，cancellation 保持 `PRODUCTION_OFF`。
 
 ## Task/Review 观测
 

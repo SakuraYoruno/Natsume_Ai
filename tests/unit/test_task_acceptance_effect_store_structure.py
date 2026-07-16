@@ -10,6 +10,12 @@ from host_brain.persistence.task_acceptance_effect_delivery import (
 from host_brain.persistence.task_acceptance_effect_staging import (
     TaskAcceptanceEffectStagingMixin,
 )
+from host_brain.persistence.task_graph_cancellation_continuation_store import (
+    TaskGraphCancellationContinuationStoreMixin,
+)
+from host_brain.persistence.task_outbox_delivery_store import (
+    TaskOutboxDeliveryStoreMixin,
+)
 from host_brain.persistence.task_parallel_success_store import (
     TaskParallelSuccessStoreMixin,
 )
@@ -30,6 +36,9 @@ from host_brain.persistence.task_retry_replay_store import (
 )
 from host_brain.persistence.task_atomic_failure_store import (
     TaskAtomicFailureStoreMixin,
+)
+from host_brain.persistence.task_operation_reconciliation_store import (
+    TaskOperationReconciliationStoreMixin,
 )
 from host_brain.persistence.task_dag_state_store import (
     TaskDagStateStoreMixin,
@@ -62,6 +71,8 @@ DELIVERY_METHODS = (
 
 def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -> None:
     assert task_repository.DurableTaskStore.__bases__ == (
+        TaskOutboxDeliveryStoreMixin,
+        TaskGraphCancellationContinuationStoreMixin,
         TaskAcceptanceEffectStagingMixin,
         TaskAcceptanceEffectDeliveryMixin,
         TaskParallelSuccessStoreMixin,
@@ -71,6 +82,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
+        TaskOperationReconciliationStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,
     )

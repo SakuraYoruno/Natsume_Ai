@@ -40,6 +40,7 @@ def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) ->
 def test_disabled_graph_cancellation_operator_has_no_startup_dependency() -> None:
     asgi._assert_graph_cancellation_operator_startup(
         enabled=False,
+        operation_reconciliation_enabled=False,
         command_ingress=None,
         security=None,
     )
@@ -53,6 +54,7 @@ def test_graph_cancellation_operator_requires_enforced_ingress(mode) -> None:
     ):
         asgi._assert_graph_cancellation_operator_startup(
             enabled=True,
+            operation_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode=mode),
             security=None,
         )
@@ -80,6 +82,7 @@ def test_graph_cancellation_operator_requires_executable_gateway(
     ):
         asgi._assert_graph_cancellation_operator_startup(
             enabled=True,
+            operation_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode="ENFORCE"),
             security=SimpleNamespace(obs_command_composition=composition),
         )
@@ -88,6 +91,7 @@ def test_graph_cancellation_operator_requires_executable_gateway(
 def test_graph_cancellation_operator_accepts_complete_startup_authority() -> None:
     asgi._assert_graph_cancellation_operator_startup(
         enabled=True,
+        operation_reconciliation_enabled=True,
         command_ingress=SimpleNamespace(mode=SimpleNamespace(value="ENFORCE")),
         security=SimpleNamespace(
             obs_command_composition=SimpleNamespace(
@@ -97,6 +101,48 @@ def test_graph_cancellation_operator_accepts_complete_startup_authority() -> Non
             )
         ),
     )
+
+
+def test_graph_cancellation_operator_requires_operation_reconciliation() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION",
+    ):
+        asgi._assert_graph_cancellation_operator_startup(
+            enabled=True,
+            operation_reconciliation_enabled=False,
+            command_ingress=None,
+            security=None,
+        )
+
+
+def test_operation_reconciliation_operator_requires_secure_gateway() -> None:
+    asgi._assert_task_operation_reconciliation_operator_startup(
+        enabled=False,
+        command_ingress=None,
+        security=None,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "TASK_OPERATION_RECONCILIATION_OPERATOR_"
+            "REQUIRES_SECURE_INGRESS_ENFORCE"
+        ),
+    ):
+        asgi._assert_task_operation_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="SHADOW"),
+            security=None,
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_OPERATION_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE",
+    ):
+        asgi._assert_task_operation_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="ENFORCE"),
+            security=None,
+        )
 
 
 def test_asgi_builds_publishes_injects_and_closes_security_container(
@@ -113,7 +159,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     model_attempt_service = object()
     prompt_registry = object()
     canonical_executor = object()
-    obs_ingress = object()
+    obs_ingress = SimpleNamespace(execute=lambda *_args, **_kwargs: None)
     pentest_composition = object()
     signed_ingress = object()
     skill_registry = object()
@@ -121,6 +167,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     class Container:
         obs_command_composition = SimpleNamespace(
             enabled=True,
+            execution_enabled=True,
             ingress=obs_ingress,
         )
         pentest_secure_run_composition = pentest_composition
@@ -157,6 +204,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     class CommandIngressContainer:
         evaluator = command_evaluator
         store = command_store
+        mode = "ENFORCE"
 
         async def aclose(self) -> None:
             events.append("command-ingress-closed")
@@ -203,6 +251,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         command_repository = object()
         task_store = object()
         recovery_id = "test-recovery"
+        operation_reconciliation_service = object()
 
         @staticmethod
         def execution_owner_id(logical_owner_id: str) -> str:
@@ -249,6 +298,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs == {
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
+            "reconciliation_public_keys": {"reconciler-v1": b"k" * 32},
         }
         events.append("task-runtime-built")
         return task_runtime_container
@@ -378,6 +428,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         lambda: SimpleNamespace(
             task_runtime_canonical_owner="test-canonical-owner",
             task_graph_cancellation_operator_enabled=False,
+            task_operation_reconciliation_operator_enabled=True,
+            task_reconciliation_public_keys=lambda: {"reconciler-v1": b"k" * 32},
         ),
     )
     monkeypatch.setattr(asgi, "get_intent_engine", object)
@@ -483,6 +535,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.governed_scheduler_runtime is scheduler_runtime
             assert application.state.memory_service_container is memory_container
             assert application.state.canon_container is canon_container
+            assert (
+                application.state.task_operation_reconciliation_command_service
+                is task_runtime_container.operation_reconciliation_service
+            )
             assert captured["canon_service_provider"]() is canon_application
             assert (
                 captured["governed_command_application_provider"]()
@@ -511,6 +567,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.governed_host_runtime is None
         assert application.state.governed_internal_runtime is None
         assert application.state.governed_scheduler_runtime is None
+        assert application.state.task_operation_reconciliation_command_service is None
         assert captured["governed_command_application_provider"]() is None
 
     asyncio.run(scenario())

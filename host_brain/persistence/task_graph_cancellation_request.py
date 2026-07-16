@@ -652,7 +652,13 @@ class TaskGraphCancellationRequestMixin:
                 "PENDING": "CANCELLED",
                 "CLAIMED": "RECONCILIATION_REQUIRED",
                 "COMMITTED": "COMMITTED_EVIDENCE",
-                "FAILED": "FAILED_EVIDENCE",
+                # A terminal handler/transport failure does not prove that
+                # the external side effect never happened.  The 0087 intent
+                # row has no attested no-side-effect provenance, so even a
+                # failure observed before cancellation must be reconciled.
+                # Keep legacy FAILED_EVIDENCE fences readable, but never
+                # create new ones from the ambiguous FAILED status alone.
+                "FAILED": "RECONCILIATION_REQUIRED",
             }
             for effect in effects:
                 node_effect_authorized = (

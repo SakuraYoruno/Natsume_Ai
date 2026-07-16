@@ -140,25 +140,35 @@ class TaskGraphCancellationFinalizationMixin:
                 JOIN task_runtime_acceptance_effect_intent AS effect
                   ON effect.effect_id = fence.effect_id
                 WHERE fence.intent_ref = ?
-                  AND fence.resolution_status = 'RECONCILIATION_REQUIRED'
+                  AND fence.resolution_status IN (
+                      'RECONCILIATION_REQUIRED', 'FAILED_EVIDENCE'
+                  )
                 ORDER BY fence.effect_id
                 """,
                 (reference,),
             ).fetchall()
             for fence in fences:
                 current = str(fence["current_status"])
-                if current in {"COMMITTED", "FAILED"}:
-                    resolution = (
-                        "COMMITTED_EVIDENCE" if current == "COMMITTED" else "FAILED_EVIDENCE"
-                    )
+                resolution_status = str(fence["resolution_status"])
+                if (
+                    resolution_status == "RECONCILIATION_REQUIRED"
+                    and current == "COMMITTED"
+                ):
+                    # A committed effect carries a durable receipt and is
+                    # positive evidence that the side effect happened.  A
+                    # FAILED effect is deliberately *not* symmetric: handler
+                    # or transport failure may follow an already-performed
+                    # side effect, and the current schema has no trusted
+                    # no-side-effect attestation.  Such rows stay pending for
+                    # explicit reconciliation.
                     conn.execute(
                         """
                         UPDATE task_runtime_graph_cancellation_effect_fence
-                        SET resolution_status = ?, resolved_ts_ms = ?
+                        SET resolution_status = 'COMMITTED_EVIDENCE', resolved_ts_ms = ?
                         WHERE effect_id = ? AND intent_ref = ?
                           AND resolution_status = 'RECONCILIATION_REQUIRED'
                         """,
-                        (resolution, ts_ms, str(fence["effect_id"]), reference),
+                        (ts_ms, str(fence["effect_id"]), reference),
                     )
                 else:
                     pending_effects.append(str(fence["effect_id"]))
@@ -453,7 +463,9 @@ class TaskGraphCancellationFinalizationMixin:
             uncertain_effect = conn.execute(
                 """
                 SELECT effect_id FROM task_runtime_graph_cancellation_effect_fence
-                WHERE intent_ref = ? AND resolution_status = 'RECONCILIATION_REQUIRED'
+                WHERE intent_ref = ? AND resolution_status IN (
+                    'RECONCILIATION_REQUIRED', 'FAILED_EVIDENCE'
+                )
                 LIMIT 1
                 """,
                 (intent_reference,),

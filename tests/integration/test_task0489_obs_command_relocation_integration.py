@@ -29,7 +29,10 @@ from host_brain.observability.command_outcome_journal import (
     ObsCommandOutcomeState,
     SideEffectCertainty,
 )
-from host_brain.observability.command_ports import OBS_COMMAND_ENVELOPE_SCHEMA
+from host_brain.observability.command_ports import (
+    DEFAULT_OBS_COMMAND_SPECS,
+    OBS_COMMAND_ENVELOPE_SCHEMA,
+)
 from host_brain.observability.query_boundary import require_query_only_routes
 from host_brain.observability.secure_command_ingress import (
     ObsCommandIngressRequest,
@@ -269,7 +272,9 @@ def test_task0489_query_only_secure_command_restart_wave(
 
     first_composition = build_obs_command_composition(env=env, db_path=db_path)
     assert first_composition.execution_enabled is True
-    assert len(first_composition.registry.bound_command_ids) == 34
+    assert len(first_composition.registry.bound_command_ids) == len(
+        DEFAULT_OBS_COMMAND_SPECS
+    )
     path = f"/v1/host/obs-commands/{COMMAND_ID}"
     first_headers = _signed_headers(
         registry=first_composition.registry,

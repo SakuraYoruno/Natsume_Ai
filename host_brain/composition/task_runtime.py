@@ -20,6 +20,7 @@ import uuid
 
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
+    Ed25519ReconciliationProofVerifier,
     OutboxMessage,
     RecoveryReport,
 )
@@ -47,6 +48,9 @@ from host_brain.task_runtime.graph_cancellation_continuation_worker import (
 )
 from host_brain.task_runtime.graph_cancellation_runtime import (
     GraphCancellationRuntime,
+)
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
 )
 from host_brain.task_runtime.local_graph_execution_registry import (
     LocalGraphExecutionRegistry,
@@ -162,6 +166,7 @@ class ProcessTaskRuntimeContainer:
     outbox_publisher: RuntimeOutboxPublisher
     graph_execution_registry: LocalGraphExecutionRegistry
     cancellation_continuation_worker: GraphCancellationContinuationWorker
+    operation_reconciliation_service: GraphCancellationOperationReconciliationService
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
@@ -657,6 +662,25 @@ def _run_canonical_migrations(
     return migration_runner.apply_migrations(request_id="startup::task-runtime")
 
 
+def _build_task_store_with_reconciliation_authority(
+    *,
+    canonical_db_path: str,
+    task_store_builder: TaskStoreBuilder,
+    reconciliation_public_keys: Mapping[str, bytes] | None,
+) -> DurableTaskStore:
+    """Inject the configured verification-only authority into TaskStore."""
+
+    if not reconciliation_public_keys:
+        return task_store_builder(canonical_db_path)
+    reconciliation_proof_verifier = Ed25519ReconciliationProofVerifier(
+        reconciliation_public_keys
+    )
+    return task_store_builder(
+        canonical_db_path,
+        reconciliation_proof_verifier=reconciliation_proof_verifier,
+    )
+
+
 def build_process_task_runtime_container(
     *,
     ledger: Any,
@@ -682,6 +706,7 @@ def build_process_task_runtime_container(
     ),
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
+    reconciliation_public_keys: Mapping[str, bytes] | None = None,
 ) -> ProcessTaskRuntimeContainer:
     """Migrate and construct one fail-closed durable infrastructure graph."""
 
@@ -717,7 +742,11 @@ def build_process_task_runtime_container(
                 f"canonical migration failed: {reason}",
             )
 
-        task_store = task_store_builder(canonical)
+        task_store = _build_task_store_with_reconciliation_authority(
+            canonical_db_path=canonical,
+            task_store_builder=task_store_builder,
+            reconciliation_public_keys=reconciliation_public_keys,
+        )
         constructed.append(("task_store", task_store))
         task_store.assert_outbox_delivery_ready()
         task_store.assert_graph_cancellation_continuation_ready()
@@ -774,6 +803,13 @@ def build_process_task_runtime_container(
         constructed.append(
             ("cancellation_continuation_worker", cancellation_continuation_worker)
         )
+        operation_reconciliation_service = (
+            GraphCancellationOperationReconciliationService(
+                task_store=task_store,
+                outbox_factory=OutboxMessage,
+                wake_cancellation=cancellation_continuation_worker.wake,
+            )
+        )
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)
         raise TaskRuntimeContainerConstructionError(
@@ -808,6 +844,7 @@ def build_process_task_runtime_container(
         outbox_publisher=outbox_publisher,
         graph_execution_registry=graph_execution_registry,
         cancellation_continuation_worker=cancellation_continuation_worker,
+        operation_reconciliation_service=operation_reconciliation_service,
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
     )

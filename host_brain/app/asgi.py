@@ -319,6 +319,7 @@ def _command_ingress_hmac_secrets() -> dict[str, str]:
 def _assert_graph_cancellation_operator_startup(
     *,
     enabled: bool,
+    operation_reconciliation_enabled: bool,
     command_ingress: Any,
     security: Any,
 ) -> None:
@@ -326,6 +327,10 @@ def _assert_graph_cancellation_operator_startup(
 
     if not enabled:
         return
+    if not operation_reconciliation_enabled:
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION"
+        )
     mode = getattr(command_ingress, "mode", None)
     mode_value = getattr(mode, "value", mode)
     if str(mode_value or "").strip().upper() != "ENFORCE":
@@ -343,6 +348,36 @@ def _assert_graph_cancellation_operator_startup(
     ):
         raise RuntimeError(
             "TASK_GRAPH_CANCELLATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
+        )
+
+
+def _assert_task_operation_reconciliation_operator_startup(
+    *,
+    enabled: bool,
+    command_ingress: Any,
+    security: Any,
+) -> None:
+    """Fail closed before exposing the signed operation reconciliation port."""
+
+    if not enabled:
+        return
+    mode = getattr(command_ingress, "mode", None)
+    mode_value = getattr(mode, "value", mode)
+    if str(mode_value or "").strip().upper() != "ENFORCE":
+        raise RuntimeError(
+            "TASK_OPERATION_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
+        )
+    composition = getattr(security, "obs_command_composition", None)
+    if (
+        composition is None
+        or not bool(getattr(composition, "enabled", False))
+        or not bool(getattr(composition, "execution_enabled", False))
+        or not callable(
+            getattr(getattr(composition, "ingress", None), "execute", None)
+        )
+    ):
+        raise RuntimeError(
+            "TASK_OPERATION_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
         )
 
 
@@ -721,10 +756,14 @@ def create_app() -> FastAPI:
                 ledger = get_ledger()
                 life_command_authority = _compose_life_command_authority(ledger)
                 life_dispatchers = _compose_life_dispatchers(ledger)
+                runtime_settings = get_core_settings()
                 task_runtime = build_process_task_runtime_container(
                     ledger=ledger,
                     canonical_db_path=str(
                         getattr(ledger, "canonical_db_path", "") or ""
+                    ),
+                    reconciliation_public_keys=(
+                        runtime_settings.task_reconciliation_public_keys()
                     ),
                 )
                 from host_brain.channels.embodiment import (  # noqa: PLC0415
@@ -764,11 +803,17 @@ def create_app() -> FastAPI:
                 canon.application.sync_startup()
                 canon_container = canon
                 application.state.canon_container = canon
-                runtime_settings = get_core_settings()
                 cancellation_operator_enabled = bool(
                     getattr(
                         runtime_settings,
                         "task_graph_cancellation_operator_enabled",
+                        False,
+                    )
+                )
+                operation_reconciliation_operator_enabled = bool(
+                    getattr(
+                        runtime_settings,
+                        "task_operation_reconciliation_operator_enabled",
                         False,
                     )
                 )
@@ -780,6 +825,14 @@ def create_app() -> FastAPI:
                 )
                 _assert_graph_cancellation_operator_startup(
                     enabled=cancellation_operator_enabled,
+                    operation_reconciliation_enabled=(
+                        operation_reconciliation_operator_enabled
+                    ),
+                    command_ingress=command_ingress,
+                    security=security,
+                )
+                _assert_task_operation_reconciliation_operator_startup(
+                    enabled=operation_reconciliation_operator_enabled,
                     command_ingress=command_ingress,
                     security=security,
                 )
@@ -1101,6 +1154,11 @@ def create_app() -> FastAPI:
                 application.state.task_graph_cancellation_command_service = (
                     runtime_group
                 )
+                application.state.task_operation_reconciliation_command_service = (
+                    task_runtime.operation_reconciliation_service
+                    if operation_reconciliation_operator_enabled
+                    else None
+                )
                 application.state.command_ingress_container = command_ingress
                 application.state.memory_service_container = memory
                 yield
@@ -1121,6 +1179,7 @@ def create_app() -> FastAPI:
                 application.state.scheduler_container = None
                 application.state.task_review_command_service = None
                 application.state.task_graph_cancellation_command_service = None
+                application.state.task_operation_reconciliation_command_service = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
                 try:
@@ -1223,6 +1282,7 @@ def create_app() -> FastAPI:
     application.state.scheduler_container = None
     application.state.task_review_command_service = None
     application.state.task_graph_cancellation_command_service = None
+    application.state.task_operation_reconciliation_command_service = None
     application.state.canon_container = None
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports

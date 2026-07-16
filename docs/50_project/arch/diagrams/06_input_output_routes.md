@@ -58,6 +58,8 @@ sequenceDiagram
 
 平台 API 返回不明确时，Gateway 把状态保留为 retryable 或 uncertain，而不是盲目重发并宣称成功。出站 adapter 只能执行已经验收的 delivery plan，不能重写回复内容或重新决定目标用户。
 
+该不确定性也进入 Graph cancellation fence：Acceptance Effect handler/transport 返回 `FAILED` 不能证明平台未收到消息，因此 cancellation 必须继续 `RECONCILIATION_REQUIRED`；只有 `COMMITTED` 且存在 durable receipt 才可自动收口。旧 `FAILED_EVIDENCE` 仅兼容读取并等待历史修复，签名 Effect 对账尚未接通，不能用错误码猜测 `NO_SIDE_EFFECT`。
+
 ## Edge 设备动作
 
 ```mermaid

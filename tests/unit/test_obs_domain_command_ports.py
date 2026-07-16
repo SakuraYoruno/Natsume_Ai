@@ -21,6 +21,9 @@ from host_brain.observability.command_router import (
     ObsCommandRoutingError,
 )
 from host_brain.composition.runtime_group import GraphCancellationOperatorError
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationError,
+)
 from host_brain.app.observability_runtime.domain_command_ports import (
     OBS_DOMAIN_RESULT_SCHEMA,
     ObsDomainCommandError,
@@ -69,7 +72,7 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     registry = build_default_obs_domain_command_registry()
     expected = tuple(sorted(spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS))
 
-    assert len(expected) == 34
+    assert len(expected) == 35
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
 
@@ -327,3 +330,89 @@ def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
 
     assert raised.value.reason_code == "GRAPH_CANCELLATION_REJECTED"
     assert raised.value.side_effects_may_have_run is False
+
+
+def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> None:
+    captured: dict[str, object] = {}
+
+    class _ReconciliationService:
+        @staticmethod
+        async def reconcile_graph_cancellation_operation(**kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {
+                "intent_ref": kwargs["intent_ref"],
+                "reservation_id": kwargs["reservation_id"],
+                "status": "RELEASED",
+            }
+
+    registry = build_default_obs_domain_command_registry()
+    spec = registry.resolve_spec("task_operation.reconcile")
+    assert spec is not None
+    assert spec.required_scopes == ("obs:write", "task-runtime:reconcile")
+    envelope = _envelope(
+        "task_operation.reconcile",
+        {
+            "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
+            "reservation_id": "reservation-1",
+            "expected_version": 4,
+            "action": "release",
+            "attestation_ref": "reconciliation://operation/proof-1",
+            "attestation_key_id": "reconciler-v1",
+            "attestation_signature": "ed25519:" + "A" * 86 + "==",
+        },
+        principal_id="reconciler.authenticated",
+    )
+    state = SimpleNamespace(
+        task_operation_reconciliation_command_service=_ReconciliationService(),
+    )
+    with bind_operator_command_runtime(state, raw_body=b"signed-proof"):
+        result = asyncio.run(registry.resolve_port("task_operation.reconcile").execute(envelope))
+
+    assert captured == {
+        "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
+        "reservation_id": "reservation-1",
+        "expected_version": 4,
+        "action": "RELEASE",
+        "reconciler_actor_id": "reconciler.authenticated",
+        "downstream_receipt_ref": None,
+        "attestation_ref": "reconciliation://operation/proof-1",
+        "attestation_key_id": "reconciler-v1",
+        "attestation_signature": "ed25519:" + "A" * 86 + "==",
+    }
+    assert result.success is True
+    assert result.side_effects_executed is True
+    assert result.result["output"]["reconciliation"]["status"] == "RELEASED"
+
+
+def test_task_operation_reconcile_translates_only_nominal_certainty() -> None:
+    class _ReconciliationService:
+        @staticmethod
+        def reconcile_graph_cancellation_operation(**_kwargs):  # noqa: ANN003
+            raise GraphCancellationOperationReconciliationError(
+                "OPERATION_RECONCILIATION_UNCERTAIN",
+                "response lost",
+                side_effects_may_have_run=True,
+            )
+
+    registry = build_default_obs_domain_command_registry()
+    envelope = _envelope(
+        "task_operation.reconcile",
+        {
+            "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
+            "reservation_id": "reservation-1",
+            "expected_version": 4,
+            "action": "RELEASE",
+            "attestation_ref": "reconciliation://operation/proof-1",
+            "attestation_key_id": "reconciler-v1",
+            "attestation_signature": "ed25519:" + "A" * 86 + "==",
+        },
+    )
+    state = SimpleNamespace(
+        task_operation_reconciliation_command_service=_ReconciliationService(),
+    )
+    with bind_operator_command_runtime(state, raw_body=b"signed-proof"):
+        with pytest.raises(ObsCommandRoutingError) as raised:
+            asyncio.run(ObsCommandRouter(registry).route(envelope))
+
+    assert raised.value.reason_code == "OPERATION_RECONCILIATION_UNCERTAIN"
+    assert raised.value.side_effects_may_have_run is True

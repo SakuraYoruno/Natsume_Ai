@@ -521,6 +521,33 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         ),
     ),
     _spec(
+        "task_operation.reconcile",
+        "task-runtime:reconcile",
+        _schema(
+            required=(
+                "intent_ref",
+                "reservation_id",
+                "expected_version",
+                "action",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+            ),
+            optional=("downstream_receipt_ref",),
+            strings=(
+                "intent_ref",
+                "reservation_id",
+                "action",
+                "attestation_ref",
+                "attestation_key_id",
+                "attestation_signature",
+                "downstream_receipt_ref",
+            ),
+            integers=("expected_version",),
+        ),
+        authority_field="reconciler_actor_id",
+    ),
+    _spec(
         "task_review.approve",
         "task-review:write",
         _schema(
@@ -544,8 +571,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 34:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_34_ACTIVE_FAMILIES")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 35:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_35_ACTIVE_FAMILIES")
 
 
 __all__ = [

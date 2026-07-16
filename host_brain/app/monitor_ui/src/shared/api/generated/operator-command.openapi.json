@@ -3999,6 +3999,160 @@
         ]
       }
     },
+    "/v1/host/obs-commands/task_operation.reconcile": {
+      "post": {
+        "operationId": "execute_task_operation_reconcile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_operation.reconcile",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_key_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_signature": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "downstream_receipt_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "expected_version": {
+                        "type": "integer"
+                      },
+                      "intent_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "reservation_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "intent_ref",
+                      "reservation_id",
+                      "expected_version",
+                      "action",
+                      "attestation_ref",
+                      "attestation_key_id",
+                      "attestation_signature"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_operation.reconcile",
+        "x-natsume-action": "obs:command:task_operation.reconcile",
+        "x-natsume-command-id": "task_operation.reconcile",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-runtime:reconcile"
+        ]
+      }
+    },
     "/v1/host/obs-commands/task_review.approve": {
       "post": {
         "operationId": "execute_task_review_approve",

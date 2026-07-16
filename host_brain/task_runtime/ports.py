@@ -469,6 +469,31 @@ class TaskOutboxFactoryPort(Protocol):
     ) -> Any: ...
 
 
+class GraphCancellationOperationReconciliationStorePort(Protocol):
+    """Narrow durable boundary for cancellation-bound operation settlement."""
+
+    def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
+
+    def reconcile_graph_cancellation_operation(
+        self,
+        intent_ref: str,
+        reservation_id: str,
+        *,
+        action: str,
+        expected_version: int,
+        outbox: Any,
+        reconciler_actor_id: str,
+        downstream_receipt_ref: str | None = None,
+        attestation_ref: str | None = None,
+        attestation_key_id: str | None = None,
+        attestation_signature: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+
 class GovernedWorkerPort(Protocol):
     """A worker selected by the frozen executor and node route."""
 
@@ -521,6 +546,7 @@ __all__ = [
     "AcceptancePort",
     "CommandRepositoryPort",
     "ExecutionProjectionReaderPort",
+    "GraphCancellationOperationReconciliationStorePort",
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",
     "RuntimeOutboxPublisherPort",

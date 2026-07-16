@@ -27,6 +27,9 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
+from host_brain.contracts.agent_runtime.operation_reconciliation import (
+    GraphCancellationOperationStoreRejected,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -42,10 +45,15 @@ from host_brain.persistence.task_repository import (
     TASK_STORE_CANCELLATION_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_LEASE_CONFLICT,
+    TASK_STORE_OWNERSHIP_CONFLICT,
     TaskStoreError,
     build_acceptance_effect_payload_digest,
     build_outbox_payload_ref,
     build_reconciliation_attestation_binding,
+)
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationError,
+    GraphCancellationOperationReconciliationService,
 )
 
 
@@ -405,6 +413,22 @@ def _stage_effect(
         payload_sha256=build_acceptance_effect_payload_digest(effect_payload),
         idempotency_key=f"idempotency-{effect_id}",
     )
+
+
+def _effect_fence(store: DurableTaskStore, effect_id: str) -> dict[str, object]:
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT observed_status, resolution_status,
+                   observed_status_version, resolved_ts_ms
+            FROM task_runtime_graph_cancellation_effect_fence
+            WHERE effect_id = ?
+            """,
+            (effect_id,),
+        ).fetchone()
+    assert row is not None
+    return dict(row)
 
 
 def _insert_review(
@@ -1349,6 +1373,234 @@ def test_unauthorized_pending_effect_is_fenced_from_dispatch(tmp_path: Path) -> 
     assert exc_info.value.reason_code == TASK_STORE_CANCELLATION_CONFLICT
 
 
+def test_failed_effect_observed_at_cancel_requires_reconciliation(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    effect_id = "effect://cancel/failed-before-request"
+    _stage_effect(store, effect_id=effect_id, accepted=False)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'FAILED', status_version = 2,
+                lease_owner = 'dispatcher-before-request',
+                lease_expires_ts_ms = NULL, fencing_token = 1,
+                attempt_count = 1,
+                reason_code = 'ACCEPTANCE_EFFECT_HANDLER_FAILED',
+                last_error = 'transport response was lost',
+                updated_ts_ms = ?, failed_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (NOW, NOW, effect_id),
+        )
+        conn.commit()
+
+    requested = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+
+    assert _effect_fence(store, effect_id) == {
+        "observed_status": "FAILED",
+        "resolution_status": "RECONCILIATION_REQUIRED",
+        "observed_status_version": 2,
+        "resolved_ts_ms": None,
+    }
+    advanced = store.advance_graph_cancellation(requested["intent"]["intent_ref"])
+    assert advanced["ready_to_finalize"] is False
+    assert advanced["pending_effect_ids"] == (effect_id,)
+    assert _effect_fence(store, effect_id)["resolution_status"] == (
+        "RECONCILIATION_REQUIRED"
+    )
+
+
+def test_handler_failure_after_cancel_does_not_resolve_uncertain_effect(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    effect_id = "effect://cancel/failed-after-request"
+    owner_id = "dispatcher-in-flight"
+    _stage_effect(store, effect_id=effect_id, accepted=False)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'CLAIMED', status_version = 1,
+                lease_owner = ?, lease_expires_ts_ms = ?,
+                fencing_token = 1, attempt_count = 1,
+                updated_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (owner_id, NOW + 60_000, NOW, effect_id),
+        )
+        conn.commit()
+    requested = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+
+    failed = store.fail_acceptance_effect_intent(
+        effect_id,
+        owner_id=owner_id,
+        fencing_token=1,
+        reason_code="ACCEPTANCE_EFFECT_HANDLER_FAILED",
+        detail="downstream timed out after request transmission",
+    )
+
+    assert failed["status"] == "FAILED"
+    assert _effect_fence(store, effect_id)["resolution_status"] == (
+        "RECONCILIATION_REQUIRED"
+    )
+    advanced = store.advance_graph_cancellation(requested["intent"]["intent_ref"])
+    assert advanced["ready_to_finalize"] is False
+    assert advanced["pending_effect_ids"] == (effect_id,)
+
+
+def test_commit_after_cancel_is_positive_evidence_and_resolves_effect_fence(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    effect_id = "effect://cancel/committed-after-request"
+    owner_id = "dispatcher-in-flight"
+    _stage_effect(store, effect_id=effect_id, accepted=False)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'CLAIMED', status_version = 1,
+                lease_owner = ?, lease_expires_ts_ms = ?,
+                fencing_token = 1, attempt_count = 1,
+                updated_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (owner_id, NOW + 60_000, NOW, effect_id),
+        )
+        conn.commit()
+    requested = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+
+    committed = store.commit_acceptance_effect_intent(
+        effect_id,
+        owner_id=owner_id,
+        fencing_token=1,
+        receipt_ref="effect-receipt://cancel/committed-after-request",
+    )
+
+    assert committed["status"] == "COMMITTED"
+    assert _effect_fence(store, effect_id)["resolution_status"] == (
+        "COMMITTED_EVIDENCE"
+    )
+    advanced = store.advance_graph_cancellation(requested["intent"]["intent_ref"])
+    assert advanced["ready_to_finalize"] is True
+    assert advanced["pending_effect_ids"] == ()
+
+
+def test_legacy_failed_evidence_fence_blocks_unfinalized_cancellation(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    effect_id = "effect://cancel/legacy-failed-evidence"
+    _stage_effect(store, effect_id=effect_id, accepted=False)
+    requested = _request_snapshot(
+        store,
+        before_status="READY",
+        before_version=0,
+        after_status="CANCEL_REQUESTED",
+        after_version=1,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_graph_cancellation_effect_fence
+            SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (NOW, effect_id),
+        )
+        conn.commit()
+
+    advanced = store.advance_graph_cancellation(requested["intent"]["intent_ref"])
+
+    assert advanced["ready_to_finalize"] is False
+    assert advanced["pending_effect_ids"] == (effect_id,)
+    assert _effect_fence(store, effect_id)["resolution_status"] == "FAILED_EVIDENCE"
+
+    intent = requested["intent"]
+    decision_payload = {
+        "schema_version": GRAPH_CANCELLATION_DECISION_SCHEMA_VERSION,
+        "intent_ref": intent["intent_ref"],
+        "request_id": intent["payload"]["request_id"],
+        "request_identity": intent["payload"]["request_identity"],
+        "graph_id": "graph-cancel",
+        "graph_revision": 1,
+        "graph_status_before": "BLOCKED",
+        "graph_status_version_before": 2,
+        "graph_target_status": "CANCELLED",
+        "budget_id": "budget-cancel",
+        "budget_status_before": "ACTIVE",
+        "budget_status_version_before": 1,
+        "budget_target_status": "RELEASED",
+        "node_states_before": {
+            "node-1": {"status": "CANCEL_REQUESTED", "status_version": 1},
+        },
+        "node_states_after": {
+            "node-1": {"status": "CANCELLED", "status_version": 2},
+        },
+        "reconciliation_evidence_refs": list(
+            advanced["reconciliation_evidence_refs"]
+        ),
+        "graph_outbox_id": "outbox-legacy-effect-final",
+        "budget_outbox_id": "outbox-legacy-effect-budget",
+    }
+    decision = normalize_graph_cancellation_decision(decision_payload)
+    authority_evidence = (
+        decision.decision_ref,
+        intent["intent_ref"],
+        intent["payload"]["request_identity"],
+    )
+    with pytest.raises(TaskStoreError) as blocked:
+        store.finalize_graph_cancellation(
+            "graph-cancel",
+            1,
+            budget_id="budget-cancel",
+            expected_graph_version=2,
+            expected_budget_version=1,
+            expected_node_states=decision_payload["node_states_before"],
+            intent_ref=intent["intent_ref"],
+            decision_ref=decision.decision_ref,
+            decision_payload=decision_payload,
+            graph_outbox=_event(
+                "TASK_GRAPH",
+                "graph-cancel",
+                3,
+                "TASK_GRAPH_CANCELLED",
+                outbox_id="outbox-legacy-effect-final",
+                evidence_refs=authority_evidence,
+            ),
+            budget_outbox=_event(
+                "BUDGET_RESERVATION",
+                "budget-cancel",
+                2,
+                "BUDGET_RESERVATION_RELEASED",
+                outbox_id="outbox-legacy-effect-budget",
+                evidence_refs=authority_evidence,
+            ),
+        )
+    assert blocked.value.reason_code == TASK_STORE_OWNERSHIP_CONFLICT
+
+
 def test_accepted_node_effect_remains_dispatchable_after_graph_cancel(tmp_path: Path) -> None:
     store = _store(tmp_path)
     effect_id = "effect://cancel/accepted-node"
@@ -1488,3 +1740,175 @@ def test_review_revocation_uses_canonical_encoded_graph_subject(tmp_path: Path) 
             ("review-encoded-graph",),
         ).fetchone()[0]
     assert status == "CANCELLED"
+
+
+@pytest.mark.parametrize(
+    ("action", "outcome", "receipt_ref", "terminal_status"),
+    (
+        ("RELEASE", "NO_SIDE_EFFECT", None, "RELEASED"),
+        (
+            "COMMIT",
+            "SIDE_EFFECT_CONFIRMED",
+            "receipt://graph-cancellation/downstream-confirmed",
+            "COMMITTED",
+        ),
+    ),
+)
+def test_cancellation_operation_service_settles_signed_outcome_and_exactly_replays(
+    tmp_path: Path,
+    action: str,
+    outcome: str,
+    receipt_ref: str | None,
+    terminal_status: str,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    store = _store(
+        tmp_path,
+        reconciliation_proof_verifier=Ed25519ReconciliationProofVerifier(
+            {"reconciler-cancel-v1": public_key}
+        ),
+    )
+    _running_operation(store)
+    requested = _request_snapshot(
+        store,
+        before_status="RUNNING",
+        before_version=2,
+        after_status="CANCEL_REQUESTED",
+        after_version=3,
+    )
+    intent_ref = str(requested["intent"]["intent_ref"])
+    reservation = store.get_operation_reservation("reservation-cancel")
+    assert reservation["status"] == "RECOVERY_REQUIRED"
+    expected_version = int(reservation["status_version"])
+    proof_ref = (
+        "proof://graph-cancellation/reconciliation/service-"
+        f"{action.lower()}"
+    )
+    actor_id = "reconciler://graph-cancellation/operator"
+    proof_binding = build_reconciliation_attestation_binding(
+        reservation_id="reservation-cancel",
+        business_scope="operation:cancel-test",
+        operation_fingerprint="sha256:" + "a" * 64,
+        recovery_version=expected_version,
+        reconciler_actor_id=actor_id,
+        attestation_ref=proof_ref,
+        recovery_action=action,
+        reconciliation_outcome=outcome,
+        receipt_ref=receipt_ref,
+    )
+    signature = "ed25519:" + base64.urlsafe_b64encode(
+        private_key.sign(proof_binding)
+    ).decode("ascii")
+    wakes: list[str] = []
+    service = GraphCancellationOperationReconciliationService(
+        task_store=store,
+        outbox_factory=OutboxMessage,
+        wake_cancellation=lambda: wakes.append("wake"),
+    )
+    request = {
+        "intent_ref": intent_ref,
+        "reservation_id": "reservation-cancel",
+        "expected_version": expected_version,
+        "action": action,
+        "reconciler_actor_id": actor_id,
+        "downstream_receipt_ref": receipt_ref,
+        "attestation_ref": proof_ref,
+        "attestation_key_id": "reconciler-cancel-v1",
+        "attestation_signature": signature,
+    }
+
+    with pytest.raises(GraphCancellationOperationReconciliationError) as forged_actor:
+        service.reconcile_graph_cancellation_operation(
+            **{**request, "reconciler_actor_id": "reconciler://forged/actor"}
+        )
+    assert forged_actor.value.side_effects_may_have_run is False
+    assert store.get_operation_reservation("reservation-cancel")["status"] == (
+        "RECOVERY_REQUIRED"
+    )
+
+    first = service.reconcile_graph_cancellation_operation(**request)
+    replay = service.reconcile_graph_cancellation_operation(**request)
+
+    assert first["replayed"] is False
+    assert replay["replayed"] is True
+    assert first["operation"] == replay["operation"]
+    assert first["operation"] == {
+        "reservation_id": "reservation-cancel",
+        "status": terminal_status,
+        "status_version": expected_version + 1,
+        "reconciliation_action": action,
+        "reconciliation_outcome": outcome,
+        "receipt_ref": receipt_ref,
+        "attestation_ref": proof_ref,
+        "attestation_key_id": "reconciler-cancel-v1",
+    }
+    assert wakes == ["wake", "wake"]
+    advanced = store.advance_graph_cancellation(intent_ref)
+    assert advanced["ready_to_finalize"] is True
+    expected_evidence = receipt_ref or proof_ref
+    assert expected_evidence in advanced["reconciliation_evidence_refs"]
+
+
+def test_cancellation_operation_store_rejects_reacquire_and_wrong_intent_without_mutation(
+    tmp_path: Path,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    store = _store(
+        tmp_path,
+        reconciliation_proof_verifier=Ed25519ReconciliationProofVerifier(
+            {"reconciler-cancel-v1": public_key}
+        ),
+    )
+    _running_operation(store)
+    requested = _request_snapshot(
+        store,
+        before_status="RUNNING",
+        before_version=2,
+        after_status="CANCEL_REQUESTED",
+        after_version=3,
+    )
+    intent_ref = str(requested["intent"]["intent_ref"])
+    reservation = store.get_operation_reservation("reservation-cancel")
+    expected_version = int(reservation["status_version"])
+    base_kwargs = {
+        "expected_version": expected_version,
+        "reconciler_actor_id": "reconciler://graph-cancellation/operator",
+        "attestation_ref": "proof://graph-cancellation/reconciliation/reject",
+        "attestation_key_id": "reconciler-cancel-v1",
+        "attestation_signature": "ed25519:" + "A" * 86 + "==",
+        "outbox": _event(
+            "OPERATION_RESERVATION",
+            "reservation-cancel",
+            expected_version + 1,
+            "OPERATION_RECOVERY_RELEASE",
+            outbox_id="outbox-cancellation-operation-rejected",
+            attempt_id="attempt-cancel",
+        ),
+    }
+
+    with pytest.raises(GraphCancellationOperationStoreRejected):
+        store.reconcile_graph_cancellation_operation(
+            intent_ref,
+            "reservation-cancel",
+            action="REACQUIRE",
+            **base_kwargs,
+        )
+    with pytest.raises(GraphCancellationOperationStoreRejected):
+        store.reconcile_graph_cancellation_operation(
+            "cancel://intent/not-found",
+            "reservation-cancel",
+            action="RELEASE",
+            **base_kwargs,
+        )
+
+    unchanged = store.get_operation_reservation("reservation-cancel")
+    assert unchanged["status"] == "RECOVERY_REQUIRED"
+    assert unchanged["status_version"] == expected_version

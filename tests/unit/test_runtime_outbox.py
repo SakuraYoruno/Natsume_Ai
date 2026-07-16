@@ -432,6 +432,7 @@ def test_coordinator_wires_one_runtime_outbox_and_keeps_budget_factory_binding()
         "acceptance",
         "projection_reader",
         "review_runtime",
+        "node_grant_verifier",
         "acceptance_effects_enabled",
         "bounded_fanout_enabled",
         "atomic_graph_success_enabled",
