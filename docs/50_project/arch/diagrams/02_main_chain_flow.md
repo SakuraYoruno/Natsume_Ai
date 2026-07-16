@@ -126,6 +126,7 @@ flowchart TD
     SUCCESS_POLICY -->|"是"| PROJECTION["所有 Node/Attempt/Reservation ACCEPTED\ncanonical projection 重算 digest\n绑定 command/request/route/target/grant"]
     PROJECTION --> RESULT["仅显式 result projection\n编译全图 effects 与公开结果"]
     RESULT --> SUCCESS_UOW["单 UoW：Graph COMPLETED + Budget CONSUMED\n两 Outbox + effects + 0091 decision"]
+    SUCCESS_UOW --> OUTBOX_REV
     SUCCESS_UOW --> REPLAY["completed replay 只读 0091\n双响应丢失重读 terminal authority"]
     NODE -->|"Operation Reservation 未决"| RECOVERY["RECOVERY_REQUIRED\nGraph/Budget 不终结"]
     FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n+ 0090 canonical v2 decision\n单事务 + exact replay"]
@@ -133,10 +134,12 @@ flowchart TD
     REVIEW --> ATOMIC
     ATOMIC --> MATCH["terminal replay：Graph target + status_version 精确匹配\nReview BLOCKED→FAILED 不泄漏旧 ref"]
     BUDGET --> USAGE["selected=BUDGET_BLOCKED 绑定 rejected usage\n被动 blocked sibling 无需本地 usage"]
-    ATOMIC --> PUB["0093 durable Outbox claim\nboot/recovery-scoped 唯一 owner"]
+    ATOMIC --> OUTBOX_REV["0095 Graph revision + payload\nID/key 升级前后稳定\n歧义 producer 整笔失败"]
+    OUTBOX_REV --> PUB["0093 durable Outbox claim\nboot/recovery-scoped 唯一 owner"]
     PUB --> APPEND["逐条：owner + token + expiry + 单调 fence\n幂等 append runtime event"]
     APPEND --> COMPLETE["fenced complete\n失败 release + durable backoff/error"]
-    TAKEOVER["后台 worker 按 aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 aggregate 严禁越过 predecessor"] -.-> PUB
+    APPEND --> EVENT_REV["新 Event = graph_id@revision\nsource_ref 一 Outbox 一 Event\nlegacy 重投 exact replay"]
+    TAKEOVER["后台 worker 按 revisioned aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 revision 严禁越过 predecessor"] -.-> PUB
     TAKEOVER --> DRAIN["canonical total_pending=0 才 DRAINED\nclaim/backoff/blocked backlog 为 DEFERRED"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
@@ -150,7 +153,7 @@ flowchart TD
     CANCEL_DEFER -.-> CANCEL_SCAN
     CANCEL_RECON -.-> CANCEL_FINAL["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
     CANCEL_FINAL -.-> CANCEL_COMPLETE["0092 FINALIZED + decision 后\n清理 0094 协调行"]
-    CANCEL_FINAL -.-> PUB
+    CANCEL_FINAL -.-> OUTBOX_REV
     EFFECT_RULE["accepted NODE effect 继续 delivery\n其他未授权 NODE/GRAPH effect 被 fence"] -.-> CANCEL_RECON
     FIRST["0091 success / 0092 cancel\nfirst-writer-wins + exact replay"] -.-> CANCEL_INTENT
     CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
@@ -160,6 +163,8 @@ flowchart TD
     style LIMIT fill:#fff3cd,stroke:#a87500
     style OFF fill:#fff3cd,stroke:#a87500
     style TAKEOVER fill:#d1e7dd,stroke:#177245
+    style OUTBOX_REV fill:#d1e7dd,stroke:#177245
+    style EVENT_REV fill:#d1e7dd,stroke:#177245
     style CANCEL_ENTRY fill:#fff3cd,stroke:#a87500
     style CANCEL_INTENT fill:#fff3cd,stroke:#a87500
     style CANCEL_LOCAL fill:#fff3cd,stroke:#a87500
@@ -179,7 +184,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Task Runtime Outbox 的跨进程投递；0094 另以 composition-owned worker 收口 pending cancellation 的扫描、持久 coordination claim/heartbeat/defer、expired takeover 与 exact HostCommand admission 重建。0094 不复制业务 cancellation status，0092 intent/decision 仍是唯一 authority；operation/effect/review 未 reconciliation 时只 durable defer。B5C verifier 尚未在生产 composition 注入，cancellation branch 也没有 HTTP/UI/canary。该图不是 production cancellation wiring。
+0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination/continuation；0095 保持升级前 Graph Outbox ID/key，以 deterministic HostCommand/governed identity 回填历史 revision，并新增 `@revision` payload、per-revision head、multi-revision marker 与 exact Event/Review/Operator read。旧 payload/journal 只走兼容 replay，source-ref unique partial 围栏防止 append-success/complete-loss 重投产生第二 Event。0092 intent/decision 仍是取消业务 authority；operation/effect/review 未 reconciliation 时只 durable defer。生产 verifier/HTTP/UI/canary 尚缺，该图不是 production cancellation wiring。
 
 ## Plan 分支的真实边界
 
@@ -203,7 +208,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 verified two-phase cancellation、0093 Outbox durable delivery 与 0094 pending-intent coordination 已有 shadow/contract 证据。生产 cancellation verifier/HTTP/UI、完整 operation/effect reconciliation、revisioned 0090、历史半提交、统一 `WAITING_APPROVAL`、Budget 高竞争和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 durable delivery、0094 continuation 与 0095 stable-ID revisioned Outbox/payload/source-fenced Event/Review/Operator 已有证据。生产 verifier/HTTP/UI、业务 reconciliation、历史半提交、统一 `WAITING_APPROVAL`、Budget 高竞争和 canary 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox background worker → runtime activation/cancellation worker 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093 Outbox 与 0094 cancellation coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
 

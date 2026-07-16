@@ -227,6 +227,7 @@ class TaskGraphCancellationFinalizationMixin:
             or decision.payload["budget_status_version_before"] != expected_budget_version
             or decision.payload["node_states_before"] != expected_before
             or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or decision.payload["budget_outbox_id"]
             != (budget_outbox.outbox_id if budget_outbox is not None else None)
             or decision_reference not in set(graph_outbox.evidence_refs)
@@ -326,6 +327,7 @@ class TaskGraphCancellationFinalizationMixin:
                     ),
                     expected_event_type="TASK_GRAPH_CANCELLED",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 if budget_ref is not None:
                     if budget_row is None:

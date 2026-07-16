@@ -130,6 +130,7 @@ def _assert_graph_cancellation_decision_bindings(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != graph_id
+        or int(graph_outbox.get("graph_revision") or 0) != revision
         or int(graph_outbox["aggregate_version"]) != int(record["graph_version_after"])
         or graph_outbox["event_type"] != "TASK_GRAPH_CANCELLED"
         or not required_evidence.issubset(set(graph_outbox["evidence_refs"]))
@@ -268,6 +269,8 @@ def _assert_parallel_success_decision_bindings(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != record["graph_id"]
+        or int(graph_outbox.get("graph_revision") or 0)
+        != int(record["graph_revision"])
         or int(graph_outbox["aggregate_version"])
         != int(record["graph_version_after"])
         or graph_outbox["event_type"] != "TASK_GRAPH_COMPLETED"
@@ -358,6 +361,8 @@ def _assert_parallel_settlement_decision_outbox_binding(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != record["graph_id"]
+        or int(graph_outbox.get("graph_revision") or 0)
+        != int(record["graph_revision"])
         or int(graph_outbox["aggregate_version"])
         != int(record["graph_version_after"])
         or graph_outbox["event_type"]
@@ -473,10 +478,9 @@ def _find_invalid_declared_parallel_settlement_decision_ref(
 ) -> str | None:
     """Find a Graph Outbox declaration with no correctly bound decision row.
 
-    TaskGraph Outboxes predate an explicit ``graph_revision`` column, so a
-    complete marker scan is safe only while one revision exists for the graph
-    id.  Every ``taskbatch://sha256/`` marker in that history must resolve to a
-    decision bound to the same revision and exact Graph Outbox.
+    Migration 0095 binds every TaskGraph Outbox to an explicit revision.  Every
+    ``taskbatch://sha256/`` marker in the requested revision must therefore
+    resolve to a decision bound to that same revision and exact Graph Outbox.
     """
 
     graph_row = conn.execute(
@@ -488,29 +492,16 @@ def _find_invalid_declared_parallel_settlement_decision_ref(
     ).fetchone()
     if graph_row is None:
         return None
-    revision_count = int(
-        conn.execute(
-            "SELECT COUNT(*) FROM task_runtime_graph WHERE graph_id = ?",
-            (graph_id,),
-        ).fetchone()[0]
-    )
-    if revision_count != 1:
-        # Historical TaskGraph Outboxes do not carry graph_revision.  Scanning
-        # them across revisions could mistake another revision's equal
-        # status/version marker for the queried revision.  The selected row is
-        # still validated against its exact Outbox by the caller; complete
-        # cross-revision missing-marker detection requires revisioned Outbox
-        # aggregate identity.
-        return None
     rows = conn.execute(
         """
         SELECT * FROM task_runtime_outbox
         WHERE aggregate_type = 'TASK_GRAPH'
           AND aggregate_id = ?
+          AND graph_revision = ?
           AND event_type IN ('TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED')
         ORDER BY aggregate_version DESC, outbox_id DESC
         """,
-        (graph_id,),
+        (graph_id, int(graph_revision)),
     ).fetchall()
     for row in rows:
         outbox = _outbox_record(row)

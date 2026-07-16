@@ -78,12 +78,14 @@ def _event(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=version,
+            graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         ),
         idempotency_key=f"idempotency:{outbox_id}",
         outbox_id=outbox_id,

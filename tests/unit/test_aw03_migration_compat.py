@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
+import shutil
 import sqlite3
 from types import SimpleNamespace
 
@@ -28,6 +31,187 @@ def _asset(filename: str, checksum: str):
         name=name,
         path=Path(filename),
         checksum=checksum,
+    )
+
+
+def _migration_catalog_through(tmp_path: Path, version: int) -> Path:
+    source = Path(migration_runner_module.__file__).with_name("migrations")
+    target = tmp_path / f"migrations-through-{version:04d}"
+    target.mkdir()
+    for path in source.glob("*.sql"):
+        migration = int(path.name.split("_", 1)[0])
+        if migration <= version:
+            shutil.copy2(path, target / path.name)
+    return target
+
+
+def _insert_task_graph(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    revision: int,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO task_runtime_graph(
+            graph_id, revision, root_work_order_id, planner_ref,
+            status, status_version, graph_json, source_kind,
+            created_ts_ms, updated_ts_ms
+        ) VALUES (?, ?, ?, ?, 'ACTIVE', 1, '{}', 'CANONICAL', 1, 1)
+        """,
+        (
+            graph_id,
+            revision,
+            f"work-order-{graph_id}-{revision}",
+            f"planner://{graph_id}/{revision}",
+        ),
+    )
+
+
+def _insert_host_command(
+    conn: sqlite3.Connection,
+    *,
+    command_id: str,
+    graph_id: str,
+    graph_revision: int,
+) -> None:
+    digest = f"sha256:{str(graph_revision) * 64}"
+    conn.execute(
+        """
+        INSERT INTO host_command_journal(
+            command_id, schema_version, request_id, surface, principal_id,
+            session_id, input_ref, input_sha256, route_type, target_id,
+            business_scope, operation_fingerprint, root_work_order_id,
+            graph_id, graph_revision, assignment_id, command_json,
+            command_digest, work_order_json, work_order_digest,
+            assignment_json, assignment_digest, graph_json, graph_digest,
+            created_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            command_id,
+            "test.host-command.v1",
+            f"request-{graph_id}-{graph_revision}",
+            "test-surface",
+            "principal://migration/test",
+            f"session://migration/{graph_revision}",
+            f"input://migration/{graph_revision}",
+            digest,
+            "TASK_GRAPH",
+            f"target-{graph_revision}",
+            f"scope-{graph_id}",
+            digest,
+            f"work-order-{graph_id}-{graph_revision}",
+            graph_id,
+            graph_revision,
+            f"assignment-{graph_id}",
+            "{}",
+            digest,
+            "{}",
+            digest,
+            "{}",
+            digest,
+            "{}",
+            digest,
+            graph_revision,
+        ),
+    )
+
+
+def _governed_outbox_identity(
+    *,
+    command_id: str,
+    aggregate_id: str,
+    aggregate_version: int,
+    event_type: str,
+) -> tuple[str, str]:
+    material = "\n".join(
+        (
+            command_id,
+            "TASK_GRAPH",
+            aggregate_id,
+            str(aggregate_version),
+            event_type,
+        )
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return f"outbox::governed::{digest}", f"governed:{digest}"
+
+
+def _insert_legacy_outbox(
+    conn: sqlite3.Connection,
+    *,
+    outbox_id: str,
+    aggregate_type: str,
+    aggregate_id: str,
+    aggregate_version: int,
+    event_type: str,
+    attempt_id: str | None = None,
+    evidence_refs: tuple[str, ...] = (),
+    idempotency_key: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO task_runtime_outbox(
+            outbox_id, aggregate_type, aggregate_id, aggregate_version,
+            event_type, payload_ref, evidence_refs_json, attempt_id,
+            idempotency_key, status, available_ts_ms, created_ts_ms,
+            published_ts_ms, status_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1, 1, NULL, 0)
+        """,
+        (
+            outbox_id,
+            aggregate_type,
+            aggregate_id,
+            aggregate_version,
+            event_type,
+            (
+                f"taskstore://event/{aggregate_type}/{aggregate_id}/"
+                f"{aggregate_version}"
+            ),
+            json.dumps(list(evidence_refs), separators=(",", ":")),
+            attempt_id,
+            idempotency_key or f"idempotency:{outbox_id}",
+        ),
+    )
+
+
+def _insert_revisioned_outbox(
+    conn: sqlite3.Connection,
+    *,
+    outbox_id: str,
+    aggregate_type: str,
+    aggregate_id: str,
+    aggregate_version: int,
+    event_type: str,
+    graph_revision: int | None,
+) -> None:
+    payload_aggregate_id = aggregate_id
+    if aggregate_type == "TASK_GRAPH" and type(graph_revision) is int:
+        payload_aggregate_id = f"{aggregate_id}@{graph_revision}"
+    conn.execute(
+        """
+        INSERT INTO task_runtime_outbox(
+            outbox_id, aggregate_type, aggregate_id, graph_revision,
+            aggregate_version, event_type, payload_ref, evidence_refs_json,
+            attempt_id, idempotency_key, status, available_ts_ms,
+            created_ts_ms, published_ts_ms, status_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', NULL, ?, 'PENDING', 1, 1, NULL, 0)
+        """,
+        (
+            outbox_id,
+            aggregate_type,
+            aggregate_id,
+            graph_revision,
+            aggregate_version,
+            event_type,
+            (
+                f"taskstore://event/{aggregate_type}/{payload_aggregate_id}/"
+                f"{aggregate_version}"
+            ),
+            f"idempotency:{outbox_id}",
+        ),
     )
 
 
@@ -158,11 +342,11 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 94
-    assert upgraded.summary["applied_count"] == 11
+    assert upgraded.summary["current_version"] == 95
+    assert upgraded.summary["applied_count"] == 12
     assert (
         upgraded.records[-1].migration_id
-        == "0094_task_runtime_graph_cancellation_continuation"
+        == "0095_task_runtime_revisioned_graph_outbox"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -221,12 +405,13 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    assert [record.migration_id for record in repaired.records[-5:]] == [
+    assert [record.migration_id for record in repaired.records[-6:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
         "0093_task_runtime_outbox_claim",
         "0094_task_runtime_graph_cancellation_continuation",
+        "0095_task_runtime_revisioned_graph_outbox",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -274,16 +459,16 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 94")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 94")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 94")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 94")
         conn.commit()
 
     replayed = runner.apply_migrations(request_id="0094-receipt-replay", ts_ms=24)
 
     assert replayed.success is True, replayed.as_dict()
-    assert replayed.summary["current_version"] == 94
+    assert replayed.summary["current_version"] == 95
     assert replayed.records[-1].migration_id == (
-        "0094_task_runtime_graph_cancellation_continuation"
+        "0095_task_runtime_revisioned_graph_outbox"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -307,6 +492,598 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
         "uq_task_runtime_graph_cancellation_continuation_graph",
         "idx_task_runtime_graph_cancellation_continuation_ready",
     } <= index_names
+
+
+def test_0095_fresh_schema_freezes_revision_column_guards_and_delivery_index(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-fresh.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-fresh",
+        ts_ms=25,
+    )
+
+    assert result.success is True, result.as_dict()
+    assert result.summary["current_version"] == 95
+    assert result.records[-1].migration_id == (
+        "0095_task_runtime_revisioned_graph_outbox"
+    )
+    with sqlite3.connect(db_path) as conn:
+        graph_revision = {
+            str(row[1]): (str(row[2]), int(row[3]))
+            for row in conn.execute(
+                "PRAGMA table_info(task_runtime_outbox)"
+            ).fetchall()
+        }["graph_revision"]
+        index_columns = tuple(
+            str(row[2])
+            for row in conn.execute(
+                "PRAGMA index_info(idx_task_runtime_outbox_revision_delivery_order)"
+            ).fetchall()
+        )
+        triggers = {
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'trigger' AND tbl_name = 'task_runtime_outbox'
+                """
+            ).fetchall()
+        }
+
+    assert graph_revision == ("INTEGER", 0)
+    assert index_columns == (
+        "aggregate_type",
+        "aggregate_id",
+        "graph_revision",
+        "status",
+        "aggregate_version",
+        "created_ts_ms",
+        "outbox_id",
+    )
+    assert {
+        "trg_task_runtime_outbox_graph_revision_insert_guard",
+        "trg_task_runtime_outbox_graph_revision_update_guard",
+    } <= triggers
+
+
+def test_0095_receipt_loss_replay_requires_complete_revision_schema(tmp_path) -> None:
+    db_path = tmp_path / "0095-receipt-loss.sqlite3"
+    seeded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-receipt-loss",
+        ts_ms=25,
+    )
+    assert seeded.success is True, seeded.as_dict()
+
+    asset_name = "0095_task_runtime_revisioned_graph_outbox.sql"
+    migration_path = (
+        Path(migration_runner_module.__file__).with_name("migrations")
+        / asset_name
+    )
+    asset = _asset(asset_name, hashlib.sha256(migration_path.read_bytes()).hexdigest())
+    failure = sqlite3.OperationalError("duplicate column name: graph_revision")
+    assert is_exact_checksum_bound_schema_replay_failure(asset, failure) is True
+    with sqlite3.connect(db_path) as conn:
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is True
+        conn.execute(
+            "DROP TRIGGER trg_task_runtime_outbox_graph_revision_update_guard"
+        )
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
+
+
+def test_0095_upgrade_backfills_only_exact_authority_then_unique_graph_fallback(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-authority-upgrade.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-head-94", ts_ms=26)
+    assert head_94.success is True, head_94.as_dict()
+    assert head_94.summary["current_version"] == 94
+
+    graph_id = "graph-0095-authority"
+    with sqlite3.connect(db_path) as conn:
+        _insert_task_graph(conn, graph_id=graph_id, revision=1)
+        _insert_task_graph(conn, graph_id=graph_id, revision=2)
+        for outbox_id, event_type in (
+            ("outbox-0090", "TASK_GRAPH_BLOCKED"),
+            ("outbox-0091", "TASK_GRAPH_COMPLETED"),
+            ("outbox-0092-intent", "TASK_GRAPH_CANCELLATION_REQUESTED"),
+            ("outbox-0092-decision", "TASK_GRAPH_CANCELLED"),
+        ):
+            _insert_legacy_outbox(
+                conn,
+                outbox_id=outbox_id,
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph_id,
+                aggregate_version=2,
+                event_type=event_type,
+            )
+
+        conn.execute(
+            """
+            INSERT INTO task_runtime_parallel_settlement_decision(
+                decision_ref, schema_version, graph_id, graph_revision,
+                graph_version_before, graph_version_after, budget_id,
+                budget_version_before, budget_version_after, decision_kind,
+                selected_node_id, graph_target_status, budget_target_status,
+                payload_json, payload_sha256, graph_outbox_id,
+                budget_outbox_id, created_ts_ms
+            ) VALUES (
+                'taskbatch://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                'test.v1', ?, 2, 1, 2, 'budget-0090', 0, 0, 'REVIEW',
+                'node-0090', 'BLOCKED', NULL, '{}', ?, 'outbox-0090', NULL, 1
+            )
+            """,
+            (graph_id, f"sha256:{'a' * 64}"),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_parallel_success_decision(
+                decision_ref, schema_version, graph_id, graph_revision,
+                graph_version_before, graph_version_after, budget_id,
+                budget_version_before, budget_version_after, result_node_id,
+                result_attempt_id, result_receipt_ref, payload_json,
+                payload_sha256, graph_outbox_id, budget_outbox_id, created_ts_ms
+            ) VALUES (
+                'taskgraph-success://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                'test.v1', ?, 1, 1, 2, 'budget-0091', 0, 1, 'node-0091',
+                'attempt-0091', 'receipt://0091', '{}', ?,
+                'outbox-0091', 'budget-outbox-0091', 1
+            )
+            """,
+            (graph_id, f"sha256:{'b' * 64}"),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_intent(
+                intent_ref, schema_version, request_id, request_identity,
+                source, reason_code, graph_id, graph_revision,
+                graph_version_before, graph_version_after, budget_id,
+                budget_version_at_request, payload_json, payload_sha256,
+                graph_outbox_id, status, status_version, requested_ts_ms,
+                finalized_ts_ms
+            ) VALUES (
+                'taskcancel-intent://0095', 'test.v1', 'request-0095',
+                'principal://0095', 'OPERATOR', 'TEST', ?, 2, 1, 2,
+                NULL, NULL, '{}', ?, 'outbox-0092-intent',
+                'FINALIZED', 1, 1, 2
+            )
+            """,
+            (graph_id, f"sha256:{'c' * 64}"),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_decision(
+                decision_ref, schema_version, intent_ref, graph_id,
+                graph_revision, graph_version_before, graph_version_after,
+                budget_id, budget_version_before, budget_version_after,
+                payload_json, payload_sha256, graph_outbox_id,
+                budget_outbox_id, created_ts_ms
+            ) VALUES (
+                'taskcancel-decision://0095', 'test.v1',
+                'taskcancel-intent://0095', ?, 2, 2, 3, NULL, NULL, NULL,
+                '{}', ?, 'outbox-0092-decision', NULL, 2
+            )
+            """,
+            (graph_id, f"sha256:{'d' * 64}"),
+        )
+
+        attempt_graph_id = "graph-0095-attempt"
+        _insert_task_graph(conn, graph_id=attempt_graph_id, revision=1)
+        _insert_task_graph(conn, graph_id=attempt_graph_id, revision=2)
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, created_ts_ms, updated_ts_ms
+            ) VALUES ('attempt-0095', ?, 1, 'node-attempt', 1,
+                      'SUCCEEDED', 1, 1, 1)
+            """,
+            (attempt_graph_id,),
+        )
+        _insert_legacy_outbox(
+            conn,
+            outbox_id="outbox-attempt",
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=attempt_graph_id,
+            aggregate_version=2,
+            event_type="TASK_GRAPH_FAILED",
+            attempt_id="attempt-0095",
+        )
+
+        unique_graph_id = "graph-0095-unique"
+        _insert_task_graph(conn, graph_id=unique_graph_id, revision=7)
+        _insert_legacy_outbox(
+            conn,
+            outbox_id="outbox-unique",
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=unique_graph_id,
+            aggregate_version=0,
+            event_type="TASK_GRAPH_CREATED",
+        )
+        _insert_legacy_outbox(
+            conn,
+            outbox_id="outbox-budget",
+            aggregate_type="BUDGET_RESERVATION",
+            aggregate_id="budget-0095",
+            aggregate_version=1,
+            event_type="BUDGET_RESERVATION_ACTIVE",
+        )
+        conn.commit()
+
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-authority-upgrade",
+        ts_ms=27,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 95
+    with sqlite3.connect(db_path) as conn:
+        revisions = dict(
+            conn.execute(
+                """
+                SELECT outbox_id, graph_revision FROM task_runtime_outbox
+                WHERE outbox_id IN (
+                    'outbox-0090', 'outbox-0091', 'outbox-0092-intent',
+                    'outbox-0092-decision', 'outbox-attempt', 'outbox-unique',
+                    'outbox-budget'
+                )
+                """
+            ).fetchall()
+        )
+    assert revisions == {
+        "outbox-0090": 2,
+        "outbox-0091": 1,
+        "outbox-0092-intent": 2,
+        "outbox-0092-decision": 2,
+        "outbox-attempt": 1,
+        "outbox-unique": 7,
+        "outbox-budget": None,
+    }
+
+
+def test_0095_backfills_created_outboxes_from_exact_host_command_evidence(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-host-command-evidence.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-host-command-head", ts_ms=28)
+    assert head_94.success is True, head_94.as_dict()
+
+    graph_id = "graph-0095-command-history"
+    with sqlite3.connect(db_path) as conn:
+        for revision in (1, 2):
+            command_id = f"host-command://{graph_id}/{revision}"
+            _insert_task_graph(conn, graph_id=graph_id, revision=revision)
+            _insert_host_command(
+                conn,
+                command_id=command_id,
+                graph_id=graph_id,
+                graph_revision=revision,
+            )
+            _insert_legacy_outbox(
+                conn,
+                outbox_id=f"outbox-created-r{revision}",
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph_id,
+                aggregate_version=0,
+                event_type="TASK_GRAPH_CREATED",
+                evidence_refs=(
+                    f"evidence://migration/unrelated/{revision}",
+                    command_id,
+                ),
+            )
+        conn.commit()
+
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-host-command-upgrade",
+        ts_ms=29,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    with sqlite3.connect(db_path) as conn:
+        assert dict(
+            conn.execute(
+                """
+                SELECT outbox_id, graph_revision
+                FROM task_runtime_outbox
+                WHERE outbox_id IN ('outbox-created-r1', 'outbox-created-r2')
+                ORDER BY outbox_id
+                """
+            ).fetchall()
+        ) == {
+            "outbox-created-r1": 1,
+            "outbox-created-r2": 2,
+        }
+
+
+def test_0095_backfills_governed_transitions_from_exact_command_identity(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-governed-identity.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-governed-head", ts_ms=30)
+    assert head_94.success is True, head_94.as_dict()
+
+    graph_id = "graph-0095-governed-history"
+    expected: dict[str, int] = {}
+    with sqlite3.connect(db_path) as conn:
+        for revision in (1, 2):
+            command_id = f"host-command://{graph_id}/{revision}"
+            _insert_task_graph(conn, graph_id=graph_id, revision=revision)
+            _insert_host_command(
+                conn,
+                command_id=command_id,
+                graph_id=graph_id,
+                graph_revision=revision,
+            )
+            outbox_id, idempotency_key = _governed_outbox_identity(
+                command_id=command_id,
+                aggregate_id=graph_id,
+                aggregate_version=1,
+                event_type="TASK_GRAPH_ACTIVE",
+            )
+            _insert_legacy_outbox(
+                conn,
+                outbox_id=outbox_id,
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph_id,
+                aggregate_version=1,
+                event_type="TASK_GRAPH_ACTIVE",
+                idempotency_key=idempotency_key,
+            )
+            expected[outbox_id] = revision
+        conn.commit()
+
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-governed-upgrade",
+        ts_ms=31,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    with sqlite3.connect(db_path) as conn:
+        actual = dict(
+            conn.execute(
+                """
+                SELECT outbox_id, graph_revision
+                FROM task_runtime_outbox
+                WHERE event_type = 'TASK_GRAPH_ACTIVE'
+                ORDER BY outbox_id
+                """
+            ).fetchall()
+        )
+    assert actual == expected
+
+
+def test_0095_does_not_treat_command_evidence_as_transition_authority(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-command-evidence-not-transition.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-command-evidence-head", ts_ms=31)
+    assert head_94.success is True, head_94.as_dict()
+
+    graph_id = "graph-0095-command-evidence-transition"
+    command_id = f"host-command://{graph_id}/1"
+    with sqlite3.connect(db_path) as conn:
+        for revision in (1, 2):
+            _insert_task_graph(conn, graph_id=graph_id, revision=revision)
+        _insert_host_command(
+            conn,
+            command_id=command_id,
+            graph_id=graph_id,
+            graph_revision=1,
+        )
+        _insert_legacy_outbox(
+            conn,
+            outbox_id="outbox-command-evidence-active",
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=graph_id,
+            aggregate_version=1,
+            event_type="TASK_GRAPH_ACTIVE",
+            evidence_refs=(command_id,),
+        )
+        conn.commit()
+
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-command-evidence-upgrade",
+        ts_ms=32,
+    )
+
+    assert rejected.success is False
+    with sqlite3.connect(db_path) as conn:
+        assert "graph_revision" not in {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(task_runtime_outbox)"
+            ).fetchall()
+        }
+
+
+@pytest.mark.parametrize("tampered_field", ("outbox_id", "idempotency_key"))
+def test_0095_rejects_tampered_governed_transition_identity(
+    tmp_path,
+    tampered_field: str,
+) -> None:
+    db_path = tmp_path / f"0095-governed-tampered-{tampered_field}.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-governed-tampered-head", ts_ms=32)
+    assert head_94.success is True, head_94.as_dict()
+
+    graph_id = "graph-0095-governed-tampered"
+    command_id = f"host-command://{graph_id}/1"
+    outbox_id, idempotency_key = _governed_outbox_identity(
+        command_id=command_id,
+        aggregate_id=graph_id,
+        aggregate_version=1,
+        event_type="TASK_GRAPH_ACTIVE",
+    )
+    if tampered_field == "outbox_id":
+        outbox_id = f"{outbox_id}-tampered"
+    else:
+        idempotency_key = f"{idempotency_key}-tampered"
+
+    with sqlite3.connect(db_path) as conn:
+        for revision in (1, 2):
+            _insert_task_graph(conn, graph_id=graph_id, revision=revision)
+        _insert_host_command(
+            conn,
+            command_id=command_id,
+            graph_id=graph_id,
+            graph_revision=1,
+        )
+        _insert_legacy_outbox(
+            conn,
+            outbox_id=outbox_id,
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=graph_id,
+            aggregate_version=1,
+            event_type="TASK_GRAPH_ACTIVE",
+            idempotency_key=idempotency_key,
+        )
+        conn.commit()
+
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-governed-tampered-upgrade",
+        ts_ms=33,
+    )
+
+    assert rejected.success is False
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(task_runtime_outbox)"
+            ).fetchall()
+        }
+        assert "graph_revision" not in columns
+        assert conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE migration_id = 95"
+        ).fetchone() is None
+
+
+def test_0095_ambiguous_multirevision_outbox_rolls_back_the_whole_migration(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0095-ambiguous.sqlite3"
+    head_94 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 94),
+    ).apply_migrations(request_id="0095-ambiguous-head", ts_ms=28)
+    assert head_94.success is True, head_94.as_dict()
+
+    with sqlite3.connect(db_path) as conn:
+        _insert_task_graph(conn, graph_id="graph-0095-ambiguous", revision=1)
+        _insert_task_graph(conn, graph_id="graph-0095-ambiguous", revision=2)
+        _insert_legacy_outbox(
+            conn,
+            outbox_id="outbox-ambiguous",
+            aggregate_type="TASK_GRAPH",
+            aggregate_id="graph-0095-ambiguous",
+            aggregate_version=0,
+            event_type="TASK_GRAPH_CREATED",
+        )
+        conn.commit()
+
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-ambiguous-upgrade",
+        ts_ms=29,
+    )
+
+    assert rejected.success is False
+    assert rejected.records[-1].migration_id == (
+        "0095_task_runtime_revisioned_graph_outbox"
+    )
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(task_runtime_outbox)"
+            ).fetchall()
+        }
+        assert "graph_revision" not in columns
+        assert conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE migration_id = 95"
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT aggregate_id FROM task_runtime_outbox WHERE outbox_id = ?",
+            ("outbox-ambiguous",),
+        ).fetchone() == ("graph-0095-ambiguous",)
+
+
+def test_0095_guards_reject_missing_wrong_and_non_graph_revisions(tmp_path) -> None:
+    db_path = tmp_path / "0095-guards.sqlite3"
+    seeded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0095-guards",
+        ts_ms=30,
+    )
+    assert seeded.success is True, seeded.as_dict()
+
+    with sqlite3.connect(db_path) as conn:
+        _insert_task_graph(conn, graph_id="graph-0095-guard", revision=2)
+        with pytest.raises(sqlite3.IntegrityError, match="graph revision is invalid"):
+            _insert_revisioned_outbox(
+                conn,
+                outbox_id="outbox-null-revision",
+                aggregate_type="TASK_GRAPH",
+                aggregate_id="graph-0095-guard",
+                graph_revision=None,
+                aggregate_version=0,
+                event_type="TASK_GRAPH_CREATED",
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="graph revision is invalid"):
+            _insert_revisioned_outbox(
+                conn,
+                outbox_id="outbox-wrong-revision",
+                aggregate_type="TASK_GRAPH",
+                aggregate_id="graph-0095-guard",
+                graph_revision=1,
+                aggregate_version=0,
+                event_type="TASK_GRAPH_CREATED",
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="graph revision is invalid"):
+            _insert_revisioned_outbox(
+                conn,
+                outbox_id="outbox-non-graph-revision",
+                aggregate_type="BUDGET_RESERVATION",
+                aggregate_id="budget-0095-guard",
+                graph_revision=2,
+                aggregate_version=0,
+                event_type="BUDGET_RESERVATION_ACTIVE",
+            )
+
+        _insert_revisioned_outbox(
+            conn,
+            outbox_id="outbox-valid-revision",
+            aggregate_type="TASK_GRAPH",
+            aggregate_id="graph-0095-guard",
+            graph_revision=2,
+            aggregate_version=0,
+            event_type="TASK_GRAPH_CREATED",
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="graph revision is invalid"):
+            conn.execute(
+                """
+                UPDATE task_runtime_outbox SET graph_revision = 1
+                WHERE outbox_id = 'outbox-valid-revision'
+                """
+            )
+        assert conn.execute(
+            """
+            SELECT graph_revision FROM task_runtime_outbox
+            WHERE outbox_id = 'outbox-valid-revision'
+            """
+        ).fetchone() == (2,)
 
 
 def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
@@ -370,14 +1147,15 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 94
-    assert upgraded.summary["applied_count"] == 5
-    assert [record.migration_id for record in upgraded.records[-5:]] == [
+    assert upgraded.summary["current_version"] == 95
+    assert upgraded.summary["applied_count"] == 6
+    assert [record.migration_id for record in upgraded.records[-6:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
         "0093_task_runtime_outbox_claim",
         "0094_task_runtime_graph_cancellation_continuation",
+        "0095_task_runtime_revisioned_graph_outbox",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -446,11 +1224,11 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 94
-    assert upgraded.summary["applied_count"] == 4
+    assert upgraded.summary["current_version"] == 95
+    assert upgraded.summary["applied_count"] == 5
     assert (
         upgraded.records[-1].migration_id
-        == "0094_task_runtime_graph_cancellation_continuation"
+        == "0095_task_runtime_revisioned_graph_outbox"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(

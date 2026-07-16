@@ -425,6 +425,7 @@ class ParallelSettlementRuntime:
             command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
             aggregate_version=graph_version + 1,
             event_type=f"TASK_GRAPH_{graph_target_status}",
         )
@@ -473,6 +474,7 @@ class ParallelSettlementRuntime:
             command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
             aggregate_version=graph_version + 1,
             event_type=f"TASK_GRAPH_{graph_target_status}",
             evidence_refs=(decision_ref,),

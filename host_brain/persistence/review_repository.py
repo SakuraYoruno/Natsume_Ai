@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
@@ -392,6 +392,7 @@ class ReviewStore:
         self,
         *,
         task_graph_id: str | None = None,
+        graph_revision: int | None = None,
         work_order_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -399,9 +400,33 @@ class ReviewStore:
 
         clauses: list[str] = []
         params: list[Any] = []
-        if _text(task_graph_id):
+        graph_ref = _text(task_graph_id)
+        if graph_ref:
             clauses.append("task_graph_id = ?")
-            params.append(_text(task_graph_id))
+            params.append(graph_ref)
+        if graph_revision is not None:
+            if not graph_ref or isinstance(graph_revision, bool):
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision requires one task_graph_id and a positive integer",
+                )
+            try:
+                normalized_revision = int(graph_revision)
+            except (TypeError, ValueError) as exc:
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision must be a positive integer",
+                ) from exc
+            if normalized_revision < 1:
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision must be a positive integer",
+                )
+            subject_prefix = (
+                f"task-node://{quote(graph_ref, safe='')}/{normalized_revision}/"
+            )
+            clauses.append("substr(subject_ref, 1, length(?)) = ?")
+            params.extend((subject_prefix, subject_prefix))
         if _text(work_order_id):
             clauses.append("work_order_id = ?")
             params.append(_text(work_order_id))

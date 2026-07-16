@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v1.4
+版本：v1.5
 核对日期：2026-07-16
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -33,7 +33,7 @@
 | Internal Agent governed | `WIRED` | Internal production cutover integration | ingress v2 立即编译 V3；Budget、child grant、PRE/POST Review、Verification、Acceptance、Receipt、replay 已贯通；长 Review 的 grant renewal 随 continuation 统一处理 | NE-01 已完成切片 |
 | 全 route universal runtime | `PARTIAL` | Cortex governed/read split + Scheduler/Internal production integrations | Host 四执行路由、Scheduler、Internal 已 governed；`task_progress/recent_turn` 已转只读投影；完整 Operator/Gateway surface matrix 仍需最终验收 | NE-01 |
 | Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
-| 多节点 Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | Coordinator、ParallelSuccessRuntime/Records、ParallelSettlementRuntime/Projection、TaskStore、0090/0091/0092 decisions、0093 Outbox delivery claim、0094 cancellation continuation store/worker、graph cancellation contract/store tests、worker projection store | B5A/B5B 成功封口继续有效；0093 已收口 Task Runtime Outbox 跨进程投递。0094 新增 composition-owned pending cancellation scanner，以及 owner/token/expiry/单调 fence/version 绑定的 claim、heartbeat、defer、expired takeover；四类变更在 `BEGIN IMMEDIATE` 后才采样时钟。Host/Internal/Scheduler Coordinator 与 worker 共用 process-local registry 作 quiescence 判断，但它不是 durable authority；worker 从 HostCommandRepository 按 exact Graph revision 重建 admission 再重入既有 Runtime，未显式获得 `local_pending` 时必须 `cancel_and_join`，本地非静默时不得 finalize。0094 只保存协调元数据，0092 intent/decision 仍是唯一业务真相；本地非静默或 operation/effect/review 未收敛时只 durable defer。activation 失败反向回滚，shutdown 有界；拒绝取消则保持 Store 开放并 fail closed。生产 composition 仍未注入 cancellation authority verifier，且无 HTTP/UI 入口或 canary。revisioned 0090、历史半提交、Budget 高竞争、统一 Review 与完整业务 reconciliation 仍缺 | NE-01 B5C |
+| 多节点 Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | Coordinator、ParallelSuccessRuntime/Records、ParallelSettlementRuntime/Projection、TaskStore、0090/0091/0092 decisions、0093 Outbox delivery claim、0094 cancellation continuation store/worker、0095 revisioned Graph Outbox/Event/Operator identity、graph cancellation contract/store tests、worker projection store | B5A/B5B 成功封口继续有效；0093 已收口 Task Runtime Outbox 跨进程投递。0094 新增 composition-owned pending cancellation scanner，以及 owner/token/expiry/单调 fence/version 绑定的 claim、heartbeat、defer、expired takeover；四类变更在 `BEGIN IMMEDIATE` 后才采样时钟。Host/Internal/Scheduler Coordinator 与 worker 共用 process-local registry 作 quiescence 判断，但它不是 durable authority；worker 从 HostCommandRepository 按 exact Graph revision 重建 admission 再重入既有 Runtime，未显式获得 `local_pending` 时必须 `cancel_and_join`，本地非静默时不得 finalize。0094 只保存协调元数据，0092 intent/decision 仍是唯一业务真相；本地非静默或 operation/effect/review 未收敛时只 durable defer。0095 要求 Graph Outbox 绑定现存 revision，歧义历史回填整笔失败；投递按 type+id+revision 独立保序，multi-revision marker 扫描、Runtime Event `graph_id@revision` 与 Operator exact revision 已闭环。activation 失败反向回滚，shutdown 有界；拒绝取消则保持 Store 开放并 fail closed。生产 composition 仍未注入 cancellation authority verifier，且无 HTTP/UI 入口或 canary。历史半提交、Budget 高竞争、统一 Review 与完整业务 reconciliation 仍缺 | NE-01 B5C |
 | Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` + Host/Scheduler/Internal integrations | core ingress 已覆盖；concurrency 未计量，DEGRADE/REVIEW 分支与剩余 Domain/Operator 路径未完整 | NE-01 |
 | Review 自动 continuation | `PARTIAL` | `review_runtime.py`、ReviewStore、UI | resume 只消费 token，不自动重调度原图 | NE-01 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
@@ -47,6 +47,10 @@
 | Code 真实收益 | `MISSING` | 仅 synthetic fixture | 未跑隔离 worktree、真实测试/verifier 和 baseline 对照 | NE-02 |
 
 0094 lifecycle 已按 fail-closed 收紧：activation rollback 或 `aclose` quiescence 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，锁死 bind/activate 并只允许 `aclose` 重试。Coordinator admission close、drain、`aclose` 任一失败都不关 Store；只有 Coordinator 与 worker 均静默后才 drain Outbox/关 infrastructure。这改善了故障关闭正确性，不改变 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 定级。
+
+0095 的 CREATED 回填以 immutable HostCommand evidence 为 authority；ACTIVE 等非 attempt transition 以 deterministic legacy governed Outbox ID/key 重算为 authority，无法解析的自定义 producer 整事务阻断。升级保持原 ID/key，新增 revisioned payload；旧 payload 仅 replay 兼容。readiness/receipt gate 冻结 revision 列、payload trigger、delivery index 与 Runtime Event source unique partial index。旧 journal 不改写，一 Outbox 只允许一 Event，append-success/complete-loss legacy 重投只能 exact replay；ReviewStore/Operator exact revision。这关闭 identity/read-path 缺口，但不改变生产 cancellation、Budget、Review continuation 与 reconciliation 的剩余定级。
+
+PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用同一读事务内真实 terminal payload ref；普通 scheduler/Operator 无新增扫描。pre-0095 ref 原样进入 failure evidence；只有旧版或替代 Store 未提供可选扩展字段时才合成 fallback，生产 DurableTaskStore 提供 inventory 后，缺行、畸形或歧义均 fail closed。`created_ts=0` 的 timestamp 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 Event candidate，因为两条历史 append 路径都可能用时钟替代零值，但其它字段必须 exact。
 
 ## 3. Composition 与隔离
 

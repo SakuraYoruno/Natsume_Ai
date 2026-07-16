@@ -32,9 +32,10 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0094_task_runtime_graph_cancellation_continuation.sql"
+        "0095_task_runtime_revisioned_graph_outbox.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0095_task_runtime_revisioned_graph_outbox.sql" in migration_files
     assert "host_brain/audit/migrations/0094_task_runtime_graph_cancellation_continuation.sql" in migration_files
     assert "host_brain/audit/migrations/0093_task_runtime_outbox_claim.sql" in migration_files
     assert "host_brain/audit/migrations/0092_task_runtime_graph_cancellation.sql" in migration_files

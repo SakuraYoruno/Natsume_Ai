@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v8.3
+版本：v8.4
 维护日期：2026-07-16
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -69,7 +69,7 @@ flowchart TD
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
 - Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision verified internal entry、durable intent/fence、reconciliation gate 与 final cancellation decision。0093 已收口 Task Runtime Outbox 跨进程投递；0094 新增 composition-owned pending-intent scanner、持久 claim/heartbeat/defer/expired takeover、exact HostCommand admission 重建并重入既有 GraphCancellationRuntime。0094 只是协调层，0092 intent/decision 仍是唯一业务真相；未解决 operation/effect reconciliation 时只 durable defer。生产 verifier、HTTP/UI 入口和 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
+- Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 以 0092 建立 exact-revision cancellation。0093 收口 Outbox 跨进程投递；0094 提供 pending-intent scanner/claim/takeover/continuation；0095 在保持升级前 Outbox ID/key 的同时增加 revision 列与 revisioned payload，精确迁移 CREATED/ACTIVE 等 governed 历史，恢复多 revision marker，并以 unique source-ref 围栏贯通新旧 Runtime Event、Review 和 Operator exact read。0092 intent/decision 仍是取消业务真相；未解决 operation/effect reconciliation 时只 durable defer。生产 verifier、HTTP/UI 入口和 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用，跨领域真实收益 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。

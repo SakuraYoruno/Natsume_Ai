@@ -149,12 +149,14 @@ def _graph_outbox(graph_id: str, *, version: int, status: str) -> OutboxMessage:
     return OutboxMessage.create(
         aggregate_type="TASK_GRAPH",
         aggregate_id=graph_id,
+        graph_revision=1,
         aggregate_version=version,
         event_type=f"TASK_GRAPH_{status}",
         payload_ref=build_outbox_payload_ref(
             aggregate_type="TASK_GRAPH",
             aggregate_id=graph_id,
             aggregate_version=version,
+            graph_revision=1,
         ),
         idempotency_key=f"gr04-replan:{graph_id}:{version}:{status}",
         outbox_id=f"outbox::gr04-replan::{graph_id}::{version}::{status}",
@@ -233,6 +235,7 @@ async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
         aggregate_type="TASK_GRAPH",
         aggregate_id=graph_id,
         aggregate_version=2,
+        graph_revision=1,
     )
 
     recovery = GovernedPlanningRecoveryService(

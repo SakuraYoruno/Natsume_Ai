@@ -283,6 +283,7 @@ class TaskAcceptanceEffectStagingMixin:
                     ),
                     expected_event_type="TASK_GRAPH_COMPLETED",
                     expected_attempt_id=None,
+                    expected_graph_revision=graph_revision,
                 )
                 staged = tuple(
                     self._stage_acceptance_effect_intent_in_transaction(

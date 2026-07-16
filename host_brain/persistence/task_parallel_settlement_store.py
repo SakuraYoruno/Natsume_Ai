@@ -274,6 +274,7 @@ class TaskParallelSettlementStoreMixin:
             or decision.payload["budget_target_status"] != expected_budget_target
             or decision.payload["node_states"] != expected_state_payload
             or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or decision.payload["budget_outbox_id"]
             != (budget_outbox.outbox_id if budget_outbox is not None else None)
             or decision_reference not in graph_outbox.evidence_refs
@@ -395,6 +396,7 @@ class TaskParallelSettlementStoreMixin:
                     ),
                     expected_event_type=f"TASK_GRAPH_{graph_target.value}",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 if budget_target is None:
                     if (

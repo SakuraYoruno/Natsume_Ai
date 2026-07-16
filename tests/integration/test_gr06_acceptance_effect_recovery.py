@@ -107,12 +107,14 @@ def _event(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         ),
         idempotency_key=(
             f"gr06-integration:{aggregate_type}:{aggregate_id}:"

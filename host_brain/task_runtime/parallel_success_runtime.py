@@ -363,6 +363,7 @@ class ParallelSuccessRuntime:
                 command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
+                graph_revision=admitted.graph_revision,
                 aggregate_version=graph_version + 1,
                 event_type="TASK_GRAPH_COMPLETED",
             )
@@ -417,6 +418,7 @@ class ParallelSuccessRuntime:
             command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
             aggregate_version=graph_version + 1,
             event_type="TASK_GRAPH_COMPLETED",
             evidence_refs=evidence_refs,

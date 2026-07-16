@@ -597,10 +597,13 @@ def _runtime_outbox(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=(
-            f"taskstore://event/{aggregate_type}/{aggregate_id}/{aggregate_version}"
+            f"taskstore://event/{aggregate_type}/"
+            f"{aggregate_id}{'@1' if aggregate_type == 'TASK_GRAPH' else ''}/"
+            f"{aggregate_version}"
         ),
         idempotency_key=f"gr03a-runtime:{discriminator}",
         outbox_id=f"outbox::gr03a-runtime::{discriminator}",
@@ -4177,8 +4180,10 @@ async def test_ne01_b2_retry_budget_exhaustion_fails_closed_before_reservation(
             SELECT attempt_id, evidence_refs_json
             FROM task_runtime_outbox
             WHERE aggregate_type = 'TASK_GRAPH'
+              AND aggregate_id = ? AND graph_revision = ?
               AND event_type = 'TASK_GRAPH_BLOCKED'
-            """
+            """,
+            (graph.graph_id, graph.revision),
         ).fetchone()
     assert reservation_count == 0
     assert graph_blocked_outbox is not None

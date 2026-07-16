@@ -627,12 +627,14 @@ class HostCommandRepository:
         graph_outbox = OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id=graph_id,
+            graph_revision=int(normalized["graph_revision"]),
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=build_outbox_payload_ref(
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=graph_id,
                 aggregate_version=0,
+                graph_revision=int(normalized["graph_revision"]),
             ),
             idempotency_key=f"host-command:{identity_digest}:task-graph-created",
             evidence_refs=evidence,

@@ -510,6 +510,21 @@ class DurableTaskStore(
         self._clock = clock
         self._timeout_ms = max(1, int(timeout_ms))
         self._reconciliation_proof_verifier = reconciliation_proof_verifier
+        # Some owning repositories borrow the TaskStore UoW with their own
+        # schema verification.  Detect this additive column once even when
+        # ``verify_schema`` is false so those writes choose the exact physical
+        # Outbox shape without weakening the production readiness gate.
+        conn = self._connect()
+        try:
+            outbox_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_outbox)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        self._outbox_graph_revision_enabled = "graph_revision" in outbox_columns
         if verify_schema:
             self.assert_schema_ready()
             self._initialize_outbox_delivery_capability()
@@ -781,6 +796,7 @@ class DurableTaskStore(
             ),
             expected_event_type=f"TASK_GRAPH_{target.value}",
             expected_attempt_id=(str(attempt_id) if attempt_id is not None else None),
+            expected_graph_revision=int(revision),
         )
         updated_graph = self._require_graph(conn, graph_id, revision)
         return _graph_record(updated_graph, node_rows)
@@ -3212,6 +3228,7 @@ class DurableTaskStore(
         aggregate_id: str,
         aggregate_version: int,
         event_type: str,
+        graph_revision: int | None = None,
         attempt_id: str | None = None,
     ) -> OutboxMessage:
         material = (
@@ -3222,12 +3239,14 @@ class DurableTaskStore(
         return OutboxMessage.create(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
+            graph_revision=graph_revision,
             aggregate_version=aggregate_version,
             event_type=event_type,
             payload_ref=build_outbox_payload_ref(
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,
                 aggregate_version=aggregate_version,
+                graph_revision=graph_revision,
             ),
             idempotency_key=f"graph-cancellation:{digest}",
             outbox_id=f"outbox::graph-cancellation:{digest}",
@@ -3725,153 +3744,6 @@ class DurableTaskStore(
             return _outbox_record(self._require_outbox(conn, outbox_id))
 
     # -- Internal row helpers -------------------------------------------------------
-
-    def _insert_outbox(
-        self,
-        conn: sqlite3.Connection,
-        message: OutboxMessage,
-        *,
-        ts_ms: int,
-        expected_aggregate: tuple[str, str, int],
-        expected_event_type: str,
-        expected_attempt_id: str | None,
-    ) -> None:
-        if not isinstance(message, OutboxMessage):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "every durable state mutation requires an OutboxMessage",
-            )
-        message.validate()
-        if message.available_ts_ms is not None:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "mutation outbox availability is assigned only by the trusted store clock",
-            )
-        actual_aggregate = (
-            message.aggregate_type,
-            message.aggregate_id,
-            int(message.aggregate_version),
-        )
-        normalized_expected = (
-            str(expected_aggregate[0]),
-            str(expected_aggregate[1]),
-            int(expected_aggregate[2]),
-        )
-        if actual_aggregate != normalized_expected:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox aggregate must identify the state version committed in this transaction: "
-                f"expected {normalized_expected}, got {actual_aggregate}",
-            )
-        normalized_event_type = str(expected_event_type or "").strip()
-        if not normalized_event_type or message.event_type != normalized_event_type:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox event_type does not describe the committed mutation: "
-                f"expected {normalized_event_type}, got {message.event_type}",
-            )
-        normalized_attempt_id = str(expected_attempt_id or "").strip() or None
-        if message.attempt_id != normalized_attempt_id:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox attempt_id does not match the committed mutation: "
-                f"expected {normalized_attempt_id}, got {message.attempt_id}",
-            )
-        try:
-            conn.execute(
-                """
-                INSERT INTO task_runtime_outbox(
-                    outbox_id, aggregate_type, aggregate_id, aggregate_version,
-                    event_type, payload_ref, evidence_refs_json, attempt_id,
-                    idempotency_key, status, available_ts_ms, created_ts_ms,
-                    published_ts_ms, status_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, NULL, 0)
-                """,
-                (
-                    message.outbox_id,
-                    message.aggregate_type,
-                    message.aggregate_id,
-                    message.aggregate_version,
-                    message.event_type,
-                    message.payload_ref,
-                    _dumps(list(message.evidence_refs)),
-                    message.attempt_id,
-                    message.idempotency_key,
-                    ts_ms,
-                    ts_ms,
-                ),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                f"outbox identity/idempotency conflict: {message.idempotency_key}",
-            ) from exc
-
-    def _assert_mutation_outbox_replay(
-        self,
-        conn: sqlite3.Connection,
-        message: OutboxMessage,
-        *,
-        expected_aggregate: tuple[str, str, int],
-        expected_event_type: str,
-        expected_attempt_id: str | None,
-    ) -> None:
-        if not isinstance(message, OutboxMessage):
-            raise TaskStoreError(TASK_STORE_INVALID, "atomic replay requires an OutboxMessage")
-        message.validate()
-        if message.available_ts_ms is not None:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "mutation outbox availability is assigned only by the trusted store clock",
-            )
-        expected = (
-            str(expected_aggregate[0]),
-            str(expected_aggregate[1]),
-            int(expected_aggregate[2]),
-        )
-        if (
-            (message.aggregate_type, message.aggregate_id, message.aggregate_version) != expected
-            or message.event_type != str(expected_event_type)
-            or message.attempt_id != (str(expected_attempt_id or "").strip() or None)
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "atomic replay outbox does not bind the committed mutation",
-            )
-        by_id = conn.execute(
-            "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
-            (message.outbox_id,),
-        ).fetchone()
-        by_key = conn.execute(
-            "SELECT * FROM task_runtime_outbox WHERE idempotency_key = ?",
-            (message.idempotency_key,),
-        ).fetchone()
-        if (
-            by_id is None
-            or by_key is None
-            or str(by_id["outbox_id"]) != str(by_key["outbox_id"])
-        ):
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                "atomic acceptance replay is missing its exact state outbox",
-            )
-        durable = _outbox_record(by_id)
-        drift = (
-            str(durable["outbox_id"]) != message.outbox_id
-            or str(durable["aggregate_type"]) != message.aggregate_type
-            or str(durable["aggregate_id"]) != message.aggregate_id
-            or int(durable["aggregate_version"]) != message.aggregate_version
-            or str(durable["event_type"]) != message.event_type
-            or str(durable["payload_ref"]) != message.payload_ref
-            or str(durable["idempotency_key"]) != message.idempotency_key
-            or durable["attempt_id"] != message.attempt_id
-            or tuple(durable["evidence_refs"]) != tuple(message.evidence_refs)
-        )
-        if drift:
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                "atomic acceptance state outbox replay drift",
-            )
 
     @staticmethod
     def _validated_reference(value: Any, *, field_name: str) -> str:

@@ -281,7 +281,10 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
     }
     with sqlite3.connect(str(db_path)) as conn:
         events = conn.execute(
-            "SELECT aggregate_type, event_type FROM task_runtime_outbox ORDER BY aggregate_type"
+            """
+            SELECT aggregate_type, graph_revision, event_type
+            FROM task_runtime_outbox ORDER BY aggregate_type
+            """
         ).fetchall()
         durable_work_order = json.loads(
             conn.execute(
@@ -290,8 +293,8 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
             ).fetchone()[0]
         )
     assert events == [
-        ("HOST_COMMAND", "HOST_COMMAND_ADMITTED"),
-        ("TASK_GRAPH", "TASK_GRAPH_CREATED"),
+        ("HOST_COMMAND", None, "HOST_COMMAND_ADMITTED"),
+        ("TASK_GRAPH", 1, "TASK_GRAPH_CREATED"),
     ]
     assert durable_work_order["schema_version"] == "Natsume.agent.work_order.v3"
 

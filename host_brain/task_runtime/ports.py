@@ -69,7 +69,13 @@ class TaskStorePort(Protocol):
         intent_ref: str,
     ) -> Mapping[str, Any] | None: ...
 
-    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        include_graph_outboxes: bool = False,
+    ) -> Mapping[str, Any]: ...
 
     def transition_graph(
         self,
@@ -454,6 +460,7 @@ class TaskOutboxFactoryPort(Protocol):
         event_type: str,
         payload_ref: str,
         idempotency_key: str | None = None,
+        graph_revision: int | None = None,
         attempt_id: str | None = None,
         evidence_refs: tuple[str, ...] = (),
         outbox_id: str | None = None,

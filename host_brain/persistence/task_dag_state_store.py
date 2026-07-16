@@ -26,6 +26,7 @@ from host_brain.persistence.task_record_codec import (
     _dumps,
     _graph_record,
     _node_record,
+    _outbox_record,
 )
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
@@ -82,6 +83,14 @@ class TaskDagStateStoreMixin:
             raise TaskStoreError(TASK_STORE_INVALID, "graph timestamp is invalid") from exc
         if trusted_ts_ms < 0:
             raise TaskStoreError(TASK_STORE_INVALID, "graph timestamp must be non-negative")
+        if (
+            not isinstance(outbox, OutboxMessage)
+            or outbox.graph_revision != graph.revision
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "TaskGraph creation outbox must bind the exact graph revision",
+            )
         conn.execute(
             """
             INSERT INTO task_runtime_graph(
@@ -128,6 +137,7 @@ class TaskDagStateStoreMixin:
             expected_aggregate=("TASK_GRAPH", graph.graph_id, 0),
             expected_event_type="TASK_GRAPH_CREATED",
             expected_attempt_id=None,
+            expected_graph_revision=graph.revision,
         )
 
     def insert_outbox_in_transaction(
@@ -139,6 +149,7 @@ class TaskDagStateStoreMixin:
         expected_aggregate: tuple[str, str, int],
         expected_event_type: str,
         expected_attempt_id: str | None = None,
+        expected_graph_revision: int | None = None,
     ) -> None:
         """Append a validated TaskStore outbox row inside an existing UoW."""
 
@@ -154,6 +165,7 @@ class TaskDagStateStoreMixin:
             expected_aggregate=expected_aggregate,
             expected_event_type=expected_event_type,
             expected_attempt_id=expected_attempt_id,
+            expected_graph_revision=expected_graph_revision,
         )
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
@@ -227,7 +239,13 @@ class TaskDagStateStoreMixin:
         finally:
             conn.close()
 
-    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        include_graph_outboxes: bool = False,
+    ) -> dict[str, Any]:
         """Return one consistent read-only view for shadow scheduling."""
         observed_ts_ms = self._now()
         conn = self._connect()
@@ -255,6 +273,28 @@ class TaskDagStateStoreMixin:
                    ORDER BY node_id, budget_id""",
                 (str(graph_id), int(revision)),
             ).fetchall()
+            graph_outbox_rows: list[sqlite3.Row] = []
+            if include_graph_outboxes and getattr(
+                self, "_outbox_graph_revision_enabled", False
+            ):
+                graph_outbox_rows = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_outbox
+                    WHERE aggregate_type = 'TASK_GRAPH'
+                      AND aggregate_id = ? AND graph_revision = ?
+                    ORDER BY aggregate_version, created_ts_ms, outbox_id
+                    """,
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+            elif include_graph_outboxes:
+                graph_outbox_rows = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_outbox
+                    WHERE aggregate_type = 'TASK_GRAPH' AND aggregate_id = ?
+                    ORDER BY aggregate_version, created_ts_ms, outbox_id
+                    """,
+                    (str(graph_id),),
+                ).fetchall()
             usage_ready = conn.execute(
                 """SELECT 1 FROM sqlite_master
                    WHERE type = 'table' AND name = 'task_runtime_budget_usage'"""
@@ -279,6 +319,10 @@ class TaskDagStateStoreMixin:
                 "budgets": [self._budget_record(row) for row in budget_rows],
                 "budget_usage": [_budget_usage_record(row) for row in budget_usage_rows],
             }
+            if include_graph_outboxes:
+                snapshot["graph_outboxes"] = [
+                    _outbox_record(row) for row in graph_outbox_rows
+                ]
             conn.commit()
             return snapshot
         except Exception:

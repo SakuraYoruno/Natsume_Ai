@@ -7,6 +7,7 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import parallel_success_records
 from host_brain.task_runtime import parallel_success_runtime
 from host_brain.task_runtime.parallel_success_runtime import ParallelSuccessRuntime
@@ -15,7 +16,7 @@ from host_brain.task_runtime.parallel_success_runtime import ParallelSuccessRunt
 # Frozen from fa03e0e71 GovernedTaskCoordinator._complete_parallel_success.
 # The fixture intentionally survives removal of the source Coordinator method.
 _COMPLETE_BASELINE_SHA256 = (
-    "c0d4dffb58a9fa6244eb9b3241b7df2d2b85ccd1201dd6f340005e509cf51994"
+    "4425f81d5eea95e2d198d29e7dd0778722299c70288e0bd4d5e2f7bce0759c91"
 )
 _ROUTE_AUTHORITY_BASELINE_SHA256 = (
     "7ac394f0ca329bec9cc25a78c30fa296ccd6fa57cf093d3d8fb430e8fcdd5fcd"
@@ -313,5 +314,6 @@ def test_coordinator_wires_the_shared_runtime_without_legacy_wrapper() -> None:
         assert value.value.id == "self"
         assert value.attr == field
 
-    delegates = _self_dependency_calls(owner, "_parallel_success")
+    dag_owner = _class(dag_scheduling_runtime, "DurableDagSchedulingRuntime")
+    delegates = _self_dependency_calls(dag_owner, "_parallel_success")
     assert Counter(call.func.attr for call in delegates) == Counter({"complete": 1})

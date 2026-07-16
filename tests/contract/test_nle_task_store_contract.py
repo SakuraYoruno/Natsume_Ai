@@ -122,19 +122,25 @@ def _event(
     event_type: str,
     *,
     idempotency_key: str | None = None,
+    graph_revision: int | None = None,
     attempt_id: str | None = None,
     evidence_refs: tuple[str, ...] = (),
 ) -> OutboxMessage:
     unique = uuid.uuid4().hex
+    normalized_graph_revision = (
+        int(graph_revision or 1) if aggregate_type == "TASK_GRAPH" else None
+    )
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
         aggregate_version=aggregate_version,
         event_type=event_type,
+        graph_revision=normalized_graph_revision,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=normalized_graph_revision,
         ),
         idempotency_key=idempotency_key or f"event:{unique}",
         attempt_id=attempt_id,
@@ -142,7 +148,12 @@ def _event(
     )
 
 
-def _graph(*, graph_id: str = "graph-1", node_status: TaskNodeStatus = TaskNodeStatus.READY) -> TaskGraph:
+def _graph(
+    *,
+    graph_id: str = "graph-1",
+    revision: int = 1,
+    node_status: TaskNodeStatus = TaskNodeStatus.READY,
+) -> TaskGraph:
     node = TaskNode(
         node_id="node-1",
         dependencies=(),
@@ -158,8 +169,8 @@ def _graph(*, graph_id: str = "graph-1", node_status: TaskNodeStatus = TaskNodeS
     graph = TaskGraph(
         graph_id=graph_id,
         root_work_order_id=f"work-order::{graph_id}",
-        revision=1,
-        planner_ref="planner://test/1",
+        revision=revision,
+        planner_ref=f"planner://test/{revision}",
         status=TaskGraphStatus.CREATED,
         created_at=1_700_000_000_000,
         nodes=(node,),
@@ -828,6 +839,55 @@ def test_t_nle_06_wrong_or_duplicate_outbox_rolls_back_state_transition(tmp_path
     assert len(store.list_pending_outbox()) == 1
 
 
+def test_t_nle_06_graph_transition_rejects_outbox_from_another_revision(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "task-runtime-revision-boundary.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="task-runtime-revision-boundary",
+        ts_ms=100,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    store = DurableTaskStore(
+        db_path,
+        clock=MutableClock(),
+        verify_schema=False,
+    )
+    graph_id = "graph-revision-boundary"
+    for revision in (1, 2):
+        store.create_graph(
+            _graph(graph_id=graph_id, revision=revision),
+            outbox=_event(
+                "TASK_GRAPH",
+                graph_id,
+                0,
+                "TASK_GRAPH_CREATED",
+                graph_revision=revision,
+            ),
+        )
+
+    with pytest.raises(TaskStoreError) as wrong_revision:
+        store.transition_graph(
+            graph_id,
+            1,
+            expected_version=0,
+            target_status=TaskGraphStatus.ACTIVE,
+            outbox=_event(
+                "TASK_GRAPH",
+                graph_id,
+                1,
+                "TASK_GRAPH_ACTIVE",
+                graph_revision=2,
+            ),
+        )
+
+    assert wrong_revision.value.reason_code == TASK_STORE_INVALID
+    assert store.get_graph(graph_id, 1)["status"] == "CREATED"
+    assert store.get_graph(graph_id, 1)["status_version"] == 0
+    assert store.get_graph(graph_id, 2)["status"] == "CREATED"
+    assert len(store.list_pending_outbox()) == 2
+
+
 def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
     tmp_path: Path,
 ) -> None:
@@ -841,6 +901,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref="taskstore://event/TASK_GRAPH/wrong-graph/0",
@@ -848,6 +909,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=canonical,
@@ -856,6 +918,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=canonical,

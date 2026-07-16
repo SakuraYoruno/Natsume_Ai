@@ -29,7 +29,13 @@ class _SnapshotStore:
         self.snapshot = snapshot
         self.calls: list[tuple[str, int]] = []
 
-    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict:
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        include_graph_outboxes: bool = False,
+    ) -> dict:
         self.calls.append((graph_id, revision))
         return self.snapshot
 
@@ -127,7 +133,7 @@ async def test_loads_failed_graph_and_derives_only_durable_failure_evidence() ->
     assert store.calls == [("graph-recovery", 1)]
     assert failure.previous_graph.status is TaskGraphStatus.FAILED
     assert failure.failure_evidence_refs == (
-        "taskstore://event/TASK_GRAPH/graph-recovery/2",
+        "taskstore://event/TASK_GRAPH/graph-recovery@1/2",
         "taskstore://event/TASK_NODE/graph-recovery@1/node-recover/3",
         "taskstore://event/TASK_ATTEMPT/attempt-recovery-1/4",
         "evidence://attempt/recovery-1",
@@ -146,7 +152,7 @@ async def test_blocked_graph_is_replannable_without_mutating_durable_snapshot() 
 
     assert failure.previous_graph.status is TaskGraphStatus.BLOCKED
     assert failure.failure_evidence_refs[0] == (
-        "taskstore://event/TASK_GRAPH/graph-recovery/2"
+        "taskstore://event/TASK_GRAPH/graph-recovery@1/2"
     )
     assert snapshot["graph_record"]["graph"] == before
 

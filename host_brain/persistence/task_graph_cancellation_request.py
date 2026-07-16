@@ -81,6 +81,7 @@ class TaskGraphCancellationRequestMixin:
             or intent.payload["budget_status_version_before"] != expected_budget_version
             or intent.payload["node_states_before"] != expected_before
             or intent.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or reference not in set(graph_outbox.evidence_refs)
         ):
             raise TaskStoreError(
@@ -162,6 +163,7 @@ class TaskGraphCancellationRequestMixin:
                         ),
                         expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
                         expected_attempt_id=None,
+                        expected_graph_revision=int(revision),
                     )
                     budget = (
                         self._budget_record(self._require_budget(conn, budget_ref))
@@ -215,6 +217,7 @@ class TaskGraphCancellationRequestMixin:
                     ),
                     expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 budget = (
                     self._budget_record(self._require_budget(conn, budget_ref))
@@ -406,6 +409,7 @@ class TaskGraphCancellationRequestMixin:
                 expected_aggregate=("TASK_GRAPH", graph_ref, graph_after_version),
                 expected_event_type=expected_graph_event,
                 expected_attempt_id=None,
+                expected_graph_revision=int(revision),
             )
 
             for row in node_rows:

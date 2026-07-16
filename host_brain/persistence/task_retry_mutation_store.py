@@ -635,12 +635,14 @@ class TaskRetryMutationStoreMixin:
                     outbox=OutboxMessage.create(
                         aggregate_type="TASK_GRAPH",
                         aggregate_id=str(attempt["graph_id"]),
+                        graph_revision=int(attempt["graph_revision"]),
                         aggregate_version=graph_version + 1,
                         event_type="TASK_GRAPH_BLOCKED",
                         payload_ref=build_outbox_payload_ref(
                             aggregate_type="TASK_GRAPH",
                             aggregate_id=str(attempt["graph_id"]),
                             aggregate_version=graph_version + 1,
+                            graph_revision=int(attempt["graph_revision"]),
                         ),
                         idempotency_key=(
                             f"task-retry-budget-blocked:{attempt['graph_id']}:"

@@ -1097,6 +1097,7 @@ def _parallel_settlement_decision_record(
 
 def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
     record = dict(row)
+    has_graph_revision = "graph_revision" in record
     evidence_refs = _loads_list(
         record.pop("evidence_refs_json"),
         field_name="task_runtime_outbox.evidence_refs_json",
@@ -1115,10 +1116,14 @@ def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
             event_type=str(record["event_type"]),
             payload_ref=str(record["payload_ref"]),
             idempotency_key=str(record["idempotency_key"]),
+            graph_revision=record.get("graph_revision"),
             attempt_id=record["attempt_id"],
             evidence_refs=tuple(evidence_refs),
             available_ts_ms=int(record["available_ts_ms"]),
-        ).validate()
+        ).validate(
+            allow_legacy_graph_revision=not has_graph_revision,
+            allow_legacy_graph_payload_ref=True,
+        )
     except (TaskStoreError, TypeError, ValueError) as exc:
         if isinstance(exc, TaskStoreError) and exc.reason_code == TASK_STORE_DURABLE_DATA_INVALID:
             raise

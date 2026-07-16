@@ -63,12 +63,14 @@ def _event(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         ),
         idempotency_key=f"gr06:{event_type}:{uuid.uuid4().hex}",
         attempt_id=attempt_id,
@@ -82,7 +84,7 @@ def _store(tmp_path: Path, *, clock: MutableClock | None = None) -> DurableTaskS
         request_id="gr06-effect-contract"
     )
     assert migrated.success is True, migrated.as_dict()
-    assert migrated.summary["current_version"] == 94
+    assert migrated.summary["current_version"] == 95
     store = DurableTaskStore(db_path, clock=clock or MutableClock())
     store.assert_acceptance_effect_intent_ready()
     return store

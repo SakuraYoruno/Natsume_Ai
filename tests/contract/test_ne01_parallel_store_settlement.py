@@ -67,17 +67,26 @@ def _event(
     attempt_id: str | None = None,
     evidence_refs: tuple[str, ...] = (),
     identity: str | None = None,
+    graph_revision: int | None = None,
 ) -> OutboxMessage:
     stable = identity or uuid.uuid4().hex
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(
+            int(graph_revision or 1) if aggregate_type == "TASK_GRAPH" else None
+        ),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=(
+                int(graph_revision or 1)
+                if aggregate_type == "TASK_GRAPH"
+                else None
+            ),
         ),
         idempotency_key=f"ne01-parallel-store:{stable}",
         outbox_id=f"outbox::ne01-parallel-store:{stable}",
@@ -86,11 +95,11 @@ def _event(
     )
 
 
-def _graph(graph_id: str) -> TaskGraph:
+def _graph(graph_id: str, *, revision: int = 1) -> TaskGraph:
     return TaskGraph(
         graph_id=graph_id,
         root_work_order_id=f"work-order::{graph_id}",
-        revision=1,
+        revision=revision,
         planner_ref="planner://ne01/parallel-store",
         status=TaskGraphStatus.CREATED,
         created_at=NOW,
@@ -1025,6 +1034,60 @@ def test_latest_parallel_decision_fails_closed_when_graph_outbox_declares_missin
     with pytest.raises(TaskStoreError) as exc:
         store.get_latest_parallel_settlement_decision(graph_id, 1)
 
+    assert exc.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+    assert missing_ref in exc.value.detail
+
+
+def test_latest_parallel_decision_scans_only_the_exact_graph_revision(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-multi-revision-marker"
+    store = _store(tmp_path, graph_id)
+    store.create_graph(
+        _graph(graph_id, revision=2),
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            0,
+            "TASK_GRAPH_CREATED",
+            graph_revision=2,
+            identity="multi-revision-created",
+        ),
+    )
+    store.transition_graph(
+        graph_id,
+        2,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            1,
+            "TASK_GRAPH_ACTIVE",
+            graph_revision=2,
+            identity="multi-revision-active",
+        ),
+    )
+    missing_ref = f"taskbatch://sha256/{'b' * 64}"
+    store.transition_graph(
+        graph_id,
+        2,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            2,
+            "TASK_GRAPH_FAILED",
+            graph_revision=2,
+            evidence_refs=(missing_ref,),
+            identity="multi-revision-missing-decision",
+        ),
+    )
+
+    assert store.get_latest_parallel_settlement_decision(graph_id, 1) is None
+    with pytest.raises(TaskStoreError) as exc:
+        store.get_latest_parallel_settlement_decision(graph_id, 2)
     assert exc.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
     assert missing_ref in exc.value.detail
 

@@ -21,6 +21,7 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
 from host_brain.persistence.review_repository import (
     REVIEW_GRAPH_CANCELLATION_CONFLICT,
     REVIEW_RESUME_ALREADY_CONSUMED,
+    REVIEW_STORE_INVALID,
     REVIEW_STORE_SCHEMA_NOT_READY,
     REVIEW_TOKEN_EXPIRED,
     REVIEW_TOKEN_SUBJECT_MISMATCH,
@@ -107,16 +108,20 @@ def _insert_graph_cancellation(
             """
             INSERT INTO task_runtime_outbox(
                 outbox_id, aggregate_type, aggregate_id, aggregate_version,
-                event_type, payload_ref, evidence_refs_json, attempt_id,
+                graph_revision, event_type, payload_ref, evidence_refs_json, attempt_id,
                 idempotency_key, status, available_ts_ms, created_ts_ms,
                 published_ts_ms, status_version
-            ) VALUES (?, 'TASK_GRAPH', ?, 1, 'TASK_GRAPH_CANCELLATION_REQUESTED',
+            ) VALUES (?, 'TASK_GRAPH', ?, 1, ?, 'TASK_GRAPH_CANCELLATION_REQUESTED',
                       ?, '[]', NULL, ?, 'PENDING', 1000, 1000, NULL, 0)
             """,
             (
                 outbox_id,
                 graph_id,
-                f"taskstore://event/TASK_GRAPH/{graph_id}/1",
+                graph_revision,
+                (
+                    f"taskstore://event/TASK_GRAPH/"
+                    f"{graph_id}@{graph_revision}/1"
+                ),
                 f"idempotency:{outbox_id}",
             ),
         )
@@ -361,6 +366,64 @@ def test_t_nle_10_task_node_review_remains_compatible_without_0092(tmp_path: Pat
 
     assert created["review"]["status"] == "PENDING"
     assert resumed["review"]["review"]["status"] == "CONSUMED"
+
+
+def test_t_nle_10_list_reviews_filters_exact_encoded_graph_revision(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path, MutableClock(1_000))
+    graph_id = "graph/review scope"
+    for revision in (1, 2):
+        review = _task_node_review(
+            f"review-revision-{revision}",
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        store.create_review(
+            review,
+            task_graph_id=graph_id,
+            task_node_id="node-1",
+        )
+
+    revision_one = store.list_reviews(
+        task_graph_id=graph_id,
+        graph_revision=1,
+        limit=10,
+    )
+
+    assert [record["review"]["review_id"] for record in revision_one] == [
+        "review-revision-1"
+    ]
+    assert revision_one[0]["review"]["subject_ref"].startswith(
+        "task-node://graph%2Freview%20scope/1/"
+    )
+
+
+@pytest.mark.parametrize(
+    ("task_graph_id", "graph_revision"),
+    (
+        (None, 1),
+        ("graph-review-invalid", 0),
+        ("graph-review-invalid", -1),
+        ("graph-review-invalid", True),
+        ("graph-review-invalid", "not-an-integer"),
+    ),
+)
+def test_t_nle_10_list_reviews_rejects_invalid_revision_scope(
+    tmp_path: Path,
+    task_graph_id: str | None,
+    graph_revision: object,
+) -> None:
+    store = _store(tmp_path, MutableClock(1_000))
+
+    with pytest.raises(ReviewStoreError) as error:
+        store.list_reviews(
+            task_graph_id=task_graph_id,
+            graph_revision=graph_revision,  # type: ignore[arg-type]
+            limit=10,
+        )
+
+    assert error.value.reason_code == REVIEW_STORE_INVALID
 
 
 def test_t_nle_10_graph_cancellation_fences_create_approve_and_resume(

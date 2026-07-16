@@ -123,7 +123,11 @@ class DurablePlanningFailureSource:
                 "graph_id is required for failure replanning",
             )
         try:
-            raw = self._store.read_scheduler_snapshot(graph_ref, revision)
+            raw = self._store.read_scheduler_snapshot(
+                graph_ref,
+                revision,
+                include_graph_outboxes=True,
+            )
             snapshot = await raw if inspect.isawaitable(raw) else raw
         except PlanningRecoveryError:
             raise
@@ -163,6 +167,7 @@ class DurablePlanningFailureSource:
         evidence_refs = _failure_evidence_refs(
             graph_record=graph_record,
             attempts=snapshot.get("attempts"),
+            graph_outboxes=snapshot.get("graph_outboxes"),
             graph=previous_graph,
             graph_status_version=status_version,
         )
@@ -296,6 +301,7 @@ def _failure_evidence_refs(
     *,
     graph_record: Mapping[str, Any],
     attempts: Any,
+    graph_outboxes: Any = None,
     graph: TaskGraph,
     graph_status_version: int,
 ) -> tuple[str, ...]:
@@ -311,13 +317,40 @@ def _failure_evidence_refs(
         if normalized and normalized not in refs:
             refs.append(normalized)
 
-    add(
-        build_outbox_payload_ref(
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=graph.graph_id,
-            aggregate_version=graph_status_version,
+    if graph_outboxes is None:
+        add(
+            build_outbox_payload_ref(
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph.graph_id,
+                aggregate_version=graph_status_version,
+                graph_revision=graph.revision,
+            )
         )
-    )
+    else:
+        if not isinstance(graph_outboxes, Sequence) or isinstance(
+            graph_outboxes, (str, bytes)
+        ):
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable recovery snapshot graph_outboxes must be a sequence",
+            )
+        terminal_event = f"TASK_GRAPH_{graph.status.value}"
+        matching_graph_outboxes = [
+            item
+            for item in graph_outboxes
+            if isinstance(item, Mapping)
+            and str(item.get("aggregate_type") or "") == "TASK_GRAPH"
+            and str(item.get("aggregate_id") or "") == graph.graph_id
+            and int(item.get("aggregate_version", -1)) == graph_status_version
+            and str(item.get("event_type") or "") == terminal_event
+            and item.get("graph_revision") in (None, graph.revision)
+        ]
+        if len(matching_graph_outboxes) != 1:
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable terminal Graph transition lacks one exact Outbox evidence identity",
+            )
+        add(str(matching_graph_outboxes[0].get("payload_ref") or ""))
 
     raw_nodes = graph_record.get("nodes")
     if not isinstance(raw_nodes, Sequence) or isinstance(raw_nodes, (str, bytes)):

@@ -25,7 +25,7 @@ def _method_ast(owner: type, name: str) -> ast.FunctionDef:
 
 
 def test_graph_cancellation_write_mixins_borrow_owner_authorities() -> None:
-    assert task_repository.DurableTaskStore.__bases__[4:6] == (
+    assert task_repository.DurableTaskStore.__bases__[6:8] == (
         TaskGraphCancellationRequestMixin,
         TaskGraphCancellationFinalizationMixin,
     )

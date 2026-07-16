@@ -118,6 +118,7 @@ class GraphCancellationRuntime:
                 command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
+                graph_revision=admitted.graph_revision,
                 aggregate_version=graph_version + 1,
                 event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
             )
@@ -163,6 +164,7 @@ class GraphCancellationRuntime:
                 command_id=admitted.command_id,
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=admitted.graph_id,
+                graph_revision=admitted.graph_revision,
                 aggregate_version=graph_version + 1,
                 event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
                 evidence_refs=(intent.intent_ref, intent.payload["request_identity"]),
@@ -459,6 +461,7 @@ class GraphCancellationRuntime:
             command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
             aggregate_version=graph_version + 1,
             event_type="TASK_GRAPH_CANCELLED",
         )
@@ -518,6 +521,7 @@ class GraphCancellationRuntime:
             command_id=admitted.command_id,
             aggregate_type="TASK_GRAPH",
             aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
             aggregate_version=graph_version + 1,
             event_type="TASK_GRAPH_CANCELLED",
             evidence_refs=evidence_refs,

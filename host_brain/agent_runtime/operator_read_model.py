@@ -511,9 +511,12 @@ class OperatorReadModelService:
         budgets = [_mapping(item) for item in _sequence(snapshot.get("budgets"))]
         reviews = self._review_store.list_reviews(
             task_graph_id=str(graph_id),
+            graph_revision=int(revision),
             limit=500,
         )
-        aggregate_refs: list[tuple[str, str]] = [("TASK_GRAPH", str(graph_id))]
+        aggregate_refs: list[tuple[str, str]] = [
+            ("TASK_GRAPH", f"{graph_id}@{int(revision)}")
+        ]
         aggregate_refs.extend(
             (
                 "TASK_NODE",

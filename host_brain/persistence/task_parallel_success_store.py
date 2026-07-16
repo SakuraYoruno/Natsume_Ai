@@ -277,6 +277,7 @@ class TaskParallelSuccessStoreMixin:
             or decision.payload["node_states"] != expected_state_payload
             or decision.payload["effect_intents"] != expected_effects
             or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != revision
             or decision.payload["budget_outbox_id"] != budget_outbox.outbox_id
             or not required_evidence.issubset(set(graph_outbox.evidence_refs))
             or not required_evidence.issubset(set(budget_outbox.evidence_refs))
@@ -420,6 +421,7 @@ class TaskParallelSuccessStoreMixin:
                     ),
                     expected_event_type="TASK_GRAPH_COMPLETED",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 self._assert_mutation_outbox_replay(
                     conn,

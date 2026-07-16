@@ -75,7 +75,8 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
-# 0089 and 0093 contain ALTER TABLE statements followed by indexes/triggers in
+# 0089, 0093 and 0095 contain ALTER TABLE statements followed by
+# indexes/triggers in
 # one explicit transaction.  SQL may commit before the runner persists its
 # migration receipt; the next startup then sees a duplicate column although
 # the complete physical migration exists.  Repair is allowed only for exact
@@ -192,6 +193,69 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
                     "new.attempt_count>0",
                     "new.claim_fencing_token=new.attempt_count",
                     "raise(abort,'task_runtime_outboxclaimstateisinvalid')",
+                ),
+            ),
+        },
+    ),
+    "0095_task_runtime_revisioned_graph_outbox.sql": (
+        "db39c2af0c497322c18d767b74139b5cba635c33e947cba5191f440aad534fa1",
+        "task_runtime_outbox",
+        {
+            "graph_revision": ("INTEGER", False),
+        },
+        {
+            "idx_task_runtime_outbox_revision_delivery_order": (
+                "task_runtime_outbox",
+                (
+                    "aggregate_type",
+                    "aggregate_id",
+                    "graph_revision",
+                    "status",
+                    "aggregate_version",
+                    "created_ts_ms",
+                    "outbox_id",
+                ),
+            ),
+            "uq_runtime_event_task_outbox_source": (
+                "runtime_event_timeline",
+                ("source_ref",),
+            ),
+        },
+        (
+            "graph_revisioninteger",
+            "check(graph_revisionisnullor(typeof(graph_revision)='integer'andgraph_revision>=1))",
+        ),
+        {
+            "trg_task_runtime_outbox_graph_revision_insert_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeinsertontask_runtime_outbox",
+                    "new.aggregate_type='task_graph'",
+                    "new.graph_revisionisnotnull",
+                    "typeof(new.graph_revision)='integer'",
+                    "new.graph_revision>=1",
+                    "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+                    "graph.graph_id=new.aggregate_id",
+                    "graph.revision=new.graph_revision",
+                    "new.aggregate_type<>'task_graph'",
+                    "new.graph_revisionisnull",
+                    "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+                ),
+            ),
+            "trg_task_runtime_outbox_graph_revision_update_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeupdateofaggregate_type,aggregate_id,graph_revision,aggregate_version,payload_refontask_runtime_outbox",
+                    "new.aggregate_type='task_graph'",
+                    "new.graph_revisionisnotnull",
+                    "typeof(new.graph_revision)='integer'",
+                    "new.graph_revision>=1",
+                    "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+                    "graph.graph_id=new.aggregate_id",
+                    "graph.revision=new.graph_revision",
+                    "new.aggregate_type<>'task_graph'",
+                    "new.graph_revisionisnull",
+                    "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
                 ),
             ),
         },
@@ -730,6 +794,91 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
                 fragment not in normalized_trigger_sql
                 for fragment in expected_fragments
             ):
+                return False
+        if asset_filename(asset) == "0095_task_runtime_revisioned_graph_outbox.sql":
+            revision_columns = {
+                str(row[1]): row
+                for row in conn.execute(
+                    'PRAGMA table_info("task_runtime_outbox")'
+                ).fetchall()
+            }
+            revision_column = revision_columns.get("graph_revision")
+            if (
+                revision_column is None
+                or str(revision_column[2] or "").strip().upper() != "INTEGER"
+                or int(revision_column[3]) != 0
+                or revision_column[4] is not None
+                or int(revision_column[5]) != 0
+            ):
+                return False
+            source_index = conn.execute(
+                """
+                SELECT tbl_name, sql FROM sqlite_master
+                WHERE type = 'index'
+                  AND name = 'uq_runtime_event_task_outbox_source'
+                """
+            ).fetchone()
+            source_index_meta = {
+                str(row[1]): row
+                for row in conn.execute(
+                    "PRAGMA index_list(runtime_event_timeline)"
+                ).fetchall()
+            }.get("uq_runtime_event_task_outbox_source")
+            normalized_source_index = re.sub(
+                r"\s+",
+                "",
+                str(source_index[1] if source_index is not None else "").lower(),
+            )
+            duplicate_source = conn.execute(
+                """
+                SELECT source_ref FROM runtime_event_timeline
+                WHERE source_kind = 'TASK_STORE_OUTBOX'
+                GROUP BY source_ref
+                HAVING COUNT(*) <> 1
+                LIMIT 1
+                """
+            ).fetchone()
+            if (
+                source_index is None
+                or str(source_index[0]) != "runtime_event_timeline"
+                or normalized_source_index
+                != (
+                    "createuniqueindexuq_runtime_event_task_outbox_source"
+                    "onruntime_event_timeline(source_ref)"
+                    "wheresource_kind='task_store_outbox'"
+                )
+                or source_index_meta is None
+                or int(source_index_meta[2]) != 1
+                or int(source_index_meta[4]) != 1
+                or duplicate_source is not None
+            ):
+                return False
+            invalid_revision = conn.execute(
+                """
+                SELECT outbox.outbox_id
+                FROM task_runtime_outbox AS outbox
+                WHERE
+                    (
+                        outbox.aggregate_type = 'TASK_GRAPH'
+                        AND (
+                            outbox.graph_revision IS NULL
+                            OR typeof(outbox.graph_revision) <> 'integer'
+                            OR outbox.graph_revision < 1
+                            OR NOT EXISTS (
+                                SELECT 1 FROM task_runtime_graph AS graph
+                                WHERE graph.graph_id = outbox.aggregate_id
+                                  AND graph.revision = outbox.graph_revision
+                            )
+                        )
+                    )
+                    OR (
+                        outbox.aggregate_type <> 'TASK_GRAPH'
+                        AND outbox.graph_revision IS NOT NULL
+                    )
+                LIMIT 1
+                """
+            ).fetchone()
+            if invalid_revision is not None:
                 return False
     except (IndexError, sqlite3.DatabaseError):
         return False

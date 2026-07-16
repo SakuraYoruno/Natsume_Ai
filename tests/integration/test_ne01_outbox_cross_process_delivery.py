@@ -55,18 +55,35 @@ def _insert_outbox(
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
+            INSERT OR IGNORE INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref, status,
+                status_version, graph_json, source_kind, source_ref,
+                legacy_snapshot_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, 'planner://ne01/outbox-test', 'CREATED',
+                      0, '{}', 'CANONICAL', ?, NULL, ?, ?)
+            """,
+            (
+                aggregate_id,
+                f"work-order::{aggregate_id}",
+                f"{aggregate_id}@1",
+                created_ts_ms,
+                created_ts_ms,
+            ),
+        )
+        conn.execute(
+            """
             INSERT INTO task_runtime_outbox(
                 outbox_id, aggregate_type, aggregate_id, aggregate_version,
-                event_type, payload_ref, evidence_refs_json, attempt_id,
+                graph_revision, event_type, payload_ref, evidence_refs_json, attempt_id,
                 idempotency_key, status, available_ts_ms, created_ts_ms,
                 published_ts_ms, status_version
-            ) VALUES (?, 'TASK_GRAPH', ?, 1, 'TASK_GRAPH_CHANGED', ?, '[]',
+            ) VALUES (?, 'TASK_GRAPH', ?, 1, 1, 'TASK_GRAPH_CHANGED', ?, '[]',
                       NULL, ?, 'PENDING', ?, ?, NULL, 0)
             """,
             (
                 outbox_id,
                 aggregate_id,
-                f"taskstore://event/TASK_GRAPH/{aggregate_id}/1",
+                f"taskstore://event/TASK_GRAPH/{aggregate_id}@1/1",
                 f"idempotency::{outbox_id}",
                 created_ts_ms,
                 created_ts_ms,
@@ -154,7 +171,7 @@ def test_two_publishers_share_one_durable_claim_without_false_failure(
         limit=100,
     )
     assert len(timeline) == 1
-    assert timeline[0]["aggregate_id"] == "graph-race"
+    assert timeline[0]["aggregate_id"] == "graph-race@1"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -215,7 +232,7 @@ def test_publisher_startup_retries_foreign_claim_after_expiry_without_command(
             time.sleep(0.02)
 
         assert len(timeline) == 1
-        assert timeline[0]["aggregate_id"] == "graph-startup-retry"
+        assert timeline[0]["aggregate_id"] == "graph-startup-retry@1"
     finally:
         publisher.close()
     assert not publisher.background_running
