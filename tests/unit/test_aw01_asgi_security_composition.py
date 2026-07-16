@@ -41,6 +41,7 @@ def test_disabled_graph_cancellation_operator_has_no_startup_dependency() -> Non
     asgi._assert_graph_cancellation_operator_startup(
         enabled=False,
         operation_reconciliation_enabled=False,
+        effect_reconciliation_enabled=False,
         command_ingress=None,
         security=None,
     )
@@ -55,6 +56,7 @@ def test_graph_cancellation_operator_requires_enforced_ingress(mode) -> None:
         asgi._assert_graph_cancellation_operator_startup(
             enabled=True,
             operation_reconciliation_enabled=True,
+            effect_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode=mode),
             security=None,
         )
@@ -83,6 +85,7 @@ def test_graph_cancellation_operator_requires_executable_gateway(
         asgi._assert_graph_cancellation_operator_startup(
             enabled=True,
             operation_reconciliation_enabled=True,
+            effect_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode="ENFORCE"),
             security=SimpleNamespace(obs_command_composition=composition),
         )
@@ -92,6 +95,7 @@ def test_graph_cancellation_operator_accepts_complete_startup_authority() -> Non
     asgi._assert_graph_cancellation_operator_startup(
         enabled=True,
         operation_reconciliation_enabled=True,
+        effect_reconciliation_enabled=True,
         command_ingress=SimpleNamespace(mode=SimpleNamespace(value="ENFORCE")),
         security=SimpleNamespace(
             obs_command_composition=SimpleNamespace(
@@ -111,6 +115,21 @@ def test_graph_cancellation_operator_requires_operation_reconciliation() -> None
         asgi._assert_graph_cancellation_operator_startup(
             enabled=True,
             operation_reconciliation_enabled=False,
+            effect_reconciliation_enabled=True,
+            command_ingress=None,
+            security=None,
+        )
+
+
+def test_graph_cancellation_operator_requires_effect_reconciliation() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION",
+    ):
+        asgi._assert_graph_cancellation_operator_startup(
+            enabled=True,
+            operation_reconciliation_enabled=True,
+            effect_reconciliation_enabled=False,
             command_ingress=None,
             security=None,
         )
@@ -143,6 +162,62 @@ def test_operation_reconciliation_operator_requires_secure_gateway() -> None:
             command_ingress=SimpleNamespace(mode="ENFORCE"),
             security=None,
         )
+
+
+def test_effect_reconciliation_operator_requires_secure_gateway() -> None:
+    asgi._assert_task_effect_reconciliation_operator_startup(
+        enabled=False,
+        command_ingress=None,
+        security=None,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "TASK_EFFECT_RECONCILIATION_OPERATOR_"
+            "REQUIRES_SECURE_INGRESS_ENFORCE"
+        ),
+    ):
+        asgi._assert_task_effect_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="SHADOW"),
+            security=None,
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_EFFECT_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE",
+    ):
+        asgi._assert_task_effect_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="ENFORCE"),
+            security=None,
+        )
+
+
+def test_cancellation_production_gate_checks_only_when_cancellation_is_enabled() -> None:
+    asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+        enabled=False,
+        task_store=None,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_EFFECT_PRODUCTION_GATE_UNAVAILABLE",
+    ):
+        asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+            enabled=True,
+            task_store=object(),
+        )
+
+    calls: list[str] = []
+    store = SimpleNamespace(
+        assert_effect_reconciliation_production_ready=(
+            lambda: calls.append("production-ready")
+        )
+    )
+    asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+        enabled=True,
+        task_store=store,
+    )
+    assert calls == ["production-ready"]
 
 
 def test_asgi_builds_publishes_injects_and_closes_security_container(
@@ -252,6 +327,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         task_store = object()
         recovery_id = "test-recovery"
         operation_reconciliation_service = object()
+        effect_reconciliation_service = object()
 
         @staticmethod
         def execution_owner_id(logical_owner_id: str) -> str:
@@ -429,6 +505,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             task_runtime_canonical_owner="test-canonical-owner",
             task_graph_cancellation_operator_enabled=False,
             task_operation_reconciliation_operator_enabled=True,
+            task_effect_reconciliation_operator_enabled=True,
             task_reconciliation_public_keys=lambda: {"reconciler-v1": b"k" * 32},
         ),
     )
@@ -539,6 +616,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 application.state.task_operation_reconciliation_command_service
                 is task_runtime_container.operation_reconciliation_service
             )
+            assert (
+                application.state.task_effect_reconciliation_command_service
+                is task_runtime_container.effect_reconciliation_service
+            )
             assert captured["canon_service_provider"]() is canon_application
             assert (
                 captured["governed_command_application_provider"]()
@@ -568,6 +649,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.governed_internal_runtime is None
         assert application.state.governed_scheduler_runtime is None
         assert application.state.task_operation_reconciliation_command_service is None
+        assert application.state.task_effect_reconciliation_command_service is None
         assert captured["governed_command_application_provider"]() is None
 
     asyncio.run(scenario())

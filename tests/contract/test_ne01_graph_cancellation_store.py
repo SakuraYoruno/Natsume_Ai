@@ -1720,12 +1720,28 @@ def test_commit_after_cancel_is_positive_evidence_and_resolves_effect_fence(
     assert advanced["pending_effect_ids"] == ()
 
 
-def test_legacy_failed_evidence_fence_blocks_unfinalized_cancellation(
+def test_forward_failed_evidence_fence_is_forbidden_and_cancellation_stays_blocked(
     tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
     effect_id = "effect://cancel/legacy-failed-evidence"
     _stage_effect(store, effect_id=effect_id, accepted=False)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'FAILED', status_version = 2,
+                lease_owner = 'dispatcher-forward-guard',
+                lease_expires_ts_ms = NULL, fencing_token = 1,
+                attempt_count = 1,
+                reason_code = 'ACCEPTANCE_EFFECT_HANDLER_FAILED',
+                last_error = 'downstream outcome is uncertain',
+                failed_ts_ms = ?, updated_ts_ms = ?
+            WHERE effect_id = ?
+            """,
+            (NOW, NOW, effect_id),
+        )
+        conn.commit()
     requested = _request_snapshot(
         store,
         before_status="READY",
@@ -1734,21 +1750,23 @@ def test_legacy_failed_evidence_fence_blocks_unfinalized_cancellation(
         after_version=1,
     )
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute(
-            """
-            UPDATE task_runtime_graph_cancellation_effect_fence
-            SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
-            WHERE effect_id = ?
-            """,
-            (NOW, effect_id),
-        )
-        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                UPDATE task_runtime_graph_cancellation_effect_fence
+                SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
+                WHERE effect_id = ?
+                """,
+                (NOW, effect_id),
+            )
 
     advanced = store.advance_graph_cancellation(requested["intent"]["intent_ref"])
 
     assert advanced["ready_to_finalize"] is False
     assert advanced["pending_effect_ids"] == (effect_id,)
-    assert _effect_fence(store, effect_id)["resolution_status"] == "FAILED_EVIDENCE"
+    assert _effect_fence(store, effect_id)["resolution_status"] == (
+        "RECONCILIATION_REQUIRED"
+    )
 
     intent = requested["intent"]
     decision_payload = {

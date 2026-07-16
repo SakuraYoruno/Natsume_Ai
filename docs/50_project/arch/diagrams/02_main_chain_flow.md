@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.5
+版本：v2.6
 核对日期：2026-07-16
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -215,7 +215,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。PENDING tuple 只有 exact virgin epoch可逻辑取消；claim 所需的 accepted NODE effect会被 cancellation 排除，completed GRAPH已终态，所以 fenceable retry PENDING不是正常 reschedule/cancel 竞态，只是 legacy/imported/corruption 防线。历史 retry-PENDING + CANCELLED fence与旧 `FAILED_EVIDENCE` 均需显式 repair/quarantine，FINALIZED replay不自动改 evidence。Operation 签名对账为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账和历史修复仍缺，整体 cancellation 继续 OFF。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。0098 将 legacy candidate 冻结成 append-only case：PENDING signed proof 可进入之后的新 decision evidence，FINALIZED correction 只在 trusted read 校验旧 decision ref/payload digest，旧 decision/fence/evidence 不变。Operation 与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；生产库存 remediation、Budget、部署密钥/凭据、完整 key lifecycle 与真实 canary仍缺，整体 cancellation 继续 OFF。
 
 ## Plan 分支的真实边界
 

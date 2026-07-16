@@ -3,7 +3,7 @@
 
 # 图 01：当前运行拓扑
 
-版本：v2.6
+版本：v2.7
 核对日期：2026-07-16
 
 ## 拓扑
@@ -83,6 +83,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Cancellation Operator authority/入口与 Operation 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账未接通。一般 Effect `FAILED` 仍可能已经产生外部副作用，所以新路径保持 `RECONCILIATION_REQUIRED`，只有带 receipt 的 `COMMITTED` 自动收口；旧 `FAILED_EVIDENCE` 是历史修复缺口。Budget 高竞争、部署凭据与真实 canary仍缺，atomic/bounded/cancellation 均 OFF。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Cancellation、Operation 签名对账与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。0098 以 append-only case/proof 和 trusted overlay 处理 Effect 不确定性；PENDING proof 可进入新 decision evidence，FINALIZED correction 不改写旧 decision/fence/evidence。Budget 高竞争、目标部署 inventory remediation、部署密钥/凭据、完整 key lifecycle 与真实 canary仍缺，atomic/bounded/cancellation 均 OFF。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

@@ -219,6 +219,21 @@ def test_projection_serializer_normalizes_camel_case_private_aliases() -> None:
         ("GET", "/obs/tribe/events", "obs:trace:read"),
         ("GET", "/obs/sessions/export", "obs:session:export"),
         ("GET", "/obs/sessions", "obs:session:read"),
+        (
+            "GET",
+            "/obs/task-runtime/effect-reconciliation/candidates",
+            "obs:task-runtime:read",
+        ),
+        (
+            "GET",
+            "/obs/task-runtime/effect-reconciliation/cases",
+            "obs:task-runtime:read",
+        ),
+        (
+            "GET",
+            "/obs/task-runtime/effect-reconciliation/challenge",
+            "obs:task-runtime:read",
+        ),
         ("GET", "/obs/summary", None),
     ],
 )
@@ -252,11 +267,73 @@ def test_authenticated_low_scope_principal_is_denied_sensitive_trace(monkeypatch
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "/obs/task-runtime/effect-reconciliation/candidates",
+        "/obs/task-runtime/effect-reconciliation/cases",
+        "/obs/task-runtime/effect-reconciliation/challenge",
+    ],
+)
+def test_effect_reconciliation_reads_require_exact_task_runtime_scope(
+    monkeypatch,
+    path,
+) -> None:
+    low_scope_token = "generic-operator-token"
+    task_runtime_token = "task-runtime-operator-token"
+    monkeypatch.setenv(
+        OPERATOR_QUERY_AUTH_BINDINGS_ENV,
+        json.dumps(
+            [
+                {
+                    "token_sha256": hashlib.sha256(
+                        low_scope_token.encode()
+                    ).hexdigest(),
+                    "principal_id": "ops.generic",
+                    "scopes": ["obs:operator:read"],
+                },
+                {
+                    "token_sha256": hashlib.sha256(
+                        task_runtime_token.encode()
+                    ).hexdigest(),
+                    "principal_id": "ops.task-runtime",
+                    "scopes": ["obs:task-runtime:read"],
+                },
+            ]
+        ),
+    )
+    gateway = OperatorQueryGateway.from_environment()
+    low_scope = gateway.open_context(
+        authorization_values=(f"Bearer {low_scope_token}",)
+    )
+    allowed = gateway.open_context(
+        authorization_values=(f"Bearer {task_runtime_token}",)
+    )
+
+    with pytest.raises(HTTPException) as error:
+        gateway.authorize_route(low_scope, method="GET", path=path)
+
+    assert error.value.status_code == 403
+    gateway.authorize_route(allowed, method="GET", path=path)
+
+
+@pytest.mark.parametrize(
     ("path", "scope"),
     [
         ("/obs/task-runtime/executions", "obs:task-runtime:read"),
         ("/obs/task-runtime/review-locator", "obs:task-runtime:read"),
         ("/obs/task-runtime/executions/graph-1", "obs:task-runtime:read"),
+        (
+            "/obs/task-runtime/effect-reconciliation/candidates",
+            "obs:task-runtime:read",
+        ),
+        (
+            "/obs/task-runtime/effect-reconciliation/cases",
+            "obs:task-runtime:read",
+        ),
+        (
+            "/obs/task-runtime/effect-reconciliation/challenge",
+            "obs:task-runtime:read",
+        ),
         ("/obs/sessions", "obs:session:read"),
         ("/obs/sessions/export", "obs:session:export"),
         ("/obs/checkpoints", "obs:checkpoint:read"),

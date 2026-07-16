@@ -320,6 +320,7 @@ def _assert_graph_cancellation_operator_startup(
     *,
     enabled: bool,
     operation_reconciliation_enabled: bool,
+    effect_reconciliation_enabled: bool,
     command_ingress: Any,
     security: Any,
 ) -> None:
@@ -330,6 +331,10 @@ def _assert_graph_cancellation_operator_startup(
     if not operation_reconciliation_enabled:
         raise RuntimeError(
             "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION"
+        )
+    if not effect_reconciliation_enabled:
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
         )
     mode = getattr(command_ingress, "mode", None)
     mode_value = getattr(mode, "value", mode)
@@ -379,6 +384,57 @@ def _assert_task_operation_reconciliation_operator_startup(
         raise RuntimeError(
             "TASK_OPERATION_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
         )
+
+
+def _assert_task_effect_reconciliation_operator_startup(
+    *,
+    enabled: bool,
+    command_ingress: Any,
+    security: Any,
+) -> None:
+    """Fail closed before exposing the signed Effect reconciliation port."""
+
+    if not enabled:
+        return
+    mode = getattr(command_ingress, "mode", None)
+    mode_value = getattr(mode, "value", mode)
+    if str(mode_value or "").strip().upper() != "ENFORCE":
+        raise RuntimeError(
+            "TASK_EFFECT_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
+        )
+    composition = getattr(security, "obs_command_composition", None)
+    if (
+        composition is None
+        or not bool(getattr(composition, "enabled", False))
+        or not bool(getattr(composition, "execution_enabled", False))
+        or not callable(
+            getattr(getattr(composition, "ingress", None), "execute", None)
+        )
+    ):
+        raise RuntimeError(
+            "TASK_EFFECT_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
+        )
+
+
+def _assert_graph_cancellation_effect_reconciliation_production_ready(
+    *,
+    enabled: bool,
+    task_store: Any,
+) -> None:
+    """Block cancellation production on unresolved legacy Effect inventory."""
+
+    if not enabled:
+        return
+    checker = getattr(
+        task_store,
+        "assert_effect_reconciliation_production_ready",
+        None,
+    )
+    if not callable(checker):
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_EFFECT_PRODUCTION_GATE_UNAVAILABLE"
+        )
+    checker()
 
 
 def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
@@ -817,6 +873,17 @@ def create_app() -> FastAPI:
                         False,
                     )
                 )
+                effect_reconciliation_operator_enabled = bool(
+                    getattr(
+                        runtime_settings,
+                        "task_effect_reconciliation_operator_enabled",
+                        False,
+                    )
+                )
+                _assert_graph_cancellation_effect_reconciliation_production_ready(
+                    enabled=cancellation_operator_enabled,
+                    task_store=task_runtime.task_store,
+                )
                 ingress_settings = get_input_settings()
                 command_ingress = build_process_command_ingress_container(
                     canonical_db_path=task_runtime.canonical_db_path,
@@ -828,11 +895,19 @@ def create_app() -> FastAPI:
                     operation_reconciliation_enabled=(
                         operation_reconciliation_operator_enabled
                     ),
+                    effect_reconciliation_enabled=(
+                        effect_reconciliation_operator_enabled
+                    ),
                     command_ingress=command_ingress,
                     security=security,
                 )
                 _assert_task_operation_reconciliation_operator_startup(
                     enabled=operation_reconciliation_operator_enabled,
+                    command_ingress=command_ingress,
+                    security=security,
+                )
+                _assert_task_effect_reconciliation_operator_startup(
+                    enabled=effect_reconciliation_operator_enabled,
                     command_ingress=command_ingress,
                     security=security,
                 )
@@ -1159,6 +1234,11 @@ def create_app() -> FastAPI:
                     if operation_reconciliation_operator_enabled
                     else None
                 )
+                application.state.task_effect_reconciliation_command_service = (
+                    task_runtime.effect_reconciliation_service
+                    if effect_reconciliation_operator_enabled
+                    else None
+                )
                 application.state.command_ingress_container = command_ingress
                 application.state.memory_service_container = memory
                 yield
@@ -1180,6 +1260,7 @@ def create_app() -> FastAPI:
                 application.state.task_review_command_service = None
                 application.state.task_graph_cancellation_command_service = None
                 application.state.task_operation_reconciliation_command_service = None
+                application.state.task_effect_reconciliation_command_service = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
                 try:
@@ -1276,6 +1357,7 @@ def create_app() -> FastAPI:
     application.state.command_ingress_container = None
     application.state.memory_service_container = None
     application.state.task_runtime_container = None
+    application.state.task_effect_reconciliation_command_service = None
     application.state.governed_host_runtime = None
     application.state.governed_internal_runtime = None
     application.state.governed_scheduler_runtime = None

@@ -494,6 +494,56 @@ class GraphCancellationOperationReconciliationStorePort(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class GraphCancellationEffectReconciliationStorePort(Protocol):
+    """Append-only proof boundary for one inventoried Effect uncertainty.
+
+    The read returns one exact aggregate with ``case``, ``intent``, ``effect``,
+    ``fence``, ``attempt`` and an optional ``proof``.  The mutation records a
+    proof sidecar and Outbox only; it must not rewrite the 0092 fence, intent,
+    decision, or a finalized cancellation.
+    """
+
+    def read_graph_cancellation_effect_reconciliation(
+        self,
+        intent_ref: str,
+        effect_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def record_graph_cancellation_effect_reconciliation_proof(
+        self,
+        intent_ref: str,
+        effect_id: str,
+        *,
+        purpose: str,
+        case_id: str,
+        expected_case_snapshot_sha256: str,
+        expected_subject_snapshot_sha256: str,
+        expected_intent_status_version: int,
+        expected_effect_status: str,
+        expected_effect_status_version: int,
+        expected_effect_fencing_token: int,
+        expected_effect_attempt_count: int,
+        expected_effect_lease_owner: str | None,
+        expected_effect_lease_expires_ts_ms: int | None,
+        expected_attempt_status: str,
+        expected_attempt_status_version: int,
+        expected_fence_observed_status: str,
+        expected_fence_observed_status_version: int,
+        expected_fence_resolution_status: str,
+        outcome: str,
+        target_resolution_status: str,
+        receipt_ref: str | None,
+        executor_quiescence_ref: str | None,
+        reconciler_actor_id: str,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
+        issued_ts_ms: int,
+        proof_id: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+
 class GovernedWorkerPort(Protocol):
     """A worker selected by the frozen executor and node route."""
 
@@ -546,6 +596,7 @@ __all__ = [
     "AcceptancePort",
     "CommandRepositoryPort",
     "ExecutionProjectionReaderPort",
+    "GraphCancellationEffectReconciliationStorePort",
     "GraphCancellationOperationReconciliationStorePort",
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sqlite3
+from threading import Event
 import uuid
 
 import pytest
@@ -27,6 +30,7 @@ from host_brain.persistence.task_repository import (
     AttemptStatus,
     DurableTaskStore,
     OutboxMessage,
+    TASK_STORE_CANCELLATION_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
     TASK_STORE_OUTBOX_CONFLICT,
@@ -49,6 +53,30 @@ class MutableClock:
 
     def set(self, value: int) -> None:
         self.value = int(value)
+
+
+class BlockingSampleClock:
+    """Pause one clock sample before the caller starts its writer transaction."""
+
+    def __init__(self, value: int = 10_000) -> None:
+        self.value = int(value)
+        self.sampled = Event()
+        self.resume = Event()
+        self._block_next = False
+
+    def arm(self) -> None:
+        self.sampled.clear()
+        self.resume.clear()
+        self._block_next = True
+
+    def __call__(self) -> int:
+        value = self.value
+        if self._block_next:
+            self._block_next = False
+            self.sampled.set()
+            if not self.resume.wait(timeout=10):
+                raise TimeoutError("blocked Effect clock sample was not released")
+        return value
 
 
 def _event(
@@ -78,7 +106,11 @@ def _event(
     )
 
 
-def _store(tmp_path: Path, *, clock: MutableClock | None = None) -> DurableTaskStore:
+def _store(
+    tmp_path: Path,
+    *,
+    clock: MutableClock | BlockingSampleClock | None = None,
+) -> DurableTaskStore:
     db_path = tmp_path / "gr06-effects.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="gr06-effect-contract"
@@ -91,6 +123,83 @@ def _store(tmp_path: Path, *, clock: MutableClock | None = None) -> DurableTaskS
     store = DurableTaskStore(db_path, clock=clock or MutableClock())
     store.assert_acceptance_effect_intent_ready()
     return store
+
+
+def _store_before_0098(
+    tmp_path: Path,
+    *,
+    clock: MutableClock | BlockingSampleClock | None = None,
+) -> DurableTaskStore:
+    migrations = tmp_path / "migrations-through-0097"
+    migrations.mkdir()
+    for source in MIGRATIONS.glob("*.sql"):
+        if int(source.name.split("_", 1)[0]) <= 97:
+            shutil.copy2(source, migrations / source.name)
+    db_path = tmp_path / "gr06-effects-before-0098.sqlite3"
+    migrated = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=migrations,
+    ).apply_migrations(request_id="gr06-effect-before-0098")
+    assert migrated.success is True, migrated.as_dict()
+    assert migrated.summary["current_version"] == 97
+    store = DurableTaskStore(db_path, clock=clock or MutableClock())
+    store.assert_acceptance_effect_intent_ready()
+    return store
+
+
+def _insert_pending_cancellation_proof_marker(
+    store: DurableTaskStore,
+    *,
+    effect_id: str,
+    suffix: str,
+) -> None:
+    """Commit one 0098 proof marker after its authority already validated it.
+
+    The late-mutation guard is intentionally deny-only and does not duplicate
+    proof verification.  This fixture therefore inserts the already-committed
+    marker directly while foreign-key validation remains the proof Store's
+    separate contract responsibility.
+    """
+
+    digest = "sha256:" + ("a" * 64)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_effect_reconciliation_proof(
+                proof_id, schema_version, purpose, case_id, intent_ref,
+                effect_id, graph_id, graph_revision, node_id, attempt_id,
+                case_snapshot_sha256, subject_snapshot_json,
+                subject_snapshot_sha256, outcome, target_resolution_status,
+                receipt_ref, executor_quiescence_ref, reconciler_actor_id,
+                attestation_ref, attestation_key_id, attestation_signature,
+                issued_ts_ms, proof_binding_json, proof_digest, outbox_id,
+                created_ts_ms
+            ) VALUES (?, ?, 'PENDING_CANCELLATION', ?, ?, ?, ?, 1, ?, ?, ?,
+                      '{}', ?, 'NO_SIDE_EFFECT', 'CANCELLED', NULL, ?, ?, ?, ?,
+                      ?, 10000, '{}', ?, ?, 10000)
+            """,
+            (
+                f"effect-proof://gr06/{suffix}",
+                "Natsume.task_runtime.acceptance_effect_reconciliation.proof.v1",
+                f"effect-case://gr06/{suffix}",
+                f"taskcancel-intent://gr06/{suffix}",
+                effect_id,
+                "graph-gr06",
+                "node-gr06",
+                "attempt-gr06",
+                digest,
+                digest,
+                f"quiescence://gr06/{suffix}",
+                "reconciler://gr06/test",
+                f"attestation://gr06/{suffix}",
+                "reconciler-gr06-v1",
+                "ed25519:" + ("A" * 88),
+                digest,
+                f"outbox::effect-proof::gr06::{suffix}",
+            ),
+        )
+        conn.commit()
 
 
 def _seed_attempt(store: DurableTaskStore) -> None:
@@ -587,6 +696,133 @@ def test_gr06_claim_is_acceptance_gated_and_terminal_transitions_are_idempotent(
     assert failed["status"] == AcceptanceEffectStatus.FAILED.value
     assert failed["receipt_ref"] is None
     assert failed_replay["replayed"] is True
+
+
+def test_gr06_delivery_mutations_remain_compatible_before_0098(
+    tmp_path: Path,
+) -> None:
+    store = _store_before_0098(tmp_path)
+    _seed_attempt(store)
+    _accept_node(store)
+
+    outcomes: dict[str, str] = {}
+    for mutation in ("commit", "fail", "reschedule"):
+        effect_id = f"acceptance-effect://gr06/pre-0098-{mutation}"
+        created = _stage(
+            store,
+            effect_id=effect_id,
+            idempotency_key=f"gr06:pre-0098:{mutation}",
+        )
+        claimed = store.claim_acceptance_effect_intent(
+            owner_id=f"dispatcher-pre-0098-{mutation}",
+            effect_id=str(created["effect_id"]),
+        )
+        assert claimed is not None
+        if mutation == "commit":
+            result = store.commit_acceptance_effect_intent(
+                effect_id,
+                owner_id="dispatcher-pre-0098-commit",
+                fencing_token=int(claimed["fencing_token"]),
+                receipt_ref="conversation-receipt://gr06/pre-0098",
+            )
+        elif mutation == "fail":
+            result = store.fail_acceptance_effect_intent(
+                effect_id,
+                owner_id="dispatcher-pre-0098-fail",
+                fencing_token=int(claimed["fencing_token"]),
+                reason_code="DELIVERY_REJECTED",
+                detail="pre-0098 compatibility failure",
+            )
+        else:
+            result = store.reschedule_acceptance_effect_intent(
+                effect_id,
+                owner_id="dispatcher-pre-0098-reschedule",
+                fencing_token=int(claimed["fencing_token"]),
+                reason_code="DELIVERY_RETRY",
+                detail="pre-0098 compatibility retry",
+                delay_ms=0,
+            )
+        outcomes[mutation] = str(result["status"])
+
+    assert outcomes == {
+        "commit": AcceptanceEffectStatus.COMMITTED.value,
+        "fail": AcceptanceEffectStatus.FAILED.value,
+        "reschedule": AcceptanceEffectStatus.PENDING.value,
+    }
+
+
+@pytest.mark.parametrize("mutation", ("commit", "fail", "reschedule"))
+def test_gr06_pending_cancellation_proof_wins_before_late_delivery_mutation(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    clock = BlockingSampleClock()
+    store = _store(tmp_path, clock=clock)
+    _seed_attempt(store)
+    effect_id = f"acceptance-effect://gr06/proof-first-{mutation}"
+    created = _stage(
+        store,
+        effect_id=effect_id,
+        idempotency_key=f"gr06:proof-first:{mutation}",
+    )
+    _accept_node(store)
+    owner_id = f"dispatcher-proof-first-{mutation}"
+    claimed = store.claim_acceptance_effect_intent(
+        owner_id=owner_id,
+        lease_ms=500,
+        effect_id=str(created["effect_id"]),
+    )
+    assert claimed is not None
+    before = store.get_acceptance_effect_intent(effect_id)
+
+    def mutate() -> dict[str, object]:
+        if mutation == "commit":
+            return store.commit_acceptance_effect_intent(
+                effect_id,
+                owner_id=owner_id,
+                fencing_token=int(claimed["fencing_token"]),
+                receipt_ref="conversation-receipt://gr06/proof-first",
+            )
+        if mutation == "fail":
+            return store.fail_acceptance_effect_intent(
+                effect_id,
+                owner_id=owner_id,
+                fencing_token=int(claimed["fencing_token"]),
+                reason_code="DELIVERY_REJECTED",
+                detail="proof committed before late failure",
+            )
+        return store.reschedule_acceptance_effect_intent(
+            effect_id,
+            owner_id=owner_id,
+            fencing_token=int(claimed["fencing_token"]),
+            reason_code="DELIVERY_RETRY",
+            detail="proof committed before late retry",
+            delay_ms=0,
+        )
+
+    clock.arm()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(mutate)
+        assert clock.sampled.wait(timeout=10)
+        try:
+            _insert_pending_cancellation_proof_marker(
+                store,
+                effect_id=effect_id,
+                suffix=mutation,
+            )
+        finally:
+            clock.resume.set()
+        with pytest.raises(TaskStoreError) as blocked:
+            future.result(timeout=10)
+
+    assert blocked.value.reason_code == TASK_STORE_CANCELLATION_CONFLICT
+    after = store.get_acceptance_effect_intent(effect_id)
+    assert after["status"] == AcceptanceEffectStatus.CLAIMED.value
+    assert after["status_version"] == before["status_version"]
+    assert after["fencing_token"] == before["fencing_token"]
+    assert after["attempt_count"] == before["attempt_count"]
+    assert after["lease_owner"] == before["lease_owner"]
+    assert after["lease_expires_ts_ms"] == before["lease_expires_ts_ms"]
 
 
 def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(

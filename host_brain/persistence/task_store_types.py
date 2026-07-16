@@ -33,6 +33,12 @@ _DURABLE_REFERENCE_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
 )
 _MAX_OUTBOX_EVIDENCE_REFS = 32
+REVISIONED_OUTBOX_AGGREGATE_TYPES = frozenset(
+    {
+        "TASK_GRAPH",
+        "GRAPH_CANCELLATION_EFFECT_RECONCILIATION",
+    }
+)
 _PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS = frozenset(
     {
         "decision_ref",
@@ -196,18 +202,18 @@ def build_outbox_payload_ref(
             TASK_STORE_INVALID,
             "outbox aggregate identity and non-negative version are required",
         )
-    if aggregate_kind == "TASK_GRAPH":
+    if aggregate_kind in REVISIONED_OUTBOX_AGGREGATE_TYPES:
         if graph_revision is not None:
             if type(graph_revision) is not int or graph_revision < 1:
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
-                    "TASK_GRAPH payload identity requires a positive graph_revision",
+                    "revisioned payload identity requires a positive graph_revision",
                 )
             aggregate_ref = f"{aggregate_ref}@{graph_revision}"
     elif graph_revision is not None:
         raise TaskStoreError(
             TASK_STORE_INVALID,
-            "non-TASK_GRAPH payload identity must not carry graph_revision",
+            "non-revisioned payload identity must not carry graph_revision",
         )
     return f"taskstore://event/{aggregate_kind}/{aggregate_ref}/{version}"
 
@@ -276,20 +282,22 @@ class OutboxMessage:
             raise TaskStoreError(TASK_STORE_INVALID, "outbox identity and payload_ref are required")
         if self.aggregate_version < 0:
             raise TaskStoreError(TASK_STORE_INVALID, "outbox aggregate_version must be non-negative")
-        if self.aggregate_type == "TASK_GRAPH":
+        if self.aggregate_type in REVISIONED_OUTBOX_AGGREGATE_TYPES:
             if not (
-                allow_legacy_graph_revision and self.graph_revision is None
+                self.aggregate_type == "TASK_GRAPH"
+                and allow_legacy_graph_revision
+                and self.graph_revision is None
             ) and (
                 type(self.graph_revision) is not int or self.graph_revision < 1
             ):
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
-                    "TASK_GRAPH outbox requires a positive integer graph_revision",
+                    "revisioned outbox requires a positive integer graph_revision",
                 )
         elif self.graph_revision is not None:
             raise TaskStoreError(
                 TASK_STORE_INVALID,
-                "non-TASK_GRAPH outbox must not carry graph_revision",
+                "non-revisioned outbox must not carry graph_revision",
             )
         expected_payload_ref = build_outbox_payload_ref(
             aggregate_type=self.aggregate_type,
@@ -376,6 +384,7 @@ __all__ = [
     "LeaseStatus",
     "OperationReservationResult",
     "OutboxMessage",
+    "REVISIONED_OUTBOX_AGGREGATE_TYPES",
     "RecoveryReport",
     "TASK_STORE_CAS_CONFLICT",
     "TASK_STORE_BUDGET_EXCEEDED",

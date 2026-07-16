@@ -177,6 +177,10 @@ class CoreSettings(BaseSettings):
         default=False,
         alias="HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED",
     )
+    task_effect_reconciliation_operator_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED",
+    )
     task_reconciliation_ed25519_public_keys_json: str = Field(
         default="",
         alias="HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON",
@@ -203,6 +207,7 @@ class CoreSettings(BaseSettings):
         if (
             self.task_graph_cancellation_operator_enabled
             or self.task_operation_reconciliation_operator_enabled
+            or self.task_effect_reconciliation_operator_enabled
         ) and not public_keys:
             raise ValueError(
                 "TASK_RECONCILIATION_OPERATOR_REQUIRES_PUBLIC_KEYS"
@@ -213,6 +218,13 @@ class CoreSettings(BaseSettings):
         ):
             raise ValueError(
                 "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION"
+            )
+        if (
+            self.task_graph_cancellation_operator_enabled
+            and not self.task_effect_reconciliation_operator_enabled
+        ):
+            raise ValueError(
+                "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
             )
         return self
 
@@ -285,6 +297,14 @@ class CoreSettings(BaseSettings):
             ),
             inspect_setting(
                 domain=domain,
+                field_name="task_effect_reconciliation_operator_enabled",
+                env_key="HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED",
+                default_value=False,
+                current_value=s.task_effect_reconciliation_operator_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
                 field_name="task_reconciliation_ed25519_public_keys_json",
                 env_key="HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON",
                 default_value="",
@@ -292,6 +312,7 @@ class CoreSettings(BaseSettings):
                 is_required=(
                     s.task_graph_cancellation_operator_enabled
                     or s.task_operation_reconciliation_operator_enabled
+                    or s.task_effect_reconciliation_operator_enabled
                 ),
             ),
             inspect_setting(

@@ -15,6 +15,7 @@ from typing import Any
 from host_brain.persistence.task_record_codec import _dumps, _outbox_record
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
+    REVISIONED_OUTBOX_AGGREGATE_TYPES,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
@@ -81,7 +82,7 @@ _OUTBOX_DELIVERY_TABLE_SQL_FRAGMENTS = (
     "check(last_errorisnullor(typeof(last_error)='text'andlength(trim(last_error))>0andlength(last_error)<=2000))",
     "check(graph_revisionisnullor(typeof(graph_revision)='integer'andgraph_revision>=1))",
 )
-_OUTBOX_DELIVERY_TRIGGER_SQL_FRAGMENTS = {
+_OUTBOX_DELIVERY_LEGACY_TRIGGER_SQL_FRAGMENTS = {
     "trg_task_runtime_outbox_claim_insert_guard": (
         "beforeinsertontask_runtime_outbox",
         "typeof(new.claim_owner)='text'",
@@ -129,6 +130,38 @@ _OUTBOX_DELIVERY_TRIGGER_SQL_FRAGMENTS = {
         "graph.graph_id=new.aggregate_id",
         "graph.revision=new.graph_revision",
         "new.aggregate_type<>'task_graph'",
+        "new.graph_revisionisnull",
+        "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+    ),
+}
+_OUTBOX_DELIVERY_EFFECT_TRIGGER_SQL_FRAGMENTS = {
+    "trg_task_runtime_outbox_graph_revision_insert_guard": (
+        "beforeinsertontask_runtime_outbox",
+        "new.aggregate_type='task_graph'",
+        "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+        "new.graph_revisionisnotnull",
+        "typeof(new.graph_revision)='integer'",
+        "new.graph_revision>=1",
+        "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+        "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+        "item.case_id=new.aggregate_id",
+        "item.graph_revision=new.graph_revision",
+        "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
+        "new.graph_revisionisnull",
+        "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+    ),
+    "trg_task_runtime_outbox_graph_revision_update_guard": (
+        "beforeupdateofaggregate_type,aggregate_id,graph_revision,aggregate_version,payload_refontask_runtime_outbox",
+        "new.aggregate_type='task_graph'",
+        "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+        "new.graph_revisionisnotnull",
+        "typeof(new.graph_revision)='integer'",
+        "new.graph_revision>=1",
+        "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+        "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+        "item.case_id=new.aggregate_id",
+        "item.graph_revision=new.graph_revision",
+        "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
         "new.graph_revisionisnull",
         "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
     ),
@@ -217,7 +250,7 @@ class TaskOutboxDeliveryStoreMixin:
                 "outbox aggregate must identify the state version committed in this transaction: "
                 f"expected {normalized_expected}, got {actual_aggregate}",
             )
-        if message.aggregate_type == "TASK_GRAPH":
+        if message.aggregate_type in REVISIONED_OUTBOX_AGGREGATE_TYPES:
             if (
                 type(expected_graph_revision) is not int
                 or expected_graph_revision < 1
@@ -225,12 +258,12 @@ class TaskOutboxDeliveryStoreMixin:
             ):
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
-                    "TaskGraph outbox must bind the exact mutated graph revision",
+                    "revisioned outbox must bind the exact graph revision",
                 )
         elif expected_graph_revision is not None:
             raise TaskStoreError(
                 TASK_STORE_INVALID,
-                "non-TaskGraph mutation cannot declare expected_graph_revision",
+                "non-revisioned mutation cannot declare expected_graph_revision",
             )
         normalized_event_type = str(expected_event_type or "").strip()
         if not normalized_event_type or message.event_type != normalized_event_type:
@@ -338,7 +371,7 @@ class TaskOutboxDeliveryStoreMixin:
             str(expected_aggregate[1]),
             int(expected_aggregate[2]),
         )
-        if message.aggregate_type == "TASK_GRAPH":
+        if message.aggregate_type in REVISIONED_OUTBOX_AGGREGATE_TYPES:
             if (
                 type(expected_graph_revision) is not int
                 or expected_graph_revision < 1
@@ -346,12 +379,12 @@ class TaskOutboxDeliveryStoreMixin:
             ):
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
-                    "TaskGraph replay outbox must bind the exact graph revision",
+                    "revisioned replay outbox must bind the exact graph revision",
                 )
         elif expected_graph_revision is not None:
             raise TaskStoreError(
                 TASK_STORE_INVALID,
-                "non-TaskGraph replay cannot declare expected_graph_revision",
+                "non-revisioned replay cannot declare expected_graph_revision",
             )
         if (
             (message.aggregate_type, message.aggregate_id, message.aggregate_version) != expected
@@ -522,6 +555,13 @@ class TaskOutboxDeliveryStoreMixin:
                     """
                 ).fetchall()
             }
+            effect_reconciliation_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_effect_reconciliation_case'
+                """
+            ).fetchone() is not None
             table_row = conn.execute(
                 """
                 SELECT sql FROM sqlite_master
@@ -558,8 +598,19 @@ class TaskOutboxDeliveryStoreMixin:
                             )
                         )
                         OR (
-                            aggregate_type <> 'TASK_GRAPH'
+                            aggregate_type NOT IN (
+                                'TASK_GRAPH',
+                                'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            )
                             AND graph_revision IS NOT NULL
+                        )
+                        OR (
+                            aggregate_type = 'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            AND (
+                                graph_revision IS NULL
+                                OR typeof(graph_revision) <> 'integer'
+                                OR graph_revision < 1
+                            )
                         )
                         OR
                         (
@@ -661,9 +712,14 @@ class TaskOutboxDeliveryStoreMixin:
             for fragment in _OUTBOX_DELIVERY_TABLE_SQL_FRAGMENTS
             if fragment not in table_sql
         )
+        expected_trigger_fragments = (
+            _OUTBOX_DELIVERY_EFFECT_TRIGGER_SQL_FRAGMENTS
+            if effect_reconciliation_schema
+            else _OUTBOX_DELIVERY_LEGACY_TRIGGER_SQL_FRAGMENTS
+        )
         invalid_trigger_guards = sorted(
             name
-            for name, fragments in _OUTBOX_DELIVERY_TRIGGER_SQL_FRAGMENTS.items()
+            for name, fragments in expected_trigger_fragments.items()
             if any(
                 fragment not in _normalized_sql(trigger_rows.get(name))
                 for fragment in fragments

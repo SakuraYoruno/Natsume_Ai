@@ -3,8 +3,8 @@
 
 # 图 07：Observability 与 Operator 数据流
 
-版本：v2.0
-核对日期：2026-07-15
+版本：v2.1
+核对日期：2026-07-16
 
 Observability 是独立 ASGI 读面和 Operator BFF。它应从 durable repositories/projections 解释系统，而不是维护第二套任务或 Life 真相。
 
@@ -114,7 +114,7 @@ sequenceDiagram
 
 取消命令要求 `obs:write + task-runtime:cancel`；Operation 对账命令要求 `obs:write + task-runtime:reconcile`，认证 actor 由服务端绑定。两个开关默认关闭，开启 cancellation 时必须同时开启 Operation 对账；还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环。这里证明的是 `WIRED_DEFAULT_OFF`，不是 production enablement。
 
-业务对账的观测口径必须保守：一般 Acceptance Effect `FAILED` 仍可能已经产生副作用，UI/Operator 只能显示 `RECONCILIATION_REQUIRED`，不得把它渲染成“未执行”或“可安全取消”；只有 `COMMITTED + durable receipt` 可显示正向完成证据。旧 `FAILED_EVIDENCE` 属历史兼容与修复缺口。Operation 签名对账已完成 service、composition、OBS command 和 verification-only 公钥注入，定级 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；Effect 签名对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺，cancellation 保持 `PRODUCTION_OFF`。
+业务对账的观测口径必须保守：一般 Acceptance Effect `FAILED` 仍可能已经产生副作用，UI/Operator 只能显示 `RECONCILIATION_REQUIRED`，不得把它渲染成“未执行”或“可安全取消”；只有 `COMMITTED + durable receipt` 可显示正向完成证据。Operation 与 Effect 签名对账已完成 service、composition、OBS command 和 verification-only 公钥注入，均定级 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。0098 的 PENDING proof进入新 decision evidence，FINALIZED correction只作 trusted overlay；生产 inventory remediation、Budget 高竞争、部署密钥/凭据、完整 key lifecycle 与真实 canary仍缺，cancellation 保持 `PRODUCTION_OFF`。
 
 ## Task/Review 观测
 

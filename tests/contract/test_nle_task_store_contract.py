@@ -28,6 +28,9 @@ from host_brain.contracts.agent_runtime.acceptance_judge import (
     judge_acceptance_result,
 )
 import host_brain.persistence.task_repository as task_store_module
+from host_brain.persistence import (
+    reconciliation_proof_verifier as reconciliation_verifier_module,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -753,7 +756,7 @@ def test_t_nle_06_ed25519_runtime_is_public_key_only_rotatable_and_dependency_fa
     assert "Ed25519PrivateKey" not in production_members
     assert not any(name.startswith("sign_") for name in production_members)
 
-    monkeypatch.setattr(task_store_module, "_Ed25519PublicKey", None)
+    monkeypatch.setattr(reconciliation_verifier_module, "_Ed25519PublicKey", None)
     with pytest.raises(TaskStoreError) as missing_dependency:
         Ed25519ReconciliationProofVerifier({"reconciler-v1": public_keys["reconciler-v1"]})
     assert missing_dependency.value.reason_code == TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED

@@ -18,6 +18,7 @@ import threading
 from typing import Any
 import uuid
 
+from host_brain.core.ids import now_ms
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     Ed25519ReconciliationProofVerifier,
@@ -51,6 +52,9 @@ from host_brain.task_runtime.graph_cancellation_runtime import (
 )
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
     GraphCancellationOperationReconciliationService,
+)
+from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
+    GraphCancellationEffectReconciliationService,
 )
 from host_brain.task_runtime.local_graph_execution_registry import (
     LocalGraphExecutionRegistry,
@@ -167,6 +171,7 @@ class ProcessTaskRuntimeContainer:
     graph_execution_registry: LocalGraphExecutionRegistry
     cancellation_continuation_worker: GraphCancellationContinuationWorker
     operation_reconciliation_service: GraphCancellationOperationReconciliationService
+    effect_reconciliation_service: GraphCancellationEffectReconciliationService
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
@@ -750,6 +755,7 @@ def build_process_task_runtime_container(
         constructed.append(("task_store", task_store))
         task_store.assert_outbox_delivery_ready()
         task_store.assert_graph_cancellation_continuation_ready()
+        task_store.assert_effect_reconciliation_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         review_store = review_store_builder(canonical)
@@ -810,6 +816,12 @@ def build_process_task_runtime_container(
                 wake_cancellation=cancellation_continuation_worker.wake,
             )
         )
+        effect_reconciliation_service = GraphCancellationEffectReconciliationService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+            wake_cancellation=cancellation_continuation_worker.wake,
+            clock_ms=now_ms,
+        )
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)
         raise TaskRuntimeContainerConstructionError(
@@ -845,6 +857,7 @@ def build_process_task_runtime_container(
         graph_execution_registry=graph_execution_registry,
         cancellation_continuation_worker=cancellation_continuation_worker,
         operation_reconciliation_service=operation_reconciliation_service,
+        effect_reconciliation_service=effect_reconciliation_service,
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
     )

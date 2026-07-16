@@ -262,6 +262,50 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
     ),
 }
 
+# Migration 0098 deliberately rebuilds the two 0095 revision guards so the
+# Effect reconciliation Outbox binds the same graph revision as its immutable
+# case.  Receipt-loss replay of 0095 must therefore recognize exactly one of
+# two physical epochs: the original 0095 TaskGraph-only guards before 0098, or
+# these stricter guards when the 0098 case table is present.
+_0098_EFFECT_AWARE_REVISION_TRIGGERS = {
+    "trg_task_runtime_outbox_graph_revision_insert_guard": (
+        "task_runtime_outbox",
+        (
+            "beforeinsertontask_runtime_outbox",
+            "new.aggregate_type='task_graph'",
+            "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+            "new.graph_revisionisnotnull",
+            "typeof(new.graph_revision)='integer'",
+            "new.graph_revision>=1",
+            "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "item.case_id=new.aggregate_id",
+            "item.graph_revision=new.graph_revision",
+            "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
+            "new.graph_revisionisnull",
+            "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+        ),
+    ),
+    "trg_task_runtime_outbox_graph_revision_update_guard": (
+        "task_runtime_outbox",
+        (
+            "beforeupdateofaggregate_type,aggregate_id,graph_revision,aggregate_version,payload_refontask_runtime_outbox",
+            "new.aggregate_type='task_graph'",
+            "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+            "new.graph_revisionisnotnull",
+            "typeof(new.graph_revision)='integer'",
+            "new.graph_revision>=1",
+            "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "item.case_id=new.aggregate_id",
+            "item.graph_revision=new.graph_revision",
+            "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
+            "new.graph_revisionisnull",
+            "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+        ),
+    ),
+}
+
 # A draft of 0072 reached one workspace database before the physical asset was
 # sealed.  The draft created the final tables and journals but omitted one
 # sealing trigger.  Compatibility is permitted only when both the final 0072
@@ -732,6 +776,18 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
         required_triggers,
     ) = frozen
     try:
+        filename = asset_filename(asset)
+        effect_reconciliation_schema = False
+        if filename == "0095_task_runtime_revisioned_graph_outbox.sql":
+            effect_reconciliation_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_effect_reconciliation_case'
+                """
+            ).fetchone() is not None
+            if effect_reconciliation_schema:
+                required_triggers = _0098_EFFECT_AWARE_REVISION_TRIGGERS
         table_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
             (table,),
@@ -795,7 +851,7 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
                 for fragment in expected_fragments
             ):
                 return False
-        if asset_filename(asset) == "0095_task_runtime_revisioned_graph_outbox.sql":
+        if filename == "0095_task_runtime_revisioned_graph_outbox.sql":
             revision_columns = {
                 str(row[1]): row
                 for row in conn.execute(
@@ -853,31 +909,89 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
                 or duplicate_source is not None
             ):
                 return False
-            invalid_revision = conn.execute(
-                """
-                SELECT outbox.outbox_id
-                FROM task_runtime_outbox AS outbox
-                WHERE
-                    (
-                        outbox.aggregate_type = 'TASK_GRAPH'
-                        AND (
-                            outbox.graph_revision IS NULL
-                            OR typeof(outbox.graph_revision) <> 'integer'
-                            OR outbox.graph_revision < 1
-                            OR NOT EXISTS (
-                                SELECT 1 FROM task_runtime_graph AS graph
-                                WHERE graph.graph_id = outbox.aggregate_id
-                                  AND graph.revision = outbox.graph_revision
+            if effect_reconciliation_schema:
+                invalid_revision = conn.execute(
+                    """
+                    SELECT outbox.outbox_id
+                    FROM task_runtime_outbox AS outbox
+                    WHERE
+                        (
+                            outbox.aggregate_type = 'TASK_GRAPH'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR outbox.payload_ref <> (
+                                    'taskstore://event/TASK_GRAPH/'
+                                    || outbox.aggregate_id || '@'
+                                    || outbox.graph_revision || '/'
+                                    || outbox.aggregate_version
+                                )
+                                OR NOT EXISTS (
+                                    SELECT 1 FROM task_runtime_graph AS graph
+                                    WHERE graph.graph_id = outbox.aggregate_id
+                                      AND graph.revision = outbox.graph_revision
+                                )
                             )
                         )
-                    )
-                    OR (
-                        outbox.aggregate_type <> 'TASK_GRAPH'
-                        AND outbox.graph_revision IS NOT NULL
-                    )
-                LIMIT 1
-                """
-            ).fetchone()
+                        OR (
+                            outbox.aggregate_type =
+                                'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR outbox.payload_ref <> (
+                                    'taskstore://event/'
+                                    || 'GRAPH_CANCELLATION_EFFECT_RECONCILIATION/'
+                                    || outbox.aggregate_id || '@'
+                                    || outbox.graph_revision || '/'
+                                    || outbox.aggregate_version
+                                )
+                                OR NOT EXISTS (
+                                    SELECT 1
+                                    FROM task_runtime_effect_reconciliation_case AS item
+                                    WHERE item.case_id = outbox.aggregate_id
+                                      AND item.graph_revision = outbox.graph_revision
+                                )
+                            )
+                        )
+                        OR (
+                            outbox.aggregate_type NOT IN (
+                                'TASK_GRAPH',
+                                'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            )
+                            AND outbox.graph_revision IS NOT NULL
+                        )
+                    LIMIT 1
+                    """
+                ).fetchone()
+            else:
+                invalid_revision = conn.execute(
+                    """
+                    SELECT outbox.outbox_id
+                    FROM task_runtime_outbox AS outbox
+                    WHERE
+                        (
+                            outbox.aggregate_type = 'TASK_GRAPH'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR NOT EXISTS (
+                                    SELECT 1 FROM task_runtime_graph AS graph
+                                    WHERE graph.graph_id = outbox.aggregate_id
+                                      AND graph.revision = outbox.graph_revision
+                                )
+                            )
+                        )
+                        OR (
+                            outbox.aggregate_type <> 'TASK_GRAPH'
+                            AND outbox.graph_revision IS NOT NULL
+                        )
+                    LIMIT 1
+                    """
+                ).fetchone()
             if invalid_revision is not None:
                 return False
     except (IndexError, sqlite3.DatabaseError):

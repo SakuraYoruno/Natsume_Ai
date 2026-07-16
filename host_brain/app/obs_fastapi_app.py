@@ -51,9 +51,16 @@ from host_brain.app.observability_runtime.live_source_projection import (
     run_operator_live_state_projection_job,
 )
 from host_brain.app.settings import get_persistence_settings
+from host_brain.app.settings.core import get_core_settings
 from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.composition.canon import build_process_canon_container
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
+from host_brain.persistence.effect_reconciliation_query_repository import (
+    EffectReconciliationQueryRepository,
+)
+from host_brain.persistence.reconciliation_proof_verifier import (
+    Ed25519ReconciliationProofVerifier,
+)
 from host_brain.app.observability_runtime.health_device_projection import (
     HEALTH_MAX_AGE_MS,
     SERVICE_HEALTH_KEY,
@@ -75,13 +82,34 @@ def _get_obs_ledger():
 _set_obs_ledger_provider(_get_obs_ledger)
 
 
+def _build_effect_reconciliation_read_authority(
+    canonical_db_path: str,
+) -> EffectReconciliationQueryRepository | None:
+    core_settings = get_core_settings()
+    if not core_settings.nle_operator_views_enabled:
+        return None
+    reconciliation_public_keys = core_settings.task_reconciliation_public_keys()
+    return EffectReconciliationQueryRepository(
+        canonical_db_path,
+        reconciliation_proof_verifier=(
+            Ed25519ReconciliationProofVerifier(reconciliation_public_keys)
+            if reconciliation_public_keys
+            else None
+        ),
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ledger = _get_ledger_dep()
     settings = get_persistence_settings()
+    canonical_db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
+    reconciliation_reader = _build_effect_reconciliation_read_authority(
+        canonical_db_path
+    )
     canon = build_process_canon_container(
         ledger=ledger,
-        canonical_db_path=str(getattr(ledger, "canonical_db_path", "") or ""),
+        canonical_db_path=canonical_db_path,
         world_root=settings.world_canon_root.resolve(),
     )
     life = build_process_life_container(
@@ -91,6 +119,7 @@ async def lifespan(_app: FastAPI):
     PROCESS_LIFE_PROVIDER.install(life)
     _app.state.canon_container = canon
     _app.state.life_container = life
+    _app.state.task_effect_reconciliation_read_authority = reconciliation_reader
     register_projection_job(
         "remaining-operator-queries",
         lambda: refresh_remaining_query_projections(
@@ -112,6 +141,7 @@ async def lifespan(_app: FastAPI):
         PROCESS_LIFE_PROVIDER.clear(life)
         _app.state.canon_container = None
         _app.state.life_container = None
+        _app.state.task_effect_reconciliation_read_authority = None
         _logger.info("operator projection daemon shutdown: %s", stop_status)
 
 

@@ -13,24 +13,13 @@ forward recovery migration have both been applied to the selected database.
 from __future__ import annotations
 
 from contextlib import contextmanager
-import base64
-import binascii
 import hashlib
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable, Iterator, Mapping, NoReturn, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, NoReturn, Sequence
 from urllib.parse import quote
 import uuid
-
-try:
-    from cryptography.exceptions import InvalidSignature as _Ed25519InvalidSignature
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-        Ed25519PublicKey as _Ed25519PublicKey,
-    )
-except ImportError:  # pragma: no cover - exercised through dependency fail-closed test
-    _Ed25519InvalidSignature = None
-    _Ed25519PublicKey = None
 
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
@@ -109,6 +98,13 @@ from host_brain.persistence.task_store_types import (
     _PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.reconciliation_proof_verifier import (
+    Ed25519ReconciliationProofVerifier,
+    ReconciliationProofVerifier,
+    TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
+    TASK_STORE_RECONCILIATION_PROOF_INVALID,
+    TASK_STORE_RECONCILIATION_PROOF_REQUIRED,
+)
 from host_brain.persistence.task_record_codec import (
     _ACCEPTANCE_EFFECT_TYPE_PATTERN,
     _MAX_ACCEPTANCE_EFFECT_PAYLOAD_BYTES,
@@ -136,7 +132,6 @@ from host_brain.persistence.task_record_codec import (
     build_acceptance_effect_payload_digest,
 )
 from host_brain.persistence.task_decision_integrity import (
-    _assert_graph_cancellation_decision_bindings,
     _assert_parallel_budget_usage_lineage,
     _assert_parallel_settlement_decision_outbox_binding,
     _assert_parallel_success_decision_bindings,
@@ -170,6 +165,12 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_effect_reconciliation_store import (
+    TaskEffectReconciliationStoreMixin,
+)
+from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
+    TaskGraphCancellationEffectOverlayMixin,
+)
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
@@ -189,10 +190,6 @@ from host_brain.persistence.task_outbox_delivery_store import (
     TaskOutboxDeliveryStoreMixin,
 )
 
-
-TASK_STORE_RECONCILIATION_PROOF_REQUIRED = "TASK_STORE_RECONCILIATION_PROOF_REQUIRED"
-TASK_STORE_RECONCILIATION_PROOF_INVALID = "TASK_STORE_RECONCILIATION_PROOF_INVALID"
-TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED = "TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED"
 
 TASK_RUNTIME_TABLES = frozenset(
     {
@@ -295,91 +292,6 @@ _GRAPH_CANCELLATION_EFFECT_FENCE_REQUIRED_COLUMNS = frozenset(
 _LEGACY_RECEIPT_REF_PATTERN = re.compile(r"^legacy-receipt://0052/rowid--?[0-9]+$")
 
 
-class ReconciliationProofVerifier(Protocol):
-    """Verification-only boundary; it intentionally exposes no signing API."""
-
-    def has_key(self, key_id: str) -> bool: ...
-
-    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool: ...
-
-
-class Ed25519ReconciliationProofVerifier:
-    """Verify authority attestations using public keys only.
-
-    Signing keys and signing helpers deliberately do not exist in the runtime
-    module.  Production composition may instead inject a remote implementation
-    of :class:`ReconciliationProofVerifier` with the same verification-only API.
-    """
-
-    def __init__(self, public_keys: Mapping[str, bytes]) -> None:
-        if _Ed25519PublicKey is None:
-            raise TaskStoreError(
-                TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
-                "cryptography with Ed25519 support is required for proof verification",
-            )
-        keys: dict[str, Any] = {}
-        for raw_key_id, raw_key in public_keys.items():
-            key_id = str(raw_key_id or "").strip()
-            try:
-                key_bytes = bytes(raw_key)
-            except (TypeError, ValueError) as exc:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "Ed25519 public keys must be byte strings",
-                ) from exc
-            if not key_id or len(key_bytes) != 32:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "reconciliation public keys require key_id and exactly 32 bytes",
-                )
-            try:
-                keys[key_id] = _Ed25519PublicKey.from_public_bytes(key_bytes)
-            except ValueError as exc:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    f"invalid Ed25519 public key for key_id {key_id}",
-                ) from exc
-        if not keys:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "at least one reconciliation public key is required",
-            )
-        self._public_keys = keys
-
-    def has_key(self, key_id: str) -> bool:
-        return str(key_id or "").strip() in self._public_keys
-
-    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool:
-        key = self._public_keys.get(str(key_id or "").strip())
-        supplied = str(signature or "").strip()
-        if key is None or not supplied.startswith("ed25519:"):
-            return False
-        encoded = supplied.removeprefix("ed25519:")
-        try:
-            signature_bytes = base64.b64decode(
-                encoded,
-                altchars=b"-_",
-                validate=True,
-            )
-        except (binascii.Error, ValueError):
-            return False
-        if (
-            len(signature_bytes) != 64
-            or base64.urlsafe_b64encode(signature_bytes).decode("ascii") != encoded
-        ):
-            return False
-        try:
-            key.verify(signature_bytes, bytes(message))
-        except (ValueError, TypeError):
-            return False
-        except Exception as exc:
-            if _Ed25519InvalidSignature is not None and isinstance(
-                exc,
-                _Ed25519InvalidSignature,
-            ):
-                return False
-            raise
-        return True
 
 
 def build_operation_fingerprint(
@@ -496,6 +408,8 @@ class DurableTaskStore(
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
     TaskOperationReconciliationStoreMixin,
+    TaskEffectReconciliationStoreMixin,
+    TaskGraphCancellationEffectOverlayMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
 ):
@@ -3128,6 +3042,7 @@ class DurableTaskStore(
         """Return one integrity-checked graph cancellation intent."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(intent_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
@@ -3152,6 +3067,7 @@ class DurableTaskStore(
         revision: int,
     ) -> dict[str, Any] | None:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         conn = self._connect()
         try:
             row = conn.execute(
@@ -3192,17 +3108,14 @@ class DurableTaskStore(
                 "finalized cancellation intent is missing its decision",
             )
         decision = _graph_cancellation_decision_record(decision_row)
-        _assert_graph_cancellation_decision_bindings(
-            conn,
-            decision,
-            evidence_refs_builder=self._graph_cancellation_evidence_refs,
-        )
+        self._assert_graph_cancellation_decision_trusted(conn, decision)
         return record
 
     def list_pending_graph_cancellations(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Enumerate REQUESTED intents for startup/re-entry continuation."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         size = max(1, min(int(limit), 500))
         conn = self._connect()
         try:
@@ -3221,6 +3134,7 @@ class DurableTaskStore(
 
     def get_graph_cancellation_decision(self, decision_ref: str) -> dict[str, Any]:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(decision_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation decision_ref is required")
@@ -3236,11 +3150,7 @@ class DurableTaskStore(
                     f"graph cancellation decision not found: {reference}",
                 )
             record = _graph_cancellation_decision_record(row)
-            _assert_graph_cancellation_decision_bindings(
-                conn,
-                record,
-                evidence_refs_builder=self._graph_cancellation_evidence_refs,
-            )
+            self._assert_graph_cancellation_decision_trusted(conn, record)
             return record
         finally:
             conn.close()
@@ -3250,6 +3160,7 @@ class DurableTaskStore(
         intent_ref: str,
     ) -> dict[str, Any] | None:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(intent_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
@@ -3265,11 +3176,7 @@ class DurableTaskStore(
             if row is None:
                 return None
             record = _graph_cancellation_decision_record(row)
-            _assert_graph_cancellation_decision_bindings(
-                conn,
-                record,
-                evidence_refs_builder=self._graph_cancellation_evidence_refs,
-            )
+            self._assert_graph_cancellation_decision_trusted(conn, record)
             return record
         finally:
             conn.close()
@@ -3368,6 +3275,17 @@ class DurableTaskStore(
         ).fetchall()
         for row in effect_rows:
             refs.add(str(row["effect_id"]))
+            proof = self._read_validated_effect_reconciliation_proof_in_transaction(
+                conn,
+                intent_ref=str(intent_ref),
+                effect_id=str(row["effect_id"]),
+                purpose="PENDING_CANCELLATION",
+            )
+            if proof is not None:
+                refs.add(str(proof["proof_id"]))
+                receipt_ref = str(proof.get("receipt_ref") or "").strip()
+                if _DURABLE_REFERENCE_PATTERN.fullmatch(receipt_ref):
+                    refs.add(receipt_ref)
             if row["resolution_status"] is None:
                 # Authorized NODE effects remain deliverable after Graph
                 # cancellation; bind only their immutable effect identity.

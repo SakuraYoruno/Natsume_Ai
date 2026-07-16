@@ -10,9 +10,6 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     GraphCancellationContractError,
     normalize_graph_cancellation_intent,
 )
-from host_brain.persistence.task_decision_integrity import (
-    _assert_graph_cancellation_decision_bindings,
-)
 from host_brain.persistence.task_record_codec import (
     _acceptance_effect_record,
     _dumps,
@@ -97,6 +94,7 @@ class TaskGraphCancellationRequestMixin:
         """
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         graph_ref = str(graph_id or "").strip()
         budget_ref = str(budget_id or "").strip() or None
         normalized_states = self._normalize_parallel_node_states(expected_node_states)
@@ -174,10 +172,9 @@ class TaskGraphCancellationRequestMixin:
                             "finalized cancellation replay is missing its decision",
                         )
                     decision_record = _graph_cancellation_decision_record(decision_row)
-                    _assert_graph_cancellation_decision_bindings(
+                    self._assert_graph_cancellation_decision_trusted(
                         conn,
                         decision_record,
-                        evidence_refs_builder=self._graph_cancellation_evidence_refs,
                     )
                     self._assert_parallel_node_states(
                         node_rows,

@@ -27,6 +27,9 @@ from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
     GraphCancellationOperationReconciliationService,
 )
+from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
+    GraphCancellationEffectReconciliationService,
+)
 from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
@@ -123,6 +126,9 @@ class _TaskStore(_Closeable):
 
     def assert_graph_cancellation_continuation_ready(self) -> None:
         self.events.append("task-store:cancellation-continuation-ready")
+
+    def assert_effect_reconciliation_ready(self) -> None:
+        self.events.append("task-store:effect-reconciliation-ready")
 
     def claim_pending_graph_cancellations(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return []
@@ -233,6 +239,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:build",
         "task-store:outbox-ready",
         "task-store:cancellation-continuation-ready",
+        "task-store:effect-reconciliation-ready",
         f"task-store:recover:{container.recovery_id}",
         "review-store:build",
         "review-continuation-store:build",
@@ -260,6 +267,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert isinstance(
         container.operation_reconciliation_service,
         GraphCancellationOperationReconciliationService,
+    )
+    assert isinstance(
+        container.effect_reconciliation_service,
+        GraphCancellationEffectReconciliationService,
     )
     assert container.graph_execution_registry is not None
     assert container.recovery_report.recovery_id == container.recovery_id
@@ -332,15 +343,16 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 7
+    assert len(events) == 8
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
     ]
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
-    assert events[4].startswith("task-store:recover:task-runtime-startup::")
-    assert events[5:] == ["task-store:close", "migration:close"]
+    assert events[4] == "task-store:effect-reconciliation-ready"
+    assert events[5].startswith("task-store:recover:task-runtime-startup::")
+    assert events[6:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -404,8 +416,9 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     ]
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
-    assert events[4].startswith("task-store:recover:task-runtime-startup::")
-    assert events[5:] == [
+    assert events[4] == "task-store:effect-reconciliation-ready"
+    assert events[5].startswith("task-store:recover:task-runtime-startup::")
+    assert events[6:] == [
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",

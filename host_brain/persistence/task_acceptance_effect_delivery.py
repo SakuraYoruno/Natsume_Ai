@@ -59,6 +59,9 @@ _ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS = frozenset(
     }
 )
 
+_EFFECT_RECONCILIATION_PROOF_TABLE = "task_runtime_effect_reconciliation_proof"
+_PENDING_CANCELLATION_RECONCILIATION_PURPOSE = "PENDING_CANCELLATION"
+
 
 class TaskAcceptanceEffectDeliveryMixin:
     """Read, claim and settle acceptance effects with durable fencing."""
@@ -310,6 +313,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             status = AcceptanceEffectStatus(str(row["status"]))
             if status is AcceptanceEffectStatus.COMMITTED:
                 if (
@@ -394,6 +401,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             status = AcceptanceEffectStatus(str(row["status"]))
             if status is AcceptanceEffectStatus.FAILED:
                 if (
@@ -497,6 +508,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         available_ts_ms = ts_ms + retry_delay
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             cancellation_fence = conn.execute(
                 """
                 SELECT resolution_status
@@ -550,6 +565,52 @@ class TaskAcceptanceEffectDeliveryMixin:
             )
             rescheduled["replayed"] = False
             return rescheduled
+
+    @staticmethod
+    def _assert_no_pending_cancellation_reconciliation_proof(
+        conn: sqlite3.Connection,
+        *,
+        effect_id: str,
+    ) -> None:
+        """Fence handler mutations that lose the 0098 proof writer race.
+
+        Migration 0098 is optional for historical 0087 databases, so an
+        absent proof table preserves the original delivery lifecycle.  Once
+        the table exists, the proof row is a deny-only fence here: its full
+        signature and subject binding are owned by the reconciliation Store,
+        while delivery must never mutate the Effect after that authority has
+        committed.  The caller already owns the same ``BEGIN IMMEDIATE``
+        transaction used for the subsequent Effect CAS.
+        """
+
+        proof_table = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            LIMIT 1
+            """,
+            (_EFFECT_RECONCILIATION_PROOF_TABLE,),
+        ).fetchone()
+        if proof_table is None:
+            return
+        proof = conn.execute(
+            """
+            SELECT proof_id
+            FROM task_runtime_effect_reconciliation_proof
+            WHERE effect_id = ? AND purpose = ?
+            LIMIT 1
+            """,
+            (
+                str(effect_id),
+                _PENDING_CANCELLATION_RECONCILIATION_PURPOSE,
+            ),
+        ).fetchone()
+        if proof is not None:
+            raise TaskStoreError(
+                TASK_STORE_CANCELLATION_CONFLICT,
+                "acceptance effect has a committed pending-cancellation "
+                f"reconciliation proof: {effect_id}",
+            )
 
     @staticmethod
     def _require_acceptance_effect_intent(

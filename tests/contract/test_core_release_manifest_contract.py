@@ -32,9 +32,10 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0097_node_grant_batch_uniqueness.sql"
+        "0098_task_runtime_effect_reconciliation.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0098_task_runtime_effect_reconciliation.sql" in migration_files
     assert "host_brain/audit/migrations/0097_node_grant_batch_uniqueness.sql" in migration_files
     assert "host_brain/audit/migrations/0096_task_runtime_review_continuation.sql" in migration_files
     assert "host_brain/audit/migrations/0095_task_runtime_revisioned_graph_outbox.sql" in migration_files
