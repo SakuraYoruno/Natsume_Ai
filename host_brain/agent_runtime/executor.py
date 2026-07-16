@@ -213,13 +213,17 @@ class AgentRuntimeExecutor:
                     self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
                     return result.to_dict()
         except Exception as exc:
+            reason_code = str(getattr(exc, "reason_code", "") or "").strip() or None
             result = blocked_result(
                 work_order_id=order.work_order_id,
                 summary="Agent WorkOrder could not be prepared.",
                 artifacts_dir=str(run_dir),
                 detail=str(exc),
-                risk_flags=["work_order_invalid"],
+                risk_flags=[
+                    "workspace_grant_required" if reason_code == "WORKSPACE_WRITE_GRANT_REQUIRED" else "work_order_invalid"
+                ],
                 review_required=order.review_required,
+                reason_code=reason_code,
             )
             self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
             return result.to_dict()

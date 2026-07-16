@@ -7,12 +7,17 @@ from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 
 
-def test_codex_evolutionplane_blocks_outside_experiment_branch(tmp_path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+def test_codex_evolutionplane_blocks_outside_experiment_branch(monkeypatch, tmp_path) -> None:
+    import host_brain.agent_runtime.workspace_policy as workspace_policy_module
+
+    monkeypatch.setattr(workspace_policy_module, "DEFAULT_CODEX_RUNS_ROOT", tmp_path / "workspaces")
     registry = build_agent_runtime_skill_registry()
     payload = registry.require("agent_self_evolve").handler(
-        {"task": "try an evolution experiment", "workspace": {"path": str(workspace)}, "confirmed": True},
+        {
+            "task": "try an evolution experiment",
+            "workspace": {"strategy": "temp_workspace"},
+            "confirmed": True,
+        },
         {"request_id": "req-evolution"},
     )
 

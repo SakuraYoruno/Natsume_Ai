@@ -400,7 +400,11 @@ class AgentExecutor:
         request_id = str(work_order.metadata.get("request_id") or work_order.work_order_id)
 
         # 1. 构建工具
-        tool_specs = build_agent_tool_specs(run_mode=run_mode)
+        tool_specs = build_agent_tool_specs(
+            run_mode=run_mode,
+            allowed_actions=work_order.allowed_actions,
+            forbidden_actions=work_order.forbidden_actions,
+        )
         tools_desc = _build_tool_description_for_prompt(tool_specs)
 
         # 2. 构建 system prompt
@@ -519,7 +523,12 @@ class AgentExecutor:
                 tool_args = {}
 
             # 权限检查
-            if not is_tool_allowed_for_run_mode(tool_id, run_mode):
+            if not is_tool_allowed_for_run_mode(
+                tool_id,
+                run_mode,
+                allowed_actions=work_order.allowed_actions,
+                forbidden_actions=work_order.forbidden_actions,
+            ):
                 step_duration = int((time.time() - step_start) * 1000)
                 obs = {"error": f"tool `{tool_id}` not allowed in run_mode=`{run_mode}`"}
                 steps.append(AgentStep(

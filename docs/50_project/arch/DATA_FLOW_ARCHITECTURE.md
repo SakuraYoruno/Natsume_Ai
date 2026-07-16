@@ -554,7 +554,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. 在 D0 canonical path fence 之上建立 per-task durable workspace authority 与隔离 worktree；任意 shell 字符串、文件句柄和 reparse-point 竞态不能用路径规范化的通过代替。
+11. W0 已在 D0 canonical path fence 之上先熔断未授权写入：写能力 WorkOrder 只能进入 runtime-owned temp root，主仓/裸路径/git clone/自定义 root 拒绝；默认 subprocess Python 与未实现 shell 不具备 workspace authority。下一步仍须建立 per-task durable workspace authority、隔离 worktree 和 cleanup continuation；文件句柄和 reparse-point 竞态不能用路径规范化的通过代替。
 
 ## 13. 代码证据索引
 
@@ -591,7 +591,7 @@ Edge as sole physical actuator             WIRED
 All Host external effects via one outbox    NOT YET TRUE
 Memory canonical write path                 WIRED_EVENTUAL
 Persona evolution authority                CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
-Workspace path safety                      D0_WIRED / DURABLE ISOLATION INCOMPLETE
+Workspace path safety                      W0_FAIL_CLOSED / DURABLE ISOLATION INCOMPLETE
 Scene context                               PARTIAL_DEFAULT_OFF
 Full Architecture                           INCOMPLETE
 ```

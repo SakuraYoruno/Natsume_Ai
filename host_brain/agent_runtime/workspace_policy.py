@@ -14,6 +14,28 @@ from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
 DEFAULT_CLONE_ROOT = REPO_ROOT / "artifacts" / "codex_clones"
 
+WORKSPACE_WRITE_GRANT_REQUIRED = "WORKSPACE_WRITE_GRANT_REQUIRED"
+
+_WRITE_FORBIDDEN_WORKSPACE_SELECTORS = frozenset(
+    {
+        "path",
+        "git_url",
+        "clone_root",
+        "runs_root",
+        "root",
+        "workspace_root",
+        "repo_root",
+    }
+)
+_WORKSPACE_WRITE_ACTIONS = frozenset({"write_files", "agent_write_file"})
+
+
+class WorkspacePolicyViolation(ValueError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = reason_code
+        self.detail = detail
+        super().__init__(f"{reason_code}: {detail}")
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceResolution:
@@ -62,6 +84,7 @@ class WorkspacePolicy:
     def resolve(self, work_order: AgentWorkOrder) -> WorkspaceResolution:
         workspace = dict(work_order.workspace or {})
         strategy = str(workspace.get("strategy") or "").strip().lower()
+        self._enforce_w0_workspace_source(work_order, workspace=workspace, strategy=strategy)
         if strategy in {"runtime_repo", "current_runtime_repo"}:
             return WorkspaceResolution(path=REPO_ROOT.resolve(), source="runtime_repo")
 
@@ -89,10 +112,59 @@ class WorkspacePolicy:
 
         raise ValueError("workspace could not be resolved from WorkOrder")
 
+    @staticmethod
+    def _enforce_w0_workspace_source(
+        work_order: AgentWorkOrder,
+        *,
+        workspace: dict[str, Any],
+        strategy: str,
+    ) -> None:
+        """Fail closed until a durable, task-bound WorkspaceGrant exists.
+
+        W0 intentionally permits write-capable orders only in the runtime-owned
+        per-WorkOrder temporary root.  It is a stopgap boundary, not durable
+        workspace ownership or OS-level isolation.
+        """
+
+        if not WorkspacePolicy._requires_workspace_write(work_order):
+            return
+        forbidden_selectors = sorted(
+            key
+            for key in _WRITE_FORBIDDEN_WORKSPACE_SELECTORS
+            if key in workspace and str(workspace.get(key) or "").strip()
+        )
+        if strategy != "temp_workspace" or forbidden_selectors:
+            detail = (
+                f"; forbidden selectors={','.join(forbidden_selectors)}"
+                if forbidden_selectors
+                else ""
+            )
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "write-capable WorkOrders may only use the runtime-owned temp_workspace "
+                f"before durable WorkspaceGrant{detail}",
+            )
+
+    @staticmethod
+    def _requires_workspace_write(work_order: AgentWorkOrder) -> bool:
+        actions = {
+            str(action).strip().lower()
+            for action in work_order.allowed_actions
+            if str(action).strip()
+        }
+        return work_order.run_mode in {"worker", "self_heal", "self_evolve"} or bool(
+            actions & _WORKSPACE_WRITE_ACTIONS
+        )
+
     def enforce_write_policy(self, work_order: AgentWorkOrder, resolution: WorkspaceResolution) -> tuple[bool, str | None]:
-        if not work_order.requires_write:
+        if not self._requires_workspace_write(work_order):
             return True, None
-        if not work_order.allowed_actions or "write_files" not in set(work_order.allowed_actions):
+        allowed_actions = {
+            str(action).strip().lower()
+            for action in work_order.allowed_actions
+            if str(action).strip()
+        }
+        if not (allowed_actions & _WORKSPACE_WRITE_ACTIONS):
             return False, "write WorkOrders must include allowed_actions=['write_files', ...]"
         if "modify_secret_files" not in set(work_order.forbidden_actions):
             return False, "write WorkOrders must forbid secret-file mutation"
@@ -132,4 +204,9 @@ class WorkspacePolicy:
         return str(completed.stdout or "").strip() or None
 
 
-__all__ = ["WorkspacePolicy", "WorkspaceResolution"]
+__all__ = [
+    "WORKSPACE_WRITE_GRANT_REQUIRED",
+    "WorkspacePolicy",
+    "WorkspacePolicyViolation",
+    "WorkspaceResolution",
+]

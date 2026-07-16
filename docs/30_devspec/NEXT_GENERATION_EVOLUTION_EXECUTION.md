@@ -126,7 +126,7 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - 0097 为 `S_TASK_GRAPH_NODE_GRANT` 增加 request+intent partial unique index 与身份 trigger；SQLite ledger 在 `BEGIN IMMEDIATE` 后重查 deterministic batch identity，跨进程 loser 只读取 winner 的 exact batch。批量第二条写入失败整事务回滚，历史重复让迁移 fail closed；
 - 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
-- Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
+- Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。W0 安全熔断进一步在 model/tool 前拒绝写能力 WorkOrder 的 `runtime_repo`、裸 path、git URL 和自定义 root，只允许 runtime-owned `temp_workspace`；read-only inspect 仍可读主仓。工具 authority 取 `run_mode ∩ allowed_actions − forbidden_actions`，默认 subprocess Python 与尚未实现的 shell 均不作为受控 workspace 执行器；
 - Composition 两个安全切片累计删除 6 个生产零消费者全局槽位和 4 个死 accessor；第二刀额外收掉 7 个宽泛 façade 重导出及 `retrieval_pipeline` 的测试 reset 残留。排除 6 个 lock 与 `application_ports` 端口束后的可变服务引用由 59 降为 53，但全局 container 仍存在。
 
 Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。B4/0090 与 B5A/B5B/0091 语义继续有效；B5C 已有 0092～0099 分范围 durable authority。Budget 高竞争唯一 winner、单节点 post-budget 检查点接管与 0099 窄历史终态 reconciliation 已有证据，但不构成通用恢复。0094 本身不复制 0092 业务状态；Operation、Effect 与 terminal reconciliation 均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。外部生产库存尚未盘点，general/batch/pre-budget recovery、部署密钥/凭据、完整 key lifecycle 与真实 canary尚未完成，atomic、bounded、cancellation均为 `PRODUCTION_OFF`。现实 resolver 分类仍未闭环。Lane D 的 workspace/composition 仍未完成，因此 Lane B、NE-01 和完整架构都不得封板。
@@ -168,7 +168,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 #### Lane D：Composition 与 workspace
 
-- D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
+- D0 scoped path-safety 与 W0 write fail-closed 熔断已完成；它们不是 per-task durable workspace ownership、唯一 lease/cleanup receipt 或 OS/tenant/worktree 隔离；
 - mixed-file gate 未抬高 ceiling，但全仓仍因三个既存 >1,500 行未分类文件为 RED。`DurableDagSchedulingRuntime` 当前 1,269 行，`coordinator.py` 268 行；新增 238 行 `AcceptedGraphFinalizationRuntime` 是 normal/restart/continuation 共用的 Graph+Effect completion boundary。Dag 调用矩阵现为 Store 9、Budget 9、Lifecycle 17、AcceptedFinalization 1、NodeProjection 13、NodeExecution 7、Settlement 4、Success 1、Review 4、Cancellation 1、Outbox 1 build/6 publish；不反向持有 Coordinator callback、不建新锁、不取得第二 persistence authority。它仍是临时 outer orchestrator，不能据此宣称 mixed-responsibility、历史 reconciliation 或一般恢复闭环完成；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；

@@ -157,31 +157,18 @@ def _tool_agent_list_files(args: dict[str, Any], *, workspace: Path) -> dict[str
 
 
 def _tool_agent_run_shell(args: dict[str, Any], *, workspace: Path, sandbox_enabled: bool = True) -> dict[str, Any]:
-    """在沙箱中运行 shell 命令。"""
+    """Fail closed until a container-backed shell executor exists."""
     command = str(args.get("command") or args.get("cmd") or "").strip()
     if not command:
         return {"error": "missing command argument"}
-    timeout = min(int(args.get("timeout") or 60), 300)
     if not sandbox_enabled:
         return {"error": "shell execution requires sandbox mode"}
-    try:
-        from host_brain.airlock import SandboxExecutor  # noqa: PLC0415
-
-        result = SandboxExecutor().execute(
-            command,
-            request_id=None,
-            intent_id="agent_shell",
-            language="shell",
+    return {
+        "error": (
+            "controlled shell execution is unavailable; "
+            "SandboxExecutor does not implement a container-backed shell"
         )
-        return {
-            "exit_code": result.exit_code,
-            "stdout": (result.stdout or "")[:8000],
-            "stderr": (result.stderr or "")[:4000],
-            "status": result.status,
-            "duration_ms": result.duration_ms,
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
+    }
 
 
 def _tool_agent_run_python(args: dict[str, Any], *, workspace: Path, sandbox_enabled: bool = True) -> dict[str, Any]:
@@ -191,6 +178,13 @@ def _tool_agent_run_python(args: dict[str, Any], *, workspace: Path, sandbox_ena
         return {"error": "missing code argument"}
     if not sandbox_enabled:
         return {"error": "python execution requires sandbox mode"}
+    if not _container_isolation_required():
+        return {
+            "error": (
+                "python execution requires fail-closed container isolation; "
+                "the subprocess backend is not a controlled workspace"
+            )
+        }
     try:
         from host_brain.airlock import SandboxExecutor  # noqa: PLC0415
 
@@ -319,12 +313,12 @@ def _tool_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> dict[s
     save_path = str(args.get("save_path") or "").strip() or None
     full_page = bool(args.get("full_page", False))
     if save_path:
-        try:
-            resolved = resolve_workspace_path(workspace, save_path)
-        except PermissionError as exc:
-            return {"error": str(exc)}
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        save_path = str(resolved)
+        return {
+            "error": (
+                "browser screenshot workspace persistence requires durable WorkspaceGrant; "
+                "request an in-memory screenshot instead"
+            )
+        }
     return execute_browser_skill({
         "action": "screenshot",
         "save_path": save_path,
@@ -366,17 +360,93 @@ def _tool_browser_execute_script(args: dict[str, Any], *, workspace: Path) -> di
 _AGENT_TOOL_PERMISSIONS: dict[str, set[str]] = {
     "inspect":    {"agent_read_file", "agent_list_files", "agent_finish"},
     "research":   {"agent_read_file", "agent_list_files", "agent_web_fetch", "browser_navigate", "browser_scrape", "browser_screenshot", "browser_execute_script", "agent_finish"},
-    "audit":      {"agent_read_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
+    "audit":      {"agent_read_file", "agent_list_files", "agent_run_python", "agent_git_diff", "agent_finish"},
     "translate":  {"agent_read_file", "agent_list_files", "agent_write_file", "agent_finish"},
-    "worker":     {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "browser_navigate", "browser_scrape", "browser_screenshot", "browser_click", "browser_execute_script", "agent_finish"},
-    "self_heal":  {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
-    "self_evolve":{"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
+    "worker":     {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_python", "agent_git_diff", "browser_navigate", "browser_scrape", "browser_screenshot", "browser_click", "browser_execute_script", "agent_finish"},
+    "self_heal":  {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_python", "agent_git_diff", "agent_finish"},
+    "self_evolve":{"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_python", "agent_git_diff", "agent_finish"},
+}
+
+# Tool IDs are execution primitives while WorkOrder actions are authority
+# capabilities.  A tool must be allowed by both this mapping and run_mode.
+_AGENT_TOOL_ACTIONS: dict[str, frozenset[str]] = {
+    "agent_read_file": frozenset({"read_files"}),
+    "agent_list_files": frozenset({"read_files"}),
+    "agent_write_file": frozenset({"write_files"}),
+    "agent_run_python": frozenset({"run_python"}),
+    "agent_web_fetch": frozenset({"read_public_web_pages", "web_fetch"}),
+    "browser_navigate": frozenset({"use_playwright_browser"}),
+    "browser_scrape": frozenset({"use_playwright_browser"}),
+    "browser_screenshot": frozenset({"use_playwright_browser", "capture_screenshots"}),
+    "browser_click": frozenset({"use_playwright_browser", "browser_click"}),
+    "browser_execute_script": frozenset({"use_playwright_browser"}),
+    "agent_git_diff": frozenset({"read_files", "git_diff"}),
+    "agent_finish": frozenset({"generate_report"}),
 }
 
 
-def is_tool_allowed_for_run_mode(tool_id: str, run_mode: str) -> bool:
-    """检查工具是否允许在指定运行模式下使用。"""
-    allowed = _AGENT_TOOL_PERMISSIONS.get(str(run_mode).strip().lower(), set())
+def _normalized_action_set(actions: Any) -> set[str]:
+    if not isinstance(actions, (list, tuple, set, frozenset)):
+        return set()
+    return {str(action).strip().lower() for action in actions if str(action).strip()}
+
+
+def _container_isolation_required() -> bool:
+    backend = str(os.environ.get("SANDBOX_ISOLATION_BACKEND") or "subprocess").strip().lower()
+    require_container = str(os.environ.get("SANDBOX_REQUIRE_CONTAINER") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    production = str(os.environ.get("Natsume_ENV") or "").strip().lower() in {
+        "prod",
+        "production",
+    }
+    return backend in {"docker", "auto"} and (require_container or production)
+
+
+def _allowed_tools_for_work_order(
+    *,
+    run_mode: str,
+    allowed_actions: Any,
+    forbidden_actions: Any,
+) -> set[str]:
+    mode_allowed = set(_AGENT_TOOL_PERMISSIONS.get(str(run_mode).strip().lower(), set()))
+    allowed = _normalized_action_set(allowed_actions)
+    forbidden = _normalized_action_set(forbidden_actions)
+    selected: set[str] = set()
+    for tool_id in mode_allowed:
+        capabilities = _AGENT_TOOL_ACTIONS.get(tool_id, frozenset())
+        authority_names = {tool_id, *capabilities}
+        if authority_names & forbidden:
+            continue
+        # agent_finish remains available so a fail-closed tool set can still
+        # terminate without forcing the model into MAX_STEPS.
+        if tool_id == "agent_finish" or authority_names & allowed:
+            selected.add(tool_id)
+    # The default subprocess backend only changes environment variables; it is
+    # not an OS filesystem boundary.  Never advertise Python as a controlled
+    # workspace tool unless container isolation is fail-closed.
+    if not _container_isolation_required():
+        selected.discard("agent_run_python")
+    return selected
+
+
+def is_tool_allowed_for_run_mode(
+    tool_id: str,
+    run_mode: str,
+    *,
+    allowed_actions: Any = (),
+    forbidden_actions: Any = (),
+) -> bool:
+    """Check the run_mode and WorkOrder authority intersection."""
+
+    allowed = _allowed_tools_for_work_order(
+        run_mode=run_mode,
+        allowed_actions=allowed_actions,
+        forbidden_actions=forbidden_actions,
+    )
     return str(tool_id).strip().lower() in allowed
 
 
@@ -426,23 +496,12 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": False,
     },
     {
-        "tool_id": "agent_run_shell",
-        "display_name": "运行 Shell 命令",
-        "description": "在沙箱中执行 shell 命令。需要 worker/self_heal/self_evolve 模式。参数：command（命令字符串）、timeout（秒，默认60）。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "要执行的 shell 命令"},
-                "timeout": {"type": "integer", "description": "超时秒数（默认60，最大300）"},
-            },
-            "required": ["command"],
-        },
-        "has_side_effects": True,
-    },
-    {
         "tool_id": "agent_run_python",
         "display_name": "运行 Python 代码",
-        "description": "在沙箱中执行 Python 代码片段。需要 worker/self_heal/self_evolve 模式。参数：code（Python 源代码）。",
+        "description": (
+            "仅在 WorkOrder 明确授权 run_python 且强制容器隔离时执行 Python；"
+            "不提供受控工作区写能力。参数：code（Python 源代码）。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -569,9 +628,19 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
 ]
 
 
-def build_agent_tool_specs(*, run_mode: str) -> list[ToolSpec]:
-    """根据运行模式构建允许的工具列表。"""
-    allowed = _AGENT_TOOL_PERMISSIONS.get(str(run_mode).strip().lower(), set())
+def build_agent_tool_specs(
+    *,
+    run_mode: str,
+    allowed_actions: Any = (),
+    forbidden_actions: Any = (),
+) -> list[ToolSpec]:
+    """Build the run_mode and WorkOrder authority intersection."""
+
+    allowed = _allowed_tools_for_work_order(
+        run_mode=run_mode,
+        allowed_actions=allowed_actions,
+        forbidden_actions=forbidden_actions,
+    )
     specs: list[ToolSpec] = []
     for tool_def in _AGENT_TOOL_DEFS:
         if tool_def["tool_id"] not in allowed:

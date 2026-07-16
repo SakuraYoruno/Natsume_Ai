@@ -23,6 +23,7 @@
     "terminal_reconciliation_auto": "DEFAULT_OFF",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "failure_replan": "PARTIAL_FAIL_CLOSED_NO_SUPERSESSION",
+    "workspace_write": "FAIL_CLOSED_W0_STOPGAP",
     "budget": "PARTIAL_CONTENTION_PROVEN",
     "production_canary": "NOT_RUN"
   },
@@ -637,10 +638,17 @@
     "workspace_isolation": {
       "status": "PARTIAL",
       "path_safety": "D0_WIRED",
+      "write_fuse": "FAIL_CLOSED_W0_STOPGAP",
+      "tool_authority": "RUN_MODE_INTERSECT_ALLOWED_MINUS_FORBIDDEN",
+      "subprocess_python": "DENIED_AS_WORKSPACE_ISOLATION",
+      "shell_execution": "REMOVED_UNTIL_CONTROLLED_CONTAINER_EXECUTOR_EXISTS",
       "evidence": [
         "host_brain/agent_runtime/workspace_paths.py",
+        "host_brain/agent_runtime/workspace_policy.py",
+        "host_brain/agent_runtime/agent_tools.py",
         "tests/unit/test_workspace_path_resolver.py",
         "tests/unit/test_agent_tool_workspace_paths.py",
+        "tests/unit/test_ne01_workspace_w0_fuse.py",
         "tests/contract/test_nle_verification_gate_contract.py"
       ],
       "protected_surfaces": [
@@ -651,11 +659,12 @@
       ],
       "missing": [
         "durable per-task workspace authority",
-        "runtime_repo removal",
+        "runtime_repo retirement for read-only inspection",
+        "collision-free leased workspace allocation and cleanup receipt",
         "OS/tenant/worktree isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path resolution now rejects traversal, absolute/UNC/device paths, same-prefix sibling escapes, and resolved symlink/junction escapes on scoped Agent/Verification surfaces. WorkspacePolicy still permits arbitrary paths/runtime_repo and does not provide durable ownership or OS, tenant, or worktree isolation."
+      "reason": "Canonical path resolution rejects traversal, absolute/UNC/device paths, same-prefix sibling escapes, and resolved symlink/junction escapes on scoped Agent/Verification surfaces. W0 additionally rejects write-capable runtime_repo, arbitrary path, git_url, and custom root selectors before model/tool execution; only the runtime-owned temp_workspace is accepted. Read-only inspect may still read runtime_repo. Tool exposure now intersects run_mode with WorkOrder actions, subprocess Python is denied as an isolation boundary, and the unsupported shell tool is removed. This remains a fail-closed stopgap without durable ownership, collision fencing, cleanup continuation, worktree, OS, or tenant isolation."
     },
     "evolution_lab": {"status": "PLACEHOLDER"},
     "counterfactual_analysis": {"status": "MISSING"},

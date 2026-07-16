@@ -94,7 +94,7 @@ def test_browser_screenshot_rejects_unsafe_save_path_before_executor(
     assert calls == []
 
 
-def test_browser_screenshot_passes_canonical_workspace_path_to_executor(
+def test_browser_screenshot_workspace_persistence_requires_durable_grant(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -117,6 +117,6 @@ def test_browser_screenshot_passes_canonical_workspace_path_to_executor(
         workspace=workspace,
     )
 
-    assert result == {"status": "ok"}
-    assert calls[0]["save_path"] == str((workspace / "artifacts/page.png").resolve())
-    assert (workspace / "artifacts").is_dir()
+    assert "requires durable WorkspaceGrant" in str(result.get("error"))
+    assert calls == []
+    assert not (workspace / "artifacts").exists()
