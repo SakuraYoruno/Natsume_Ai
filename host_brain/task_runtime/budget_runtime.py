@@ -283,6 +283,15 @@ class DurableBudgetRuntime:
         elapsed time supplies the missing wall-clock charge.
         """
 
+        if (
+            type(durable_elapsed_ms) is not int
+            or durable_elapsed_ms <= 0
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_USAGE_INVALID,
+                "worker checkpoint durable elapsed time must be a positive integer",
+            )
+
         payload = worker_commit.get("budget_usage")
         if payload is None:
             usage_id = _internal_usage_id(
@@ -322,7 +331,7 @@ class DurableBudgetRuntime:
             node_id=node_id,
             attempt_id=attempt_id,
             worker_commit=worker_commit,
-            elapsed_ms=max(0, int(durable_elapsed_ms)),
+            elapsed_ms=durable_elapsed_ms,
         )
 
     async def reconcile_worker_checkpoint(

@@ -39,7 +39,15 @@ class _Store:
                     "graph_revision": 1,
                     "node_id": "node-1",
                     "attempt_id": "attempt-1",
-                    "charge_kind": "WORKER_ELAPSED",
+                    "charge_kind": "WORKER_USAGE:COST+RETRY+TIME+TOKEN",
+                    "delta": {
+                        "token_count": 1,
+                        "tool_call_count": 0,
+                        "time_ms": 3,
+                        "concurrency": 0,
+                        "retry_count": 0,
+                        "model_cost_micros": 1,
+                    },
                     "accepted": True,
                 }
             ]
@@ -96,7 +104,18 @@ class _Store:
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
         assert (graph_id, revision) == ("graph-1", 1)
         return {
-            "budget_usage": [dict(item) for item in self.budget_usage]
+            "budgets": [
+                {
+                    "budget_id": "budget-1",
+                    "graph_id": "graph-1",
+                    "graph_revision": 1,
+                    "node_id": None,
+                    "attempt_id": None,
+                    "status": "ACTIVE",
+                    "status_version": 1,
+                }
+            ],
+            "budget_usage": [dict(item) for item in self.budget_usage],
         }
 
 
@@ -140,6 +159,8 @@ def _attempt() -> dict[str, Any]:
         "operation_fingerprint": "fingerprint-1",
         "status": "SUCCEEDED",
         "status_version": 4,
+        "started_ts_ms": 10,
+        "updated_ts_ms": 20,
     }
 
 
@@ -164,6 +185,8 @@ def _reservation(receipt_ref: str) -> dict[str, Any]:
         "status": "COMMITTED",
         "status_version": 2,
         "receipt_ref": receipt_ref,
+        "created_ts_ms": 1,
+        "updated_ts_ms": 20,
     }
 
 
@@ -356,7 +379,15 @@ async def test_multiple_accepted_worker_budget_usages_block_takeover() -> None:
         "graph_revision": 1,
         "node_id": "node-1",
         "attempt_id": "attempt-1",
-        "charge_kind": "WORKER_ELAPSED",
+        "charge_kind": "WORKER_USAGE:COST+RETRY+TIME+TOKEN",
+        "delta": {
+            "token_count": 1,
+            "tool_call_count": 0,
+            "time_ms": 3,
+            "concurrency": 0,
+            "retry_count": 0,
+            "model_cost_micros": 1,
+        },
         "accepted": True,
     }
     duplicate_usage = {
@@ -376,7 +407,7 @@ async def test_multiple_accepted_worker_budget_usages_block_takeover() -> None:
 
     with pytest.raises(
         GovernedRuntimeError,
-        match="lacks one accepted worker BudgetUsage",
+        match="worker BudgetUsage conflicts",
     ):
         await runtime.takeover_committed(
             admitted=_admitted(),

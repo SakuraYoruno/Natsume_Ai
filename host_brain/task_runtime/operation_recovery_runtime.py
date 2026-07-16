@@ -33,9 +33,11 @@ from .node_execution_records import (
 )
 from .operation_commit_reconciliation import commit_or_reconcile_exact
 from .operation_checkpoint_validation import (
-    accepted_worker_budget_usage,
+    WorkerBudgetUsageCheckpointState,
+    assert_active_checkpoint_budget,
     assert_canonical_projection_identity,
     assert_exact_committed_checkpoint,
+    classify_worker_budget_usage,
     expected_route_authority,
 )
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
@@ -51,7 +53,9 @@ class CommittedOperationCheckpoint:
     receipt_ref: str
     payload_digest: str
     payload_digest_source: str
-    budget_usage: dict[str, Any]
+    budget_usage_state: WorkerBudgetUsageCheckpointState
+    budget_usage: dict[str, Any] | None
+    durable_elapsed_ms: int | None
     lease: dict[str, Any] | None
 
     @property
@@ -252,11 +256,30 @@ class DurableOperationRecoveryRuntime:
                 admitted.graph_revision,
             )
         )
-        budget_usage = accepted_worker_budget_usage(
+        assert_active_checkpoint_budget(
+            snapshot,
+            graph_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+            budget_id=_required_text(budget_id, "budget_id"),
+        )
+        budget_usage = classify_worker_budget_usage(
             snapshot,
             attempt_id=_required_text(latest_attempt.get("attempt_id"), "attempt_id"),
             budget_id=_required_text(budget_id, "budget_id"),
             worker_commit=worker_commit,
+            graph_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+            node_id=admitted.node_id,
+        )
+        if budget_usage.state is WorkerBudgetUsageCheckpointState.CONFLICT:
+            self._blocked("committed checkpoint worker BudgetUsage conflicts")
+        durable_elapsed_ms = (
+            _durable_checkpoint_elapsed_ms(
+                reservation=reservation,
+                attempt=latest_attempt,
+            )
+            if budget_usage.state is WorkerBudgetUsageCheckpointState.MISSING
+            else None
         )
 
         attempt, lease = await acquire_checkpoint_takeover_lease(
@@ -268,6 +291,13 @@ class DurableOperationRecoveryRuntime:
             owner_id=self._owner_id,
             lease_ttl_ms=self._lease_ttl_ms,
         )
+        if (
+            budget_usage.state is WorkerBudgetUsageCheckpointState.MISSING
+            and lease is None
+        ):
+            self._blocked(
+                "missing worker BudgetUsage requires a new fenced takeover Lease"
+            )
 
         return CommittedOperationCheckpoint(
             reservation=dict(reservation),
@@ -276,7 +306,13 @@ class DurableOperationRecoveryRuntime:
             receipt_ref=receipt_ref,
             payload_digest=payload_digest,
             payload_digest_source=payload_digest_source,
-            budget_usage=budget_usage,
+            budget_usage_state=budget_usage.state,
+            budget_usage=(
+                dict(budget_usage.usage)
+                if budget_usage.usage is not None
+                else None
+            ),
+            durable_elapsed_ms=durable_elapsed_ms,
             lease=lease,
         )
 
@@ -373,6 +409,32 @@ def _required_positive_int(value: Any, field_name: str) -> int:
             f"committed checkpoint has invalid {field_name}",
         )
     return value
+
+
+def _durable_checkpoint_elapsed_ms(
+    *,
+    reservation: Mapping[str, Any],
+    attempt: Mapping[str, Any],
+) -> int:
+    started_ts_ms = attempt.get("started_ts_ms")
+    committed_ts_ms = reservation.get("updated_ts_ms")
+    if (
+        type(started_ts_ms) is not int
+        or type(committed_ts_ms) is not int
+        or started_ts_ms < 0
+        or committed_ts_ms < started_ts_ms
+    ):
+        raise GovernedRuntimeError(
+            GOVERNED_OPERATION_RECOVERY_REQUIRED,
+            "committed checkpoint durable elapsed time is invalid",
+        )
+    elapsed_ms = committed_ts_ms - started_ts_ms
+    if elapsed_ms == 0:
+        raise GovernedRuntimeError(
+            GOVERNED_OPERATION_RECOVERY_REQUIRED,
+            "committed checkpoint durable elapsed time cannot be zero",
+        )
+    return elapsed_ms
 
 
 __all__ = [

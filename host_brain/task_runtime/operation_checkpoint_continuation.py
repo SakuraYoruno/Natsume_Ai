@@ -39,6 +39,7 @@ from .errors import (
 from .node_execution_records import build_review_context
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .operation_checkpoint_records import build_checkpoint_execution_context
+from .operation_checkpoint_validation import WorkerBudgetUsageCheckpointState
 from .operation_recovery_runtime import CommittedOperationCheckpoint
 from .ports import AcceptancePort, TaskStorePort, VerificationPort
 from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
@@ -100,6 +101,12 @@ class CommittedCheckpointContinuation:
             "worker_replayed": False,
             "payload_digest": payload_digest,
             "payload_digest_source": checkpoint.payload_digest_source,
+            "budget_usage_state": checkpoint.budget_usage_state.value,
+            "budget_usage_reconstructed": (
+                checkpoint.budget_usage_state
+                is WorkerBudgetUsageCheckpointState.MISSING
+            ),
+            "durable_elapsed_ms": checkpoint.durable_elapsed_ms,
         }
         receipt_projection = {
             **worker_commit,
@@ -140,13 +147,43 @@ class CommittedCheckpointContinuation:
             )
             node_status = _status(current_node)
         try:
-            charge = await self._budgets.reconcile_worker_checkpoint(
-                budget,
-                node_id=admitted.node_id,
-                attempt_id=attempt_id,
-                worker_commit=worker_commit,
-                durable_usage=checkpoint.budget_usage,
-            )
+            if (
+                checkpoint.budget_usage_state
+                is WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED
+            ):
+                if not isinstance(checkpoint.budget_usage, Mapping):
+                    self._blocked(
+                        "exact worker BudgetUsage checkpoint lost its durable row"
+                    )
+                charge = await self._budgets.reconcile_worker_checkpoint(
+                    budget,
+                    node_id=admitted.node_id,
+                    attempt_id=attempt_id,
+                    worker_commit=worker_commit,
+                    durable_usage=checkpoint.budget_usage,
+                )
+            elif (
+                checkpoint.budget_usage_state
+                is WorkerBudgetUsageCheckpointState.MISSING
+            ):
+                durable_elapsed_ms = checkpoint.durable_elapsed_ms
+                if (
+                    type(durable_elapsed_ms) is not int
+                    or durable_elapsed_ms <= 0
+                    or active_lease is None
+                ):
+                    self._blocked(
+                        "missing worker BudgetUsage has no positive durable elapsed time and takeover Lease"
+                    )
+                charge = await self._budgets.settle_worker_checkpoint(
+                    budget,
+                    node_id=admitted.node_id,
+                    attempt_id=attempt_id,
+                    worker_commit=worker_commit,
+                    durable_elapsed_ms=durable_elapsed_ms,
+                )
+            else:
+                self._blocked("worker BudgetUsage checkpoint is conflicting")
         except GovernedRuntimeError as exc:
             failure_fence = (
                 _record_positive_int(active_lease, "fencing_token")
@@ -189,7 +226,10 @@ class CommittedCheckpointContinuation:
                     evidence_refs=evidence_refs,
                     projection={
                         "worker_replayed": False,
-                        "budget_usage_reconstructed": False,
+                        "budget_usage_reconstructed": (
+                            checkpoint.budget_usage_state
+                            is WorkerBudgetUsageCheckpointState.MISSING
+                        ),
                         "budget": budget.execution_payload(),
                     },
                 )

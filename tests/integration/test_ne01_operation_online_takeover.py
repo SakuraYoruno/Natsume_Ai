@@ -4,10 +4,12 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import threading
 from typing import Any
 
 import pytest
 
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
 from host_brain.orchestration import GovernedCommandApplication
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import (
@@ -165,6 +167,60 @@ class _SelectedCommitFailureStore(_CommitFailureStore):
         self._failed = True
         self._delegate.commit_operation(reservation_id, **kwargs)
         raise self._failure
+
+
+class _TimedCommitFailureStore(_CommitFailureStore):
+    def __init__(
+        self,
+        delegate: DurableTaskStore,
+        failure: BaseException,
+        *,
+        clock: _Clock,
+        elapsed_ms: int,
+    ) -> None:
+        super().__init__(delegate, failure)
+        self._clock = clock
+        self._elapsed_ms = int(elapsed_ms)
+
+    def commit_operation(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self._clock.advance(self._elapsed_ms)
+        return super().commit_operation(*args, **kwargs)
+
+
+class _BudgetResponseLossStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.failed = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def consume_budget_once(self, *args: Any, **kwargs: Any) -> Any:
+        result = self._delegate.consume_budget_once(*args, **kwargs)
+        if (
+            not self.failed
+            and str(kwargs.get("charge_kind") or "").startswith("WORKER_USAGE")
+        ):
+            self.failed = True
+            raise TimeoutError("simulated BudgetUsage response loss")
+        return result
+
+
+class _BarrierAcquireStore:
+    def __init__(
+        self,
+        delegate: DurableTaskStore,
+        barrier: threading.Barrier,
+    ) -> None:
+        self._delegate = delegate
+        self._barrier = barrier
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def acquire_lease(self, *args: Any, **kwargs: Any) -> Any:
+        self._barrier.wait(timeout=5.0)
+        return self._delegate.acquire_lease(*args, **kwargs)
 
 
 class _StopBeforeAttemptSuccessStore:
@@ -405,11 +461,11 @@ async def test_reopened_runtime_takes_over_same_attempt_from_committed_checkpoin
 
 
 @pytest.mark.asyncio
-async def test_prebudget_checkpoint_stays_incomplete_without_new_takeover_lease(
+async def test_prebudget_checkpoint_is_settled_once_without_worker_replay(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
-    contracts = _contracts((("root", ()),), token_limit=5)
+    contracts = _contracts((("root", ()),))
     clock = _Clock()
     projections = WorkerProjectionStore(db_path, clock=clock)
     calls: list[str] = []
@@ -418,9 +474,11 @@ async def test_prebudget_checkpoint_stays_incomplete_without_new_takeover_lease(
     first_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=clock),
         coordinator=_coordinator(
-            store=_CommitFailureStore(
+            store=_TimedCommitFailureStore(
                 durable,
                 _ProcessStopped("process stopped before budget settlement"),
+                clock=clock,
+                elapsed_ms=7,
             ),
             projections=projections,
             worker=worker,
@@ -442,24 +500,22 @@ async def test_prebudget_checkpoint_stays_incomplete_without_new_takeover_lease(
             owner_id="budget-owner-b",
         ),
     )
-    incomplete = await _events(second_app, contracts)
+    resumed = await _events(second_app, contracts)
 
-    assert incomplete[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
-    assert incomplete[-1]["execution_receipt"]["accepted"] is False
-    assert (
-        incomplete[-1]["execution_receipt"]["projection"][
-            "online_takeover_state"
-        ]
-        == "CHECKPOINT_INCOMPLETE"
-    )
+    assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
+    assert resumed[-1]["execution_receipt"]["accepted"] is True
     assert calls == ["root"]
     snapshot = reopened.read_scheduler_snapshot("graph-gr03a", 1)
-    assert snapshot["attempts"][0]["status"] == "RUNNING"
-    assert reopened.get_node("graph-gr03a", 1, "root")["status"] == "RUNNING"
-    assert reopened.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
-    assert [lease["owner_id"] for lease in snapshot["active_leases"]] == [
-        "budget-owner-a"
+    worker_usages = [
+        row
+        for row in snapshot["budget_usage"]
+        if row["charge_kind"].startswith("WORKER_USAGE")
     ]
+    assert len(worker_usages) == 1
+    assert worker_usages[0]["accepted"] is True
+    assert worker_usages[0]["delta"]["time_ms"] == 7
+    assert worker_usages[0]["delta"]["token_count"] == 10
+    assert snapshot["attempts"][0]["status"] == "SUCCEEDED"
 
     third_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=clock),
@@ -471,15 +527,283 @@ async def test_prebudget_checkpoint_stays_incomplete_without_new_takeover_lease(
         ),
     )
     replay = await _events(third_app, contracts)
-    assert replay[-1]["execution_receipt"]["accepted"] is False
-    assert replay[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
-    assert (
-        replay[-1]["execution_receipt"]["projection"][
-            "online_takeover_state"
-        ]
-        == "CHECKPOINT_INCOMPLETE"
+    assert replay[-1]["execution_receipt"]["accepted"] is True
+    assert replay[-1]["execution_receipt"]["replayed"] is True
+    final_snapshot = DurableTaskStore(db_path, clock=clock).read_scheduler_snapshot(
+        "graph-gr03a", 1
     )
+    assert len(
+        [
+            row
+            for row in final_snapshot["budget_usage"]
+            if row["charge_kind"].startswith("WORKER_USAGE")
+        ]
+    ) == 1
     assert calls == ["root"]
+
+
+@pytest.mark.asyncio
+async def test_prebudget_checkpoint_over_limit_fails_closed_without_replay(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),), token_limit=5)
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(projections=projections, calls=calls)
+    durable = DurableTaskStore(db_path, clock=clock)
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_TimedCommitFailureStore(
+                durable,
+                _ProcessStopped("process stopped before budget settlement"),
+                clock=clock,
+                elapsed_ms=9,
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="budget-limit-owner-a",
+        ),
+    )
+
+    with pytest.raises(GovernedRuntimeError):
+        await _events(first_app, contracts)
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    second_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=reopened,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="budget-limit-owner-b",
+        ),
+    )
+
+    blocked = await _events(second_app, contracts)
+
+    assert blocked[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    assert blocked[-1]["execution_receipt"]["accepted"] is False
+    assert calls == ["root"]
+    snapshot = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    worker_usages = [
+        row
+        for row in snapshot["budget_usage"]
+        if row["charge_kind"].startswith("WORKER_USAGE")
+    ]
+    assert len(worker_usages) == 1
+    assert worker_usages[0]["accepted"] is False
+    assert worker_usages[0]["delta"]["time_ms"] == 9
+    assert "token_count" in worker_usages[0]["exceeded_dimensions"]
+    assert reopened.get_graph("graph-gr03a", 1)["status"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_prebudget_settlement_response_loss_reuses_exact_usage(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(projections=projections, calls=calls)
+    durable = DurableTaskStore(db_path, clock=clock)
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_TimedCommitFailureStore(
+                durable,
+                _ProcessStopped("process stopped before budget settlement"),
+                clock=clock,
+                elapsed_ms=11,
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="budget-loss-owner-a",
+        ),
+    )
+    with pytest.raises(GovernedRuntimeError):
+        await _events(first_app, contracts)
+    clock.advance(25)
+
+    loss_store = _BudgetResponseLossStore(DurableTaskStore(db_path, clock=clock))
+    second_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=loss_store,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="budget-loss-owner-b",
+        ),
+    )
+    resumed = await _events(second_app, contracts)
+
+    assert resumed[-1]["execution_receipt"]["accepted"] is True
+    assert loss_store.failed is True
+    assert calls == ["root"]
+    snapshot = DurableTaskStore(db_path, clock=clock).read_scheduler_snapshot(
+        "graph-gr03a", 1
+    )
+    assert len(
+        [
+            row
+            for row in snapshot["budget_usage"]
+            if row["charge_kind"].startswith("WORKER_USAGE")
+        ]
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_conflicting_worker_usage_blocks_before_takeover_lease(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(projections=projections, calls=calls)
+    durable = DurableTaskStore(db_path, clock=clock)
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_TimedCommitFailureStore(
+                durable,
+                _ProcessStopped("process stopped before budget settlement"),
+                clock=clock,
+                elapsed_ms=13,
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="budget-conflict-owner-a",
+        ),
+    )
+    with pytest.raises(GovernedRuntimeError):
+        await _events(first_app, contracts)
+
+    snapshot = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    budget = snapshot["budgets"][0]
+    attempt_id = snapshot["attempts"][0]["attempt_id"]
+    wrong_usage_id = "worker-usage://root/conflicting-checkpoint"
+    durable.consume_budget_once(
+        budget["budget_id"],
+        usage_id=wrong_usage_id,
+        charge_kind="WORKER_USAGE:COST+RETRY+TIME+TOKEN",
+        graph_id="graph-gr03a",
+        graph_revision=1,
+        node_id="root",
+        attempt_id=attempt_id,
+        delta=BudgetAmount(
+            token_count=1,
+            time_ms=13,
+            retry_count=0,
+            model_cost_micros=1,
+        ),
+        expected_version=budget["status_version"],
+        outbox=OutboxMessage.create(
+            aggregate_type="BUDGET_RESERVATION",
+            aggregate_id=budget["budget_id"],
+            aggregate_version=budget["status_version"] + 1,
+            event_type="BUDGET_CONSUMED",
+            payload_ref=(
+                "taskstore://event/BUDGET_RESERVATION/"
+                f"{budget['budget_id']}/{budget['status_version'] + 1}"
+            ),
+            attempt_id=attempt_id,
+            evidence_refs=(wrong_usage_id,),
+        ),
+    )
+    clock.advance(25)
+
+    second_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=DurableTaskStore(db_path, clock=clock),
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="budget-conflict-owner-b",
+        ),
+    )
+    blocked = await _events(second_app, contracts)
+
+    assert blocked[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert blocked[-1]["execution_receipt"]["accepted"] is False
+    assert calls == ["root"]
+    with durable._connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_lease WHERE owner_id = ?",
+            ("budget-conflict-owner-b",),
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_prebudget_takeover_has_one_fenced_settlement(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(projections=projections, calls=calls)
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_TimedCommitFailureStore(
+                DurableTaskStore(db_path, clock=clock),
+                _ProcessStopped("process stopped before budget settlement"),
+                clock=clock,
+                elapsed_ms=17,
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="budget-race-owner-a",
+        ),
+    )
+    with pytest.raises(GovernedRuntimeError):
+        await _events(first_app, contracts)
+    clock.advance(25)
+
+    barrier = threading.Barrier(2)
+    apps = [
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=_BarrierAcquireStore(
+                    DurableTaskStore(db_path, clock=clock),
+                    barrier,
+                ),
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id=f"budget-race-owner-{suffix}",
+            ),
+        )
+        for suffix in ("b", "c")
+    ]
+
+    async def threaded_events(app: GovernedCommandApplication) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(lambda: asyncio.run(_events(app, contracts)))
+
+    outcomes = await asyncio.gather(*(threaded_events(app) for app in apps))
+    receipts = [events[-1]["execution_receipt"] for events in outcomes]
+
+    assert sum(receipt["accepted"] is True for receipt in receipts) == 1
+    assert sum(receipt["status"] == "RECOVERY_REQUIRED" for receipt in receipts) == 1
+    assert calls == ["root"]
+    snapshot = DurableTaskStore(db_path, clock=clock).read_scheduler_snapshot(
+        "graph-gr03a", 1
+    )
+    worker_usages = [
+        row
+        for row in snapshot["budget_usage"]
+        if row["charge_kind"].startswith("WORKER_USAGE")
+    ]
+    assert len(worker_usages) == 1
+    assert worker_usages[0]["accepted"] is True
+    assert worker_usages[0]["delta"]["time_ms"] == 17
 
 
 @pytest.mark.asyncio
