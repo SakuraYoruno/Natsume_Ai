@@ -126,6 +126,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         canonical_db_path = ledger.canonical_db_path
         agent_result_repository = object()
 
+        @staticmethod
+        def execution_owner_id(logical_owner_id: str) -> str:
+            assert logical_owner_id == "test-canonical-owner"
+            return "test-canonical-owner::runtime::test-boot"
+
         def bind_runtime(self, runtime) -> None:
             self.bound_runtime = runtime
             events.append("governed-runtime-bound")
@@ -185,16 +190,17 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["model_attempt_service"] is model_attempt_service
         assert kwargs["production_authority_verifier"] is asgi.verify_durable_production_authority
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
-        assert kwargs["owner_id"] == "test-canonical-owner"
+        assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         events.append("governed-runtime-built")
         return governed_runtime
 
     def fake_build_internal_runtime(**kwargs):
         assert kwargs["task_runtime_container"] is task_runtime_container
         assert kwargs["ledger"] is ledger
+        assert kwargs["token_service"] is token_service
         assert kwargs["result_repository"] is task_runtime_container.agent_result_repository
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
-        assert kwargs["owner_id"] == "test-canonical-owner"
+        assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         assert kwargs["canonical_executor"] is canonical_executor
         events.append("internal-runtime-built")
         return internal_runtime
@@ -223,6 +229,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["ledger"] is ledger
         assert kwargs["evaluator"] is command_evaluator
         assert kwargs["claim_result_store"] is command_store
+        assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         events.append("scheduler-runtime-built")
         return scheduler_container
 

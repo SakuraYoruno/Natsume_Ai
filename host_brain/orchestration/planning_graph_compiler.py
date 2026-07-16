@@ -28,9 +28,11 @@ from host_brain.contracts.agent_runtime.contract_errors import (
 )
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
+    normalize_task_retry_policy,
     validate_task_graph_admission_state,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -315,6 +317,7 @@ class PlanningGraphCompiler:
         created_at: int = 0,
         previous_graph: TaskGraph | None = None,
         failure_evidence_refs: Sequence[str] = (),
+        completion_policy: TaskGraphCompletionPolicy | str | None = None,
     ) -> CompiledPlanningGraph:
         if not isinstance(result, SearchResult):
             raise ContractViolation(
@@ -341,6 +344,19 @@ class PlanningGraphCompiler:
             )
         resolved_created_at = _exact_non_negative_int(created_at, field_name="created_at")
         evidence_refs = _normalize_evidence_refs(failure_evidence_refs)
+        try:
+            resolved_completion_policy = (
+                TaskGraphCompletionPolicy(
+                    str(getattr(completion_policy, "value", completion_policy)).strip()
+                )
+                if completion_policy is not None
+                else None
+            )
+        except ValueError as exc:
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "planning compiler completion_policy is unsupported",
+            ) from exc
 
         payloads: list[dict[str, Any]] = []
         for index, candidate in enumerate(selected_path):
@@ -405,6 +421,11 @@ class PlanningGraphCompiler:
                     "previous_graph must be a canonical TaskGraph",
                 )
             previous_graph.validate()
+            if (
+                resolved_completion_policy is None
+                and previous_graph.completion_policy is not None
+            ):
+                resolved_completion_policy = previous_graph.completion_policy
             if previous_graph.status not in {
                 TaskGraphStatus.FAILED,
                 TaskGraphStatus.BLOCKED,
@@ -455,6 +476,19 @@ class PlanningGraphCompiler:
             )
             for index, payload in enumerate(payloads)
         )
+        depended_on = {
+            dependency for node in nodes for dependency in node.dependencies
+        }
+        sink_node_ids = tuple(
+            node.node_id for node in nodes if node.node_id not in depended_on
+        )
+        result_node_id = (
+            node_ids[-1]
+            if len(sink_node_ids) == 1
+            or resolved_completion_policy
+            is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+            else None
+        )
         graph = TaskGraph(
             graph_id=graph_id,
             root_work_order_id=root_work_order_id,
@@ -462,6 +496,8 @@ class PlanningGraphCompiler:
             planner_ref=planner_ref,
             status=TaskGraphStatus.CREATED,
             created_at=resolved_created_at,
+            result_node_id=result_node_id,
+            completion_policy=resolved_completion_policy,
             nodes=nodes,
         )
         validate_task_graph_admission_state(graph)
@@ -584,18 +620,10 @@ def _validate_node_payload(payload: Mapping[str, Any], *, index: int) -> None:
             CONTRACT_FIELD_INVALID,
             f"selected_path[{index}] output_contract must be a non-empty object",
         )
-    retry_policy = payload.get("retry_policy")
-    if not isinstance(retry_policy, Mapping) or not retry_policy:
-        raise ContractViolation(
-            CONTRACT_FIELD_INVALID,
-            f"selected_path[{index}] retry_policy must be a non-empty object",
-        )
-    max_attempts = retry_policy.get("max_attempts")
-    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
-        raise ContractViolation(
-            CONTRACT_FIELD_INVALID,
-            f"selected_path[{index}] retry_policy.max_attempts must be an integer >= 1",
-        )
+    normalize_task_retry_policy(
+        payload.get("retry_policy"),
+        field_name=f"selected_path[{index}].retry_policy",
+    )
     risk_level = payload.get("risk_level")
     if isinstance(risk_level, bool) or not isinstance(risk_level, int) or not 1 <= risk_level <= 5:
         raise ContractViolation(
@@ -795,7 +823,10 @@ def _compile_node(
         route=f"{route}:{quote(target_id, safe='')}",
         input_refs=input_refs,
         output_contract=deepcopy(dict(payload["output_contract"])),
-        retry_policy=deepcopy(dict(payload["retry_policy"])),
+        retry_policy=normalize_task_retry_policy(
+            payload["retry_policy"],
+            field_name="selected_path.retry_policy",
+        ),
         risk_level=int(payload["risk_level"]),
         acceptance_criteria=_required_text_list(
             payload.get("acceptance_criteria"),
@@ -888,6 +919,12 @@ def _compile_work_order(
         "parent_status": previous_status,
         "parent_planner_ref": previous_planner_ref,
         "planner_ref": planner_ref,
+        "result_node_id": graph.result_node_id,
+        "completion_policy": (
+            graph.completion_policy.value
+            if graph.completion_policy is not None
+            else None
+        ),
         "trace_digest": trace_digest,
         "failure_evidence_refs": list(failure_evidence_refs),
         "approval_ref": str(root["approval_ref"]).strip(),

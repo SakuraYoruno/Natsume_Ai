@@ -14,6 +14,7 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     TASK_GRAPH_INVALID,
     ContractViolation,
 )
+from host_brain.contracts.agent_runtime.task_graph import TaskGraphCompletionPolicy
 from host_brain.agent_runtime.planner_adapter import (
     CanonicalPlannerOutput,
     GraphRevisionIdentity,
@@ -155,6 +156,10 @@ def test_t_nle_05_preserves_sequential_parallel_and_mixed_dependencies(
         graph_node = next(item for item in adapted.task_graph.nodes if item.node_id == node.node_id)
         assert graph_node.dependencies == node.dependencies
         assert graph_node.route == f"{node.route_type}:{node.target_id}"
+        assert graph_node.retry_policy == {
+            "max_attempts": 1,
+            "retry_backoff_ms": 0,
+        }
         assert set(node.dependency_refs).issubset(set(graph_node.input_refs))
 
 
@@ -177,7 +182,41 @@ def test_t_nle_05_ready_siblings_parallel_unless_source_explicitly_disables_it()
     )
 
     assert parallel.execution_batches == (("a",), ("b", "c"))
+    assert parallel.task_graph.result_node_id is None
     assert serial.execution_batches == (("a",), ("b",), ("c",))
+    assert serial.task_graph.result_node_id is None
+
+    atomic_plan = _dag(
+        _node("a"),
+        _node("b", dependencies=("a",)),
+        _node("c", dependencies=("a",)),
+    )
+    atomic_plan.completion_policy = "ATOMIC_GRAPH_SUCCESS_V1"  # type: ignore[attr-defined]
+    atomic = adapt_skill_dag_plan(atomic_plan, identity=_identity())
+    assert atomic.task_graph.result_node_id == "c"
+    assert (
+        atomic.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
+
+
+def test_t_nle_05_skill_dag_retry_limit_maps_to_canonical_attempt_policy() -> None:
+    source = replace(
+        _node("retrying"),
+        retry_limit=2,
+        retry_backoff_ms=250,
+    )
+
+    adapted = adapt_skill_dag_plan(_dag(source), identity=_identity())
+
+    assert adapted.node("retrying").retry_policy == {
+        "max_attempts": 3,
+        "retry_backoff_ms": 250,
+    }
+    assert adapted.task_graph.nodes[0].retry_policy == {
+        "max_attempts": 3,
+        "retry_backoff_ms": 250,
+    }
 
 
 def test_t_nle_05_set_dependencies_are_deterministic() -> None:
@@ -232,6 +271,10 @@ def test_t_nle_05_planning_agent_scaffold_ref_and_ready_siblings_are_preserved()
     assert adapted.node("step-2").input_refs == (
         "artifact://planner-context/planning-source/steps/1",
     )
+    assert adapted.node("step-2").retry_policy == {
+        "max_attempts": 1,
+        "retry_backoff_ms": 0,
+    }
 
 
 def test_t_nle_05_planning_agent_non_executable_dependency_fails_closed() -> None:
@@ -293,6 +336,7 @@ def test_t_nle_05_shadow_comparison_checks_complete_execution_semantics() -> Non
         planner_ref="planner://different-provenance",
         created_at=999,
         nodes=source.nodes,
+        result_node_id=source.task_graph.result_node_id or "a",
         parallel_window=source.parallel_window,
     )
     equivalent = build_planner_shadow_comparison(source, same_semantics)
@@ -307,6 +351,7 @@ def test_t_nle_05_shadow_comparison_checks_complete_execution_semantics() -> Non
         planner_ref="planner://different-provenance",
         created_at=999,
         nodes=(replace(source.nodes[0], risk_level=5),),
+        result_node_id=source.task_graph.result_node_id or "a",
         parallel_window=source.parallel_window,
     )
     mismatch = build_planner_shadow_comparison(source, risk_drift)

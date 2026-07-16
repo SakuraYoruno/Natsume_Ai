@@ -26,13 +26,22 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetExceededAction,
+    BudgetPolicy,
+)
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
     GovernorGrantError,
     governor_grant_ref,
+)
+from host_brain.orchestration.node_grants import (
+    DurableNodeGrantVerifier,
+    NodeBoundGrantService,
 )
 from host_brain.scheduler.contracts import (
     SCHEDULER_DEFINITION_INVALID,
@@ -52,6 +61,7 @@ from host_brain.scheduler.worker_registry import (
 )
 from host_brain.secure_ingress import SecureIngressAuthority
 from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 
 
 SCHEDULER_RUNTIME_INACTIVE = "SCHEDULER_RUNTIME_INACTIVE"
@@ -72,6 +82,14 @@ SCHEDULER_RUNTIME_DRAIN_TIMEOUT = "SCHEDULER_RUNTIME_DRAIN_TIMEOUT"
 SCHEDULER_COMMAND_REPLAY = "SCHEDULER_COMMAND_REPLAY"
 
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
+_SCHEDULER_BUDGET_LIMITS = BudgetAmount(
+    token_count=32_768,
+    tool_call_count=32,
+    time_ms=300_000,
+    concurrency=1,
+    retry_count=8,
+    model_cost_micros=1_000_000,
+)
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 _STABLE_COMMAND_FIELDS = (
     "schema_version",
@@ -930,6 +948,7 @@ def build_governed_scheduler_runtime(
     *,
     task_runtime_container: Any,
     ledger: Any,
+    token_service: Any,
     result_repository: Any,
     runtime_router: CanonicalRuntimeRouter,
     worker_registry: SchedulerWorkerRegistry,
@@ -943,11 +962,20 @@ def build_governed_scheduler_runtime(
     )
     if definitions is None:
         raise TypeError("scheduler definition repository is required")
+    review_store = getattr(task_runtime_container, "review_store", None)
+    if review_store is None:
+        raise TypeError("scheduler Task Runtime review store is required")
+    node_grant_service = NodeBoundGrantService(
+        ledger=ledger,
+        token_service=token_service,
+    )
+    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
     canonical_worker = GovernedSchedulerWorker(
         handlers=worker_registry,
         definition_repository=definitions,
         occurrence_repository=definitions,
         result_repository=result_repository,
+        node_grant_verifier=node_grant_verifier,
     )
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(
@@ -962,11 +990,18 @@ def build_governed_scheduler_runtime(
             occurrence_repository=definitions,
             command_repository=command_repository,
         ),
+        review_runtime=TaskNodeReviewRuntime(review_store),
+        execution_registry=getattr(
+            task_runtime_container,
+            "graph_execution_registry",
+            None,
+        ),
         owner_id=owner_id,
     )
     application = GovernedCommandApplication(
         command_repository=command_repository,
         coordinator=coordinator,
+        node_grant_service=node_grant_service,
     )
     return GovernedSchedulerRuntime(
         application=application,
@@ -983,7 +1018,7 @@ def _build_contracts(
     authority: Mapping[str, Any],
     governor_grant: str,
     received_at_ms: int,
-) -> tuple[HostCommand, AgentWorkOrder, TaskGraph]:
+) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     if occurrence.task_id != definition.task_id or (
         occurrence.definition_revision != definition.definition_revision
     ):
@@ -1002,7 +1037,35 @@ def _build_contracts(
     definition_ref = _definition_ref(definition)
     retry_policy = definition.retry_policy
     risk_level = max(1, min(5, int(definition.definition.get("risk_level") or 1)))
-    work_order = AgentWorkOrder(
+    worker_route = f"delegate:{definition.worker_key}"
+    business_scope = f"scheduler:{_scope_token(occurrence.task_id)}"
+    operation_fingerprint = _sha256_json(
+        {
+            "definition_revision": definition.definition_revision,
+            "occurrence_id": occurrence.occurrence_id,
+            "payload_sha256": occurrence.payload_sha256,
+            "worker_key": definition.worker_key,
+        }
+    )
+    output_contract = {
+        "type": "durable_scheduler_result",
+        "required": ["occurrence_id", "result", "receipt_ref"],
+    }
+    review_ref = f"review-waiver://governor-grant/{suffix}"
+    budget_policy = BudgetPolicy(
+        scope=f"work-order:{work_order_id}",
+        limits=_SCHEDULER_BUDGET_LIMITS,
+        on_exceeded=BudgetExceededAction.BLOCK,
+        metadata={
+            "policy": "governed_scheduler_default",
+            "policy_version": "governed_scheduler_budget.v1",
+            "route_type": "delegate",
+            "fail_closed": True,
+            "source": "scheduler_runtime_composition",
+        },
+    )
+    budget_policy.validate()
+    work_order = WorkOrderV3(
         work_order_id=work_order_id,
         domain="organ_ops",
         run_mode="worker",
@@ -1011,10 +1074,29 @@ def _build_contracts(
             "occurrence_id": occurrence.occurrence_id,
             "definition_ref": definition_ref,
         },
-        allowed_actions=["execute_scheduler_task"],
-        forbidden_actions=["change_scheduler_definition", "bypass_governor"],
-        acceptance_criteria=["scheduler handler result persisted"],
+        allowed_actions=(f"delegate:{definition.worker_key}",),
+        forbidden_actions=(
+            "change_scheduler_definition",
+            "bypass_governor",
+            "reroute",
+            "replan",
+            "cross_executor_resume",
+        ),
+        acceptance_criteria=("scheduler handler result persisted",),
         verification_plan={"required": True, "type": "durable_scheduler_result"},
+        approval_policy={
+            "required": True,
+            "governor_grant_ref": governor_grant,
+            "on_missing": "BLOCK",
+        },
+        review_policy={
+            "review_required": False,
+            "durable_review_required": False,
+            "mode": "governor_grant_review_waiver",
+            "reason": "approved_scheduler_occurrence",
+            "waiver_authority": "governor_grant",
+            "waiver_ref": review_ref,
+        },
         metadata={
             "definition_revision": definition.definition_revision,
             "priority": definition.priority,
@@ -1022,18 +1104,49 @@ def _build_contracts(
             "resource_profile": definition.resource_profile,
             "retry_policy": retry_policy,
             "risk_level": risk_level,
+            "planning_lineage": {
+                "graph_id": graph_id,
+                "root_work_order_id": work_order_id,
+                "revision": 1,
+                "parent_revision": None,
+                "approval_ref": governor_grant,
+                "review_ref": review_ref,
+                "node_bindings": [
+                    {
+                        "node_id": node_id,
+                        "objective": (
+                            f"Execute durable scheduled task {occurrence.task_id}"
+                        ),
+                        "worker_route": "delegate",
+                        "target_id": definition.worker_key,
+                    }
+                ],
+            },
         },
+        root_work_order_id=work_order_id,
+        parent_work_order_id=None,
+        task_graph_id=graph_id,
+        task_node_id=node_id,
+        graph_revision=1,
+        attempt=0,
+        capability_requirements=(definition.worker_key,),
+        risk_level=risk_level,
+        input_refs=(occurrence.occurrence_id, definition_ref, governor_grant),
+        output_contract=output_contract,
+        budget_policy=budget_policy,
+        business_idempotency_scope=business_scope,
+        operation_fingerprint=operation_fingerprint,
+        status_version=0,
+        approval_ref=governor_grant,
+        review_ref=review_ref,
     )
     work_order.validate()
     node = TaskNode(
         node_id=node_id,
         dependencies=(),
-        route=SCHEDULER_WORKER_ROUTE,
+        route=worker_route,
         input_refs=(occurrence.occurrence_id, definition_ref, governor_grant),
-        output_contract={
-            "type": "durable_scheduler_result",
-            "required": ["occurrence_id", "result", "receipt_ref"],
-        },
+        output_contract=output_contract,
         retry_policy=retry_policy,
         risk_level=risk_level,
         acceptance_criteria=("scheduler handler result persisted",),
@@ -1047,15 +1160,8 @@ def _build_contracts(
         planner_ref=f"planner://governed-scheduler/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(received_at_ms),
+        result_node_id=node_id,
         nodes=(node,),
-    )
-    operation_fingerprint = _sha256_json(
-        {
-            "definition_revision": definition.definition_revision,
-            "occurrence_id": occurrence.occurrence_id,
-            "payload_sha256": occurrence.payload_sha256,
-            "worker_key": definition.worker_key,
-        }
     )
     command = build_host_command(
         surface=HostCommandSurface.SCHEDULER,
@@ -1072,7 +1178,7 @@ def _build_contracts(
         graph_revision=1,
         route_type=SCHEDULER_WORKER_ROUTE,
         target_id=definition.worker_key,
-        business_scope=f"scheduler:{_scope_token(occurrence.task_id)}",
+        business_scope=business_scope,
         operation_fingerprint=operation_fingerprint,
         created_at_ms=int(received_at_ms),
     )

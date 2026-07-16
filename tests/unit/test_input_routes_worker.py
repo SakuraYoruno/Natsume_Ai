@@ -265,7 +265,8 @@ def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
         ledger.close()
 
 
-def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None:
+def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_GATEWAY_REPLY_FAILURE_DEGRADE_INPUT", "true")
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
@@ -1919,25 +1920,12 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
         ledger.close()
 
 
-def test_gateway_progress_fastpath_replies_from_runtime_registry(monkeypatch) -> None:
+def test_gateway_progress_fastpath_is_retired(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
-
-    class _FakeRuntimeTaskRegistry:
-        def summarize_for_chat(self, **_kwargs):  # noqa: ANN003
-            return {
-                "status": "RUNNING",
-                "target_id": "session_summary",
-                "progress_message": "已完成检索，正在汇总",
-                "elapsed_ms": 42000,
-                "result_text": "",
-            }
 
     try:
         monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
         with patch(
-            "host_brain.composition.process_services.get_runtime_task_registry",
-            return_value=_FakeRuntimeTaskRegistry(),
-        ), patch(
             "host_brain.channels.edge_transport.submit_gateway_reply",
             new=AsyncMock(return_value=SimpleNamespace(success=True, status="SENT", reason_code=None, latency_ms=28)),
         ) as post_mock:
@@ -1968,21 +1956,9 @@ def test_gateway_progress_fastpath_replies_from_runtime_registry(monkeypatch) ->
 def test_gateway_progress_fastpath_send_failure_falls_back(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
 
-    class _FakeRuntimeTaskRegistry:
-        def summarize_for_chat(self, **_kwargs):  # noqa: ANN003
-            return {
-                "status": "RUNNING",
-                "target_id": "session_summary",
-                "progress_message": "正在执行",
-                "elapsed_ms": 2000,
-            }
-
     try:
         monkeypatch.setenv("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", "true")
         with patch(
-            "host_brain.composition.process_services.get_runtime_task_registry",
-            return_value=_FakeRuntimeTaskRegistry(),
-        ), patch(
             "host_brain.channels.edge_transport.submit_gateway_reply",
             new=AsyncMock(return_value=SimpleNamespace(success=False, status="FAILED", reason_code="TIMEOUT", latency_ms=100)),
         ):

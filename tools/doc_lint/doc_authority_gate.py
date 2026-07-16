@@ -249,8 +249,8 @@ def _validate_machine_status(repo_root: Path) -> list[dict[str, Any]]:
         issues.append("historical receipts must remain explicitly scope-bound")
     active_wave = str(payload.get("active_wave") or "")
     active_wave_status = str(payload.get("active_wave_status") or "")
-    if active_wave != "NE-00":
-        issues.append("active_wave must be NE-00 while this document-reset change is active")
+    if re.fullmatch(r"NE-\d{2}", active_wave) is None:
+        issues.append("active_wave must use the NE-00 through NE-99 identifier format")
     if active_wave_status not in {"IN_PROGRESS", "COMPLETED"}:
         issues.append("active_wave_status must be IN_PROGRESS or COMPLETED")
     execution_path = repo_root / expected_execution

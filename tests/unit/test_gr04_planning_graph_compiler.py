@@ -11,6 +11,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNodeStatus,
     validate_task_graph_admission_state,
@@ -36,7 +37,7 @@ def _payload(candidate_id: str, **overrides: Any) -> dict[str, Any]:
             "type": "planning_step_result",
             "required": ["evidence_ref"],
         },
-        "retry_policy": {"max_attempts": 2, "backoff_ms": 10},
+        "retry_policy": {"max_attempts": 2, "retry_backoff_ms": 10},
         "risk_level": 2,
         "capability_requirements": [f"capability-{candidate_id}"],
         "domain": "code",
@@ -126,7 +127,12 @@ def test_gr04_compilation_is_deterministic_linear_and_admission_ready() -> None:
     assert graph.nodes[0].status is TaskNodeStatus.READY
     assert graph.nodes[1].dependencies == (graph.nodes[0].node_id,)
     assert graph.nodes[1].status is TaskNodeStatus.BLOCKED
+    assert graph.result_node_id == graph.nodes[1].node_id
     assert graph.nodes[0].route == "skill:worker-collect"
+    assert graph.nodes[0].retry_policy == {
+        "max_attempts": 2,
+        "retry_backoff_ms": 10,
+    }
     assert any(
         ref.endswith(f"/revisions/1/nodes/{graph.nodes[0].node_id}")
         for ref in graph.nodes[1].input_refs
@@ -143,6 +149,18 @@ def test_gr04_compilation_is_deterministic_linear_and_admission_ready() -> None:
     assert order.review_ref == "review://gr04/root"
     assert order.operation_fingerprint.startswith("sha256:")
     assert len(order.operation_fingerprint) == 71
+
+
+def test_gr04_compiler_rejects_legacy_retry_backoff_alias() -> None:
+    candidate = _candidate(
+        "legacy-retry",
+        retry_policy={"max_attempts": 2, "backoff_ms": 10},
+    )
+
+    with pytest.raises(ContractViolation) as error:
+        PlanningGraphCompiler().compile(_result(candidate))
+
+    assert "unsupported fields: backoff_ms" in error.value.detail
 
 
 def test_gr04_explicit_candidate_dependencies_compile_parallel_dag() -> None:
@@ -169,9 +187,41 @@ def test_gr04_explicit_candidate_dependencies_compile_parallel_dag() -> None:
         graph.nodes[1].node_id,
     )
     assert graph.nodes[2].status is TaskNodeStatus.BLOCKED
+    assert graph.result_node_id == graph.nodes[2].node_id
     bindings = compiled.work_order.metadata["planning_lineage"]["node_bindings"]
     assert bindings[2]["depends_on_candidate_ids"] == ["collect", "inspect"]
     assert bindings[2]["depends_on_node_ids"] == list(graph.nodes[2].dependencies)
+
+
+def test_gr04_parallel_terminal_candidates_use_selected_path_result_authority() -> None:
+    compiled = PlanningGraphCompiler().compile(
+        _result(
+            _candidate("left", depends_on_candidate_ids=[]),
+            _candidate("right", depends_on_candidate_ids=[]),
+        ),
+        created_at=123,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+
+    assert [node.node_id for node in compiled.task_graph.nodes] != []
+    assert compiled.task_graph.result_node_id == compiled.task_graph.nodes[-1].node_id
+    assert (
+        compiled.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
+
+
+def test_gr04_parallel_terminal_candidates_default_to_safe_legacy_without_result() -> None:
+    compiled = PlanningGraphCompiler().compile(
+        _result(
+            _candidate("left", depends_on_candidate_ids=[]),
+            _candidate("right", depends_on_candidate_ids=[]),
+        ),
+        created_at=123,
+    )
+
+    assert compiled.task_graph.completion_policy is None
+    assert compiled.task_graph.result_node_id is None
 
 
 @pytest.mark.parametrize(

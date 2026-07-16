@@ -1,0 +1,291 @@
+"""Read-only durable projection boundary for one TaskGraph node execution."""
+
+from __future__ import annotations
+
+import inspect
+from collections.abc import Mapping
+from typing import Any
+
+from host_brain.contracts.agent_runtime.parallel_settlement import (
+    ParallelSettlementContractError,
+    normalize_parallel_settlement_decision,
+)
+
+from .admission import AdmittedExecution
+from .coordinator_receipts import (
+    GovernedExecutionReceipt,
+    _digest_from_receipt_ref,
+    build_execution_receipt,
+)
+from .coordinator_records import (
+    _attempt_id,
+    _exception_reason,
+    _mapping,
+    _record_evidence_refs,
+    _required_record_text,
+    _status,
+    _text,
+    _version,
+)
+from .errors import (
+    GOVERNED_DURABLE_STATE_CONFLICT,
+    GovernedRuntimeError,
+)
+from .ports import ExecutionProjectionReaderPort, TaskStorePort
+
+
+class NodeExecutionProjection:
+    """Rebuild terminal node receipts from canonical durable records."""
+
+    __slots__ = ("_store", "_projection_reader")
+
+    def __init__(
+        self,
+        *,
+        task_store: TaskStorePort,
+        projection_reader: ExecutionProjectionReaderPort | None,
+    ) -> None:
+        self._store = task_store
+        self._projection_reader = projection_reader
+
+    async def matching_parallel_decision(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        graph: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        graph_status = _status(graph)
+        if (
+            len(admitted.nodes) <= 1
+            or graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}
+        ):
+            return None
+        raw = await _maybe_await(
+            self._store.get_latest_parallel_settlement_decision(
+                admitted.graph_id,
+                admitted.graph_revision,
+            )
+        )
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "parallel settlement decision record is invalid",
+            )
+        payload = raw.get("payload")
+        try:
+            decision = normalize_parallel_settlement_decision(payload)
+        except (ParallelSettlementContractError, TypeError) as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"parallel settlement replay decision is invalid: {exc}",
+            ) from exc
+        if (
+            _text(raw.get("decision_ref")) != decision.decision_ref
+            or decision.payload["graph_id"] != admitted.graph_id
+            or decision.payload["graph_revision"] != admitted.graph_revision
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "parallel settlement replay decision identity drifted",
+            )
+        if (
+            decision.payload["graph_target_status"] != graph_status
+            or decision.payload["graph_status_version_before"] + 1
+            != _version(graph)
+        ):
+            return None
+        selected = self.selected_parallel_decision_outcome(
+            {"payload": decision.payload}
+        )
+        selected_admission = admitted.for_node(
+            _required_record_text(selected, "node_id")
+        )
+        attempts = await self.attempts_for_node(selected_admission)
+        if (
+            not attempts
+            or _required_record_text(attempts[-1], "attempt_id")
+            != _required_record_text(selected, "attempt_id")
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "parallel settlement replay selected Attempt is not latest",
+            )
+        record = dict(raw)
+        record["decision_ref"] = decision.decision_ref
+        record["payload"] = decision.payload
+        return record
+
+    @staticmethod
+    def selected_parallel_decision_outcome(
+        decision: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        payload = _mapping(
+            decision.get("payload"),
+            field_name="parallel settlement replay payload",
+        )
+        selected_node_id = _required_record_text(payload, "selected_node_id")
+        raw_outcomes = payload.get("outcomes")
+        if not isinstance(raw_outcomes, list):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "parallel settlement replay outcomes are invalid",
+            )
+        selected = [
+            dict(outcome)
+            for outcome in raw_outcomes
+            if isinstance(outcome, Mapping)
+            and _text(outcome.get("node_id")) == selected_node_id
+        ]
+        if len(selected) != 1:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "parallel settlement replay selected outcome is missing",
+            )
+        return selected[0]
+
+    async def terminal_replay(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        graph: Mapping[str, Any],
+        node: Mapping[str, Any],
+    ) -> GovernedExecutionReceipt | None:
+        graph_status = _status(graph)
+        node_status = _status(node)
+        waiting_acceptance_review = (
+            graph_status in {"ACTIVE", "BLOCKED"}
+            and node_status == "WAITING_ACCEPTANCE_REVIEW"
+        )
+        terminal = (
+            graph_status in {"COMPLETED", "FAILED", "CANCELLED"}
+            or node_status in {
+                "ACCEPTED",
+                "FAILED",
+                "RETRY_PENDING",
+                "VERIFICATION_FAILED",
+                "CANCELLED",
+            }
+            or waiting_acceptance_review
+        )
+        if not terminal:
+            return None
+        reservation = await self.try_operation(admitted.reservation_id)
+        attempts = await self.attempts_for_node(admitted)
+        latest = attempts[-1] if attempts else {}
+        attempt_id = _text(latest.get("attempt_id")) or _attempt_id(admitted, attempt_no=1)
+        reservation_status = _status(reservation or {})
+        receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
+        accepted = node_status == "ACCEPTED" and graph_status in {"ACTIVE", "COMPLETED"}
+        if accepted and (reservation_status != "COMMITTED" or not receipt_ref):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "accepted graph lacks its committed operation receipt",
+            )
+        if waiting_acceptance_review and (
+            reservation_status != "COMMITTED" or not receipt_ref
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "acceptance-review graph lacks its committed operation receipt",
+            )
+        projection: Mapping[str, Any] | None = None
+        if accepted and receipt_ref and self._projection_reader is not None:
+            loaded = await _maybe_await(self._projection_reader.load(receipt_ref))
+            if not isinstance(loaded, Mapping):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "accepted receipt has no durable public projection",
+                )
+            projection = dict(loaded)
+        decision = await self.matching_parallel_decision(admitted, graph=graph)
+        if decision is not None:
+            selected = self.selected_parallel_decision_outcome(decision)
+            selected_node_id = _required_record_text(selected, "node_id")
+            if selected_node_id != admitted.node_id:
+                decision = None
+            elif _required_record_text(selected, "attempt_id") != attempt_id:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "parallel settlement replay selected Attempt drifted",
+                )
+        decision_ref = (
+            _required_record_text(decision, "decision_ref")
+            if decision is not None
+            else None
+        )
+        if decision_ref is not None:
+            projected = dict(projection or {})
+            projected["parallel_settlement"] = {
+                "graph_status": graph_status,
+                "decision_ref": decision_ref,
+            }
+            projection = projected
+        return build_execution_receipt(
+            admitted,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            payload_digest=_digest_from_receipt_ref(receipt_ref),
+            status=node_status or graph_status,
+            verification_status=(
+                "PASS"
+                if accepted or waiting_acceptance_review
+                else "FAIL"
+                if node_status == "VERIFICATION_FAILED"
+                else "UNKNOWN"
+            ),
+            accepted=accepted,
+            replayed=True,
+            reason_code=None if accepted else f"GOVERNED_REPLAY_{node_status or graph_status}",
+            evidence_refs=tuple(
+                dict.fromkeys(
+                    reference
+                    for reference in (
+                        *_record_evidence_refs(node),
+                        _text(latest.get("error_ref")),
+                        receipt_ref,
+                        decision_ref,
+                    )
+                    if reference
+                )
+            ),
+            projection=projection,
+        )
+
+    async def attempts_for_node(self, admitted: AdmittedExecution) -> list[dict[str, Any]]:
+        snapshot = await _maybe_await(
+            self._store.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
+        )
+        attempts = snapshot.get("attempts") if isinstance(snapshot, Mapping) else None
+        if not isinstance(attempts, list):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable scheduler snapshot does not expose attempts",
+            )
+        rows = [
+            dict(item)
+            for item in attempts
+            if isinstance(item, Mapping) and _text(item.get("node_id")) == admitted.node_id
+        ]
+        rows.sort(key=lambda item: (int(item.get("attempt_no") or 0), _text(item.get("attempt_id"))))
+        return rows
+
+    async def try_operation(self, reservation_id: str) -> dict[str, Any] | None:
+        try:
+            value = await _maybe_await(self._store.get_operation_reservation(reservation_id))
+        except Exception as exc:
+            reason = _exception_reason(exc, "")
+            if reason in {"TASK_STORE_NOT_FOUND", "NOT_FOUND", "OPERATION_NOT_FOUND"}:
+                return None
+            raise
+        return dict(value) if isinstance(value, Mapping) else None
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+__all__ = ["NodeExecutionProjection"]

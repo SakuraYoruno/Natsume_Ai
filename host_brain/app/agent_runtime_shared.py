@@ -26,7 +26,7 @@ from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
 from host_brain.observability.runtime_audit import _persist_post_process_audit
-from host_brain.app.executive_runtime import executive_runtime_sse_generator
+from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.composition.process_services import (
     get_conversation_history,
     get_ledger,
@@ -84,11 +84,13 @@ AGENT_RUNTIME_PORTS = AgentRuntimeApplicationPorts(
         audit_ledger=get_ledger,
         prompt_registry=get_prompt_registry,
         model_attempt_service=get_model_attempt_service,
+        task_status_projection=lambda: build_durable_task_status_projection(
+            ledger=get_ledger()
+        ),
         persist_post_process_audit=partial(
             _persist_post_process_audit,
             audit_ledger=get_ledger,
         ),
-        executive_router_sse_generator=executive_runtime_sse_generator,
 )
 
 __all__ = ["AGENT_RUNTIME_PORTS"]

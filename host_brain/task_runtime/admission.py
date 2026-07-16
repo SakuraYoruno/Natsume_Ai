@@ -10,6 +10,7 @@ from typing import Any
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand, TaskExecutor
 
 from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraphCompletionPolicy,
     validate_task_graph_admission_state,
 )
 
@@ -68,6 +69,8 @@ class AdmittedExecution:
     business_scope: str
     replayed: bool = False
     active_node_id: str | None = None
+    result_node_id: str | None = None
+    completion_policy: str | None = None
 
     @property
     def active_node(self) -> AdmittedTaskNode:
@@ -116,6 +119,8 @@ class AdmittedExecution:
             graph_revision=self.graph_revision,
             nodes=self.nodes,
             business_scope=self.business_scope,
+            result_node_id=self.result_node_id,
+            completion_policy=self.completion_policy,
             replayed=self.replayed,
             active_node_id=normalized,
         )
@@ -139,6 +144,16 @@ class AdmittedExecution:
         graph_id = _text(getattr(graph, "graph_id", None))
         graph_revision = _exact_positive_int(getattr(graph, "revision", None), "graph.revision")
         graph_root = _text(getattr(graph, "root_work_order_id", None))
+        raw_result_node_id = getattr(graph, "result_node_id", None)
+        result_node_id = (
+            _text(raw_result_node_id) if raw_result_node_id is not None else None
+        )
+        raw_completion_policy = getattr(graph, "completion_policy", None)
+        completion_policy = (
+            _text(getattr(raw_completion_policy, "value", raw_completion_policy))
+            if raw_completion_policy is not None
+            else None
+        )
         try:
             validate_task_graph_admission_state(graph)
         except Exception as exc:
@@ -225,6 +240,8 @@ class AdmittedExecution:
             graph_revision=graph_revision,
             nodes=tuple(bindings),
             business_scope=command.business_scope,
+            result_node_id=result_node_id,
+            completion_policy=completion_policy,
             replayed=bool(replayed),
         )
         admitted.validate()
@@ -261,6 +278,60 @@ class AdmittedExecution:
                     f"admitted TaskNode {node.node_id} has unknown dependencies: {','.join(missing)}",
                 )
         _topological_nodes(self.nodes)
+        completion_policy: TaskGraphCompletionPolicy | None = None
+        if self.completion_policy is not None:
+            try:
+                completion_policy = TaskGraphCompletionPolicy(self.completion_policy)
+            except (TypeError, ValueError) as exc:
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "admitted completion_policy is unsupported",
+                ) from exc
+        if self.result_node_id is not None:
+            result_node_id = _text(self.result_node_id)
+            if not result_node_id or result_node_id not in node_ids:
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "admitted result_node_id is outside the TaskGraph",
+                )
+            dependents = sorted(
+                node.node_id
+                for node in self.nodes
+                if result_node_id in node.dependencies
+            )
+            if dependents:
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "admitted result_node_id is not a sink; dependents: "
+                    + ",".join(dependents),
+                )
+            depended_on = {
+                dependency
+                for node in self.nodes
+                for dependency in node.dependencies
+            }
+            sink_node_ids = {
+                node.node_id for node in self.nodes if node.node_id not in depended_on
+            }
+            if (
+                completion_policy
+                is not TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+                and len(sink_node_ids) > 1
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "legacy admitted Graph cannot bind one result across multiple sinks",
+                )
+        if self.completion_policy is not None:
+            if (
+                completion_policy
+                is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+                and self.result_node_id is None
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "atomic Graph success requires an admitted result authority",
+                )
         if self.active_node_id is not None and self.active_node_id not in node_ids:
             raise GovernedRuntimeError(
                 GOVERNED_ADMISSION_INVALID,

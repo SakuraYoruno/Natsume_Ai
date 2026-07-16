@@ -314,6 +314,7 @@ def build_direct_host_route_contracts(
         planner_ref=f"planner://direct-host-route/{route}/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
+        result_node_id=node_id,
         nodes=(node,),
     )
     command = build_host_command(

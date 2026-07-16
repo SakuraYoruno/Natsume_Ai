@@ -230,23 +230,6 @@ def get_endocrine_state(
         }
 
 
-def get_context_compressor():
-    """获取 ContextCompressor 单例（延迟初始化）。
-
-    返回 ContextCompressor 实例，供主链路压缩多轮上下文使用。
-    若初始化失败则返回 None（降级）。
-    """
-    if _container().context_compressor is None:
-        try:
-            from host_brain.memory.context_compressor import ContextCompressor  # noqa: PLC0415
-            _container().context_compressor = ContextCompressor()
-            _logger.info("ContextCompressor 已初始化")
-        except Exception as exc:
-            _logger.warning("ContextCompressor 初始化失败（降级）: %s", exc)
-            return None
-    return _container().context_compressor
-
-
 def get_emotion_timeline():
     """获取进程级 EmotionTimeline 单例并预热最近 24h 情绪历史。
 

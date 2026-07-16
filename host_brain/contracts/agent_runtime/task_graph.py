@@ -26,6 +26,8 @@ TASK_GRAPH_SCHEMA_VERSION = "Natsume.agent.task_graph.v1"
 TASK_NODE_SCHEMA_VERSION = "Natsume.agent.task_node.v1"
 TASK_EVENT_SCHEMA_VERSION = "Natsume.agent.task_event.v1"
 
+TASK_RETRY_POLICY_FIELDS = frozenset({"max_attempts", "retry_backoff_ms"})
+
 
 class TaskGraphStatus(StrEnum):
     CREATED = "CREATED"
@@ -34,6 +36,18 @@ class TaskGraphStatus(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+class TaskGraphCompletionPolicy(StrEnum):
+    """Frozen whole-graph completion semantics.
+
+    Absence of this compatible v1 extension preserves the historical
+    node-terminal completion path.  The atomic policy is an explicit durable
+    opt-in and must never be inferred from process-local feature flags.
+    """
+
+    LEGACY_NODE_TERMINAL_V1 = "LEGACY_NODE_TERMINAL_V1"
+    ATOMIC_GRAPH_SUCCESS_V1 = "ATOMIC_GRAPH_SUCCESS_V1"
 
 
 class TaskNodeStatus(StrEnum):
@@ -94,12 +108,22 @@ _NODE_TRANSITIONS: dict[TaskNodeStatus, frozenset[TaskNodeStatus]] = {
             TaskNodeStatus.CANCEL_REQUESTED,
         }
     ),
-    TaskNodeStatus.EXECUTED: frozenset({TaskNodeStatus.VERIFYING}),
+    TaskNodeStatus.EXECUTED: frozenset(
+        {TaskNodeStatus.VERIFYING, TaskNodeStatus.CANCEL_REQUESTED}
+    ),
     TaskNodeStatus.VERIFYING: frozenset(
-        {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}
+        {
+            TaskNodeStatus.VERIFIED,
+            TaskNodeStatus.VERIFICATION_FAILED,
+            TaskNodeStatus.CANCEL_REQUESTED,
+        }
     ),
     TaskNodeStatus.VERIFIED: frozenset(
-        {TaskNodeStatus.ACCEPTED, TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW}
+        {
+            TaskNodeStatus.ACCEPTED,
+            TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW,
+            TaskNodeStatus.CANCEL_REQUESTED,
+        }
     ),
     TaskNodeStatus.VERIFICATION_FAILED: frozenset(),
     TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW: frozenset(
@@ -112,7 +136,9 @@ _NODE_TRANSITIONS: dict[TaskNodeStatus, frozenset[TaskNodeStatus]] = {
     ),
     TaskNodeStatus.ACCEPTED: frozenset(),
     TaskNodeStatus.FAILED: frozenset(),
-    TaskNodeStatus.RETRY_PENDING: frozenset({TaskNodeStatus.READY}),
+    TaskNodeStatus.RETRY_PENDING: frozenset(
+        {TaskNodeStatus.READY, TaskNodeStatus.CANCELLED}
+    ),
     TaskNodeStatus.CANCEL_REQUESTED: frozenset({TaskNodeStatus.CANCELLED}),
     TaskNodeStatus.CANCELLED: frozenset(),
 }
@@ -160,6 +186,54 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def normalize_task_retry_policy(
+    value: Any,
+    *,
+    field_name: str = "TaskNode.retry_policy",
+) -> dict[str, int]:
+    """Validate and freeze the canonical TaskNode retry-policy shape.
+
+    ``retry_backoff_ms`` has a canonical zero default so v1 producers that
+    only bounded ``max_attempts`` keep their existing meaning.  Legacy aliases
+    are rejected instead of being silently interpreted at the execution
+    boundary.
+    """
+
+    if not isinstance(value, Mapping) or not value:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name} must be a non-empty object",
+        )
+    policy = dict(value)
+    unknown = sorted(str(key) for key in set(policy) - TASK_RETRY_POLICY_FIELDS)
+    if unknown:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name} contains unsupported fields: {','.join(unknown)}",
+        )
+
+    max_attempts = policy.get("max_attempts")
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name}.max_attempts must be an integer >= 1",
+        )
+    retry_backoff_ms = policy.get("retry_backoff_ms", 0)
+    if (
+        isinstance(retry_backoff_ms, bool)
+        or not isinstance(retry_backoff_ms, int)
+        or retry_backoff_ms < 0
+    ):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"{field_name}.retry_backoff_ms must be an integer >= 0",
+        )
+    return {
+        "max_attempts": max_attempts,
+        "retry_backoff_ms": retry_backoff_ms,
+    }
 
 
 def validate_task_node_transition(
@@ -249,11 +323,7 @@ class TaskNode:
                 if isinstance(data.get("output_contract"), Mapping)
                 else {}
             ),
-            retry_policy=(
-                dict(data.get("retry_policy") or {})
-                if isinstance(data.get("retry_policy"), Mapping)
-                else {}
-            ),
+            retry_policy=normalize_task_retry_policy(data.get("retry_policy")),
             risk_level=_non_negative_int(data.get("risk_level", 1), field_name="risk_level", minimum=1),
             acceptance_criteria=_text_tuple(data.get("acceptance_criteria")),
             status=_enum_value(TaskNodeStatus, data.get("status") or "CREATED", field_name="TaskNode.status"),
@@ -273,6 +343,7 @@ class TaskNode:
             raise ContractViolation(TASK_GRAPH_INVALID, f"TaskNode dependencies must be unique: {self.node_id}")
         if self.risk_level < 1 or self.risk_level > 5:
             raise ContractViolation(TASK_GRAPH_INVALID, "TaskNode.risk_level must be between 1 and 5")
+        normalize_task_retry_policy(self.retry_policy)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -282,7 +353,7 @@ class TaskNode:
             "route": self.route,
             "input_refs": list(self.input_refs),
             "output_contract": deepcopy(self.output_contract),
-            "retry_policy": deepcopy(self.retry_policy),
+            "retry_policy": normalize_task_retry_policy(self.retry_policy),
             "risk_level": self.risk_level,
             "acceptance_criteria": list(self.acceptance_criteria),
             "status": self.status.value,
@@ -300,6 +371,8 @@ class TaskGraph:
     created_at: int
     nodes: tuple[TaskNode, ...] = ()
     schema_version: str = TASK_GRAPH_SCHEMA_VERSION
+    result_node_id: str | None = None
+    completion_policy: TaskGraphCompletionPolicy | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "TaskGraph":
@@ -322,6 +395,20 @@ class TaskGraph:
             planner_ref=str(data.get("planner_ref") or "").strip(),
             status=_enum_value(TaskGraphStatus, data.get("status") or "CREATED", field_name="TaskGraph.status"),
             created_at=_non_negative_int(data.get("created_at"), field_name="created_at"),
+            result_node_id=(
+                str(data.get("result_node_id") or "").strip()
+                if data.get("result_node_id") is not None
+                else None
+            ),
+            completion_policy=(
+                _enum_value(
+                    TaskGraphCompletionPolicy,
+                    data.get("completion_policy"),
+                    field_name="TaskGraph.completion_policy",
+                )
+                if data.get("completion_policy") is not None
+                else None
+            ),
             nodes=nodes,
         )
         graph.validate()
@@ -347,6 +434,59 @@ class TaskGraph:
                     TASK_GRAPH_INVALID,
                     f"TaskNode {node.node_id} has unknown dependencies: {','.join(missing)}",
                 )
+        completion_policy: TaskGraphCompletionPolicy | None = None
+        if self.completion_policy is not None:
+            try:
+                completion_policy = TaskGraphCompletionPolicy(self.completion_policy)
+            except (TypeError, ValueError) as exc:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.completion_policy is invalid",
+                ) from exc
+        depended_on = {
+            dependency
+            for node in self.nodes
+            for dependency in node.dependencies
+        }
+        sink_node_ids = tuple(
+            node.node_id for node in self.nodes if node.node_id not in depended_on
+        )
+        if self.result_node_id is not None:
+            result_node_id = str(self.result_node_id).strip()
+            if not result_node_id or result_node_id not in known:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.result_node_id must identify a node in the graph",
+                )
+            dependents = sorted(
+                node.node_id
+                for node in self.nodes
+                if result_node_id in node.dependencies
+            )
+            if dependents:
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "TaskGraph.result_node_id must identify a sink node; "
+                    f"dependents: {','.join(dependents)}",
+                )
+            if (
+                completion_policy
+                is not TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+                and len(sink_node_ids) > 1
+            ):
+                raise ContractViolation(
+                    TASK_GRAPH_INVALID,
+                    "legacy TaskGraph cannot declare one result authority across "
+                    "multiple terminal sinks",
+                )
+        if (
+            completion_policy is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+            and self.result_node_id is None
+        ):
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "atomic Graph success requires an explicit result_node_id",
+            )
         self._validate_acyclic()
 
     def _validate_acyclic(self) -> None:
@@ -369,7 +509,7 @@ class TaskGraph:
             visit(node_id)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "graph_id": self.graph_id,
             "root_work_order_id": self.root_work_order_id,
@@ -379,6 +519,16 @@ class TaskGraph:
             "created_at": self.created_at,
             "nodes": [node.to_dict() for node in self.nodes],
         }
+        # ``result_node_id`` is an optional compatible extension of the v1
+        # wire shape.  Omitting ``None`` preserves byte-stable legacy journal
+        # payloads and their existing digests/replay identities.
+        if self.result_node_id is not None:
+            payload["result_node_id"] = self.result_node_id
+        if self.completion_policy is not None:
+            payload["completion_policy"] = TaskGraphCompletionPolicy(
+                self.completion_policy
+            ).value
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,13 +630,16 @@ __all__ = [
     "TASK_EVENT_SCHEMA_VERSION",
     "TASK_GRAPH_SCHEMA_VERSION",
     "TASK_NODE_SCHEMA_VERSION",
+    "TASK_RETRY_POLICY_FIELDS",
     "EventActorType",
     "EventRedactionLevel",
     "TaskEvent",
     "TaskGraph",
+    "TaskGraphCompletionPolicy",
     "TaskGraphStatus",
     "TaskNode",
     "TaskNodeStatus",
+    "normalize_task_retry_policy",
     "validate_task_graph_transition",
     "validate_task_graph_admission_state",
     "validate_task_node_transition",

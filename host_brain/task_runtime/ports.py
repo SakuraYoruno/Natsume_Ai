@@ -14,6 +14,8 @@ from typing import Any, Protocol
 class CommandRepositoryPort(Protocol):
     """Atomically admit a command and its frozen graph/assignment."""
 
+    def get(self, command_id: str) -> Mapping[str, Any] | None: ...
+
     def admit(
         self,
         command: Any,
@@ -30,11 +32,42 @@ class TaskStorePort(Protocol):
 
     def assert_budget_usage_ready(self) -> None: ...
 
+    def assert_dag_scheduling_ready(self) -> None: ...
+
+    def assert_parallel_settlement_decision_ready(self) -> None: ...
+
+    def assert_parallel_success_decision_ready(self) -> None: ...
+
+    def assert_graph_cancellation_ready(self) -> None: ...
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
 
+    def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
+
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def list_pending_graph_cancellations(
+        self,
+        *,
+        limit: int = 100,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
+    def get_graph_cancellation_decision(self, decision_ref: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_decision_for_intent(
+        self,
+        intent_ref: str,
+    ) -> Mapping[str, Any] | None: ...
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
 
@@ -46,6 +79,41 @@ class TaskStorePort(Protocol):
         expected_version: int,
         target_status: str,
         outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def request_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        intent_payload: Mapping[str, Any],
+        graph_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def advance_graph_cancellation(
+        self,
+        intent_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def finalize_graph_cancellation(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str | None,
+        expected_graph_version: int,
+        expected_budget_version: int | None,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        intent_ref: str,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: Any,
+        budget_outbox: Any | None,
     ) -> Mapping[str, Any]: ...
 
     def transition_node(
@@ -118,6 +186,86 @@ class TaskStorePort(Protocol):
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
+    def promote_retry_due(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def claim_ready_node(
+        self,
+        *,
+        attempt_id: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        expected_node_version: int,
+        expected_attempt_count: int,
+        owner_id: str,
+        lease_ttl_ms: int,
+        budget_id: str,
+        operation_scope: str | None,
+        operation_fingerprint: str | None,
+        attempt_created_outbox: Any,
+        attempt_leased_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def schedule_retry(
+        self,
+        attempt_id: str,
+        *,
+        budget_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        error_ref: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def schedule_retry_node_outcome(
+        self,
+        attempt_id: str,
+        *,
+        budget_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def fail_running_attempt_bundle(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        graph_target_status: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def fail_running_attempt_node_bundle(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        error_ref: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
     def acquire_lease(
         self,
         attempt_id: str,
@@ -125,6 +273,17 @@ class TaskStorePort(Protocol):
         owner_id: str,
         ttl_ms: int,
         expected_attempt_version: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def heartbeat_lease(
+        self,
+        lease_id: str,
+        *,
+        owner_id: str,
+        fencing_token: int,
+        expected_lease_version: int,
+        ttl_ms: int,
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
@@ -141,6 +300,19 @@ class TaskStorePort(Protocol):
         ttl_ms: int,
         outbox: Any,
     ) -> Any: ...
+
+    def renew_operation_reservation(
+        self,
+        reservation_id: str,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        ttl_ms: int,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
 
     def transition_attempt(
         self,
@@ -186,6 +358,61 @@ class TaskStorePort(Protocol):
         target_status: str,
         outbox: Any,
     ) -> Mapping[str, Any]: ...
+
+    def settle_parallel_graph_budget(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        graph_target_status: str,
+        budget_target_status: str | None,
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: Any,
+        budget_outbox: Any | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def get_parallel_settlement_decision(
+        self,
+        decision_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_latest_parallel_settlement_decision(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def complete_parallel_graph_success(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        budget_id: str,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_node_states: Mapping[str, Mapping[str, Any]],
+        decision_ref: str,
+        decision_payload: Mapping[str, Any],
+        graph_outbox: Any,
+        budget_outbox: Any,
+        effect_intents: Sequence[Mapping[str, Any] | Any],
+    ) -> Mapping[str, Any]: ...
+
+    def get_parallel_success_decision(
+        self,
+        decision_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_latest_parallel_success_decision(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
 
     def consume_budget_once(
         self,
@@ -247,6 +474,13 @@ class GovernedWorkerPort(Protocol):
 
 
 class GovernedWorkerResolverPort(Protocol):
+    """Side-effect-free worker preparation before operation reservation.
+
+    A resolver may raise ``RetryableWorkerPreparationError`` to explicitly
+    classify a transient pre-operation failure.  Returning a worker closes
+    this retry boundary; execution occurs only after durable reservation.
+    """
+
     def resolve(self, *, executor: str, worker_route: str) -> GovernedWorkerPort: ...
 
 

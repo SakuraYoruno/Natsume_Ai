@@ -3,10 +3,10 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v1.0
-日期：2026-07-15
-状态：`NE-00_COMPLETED / PROGRAM_INCOMPLETE`
-代码基线：`origin/dev@9b6db346`，叠加仓库清理 `f0cd1dfd`
+版本：v1.5
+日期：2026-07-16
+状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+代码基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -31,11 +31,12 @@
 | 项目 | 执行起点 |
 |---|---|
 | Host `chat/skill/delegate/plan` | 已接 canonical runtime，作为可复用地基 |
-| Scheduler/Internal Agent | `BROKEN`，优先修复 |
-| Durable DAG | 多节点基础已实现；并发/retry/backoff 未实现 |
-| Budget | Host 已接；program-wide 与全部策略语义未完成 |
+| Scheduler | `WIRED`：真实 occurrence 已贯通 `WorkOrderV3 + Budget + child grant + Review + Verification + Acceptance + Receipt` |
+| Internal Agent | `WIRED`：边界 v2 已立即编译为 V3，完整 Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已通过真实集成 |
+| Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5A/B5B 已冻结显式结果 authority 并以 0091 单 UoW 封口成功；B5C 新增 0092、verified internal cancellation boundary、durable intent/fence、reconciliation gate 与 final decision。first-writer 决定 success/cancel 终局；accepted NODE effect 继续交付，未授权 effect 被 fence。生产 composition 未注入 verifier，也无 HTTP/UI 入口或跨进程自动 reconciliation/takeover/continuation，atomic/bounded/cancellation 均 OFF |
+| Budget | Host/Scheduler/Internal 已接；program-wide 与全部策略语义未完成 |
 | Review | durable token 已有；自动 continuation 未完成 |
-| Persona 演化 authority | `UNSAFE_DIRECT_WRITERS`：Bond stage/milestone、interaction cycle、emergent weekly 等路径可绕过 proposal/Review/版本激活直接修改 trait |
+| Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
 | Pentest L3 | shadow、非 durable 校准、不能生成 capability-unlocking 后继 |
 | Code/Research | 只有 synthetic benchmark，不是生产收益 |
@@ -43,6 +44,8 @@
 | Evolution abilities | 多为 partial/placeholder/missing |
 
 任何 PR 或报告若把上述 `PARTIAL/BROKEN/SHADOW` 写成 `DONE/PASS`，该交付自动失败。
+
+任何生产代码或工程工具变更必须在同一变更集中更新 README、对应权威文档或机器状态；CI 的 change-contract 门禁直接检查 Git 变更集，不能再用“文档最近更新过”代替本次同步。架构语义变化还必须按 freshness policy 的 source→doc 映射更新对应事实、数据流、图和 Trace。
 
 ## 3. 执行 DAG
 
@@ -86,9 +89,40 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 ### NE-01：执行主链与显式 Composition 闭环
 
+状态：`IN_PROGRESS`
+
+当前已完成切片：
+
+- Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
+- Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
+- Internal Agent 真实 `WorkOrderV3` admission、Secure Ingress principal、Budget、`delegate:agent_runtime` child grant、PRE/POST Review、Verification、Acceptance、Receipt 与 replay；
+- Durable DAG B1 safe-retry 子集：Coordinator 消费 B0，原子提交 claim 并执行到期 promotion；worker resolver 的显式 `RetryableWorkerPreparationError` 只会在 operation reservation 前进入 `schedule_retry`。retry_count BudgetUsage、Budget、Attempt、Node、Lease 与 Outbox 在同一 `BEGIN IMMEDIATE` 内提交，超限则原子阻断 graph；真实 Coordinator 已证明 attempt 1 → RETRY_PENDING → 到期 attempt 2，且 reservation 后 worker 异常绝不 retry。提交后响应丢失只在 Attempt/Node/Lease/Graph/Budget/BudgetUsage/关联 Outbox 全部精确一致时 replay，不重复扣费；`CancelledError` 原样传播。当前生产 resolver 尚无现实异常源抛该 marker，因此这是已接 contract path，不是现实故障自动分类已完成；
+- pre-reservation 普通/耗尽 failure 已通过 `fail_running_attempt_bundle` 在单事务内关闭 Attempt、Node、Graph、Lease 并生成四条 attempt/evidence-bound Outbox；已有 operation reservation 时拒绝，精确重放会拒绝 fence、version、evidence 或 Outbox 漂移。Budget finalize 仍在 bundle 外；
+- operation reservation 后已启动 `DurableExecutionHeartbeat`：先续 Lease、再续 Reservation，流事件和最终结果均 checkpoint，stop/join 后才允许使用最新 reservation version COMMIT；续租同参响应丢失支持精确重放，失败返回 `RECOVERY_REQUIRED` 且绝不 COMMIT；
+- `GovernedTaskCoordinator` 的 `bounded_fanout_enabled` 仍默认 `false`，生产 composition 未开启。`0090` schema 在 Budget/worker 前 fail-fast；进入 B5 成功路径还要求 `0091` schema ready。Store-only `ParallelSettlementProjection` 已接管 settlement 所需的 active re-entry、rejected Budget outcome 与 outcome snapshot read/validation，`ParallelSettlementRuntime` 共享原 Store/BudgetRuntime/RuntimeOutbox 并接管 failure/review/Budget outcome resolution 与 settlement orchestration；Coordinator 直接调用该服务。live 与 crash/re-entry 的 0090 outcomes 继续从整个 admitted Graph 的 durable Node、Attempt、Reservation、BudgetUsage 重建同一 payload/ref并 exact replay，DurableTaskStore 仍是唯一 UoW mutation authority，既有 ownership/CAS、selected Budget usage、digest/Outbox/Attempt/usage fail-closed 语义不变；
+- B5A 已把 `result_node_id` 与可选 `completion_policy` 加入 canonical TaskGraph/AdmittedExecution、durable identity 和 planner semantic/shadow comparison。atomic policy 必须显式绑定 sink result；legacy 多 sink 保持无 result。`PlanningGraphCompiler` 默认 legacy，只有调用方显式请求或失败重规划继承前一 revision 才生成 atomic policy；
+- B5B 使用独立 `atomic_graph_success_enabled`，Host、Scheduler、Internal 三处生产 composition 均未启用。Application 在 repository admission 前校验 runtime capability、node-grant service 与 parent grant；Coordinator 直入只接受覆盖全部 TaskNode 的 exact grant map。atomic policy 即使单节点或串行执行也由 outer 成功封口；terminal-leaf 实际并行还需另开 bounded fan-out；
+- 每个节点必须已有 `ACCEPTED` Node、latest `SUCCEEDED` Attempt、已提交 Reservation receipt 和 canonical worker projection。projection 会重算 digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式结果节点编译整图 effect intents 和用户可见结果，Skill 也使用冻结 canonical projection；
+- 全节点成功由 `complete_parallel_graph_success()` 在单一 Store UoW 中提交 `Graph COMPLETED`、共享 `Budget CONSUMED`、两条不同的 Graph/Budget Outbox、整图 durable effect intents 与迁移 0091 的 `Natsume.task_runtime.parallel_success.v1` canonical decision。任一 identity、projection、effect、Outbox 或版本漂移 fail closed；晚故障整体回滚。completed replay 只读 0091、不重编 effect；连续两次 Store 响应丢失会重读 terminal authority；
+- 定向证据覆盖单节点、串行、多 terminal roots 完成顺序对抗、flag-off admission 前拒绝、缺 grant service 拒绝、projection 篡改、restart、一次/两次响应丢失与 completed replay；
+- B5C 以迁移 0092 持久化 canonical cancellation intent、final decision 与 effect fence。Application 新增无 HTTP/UI 暴露的内部 verified entry；verifier 必须把 request/principal/source/reason 精确绑定到既有 durable Graph revision，没有 verifier 即 fail closed。当前三处生产 composition 均未注入 verifier，因此只属于 shadow contract/path；
+- phase 1 UoW 先将 Graph 推入 `BLOCKED`，把非终态 Node、active Attempt/Lease、Review/token、operation 和未授权 effect 写入取消或 reconciliation 状态，提交后才 cancel/join 本进程 child 与 heartbeat。执行重入会发现 intent 并继续 advance/finalize，但本地 task handle 不是 authority；
+- phase 2 只有在 active ownership、operation/effect/review 不确定性全部收敛后才原子提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 与 canonical decision。accepted NODE + succeeded Attempt 的 effect 保留既有 delivery authority；其余 NODE/未完成 GRAPH effect 被 fence。0091 success 与 0092 cancellation first-writer-wins，请求/封口响应丢失 exact replay；
+- Outbox publish 保留 `RuntimeOutbox` asyncio lock 与 `RuntimeOutboxPublisher` 实例级 `threading.Lock` 作为进程内降噪；Node Lifecycle 子矩阵固定为 6 build/3 publish/1 best-effort，Node Execution 子矩阵固定为 6 build/14 publish/4 best-effort，所有 owner 联合矩阵仍为 27 build/31 publish/58 calls/5 best-effort。0093 已提供跨进程 durable claim/CAS：claim 持久化 owner/token/expiry/单调 fence，过期可 takeover，同 aggregate 严格阻止越过 predecessor；publisher 逐条 `claim → 幂等 append → fenced complete`，失败则 fenced release 并持久化 backoff/error。Composition 使用当次 boot/construction 的 `recovery_id::outbox` 作为唯一 owner，并在 startup publish 后启动可关闭后台 worker；worker 按 aggregate-head 最早 available/claim-expiry + 有界轮询自动续投。close 与前台 publish 线性化，等待已进入的发布临界区；已提交 event/claim complete 后的 backlog 诊断失败只返回脱敏 DEGRADED，不造假失败。显式 drain 只有 canonical total_pending=0 才返回 DRAINED，否则为 DEFERRED；`list_pending_outbox` 保持完整 PENDING inventory，delivery-ready 只由 claim/backlog API 表达；readiness 缓存在每个 Store 实例，仅显式诊断 force-revalidate 重扫；
+- Task Runtime 启动已按 migration/readiness → `task_store.recover_startup` → publisher → recovery outbox publish → outbox background worker → runtime activation 与 cancellation continuation worker 排序；ASGI 将配置逻辑 owner 派生为每次 container construction 唯一的 execution owner。恢复异常在 route activation 前 fail closed。Container 拥有且向 Host/Internal/Scheduler/worker 注入同一 process-shared `LocalGraphExecutionRegistry`，仅用于本进程 quiescence，不是 durable authority。Coordinator 激活后 worker start 失败会尝试反向 stop/join worker 与 close Coordinator；全部回滚成功才 unbind，失败则保留 handle 供 `aclose` 重试，Runtime Group 也保留关闭失败的 child。shutdown 经有界 grace+cancel，若 worker 仍不静默则 fail closed 并保持 Store 开放供重试。0093 Outbox 已具在线过期 takeover；0094 cancellation worker 以独立 recovery-scoped owner 扫描、claim、heartbeat、defer 与 expired takeover pending intent，claim/heartbeat/defer/complete 在 `BEGIN IMMEDIATE` 后才采时；Runtime 未显式获得 `local_pending` 时必做 `cancel_and_join`，本地非静默或 operation/effect/review 未收敛时都只 durable defer；
+- lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`；activation rollback 或 `aclose` quiescence 失败后 bind/activate 锁死，只允许 `aclose` 重试。Coordinator admission close、drain、`aclose` 任一失败均保持 Store 开放；只有 Coordinator 与 worker 均静默后才 drain Outbox/关 infrastructure；
+- 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
+- Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
+- Workspace D0 统一 path resolver 已接入 Agent 文件 I/O/list、截图保存、Verification cwd/argv 和 git cwd，封闭绝对路径、遍历、同前缀目录及已解析 link 逃逸。
+- Composition 两个安全切片累计删除 6 个生产零消费者全局槽位和 4 个死 accessor；第二刀额外收掉 7 个宽泛 façade 重导出及 `retrieval_pipeline` 的测试 reset 残留。排除 6 个 lock 与 `application_ports` 端口束后的可变服务引用由 59 降为 53，但全局 container 仍存在。
+
+Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。B4/0090 与 B5A/B5B/0091 语义继续有效；B5C 已有 0092 两阶段 durable cancellation、first-writer fence、accepted-effect 保留与 internal verified boundary，0093 收口 Task Runtime Outbox 跨进程投递，0094 增加 composition-owned pending cancellation scanner、持久协调 claim/heartbeat/defer/expired takeover、exact HostCommand admission 重建与既有 Runtime continuation。0094 没有复制 0092 业务状态，也没有自动解决 operation/effect reconciliation；未收敛时只 durable defer。生产 verifier/HTTP/UI 入口/canary 尚未接线，atomic、bounded、cancellation 均为 `PRODUCTION_OFF`。revisioned 0090、历史半提交、`WAITING_APPROVAL` optional-attempt、Budget 高竞争和现实 resolver 分类仍未闭环。Lane D 的 workspace/composition 仍未完成，因此 Lane B、NE-01 和完整架构都不得封板。
+
 目标：先修发动机底座，保证所有生产入口真的可执行，再删除第二 authority。
 
 #### Lane A：Scheduler / Internal contract repair
+
+状态：`COMPLETED`（Scheduler 与 Internal 均有首次真实 admission/replay 证据）。
 
 - 将 `AgentWorkOrder` 转为显式 `WorkOrderV3`；
 - 每路必须有 `BudgetPolicy`、node-bound grant、Review runtime、Verification、Acceptance 与 Receipt；
@@ -97,10 +131,19 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 #### Lane B：Durable DAG completion
 
-- 调度所有依赖已满足节点，支持有界 fan-out/fan-in；
-- 真正消费 `retry_policy.max_attempts`、backoff 和 retry budget；
+状态：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / LANE_IN_PROGRESS / PRODUCTION_OFF`。B5A/B5B 已建立 atomic success 边界；B5C 已建立 0092 两阶段取消 shadow 与内部 verified boundary。0094 已完成跨进程扫描、协调 claim/heartbeat/defer、expired takeover 和 exact admission 重建，但业务 reconciliation 仍由既有 0092 Runtime/Store 收敛。生产 composition 未注入 verifier，且 HTTP/UI/canary 与完整 operation/effect reconciliation 尚缺，不能宣称 Lane B 完成。
+
+- 维持 0094 scanner/worker 的 claim/heartbeat/defer/expired-takeover 与 exact HostCommand reconstruction 故障矩阵；继续补齐 operation/effect 等业务 reconciliation，并将 B5C verified cancellation 接入明确的生产 authority provider 与受控 HTTP/UI 入口；完成 fault matrix 与 canary 前保持 OFF；
+- 为 TaskGraph Outbox 增加 revisioned aggregate identity，使多 revision graph ID 也能完整扫描历史 `taskbatch` marker 的缺行与错绑；
+- 在 reconciliation 阶段识别并修复历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态，不能把 B4 的 `ACTIVE` 重入收口误写成历史修复；
+- 将 `WAITING_APPROVAL` 专线收敛为支持无 Attempt 的统一 outcome observation，同时保留严格 Review token/checkpoint fence；
+- 保持 0093 Outbox claim/CAS 故障矩阵：并发 owner、claim 过期 takeover、append 后 complete 响应丢失、fenced stale worker、同 aggregate 严格顺序与失败 release/backoff 必须持续通过；还必须覆盖新进程在旧 claim 到期前启动后的后台自动 takeover、PENDING backlog 不得误报 DRAINED、完整 inventory 与 ready backlog 分离，以及热路径不重复 readiness 全表扫描；
+- 把现实 resolver 的可证明瞬态准备失败映射到显式 marker；禁止扩大到 reservation 后异常；
+- 在现有 max-attempt/backoff/retry-budget 原子路径上补齐真实故障分类与运行观测；
+- 收敛 Budget CAS 高竞争下固定重试上限及 `ALREADY_EXCEEDED` 的唯一语义，并补齐 reservation 后 `RECOVERY_REQUIRED` 的即时 reconciliation 与 online takeover；
 - 实现 resume 后的自动 continuation，保证 checkpoint 后不重放已确认副作用；
 - 并发、retry、cancel、lease takeover、crash recovery 均产生同一 lineage。
+- 完成跨进程、接管、续跑和故障矩阵后再做 production canary；在 canary 证据前 `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 必须保持关闭。
 
 #### Lane C：Legacy authority removal
 
@@ -112,6 +155,8 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 
 #### Lane D：Composition 与 workspace
 
+- D0 已完成 scoped path-safety vertical slice；它不是 per-task workspace ownership 或 OS/tenant/worktree 隔离；
+- mixed-file gate 在第十七刀转绿并于第十八刀继续保持绿色，未抬高任何 ceiling。第十八刀新增 1,172 行 `DurableDagSchedulingRuntime` 与 38 行纯 `dag_scheduling_records.py`，从冻结 HEAD 65219 迁出 `execute_stream`（原 988 行）、reentered outcomes、`supports` 与 `run_claimed_node`，规范化/精确 AST hash 已冻结。Runtime 只注入同一 Store、共享 Outbox/Budget/Lifecycle/NodeExecution/Projection/0090/0091/Cancellation/Review、flags、reader 与 progress buffer，不反向持有 Coordinator callback、不建新锁、不取得第二 persistence authority；调用矩阵固定为 Store 9、Budget 9、Lifecycle 18、NodeProjection 12、NodeExecution 6、Settlement 4、Success 1、Review 4、Cancellation 1、Outbox 1 build/6 publish/0 best-effort，全局 Outbox 仍为 27/31/58/5。`coordinator.py` 已降至 257 行，只保留 composition、公开 cancel/supports/execute facade 与 registry track。1,172 行文件是临时 outer orchestrator，仍集中 review、terminal-state 与 fanout 协调并登记为后续结构拆分，不代表 mixed-responsibility 或业务 reconciliation 闭环完成。证据为 `host_brain/task_runtime/dag_scheduling_runtime.py`、`host_brain/task_runtime/dag_scheduling_records.py` 与 `tests/unit/test_dag_scheduling_runtime_structure.py`。0094 已新增 cancellation continuation 的跨进程协调层；下一步是业务 reconciliation、生产 authority/入口与 canary，整体仍为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；

@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from host_brain.agent_runtime.workspace_paths import (
+    normalize_workspace_root,
+    resolve_workspace_path,
+)
 from host_brain.core.subprocess_utils import run as _subprocess_run
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
@@ -41,12 +45,21 @@ def _ensure_path(value: Path | str) -> Path:
     return Path(str(value))
 
 
-def _check_path_within_workspace(target: Path, workspace: Path) -> Path:
-    """安全校验：确保目标路径在工作区范围内。"""
-    resolved = (workspace / target).resolve()
-    if not str(resolved).startswith(str(workspace.resolve())):
-        raise PermissionError(f"path escape denied: {target}")
-    return resolved
+def _check_path_within_workspace(
+    target: Path | str,
+    workspace: Path,
+    *,
+    must_exist: bool = False,
+    allow_root: bool = False,
+) -> Path:
+    """兼容入口：所有工作区路径统一委托给 canonical resolver。"""
+
+    return resolve_workspace_path(
+        workspace,
+        target,
+        must_exist=must_exist,
+        allow_root=allow_root,
+    )
 
 
 def _tool_agent_read_file(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
@@ -56,7 +69,7 @@ def _tool_agent_read_file(args: dict[str, Any], *, workspace: Path) -> dict[str,
     if not path:
         return {"error": "missing path argument"}
     try:
-        resolved = _check_path_within_workspace(Path(path), ws)
+        resolved = _check_path_within_workspace(path, ws, must_exist=True)
     except PermissionError as exc:
         return {"error": str(exc)}
     if not resolved.exists():
@@ -87,7 +100,7 @@ def _tool_agent_write_file(args: dict[str, Any], *, workspace: Path) -> dict[str
     if not path:
         return {"error": "missing path argument"}
     try:
-        resolved = _check_path_within_workspace(Path(path), ws)
+        resolved = _check_path_within_workspace(path, ws)
     except PermissionError as exc:
         return {"error": str(exc)}
     # 禁止覆盖 .env、secrets、密钥文件
@@ -112,7 +125,12 @@ def _tool_agent_list_files(args: dict[str, Any], *, workspace: Path) -> dict[str
     ws = _ensure_path(workspace)
     subdir = str(args.get("path") or "").strip()
     try:
-        target = _check_path_within_workspace(Path(subdir), ws) if subdir else ws.resolve()
+        target = _check_path_within_workspace(
+            subdir or ".",
+            ws,
+            must_exist=True,
+            allow_root=not subdir,
+        )
     except PermissionError as exc:
         return {"error": str(exc)}
     if not target.exists():
@@ -122,10 +140,16 @@ def _tool_agent_list_files(args: dict[str, Any], *, workspace: Path) -> dict[str
     try:
         entries = []
         for entry in sorted(target.iterdir()):
+            safe_entry = resolve_workspace_path(
+                ws,
+                entry.name,
+                base=target,
+                must_exist=True,
+            )
             entries.append({
                 "name": entry.name,
-                "type": "dir" if entry.is_dir() else "file",
-                "size_bytes": entry.stat().st_size if entry.is_file() else None,
+                "type": "dir" if safe_entry.is_dir() else "file",
+                "size_bytes": safe_entry.stat().st_size if safe_entry.is_file() else None,
             })
         return {"path": str(target), "entries": entries[:200]}
     except Exception as exc:
@@ -214,7 +238,7 @@ def _tool_agent_web_fetch(args: dict[str, Any], *, workspace: Path) -> dict[str,
 
 def _tool_agent_git_diff(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """获取工作区 git diff。"""
-    ws = _ensure_path(workspace)
+    ws = normalize_workspace_root(workspace)
     try:
         completed = _subprocess_run(
             ["git", "-C", str(ws), "diff", "--stat"],
@@ -295,7 +319,10 @@ def _tool_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> dict[s
     save_path = str(args.get("save_path") or "").strip() or None
     full_page = bool(args.get("full_page", False))
     if save_path:
-        resolved = _ensure_path(workspace) / save_path
+        try:
+            resolved = resolve_workspace_path(workspace, save_path)
+        except PermissionError as exc:
+            return {"error": str(exc)}
         resolved.parent.mkdir(parents=True, exist_ok=True)
         save_path = str(resolved)
     return execute_browser_skill({

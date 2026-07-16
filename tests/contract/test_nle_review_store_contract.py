@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 import sqlite3
+from urllib.parse import quote
 
 import pytest
 
@@ -12,7 +15,11 @@ from host_brain.contracts.agent_runtime.review_policy import (
     ReviewStatus,
     ReviewType,
 )
+from host_brain.contracts.agent_runtime.graph_cancellation import (
+    GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+)
 from host_brain.persistence.review_repository import (
+    REVIEW_GRAPH_CANCELLATION_CONFLICT,
     REVIEW_RESUME_ALREADY_CONSUMED,
     REVIEW_STORE_SCHEMA_NOT_READY,
     REVIEW_TOKEN_EXPIRED,
@@ -20,6 +27,7 @@ from host_brain.persistence.review_repository import (
     ReviewStore,
     ReviewStoreError,
 )
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy, WorkspaceResolution
 
@@ -48,6 +56,126 @@ def _store(tmp_path: Path, clock: MutableClock | None = None) -> ReviewStore:
     db_path = tmp_path / "review-store.sqlite3"
     _apply_review_migration(db_path)
     return ReviewStore(db_path, clock=clock or MutableClock())
+
+
+def _store_with_cancellation_schema(
+    tmp_path: Path,
+    clock: MutableClock | None = None,
+) -> ReviewStore:
+    db_path = tmp_path / "review-cancellation-store.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="migration-review-cancellation-fence",
+        ts_ms=1_000,
+    )
+    assert result.success, result.as_dict()
+    return ReviewStore(db_path, clock=clock or MutableClock())
+
+
+def _insert_graph_cancellation(
+    store: ReviewStore,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> None:
+    intent_ref = f"taskcancel-intent://test/{graph_id}/{graph_revision}"
+    request_id = f"request-review-cancel-{graph_id}-{graph_revision}"
+    outbox_id = f"outbox-review-cancel-{graph_id}-{graph_revision}"
+    payload_json = json.dumps(
+        {"graph_id": graph_id, "graph_revision": graph_revision},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    payload_sha256 = "sha256:" + hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    with sqlite3.connect(str(store.db_path)) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind, source_ref,
+                legacy_snapshot_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, 'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
+            """,
+            (
+                graph_id,
+                graph_revision,
+                f"work-order-{graph_id}-{graph_revision}",
+                "planner://review-cancellation/test",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_outbox(
+                outbox_id, aggregate_type, aggregate_id, aggregate_version,
+                event_type, payload_ref, evidence_refs_json, attempt_id,
+                idempotency_key, status, available_ts_ms, created_ts_ms,
+                published_ts_ms, status_version
+            ) VALUES (?, 'TASK_GRAPH', ?, 1, 'TASK_GRAPH_CANCELLATION_REQUESTED',
+                      ?, '[]', NULL, ?, 'PENDING', 1000, 1000, NULL, 0)
+            """,
+            (
+                outbox_id,
+                graph_id,
+                f"taskstore://event/TASK_GRAPH/{graph_id}/1",
+                f"idempotency:{outbox_id}",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph_cancellation_intent(
+                intent_ref, schema_version, request_id, request_identity,
+                source, reason_code, graph_id, graph_revision,
+                graph_version_before, graph_version_after, budget_id,
+                budget_version_at_request, payload_json, payload_sha256,
+                graph_outbox_id, status, status_version,
+                requested_ts_ms, finalized_ts_ms
+            ) VALUES (?, ?, ?,
+                      'principal://review/test', 'OPERATOR', 'OPERATOR_CANCELLED_TASK',
+                      ?, ?, 0, 1, NULL, NULL, ?, ?, ?, 'REQUESTED', 0, 1000, NULL)
+            """,
+            (
+                intent_ref,
+                GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
+                request_id,
+                graph_id,
+                graph_revision,
+                payload_json,
+                payload_sha256,
+                outbox_id,
+            ),
+        )
+
+
+def _task_node_review(
+    review_id: str,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> ReviewItem:
+    node_id = "node-1"
+    subject_ref = (
+        f"task-node://{quote(graph_id, safe='')}/{graph_revision}/"
+        f"{quote(node_id, safe='')}"
+        "?root=root-work-order&attempt=not-started"
+    )
+    return ReviewItem(
+        review_id=review_id,
+        review_type=ReviewType.PRE_EXECUTION_APPROVAL,
+        subject_ref=subject_ref,
+        subject_version=0,
+        requester="agent-runtime",
+        reason="TaskNode requires approval",
+        risk_level=4,
+        side_effects=("write_files",),
+        evidence_refs=("evidence://review/task-node/1",),
+        status=ReviewStatus.PENDING,
+        expires_at=60_000,
+        resume_phase=ReviewResumePhase.PRE_EXECUTION,
+        checkpoint_id=(
+            f"task-checkpoint://{quote(graph_id, safe='')}/{graph_revision}/"
+            f"{quote(node_id, safe='')}/pre_execution"
+        ),
+    )
 
 
 def _review(
@@ -206,6 +334,118 @@ def test_t_nle_10_post_resume_returns_checkpoint_without_side_effect_replay(tmp_
     assert resumed["resume_action"] == "RETURN_POST_EXECUTION_CHECKPOINT"
     assert resumed["checkpoint_id"] == "checkpoint://post/graph-1/node-1/v4"
     assert resumed["replay_side_effects"] is False
+
+
+def test_t_nle_10_task_node_review_remains_compatible_without_0092(tmp_path: Path) -> None:
+    store = _store(tmp_path, MutableClock(1_000))
+    review = _task_node_review(
+        "review-task-node-legacy-schema",
+        graph_id="graph-legacy-review",
+        graph_revision=1,
+    )
+
+    created = store.create_review(
+        review,
+        task_graph_id="graph-legacy-review",
+        task_node_id="node-1",
+    )
+    approved = store.approve_review(review.review_id, actor_id="owner")
+    resumed = store.resume_review(
+        review.review_id,
+        resume_token_ref=approved["resume_token_ref"],
+        subject_ref=review.subject_ref,
+        subject_version=review.subject_version,
+        resume_phase=review.resume_phase,
+        checkpoint_id=str(review.checkpoint_id),
+    )
+
+    assert created["review"]["status"] == "PENDING"
+    assert resumed["review"]["review"]["status"] == "CONSUMED"
+
+
+def test_t_nle_10_graph_cancellation_fences_create_approve_and_resume(
+    tmp_path: Path,
+) -> None:
+    store = _store_with_cancellation_schema(tmp_path, MutableClock(1_000))
+
+    encoded_graph_id = "graph/create fenced"
+    _insert_graph_cancellation(store, graph_id=encoded_graph_id, graph_revision=1)
+    create_review = _task_node_review(
+        "review-create-fenced",
+        graph_id=encoded_graph_id,
+        graph_revision=1,
+    )
+    with pytest.raises(ReviewStoreError) as create_error:
+        store.create_review(
+            create_review,
+            task_graph_id=encoded_graph_id,
+            task_node_id="node-1",
+        )
+    assert create_error.value.reason_code == REVIEW_GRAPH_CANCELLATION_CONFLICT
+
+    approve_review = _task_node_review(
+        "review-approve-fenced",
+        graph_id="graph-approve-fenced",
+        graph_revision=1,
+    )
+    store.create_review(
+        approve_review,
+        task_graph_id="graph-approve-fenced",
+        task_node_id="node-1",
+    )
+    _insert_graph_cancellation(store, graph_id="graph-approve-fenced", graph_revision=1)
+    with pytest.raises(ReviewStoreError) as approve_error:
+        store.approve_review(approve_review.review_id, actor_id="owner")
+    assert approve_error.value.reason_code == REVIEW_GRAPH_CANCELLATION_CONFLICT
+    assert store.get_review(approve_review.review_id)["review"]["status"] == "PENDING"
+
+    resume_review = _task_node_review(
+        "review-resume-fenced",
+        graph_id="graph-resume-fenced",
+        graph_revision=1,
+    )
+    store.create_review(
+        resume_review,
+        task_graph_id="graph-resume-fenced",
+        task_node_id="node-1",
+    )
+    approved = store.approve_review(resume_review.review_id, actor_id="owner")
+    _insert_graph_cancellation(store, graph_id="graph-resume-fenced", graph_revision=1)
+    with pytest.raises(ReviewStoreError) as resume_error:
+        store.resume_review(
+            resume_review.review_id,
+            resume_token_ref=approved["resume_token_ref"],
+            subject_ref=resume_review.subject_ref,
+            subject_version=resume_review.subject_version,
+            resume_phase=resume_review.resume_phase,
+            checkpoint_id=str(resume_review.checkpoint_id),
+        )
+    assert resume_error.value.reason_code == REVIEW_GRAPH_CANCELLATION_CONFLICT
+    assert store.get_review(resume_review.review_id)["review"]["status"] == "APPROVED"
+
+    _insert_graph_cancellation(store, graph_id="graph-adjacent", graph_revision=1)
+    adjacent_review = _task_node_review(
+        "review-adjacent-revision",
+        graph_id="graph-adjacent",
+        graph_revision=2,
+    )
+    adjacent_created = store.create_review(
+        adjacent_review,
+        task_graph_id="graph-adjacent",
+        task_node_id="node-1",
+    )
+    adjacent_approved = store.approve_review(adjacent_review.review_id, actor_id="owner")
+    adjacent_resumed = store.resume_review(
+        adjacent_review.review_id,
+        resume_token_ref=adjacent_approved["resume_token_ref"],
+        subject_ref=adjacent_review.subject_ref,
+        subject_version=adjacent_review.subject_version,
+        resume_phase=adjacent_review.resume_phase,
+        checkpoint_id=str(adjacent_review.checkpoint_id),
+    )
+
+    assert adjacent_created["review"]["status"] == "PENDING"
+    assert adjacent_resumed["review"]["review"]["status"] == "CONSUMED"
 
 
 def test_t_nle_10_confirmed_true_cannot_bypass_declared_durable_review(tmp_path: Path) -> None:

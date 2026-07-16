@@ -83,6 +83,7 @@ def test_direct_chat_and_delegate_compile_same_governed_contracts(
     assert first.command.route_type == route
     assert first.command.target_id == expected_target
     assert first.graph.nodes[0].route == f"{route}:{expected_target}"
+    assert first.graph.result_node_id == first.graph.nodes[0].node_id
     assert first.work_order.domain == domain
     assert first.work_order.budget_policy is not None
     assert first.work_order.budget_policy.limits.time_ms > 0

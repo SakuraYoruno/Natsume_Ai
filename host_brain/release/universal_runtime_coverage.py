@@ -19,6 +19,7 @@ PROGRAM_COMPLETE = "COMPLETE"
 PROGRAM_INCOMPLETE = "INCOMPLETE"
 CONTROL_PASS = "PASS"
 CONTROL_MISSING = "MISSING"
+CONTROL_PARTIAL = "PARTIAL"
 CONTROL_IMPLEMENTED_NOT_WIRED = "IMPLEMENTED_NOT_WIRED"
 
 REQUIRED_ROUTES = ("chat", "skill", "delegate", "plan")
@@ -203,10 +204,12 @@ def _control_status(value: Any, *, subject: str) -> str:
     if status not in {
         CONTROL_PASS,
         CONTROL_MISSING,
+        CONTROL_PARTIAL,
         CONTROL_IMPLEMENTED_NOT_WIRED,
     }:
         raise UniversalRuntimeCoverageError(
-            f"{subject} must be explicitly PASS, IMPLEMENTED_NOT_WIRED, or MISSING"
+            f"{subject} must be explicitly PASS, PARTIAL, "
+            "IMPLEMENTED_NOT_WIRED, or MISSING"
         )
     return status
 
@@ -236,6 +239,7 @@ def _evidence_refs(
 __all__ = [
     "COVERAGE_SCHEMA_VERSION",
     "CONTROL_IMPLEMENTED_NOT_WIRED",
+    "CONTROL_PARTIAL",
     "PROGRAM_COMPLETE",
     "PROGRAM_INCOMPLETE",
     "REQUIRED_ARCHITECTURE_CONTROLS",

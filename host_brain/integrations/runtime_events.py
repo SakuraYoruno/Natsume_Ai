@@ -8,12 +8,14 @@ fail-closed redaction gate before anything becomes replayable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
 import re
+import threading
 from typing import Any, Callable, Mapping, Sequence
+import uuid
 
 from host_brain.core.ids import now_ms
 from host_brain.persistence.runtime_event_repository import (
@@ -818,20 +820,51 @@ class RuntimeEventStore:
 class RuntimeOutboxPublisher:
     """Publish TaskStore outbox rows into the runtime event timeline.
 
-    The sequence is intentionally append-then-mark:
-    1. Write an idempotent runtime event.
-    2. Mark the TaskStore outbox row PUBLISHED only after the event exists.
+    The sequence is intentionally claim-append-complete:
+    1. Claim one or more ready rows through the durable TaskStore fence.
+    2. Write an idempotent runtime event.
+    3. Complete the exact claim only after the event exists.
 
-    If step 2 fails after step 1 succeeds, a later retry reuses the same
-    dedupe key and then marks the still-pending outbox row, preserving
-    at-least-once delivery without duplicate client-side state changes.
+    If step 3 fails after step 2 succeeds, claim expiry permits a later owner
+    to reuse the same event dedupe key and complete the still-pending row.
+    The in-process lock remains a local batching guard; cross-process exclusion
+    and stale-owner rejection belong to the durable claim token and fence.
     """
 
     task_store: Any
     event_store: RuntimeEventStore
     projection_worker: Any | None = None
+    worker_id: str | None = None
+    claim_lease_ms: int = 30_000
+    retry_delay_ms: int = 1_000
+    background_batch_limit: int = 100
+    max_poll_interval_ms: int = 1_000
+    close_join_timeout_ms: int = 10_000
+    clock: Callable[[], int] = now_ms
+    _publish_lock: threading.Lock = field(init=False, repr=False)
+    _lifecycle_lock: threading.Lock = field(init=False, repr=False)
+    _background_stop: threading.Event = field(init=False, repr=False)
+    _background_wake: threading.Event = field(init=False, repr=False)
+    _background_thread: threading.Thread | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
+    _closed: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
+        self._publish_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._background_stop = threading.Event()
+        self._background_wake = threading.Event()
+        self.worker_id = _text(self.worker_id) or (
+            f"runtime-outbox-publisher::{uuid.uuid4().hex}"
+        )
+        self.claim_lease_ms = max(1, int(self.claim_lease_ms))
+        self.retry_delay_ms = max(0, int(self.retry_delay_ms))
+        self.background_batch_limit = max(1, int(self.background_batch_limit))
+        self.max_poll_interval_ms = max(1, int(self.max_poll_interval_ms))
+        self.close_join_timeout_ms = max(1, int(self.close_join_timeout_ms))
         if self.projection_worker is None:
             # Local import keeps eventing dependent on a small store protocol,
             # not on this integration facade.
@@ -841,20 +874,225 @@ class RuntimeOutboxPublisher:
 
             self.projection_worker = RuntimeEventProjectionWorker(self.event_store)
 
+    @property
+    def background_running(self) -> bool:
+        thread = self._background_thread
+        return bool(thread is not None and thread.is_alive())
+
+    def start(self) -> None:
+        """Start the composition-owned retry loop exactly once.
+
+        Directly constructed publishers stay synchronous until their owner
+        explicitly starts them.  The loop is a liveness helper only; durable
+        claims and their fencing tokens remain the delivery authority.
+        """
+
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                    "cannot start a closed runtime outbox publisher",
+                )
+            thread = self._background_thread
+            if thread is not None and thread.is_alive():
+                return
+            self._background_stop.clear()
+            self._background_wake.clear()
+            thread = threading.Thread(
+                target=self._run_background,
+                name=f"runtime-outbox::{str(self.worker_id)[-32:]}",
+                daemon=True,
+            )
+            self._background_thread = thread
+            thread.start()
+
+    def wake(self) -> None:
+        """Request an early retry without granting any delivery authority."""
+
+        self._background_wake.set()
+
+    def close(self) -> None:
+        """Stop, wake and join the retry worker before stores are closed."""
+
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._background_stop.set()
+            self._background_wake.set()
+            thread = self._background_thread
+        if thread is threading.current_thread():
+            return
+        # Linearize shutdown with any foreground publication that passed the
+        # first lifecycle check before ``_closed`` was set.  Publishers also
+        # recheck under this lock, so no late caller can touch stores after
+        # close returns.
+        with self._publish_lock:
+            pass
+        if thread is None:
+            return
+        thread.join(timeout=self.close_join_timeout_ms / 1_000)
+        if thread.is_alive():
+            raise RuntimeEventError(
+                RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                "runtime outbox retry worker did not stop before close timeout",
+            )
+
+    def _run_background(self) -> None:
+        while not self._background_stop.is_set():
+            backlog: Mapping[str, Any] | None = None
+            try:
+                result = self.publish_pending(limit=self.background_batch_limit)
+                candidate = result.get("backlog")
+                if isinstance(candidate, Mapping):
+                    backlog = candidate
+            except Exception:
+                # The row remains PENDING or durably claimed.  The next bounded
+                # poll retries without allowing a transient failure to kill the
+                # only process-local liveness loop.
+                backlog = None
+            if self._background_stop.is_set():
+                break
+            if backlog is None:
+                try:
+                    backlog = self._inspect_delivery_backlog()
+                except Exception:
+                    backlog = None
+            delay_ms = self._background_delay_ms(backlog)
+            self._background_wake.wait(delay_ms / 1_000)
+            self._background_wake.clear()
+
+    def _background_delay_ms(
+        self,
+        backlog: Mapping[str, Any] | None,
+    ) -> int:
+        if backlog is None:
+            return self.max_poll_interval_ms
+        if int(backlog["delivery_ready_count"]) > 0:
+            return 1
+        wake_ts_ms = backlog.get("next_wakeup_ts_ms")
+        if wake_ts_ms is None:
+            return self.max_poll_interval_ms
+        until_wake_ms = max(1, int(wake_ts_ms) - int(self.clock()))
+        return min(self.max_poll_interval_ms, until_wake_ms)
+
+    def _inspect_delivery_backlog(self) -> dict[str, int | None]:
+        raw = dict(self.task_store.inspect_outbox_delivery_backlog())
+        try:
+            total_pending = int(raw["total_pending"])
+            delivery_ready_count = int(raw["delivery_ready_count"])
+            raw_wakeup = raw["next_wakeup_ts_ms"]
+            next_wakeup_ts_ms = None if raw_wakeup is None else int(raw_wakeup)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeEventError(
+                RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                "task outbox backlog inspection returned an invalid result",
+            ) from exc
+        if (
+            total_pending < 0
+            or delivery_ready_count < 0
+            or delivery_ready_count > total_pending
+            or (total_pending == 0 and next_wakeup_ts_ms is not None)
+            or (total_pending > 0 and next_wakeup_ts_ms is None)
+            or (next_wakeup_ts_ms is not None and next_wakeup_ts_ms < 0)
+        ):
+            raise RuntimeEventError(
+                RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                "task outbox backlog inspection returned impossible counters",
+            )
+        return {
+            "total_pending": total_pending,
+            "delivery_ready_count": delivery_ready_count,
+            "next_wakeup_ts_ms": next_wakeup_ts_ms,
+        }
+
     def publish_pending(self, *, limit: int = 100) -> dict[str, Any]:
-        pending = list(self.task_store.list_pending_outbox(limit=limit))
+        # Host, Internal and Scheduler coordinators share one process publisher.
+        # Serialize its claim/append/complete drain across event loops and
+        # worker threads.  Multi-process exclusion lives in the durable store.
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                    "runtime outbox publisher is closed",
+                )
+        with self._publish_lock:
+            with self._lifecycle_lock:
+                if self._closed:
+                    raise RuntimeEventError(
+                        RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                        "runtime outbox publisher closed before publication",
+                    )
+            result = self._publish_pending_locked(limit=limit)
+        backlog = result.get("backlog")
+        if isinstance(backlog, Mapping) and int(
+            backlog.get("delivery_ready_count") or 0
+        ) > 0:
+            self._background_wake.set()
+        return result
+
+    def _publish_pending_locked(self, *, limit: int) -> dict[str, Any]:
+        batch_limit = max(1, int(limit))
+        pending: list[dict[str, Any]] = []
         published: list[dict[str, Any]] = []
-        for row in pending:
+        # Claim one row at a time.  Completing the oldest event immediately
+        # makes the next version of that same aggregate eligible in this drain
+        # and avoids hoarding unrelated claims when a later append fails.
+        for _ in range(batch_limit):
+            claimed = list(
+                self.task_store.claim_pending_outbox(
+                    worker_id=str(self.worker_id),
+                    lease_ms=self.claim_lease_ms,
+                    limit=1,
+                )
+            )
+            if not claimed:
+                break
+            if len(claimed) != 1:
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                    "task outbox single-claim request returned an invalid batch",
+                )
+            row = dict(claimed[0])
+            pending.append(row)
             try:
                 event_record = self.event_store.append_task_outbox(row)
-                marked = self.task_store.mark_outbox_published(
+            except Exception as exc:
+                try:
+                    self.task_store.release_outbox_claim(
+                        str(row["outbox_id"]),
+                        worker_id=str(self.worker_id),
+                        claim_token=str(row["claim_token"]),
+                        fencing_token=int(row["claim_fencing_token"]),
+                        expected_version=int(row["status_version"]),
+                        retry_delay_ms=self.retry_delay_ms,
+                        last_error=(
+                            str(getattr(exc, "reason_code", "") or "").strip()
+                            or type(exc).__name__
+                        ),
+                    )
+                except Exception as release_exc:
+                    raise RuntimeEventError(
+                        RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                        "failed to publish an outbox row and release its durable claim",
+                    ) from release_exc
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
+                    f"failed to publish outbox {row.get('outbox_id')}",
+                ) from exc
+            try:
+                marked = self.task_store.complete_outbox_claim(
                     str(row["outbox_id"]),
+                    worker_id=str(self.worker_id),
+                    claim_token=str(row["claim_token"]),
+                    fencing_token=int(row["claim_fencing_token"]),
                     expected_version=int(row["status_version"]),
                 )
             except Exception as exc:
                 raise RuntimeEventError(
                     RUNTIME_EVENT_OUTBOX_PUBLISH_FAILED,
-                    f"failed to publish outbox {row.get('outbox_id')}: {exc}",
+                    f"runtime event exists but outbox claim completion failed: "
+                    f"{row.get('outbox_id')}",
                 ) from exc
             published.append(
                 {
@@ -887,12 +1125,30 @@ class RuntimeOutboxPublisher:
                 "detail": detail,
                 "processed_count": 0,
             }
+        backlog: dict[str, int | None] | None
+        backlog_error: dict[str, str] | None = None
+        try:
+            backlog = self._inspect_delivery_backlog()
+        except Exception as exc:
+            # Event append/completion above may already be authoritative.  A
+            # diagnostic backlog read must not turn that commit into a false
+            # publication failure.  Background retry and explicit drain both
+            # fail closed on the missing snapshot and inspect again later.
+            backlog = None
+            backlog_error = {
+                "reason_code": (
+                    str(getattr(exc, "reason_code", "") or "").strip()
+                    or "RUNTIME_EVENT_OUTBOX_BACKLOG_UNAVAILABLE"
+                )
+            }
         return {
-            "status": "OK",
+            "status": "OK" if backlog_error is None else "DEGRADED",
             "pending_scanned": len(pending),
             "published_count": len(published),
             "published": published,
             "projection": projection,
+            "backlog": backlog,
+            "backlog_error": backlog_error,
         }
 
 

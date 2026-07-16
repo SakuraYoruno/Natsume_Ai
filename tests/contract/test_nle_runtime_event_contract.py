@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -33,6 +36,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "host_brain" / "audit" / "migrations"
 TASK_RUNTIME_BASE_MIGRATION = MIGRATIONS / "0052_task_runtime.sql"
 TASK_RUNTIME_RECOVERY_MIGRATION = MIGRATIONS / "0054_task_runtime_recovery.sql"
+TASK_RUNTIME_OUTBOX_CLAIM_MIGRATION = (
+    MIGRATIONS / "0093_task_runtime_outbox_claim.sql"
+)
 RUNTIME_EVENT_MIGRATION = MIGRATIONS / "0056_runtime_events.sql"
 RUNTIME_EVENT_DELIVERY_MIGRATION = MIGRATIONS / "0068_runtime_event_delivery.sql"
 
@@ -61,6 +67,9 @@ def _migrated_combined_store(tmp_path: Path, *, clock: MutableClock | None = Non
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(TASK_RUNTIME_BASE_MIGRATION.read_text(encoding="utf-8"))
         conn.executescript(TASK_RUNTIME_RECOVERY_MIGRATION.read_text(encoding="utf-8"))
+        conn.executescript(
+            TASK_RUNTIME_OUTBOX_CLAIM_MIGRATION.read_text(encoding="utf-8")
+        )
         conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
         conn.executescript(RUNTIME_EVENT_DELIVERY_MIGRATION.read_text(encoding="utf-8"))
         _record_delivery_migration(conn)
@@ -242,6 +251,58 @@ def test_t_nle_12_task_outbox_retry_marks_pending_duplicate_without_duplicate_ti
     assert len(replay) == 1
     assert published["published"][0]["cursor"] == replay[0]["cursor"]
     assert task_store.list_pending_outbox() == []
+
+
+def test_t_nle_12_shared_publisher_serializes_same_process_drains() -> None:
+    class TaskStoreProbe:
+        def __init__(self) -> None:
+            self.active = 0
+            self.peak_active = 0
+            self._lock = threading.Lock()
+
+        def claim_pending_outbox(
+            self,
+            *,
+            worker_id: str,
+            lease_ms: int,
+            limit: int,
+        ) -> list[dict[str, object]]:
+            assert worker_id
+            assert lease_ms > 0
+            assert limit == 1
+            with self._lock:
+                self.active += 1
+                self.peak_active = max(self.peak_active, self.active)
+            try:
+                time.sleep(0.03)
+                return []
+            finally:
+                with self._lock:
+                    self.active -= 1
+
+        def inspect_outbox_delivery_backlog(self) -> dict[str, int | None]:
+            return {
+                "total_pending": 0,
+                "delivery_ready_count": 0,
+                "next_wakeup_ts_ms": None,
+            }
+
+    class ProjectionProbe:
+        def drain(self, *, limit: int) -> dict[str, object]:
+            return {"status": "IDLE", "processed_count": 0, "limit": limit}
+
+    task_store = TaskStoreProbe()
+    publisher = RuntimeOutboxPublisher(
+        task_store=task_store,
+        event_store=object(),
+        projection_worker=ProjectionProbe(),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: publisher.publish_pending(limit=10), range(2)))
+
+    assert [result["published_count"] for result in results] == [0, 0]
+    assert task_store.peak_active == 1
 
 
 def test_t_nle_12_tribe_adapter_persists_metadata_not_raw_payload(tmp_path: Path) -> None:

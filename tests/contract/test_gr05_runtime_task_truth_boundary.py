@@ -18,19 +18,6 @@ _REGISTRY_MARKERS = (
     "get_runtime_task_registry",
     "get_legacy_runtime_task_registry",
 )
-_LEGACY_REGISTRY_ALLOWLIST = {
-    "host_brain/app/process_service_wiring.py",
-    "host_brain/app/runtime_port_wiring.py",
-    "host_brain/app/runtime_task_registry.py",
-    "host_brain/composition/process_application_ports.py",
-    "host_brain/composition/process_runtime_services.py",
-    "host_brain/composition/process_service_container.py",
-    "host_brain/composition/process_services.py",
-    "host_brain/executive_runtime/ports.py",
-    "host_brain/executive_runtime/runtime.py",
-    # Documentation-only compatibility wording in the durable replacement.
-    "host_brain/persistence/durable_task_status_projection.py",
-}
 _CANONICAL_RUNTIME_FILES = (
     "host_brain/agent_runtime/application_ports.py",
     "host_brain/agent_runtime/cortex_runtime.py",
@@ -45,14 +32,13 @@ def _relative(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
-def test_runtime_task_registry_is_confined_to_legacy_executive_compatibility() -> None:
+def test_process_local_runtime_task_registry_is_deleted() -> None:
+    assert not (ROOT / "host_brain/app/runtime_task_registry.py").exists()
     offenders: list[str] = []
     for path in HOST_BRAIN.rglob("*.py"):
         source = path.read_text(encoding="utf-8")
         if any(marker in source for marker in _REGISTRY_MARKERS):
-            relative = _relative(path)
-            if relative not in _LEGACY_REGISTRY_ALLOWLIST:
-                offenders.append(relative)
+            offenders.append(_relative(path))
 
     assert offenders == []
 

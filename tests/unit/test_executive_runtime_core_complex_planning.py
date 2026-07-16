@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 from host_brain.executive_runtime.capability_gap import CapabilityGapDecision
@@ -8,7 +7,6 @@ from host_brain.app.runtime_port_wiring import build_executive_runtime_applicati
 from host_brain.executive_runtime._shared import _ExecutionOutcome, _RouteSelection
 from host_brain.executive_runtime.conversation_execution import (
     _build_plan_chat_outcome,
-    _execute_skill_dag,
 )
 from host_brain.executive_runtime.route_planning import (
     _hard_rule_route,
@@ -330,64 +328,3 @@ def test_build_plan_chat_outcome_preserves_structured_steps() -> None:
     assert enriched.payload["parallel_enabled"] is True
     assert enriched.payload["steps"][0]["target_id"] == "session_summary"
     assert enriched.payload["steps"][1]["target_id"] == "emotion_query"
-
-
-def test_execute_skill_dag_uses_upstream_plan_without_replanning(monkeypatch) -> None:
-    plan = SkillDagPlan(
-        plan_id="plan::canonical-upstream",
-        nodes=[
-            SkillDagNode(
-                node_id="approved-step",
-                step_index=1,
-                description="execute approved step",
-                task_description="execute approved step",
-                route="skill",
-                target_id="session_summary",
-                route_reason="test:canonical-upstream",
-                allow_parallel=False,
-                skill_family="social",
-                risk_level=1,
-            )
-        ],
-        execution_batches=[["approved-step"]],
-    )
-    executed_nodes: list[str] = []
-
-    async def _execute_approved_node(**kwargs):  # noqa: ANN003
-        executed_nodes.append(kwargs["node"].node_id)
-        return _ExecutionOutcome(
-            route_type="skill",
-            target_id="session_summary",
-            skill_family="social",
-            success=True,
-            result_text="approved result",
-            error_text="",
-            latency_ms=7,
-            payload={},
-        )
-
-    monkeypatch.setattr(
-        "host_brain.executive_runtime.conversation_execution._execute_plan_node",
-        _execute_approved_node,
-    )
-
-    outcome, metadata = asyncio.run(
-        _execute_skill_dag(
-            ports=build_executive_runtime_application_ports(),
-            plan=plan,
-            request_body={},
-            request_id="req-canonical-upstream",
-            session_id="session",
-            person_id="person",
-            intent_id="intent",
-            governor_result={},
-            intent_draft={},
-            emotion_context={},
-            render_target_lang="zh-CN",
-        )
-    )
-
-    assert executed_nodes == ["approved-step"]
-    assert outcome.success is True
-    assert outcome.payload["plan"] == plan.as_dict()
-    assert metadata["engine"] == "canonical_skill_dag"

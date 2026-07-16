@@ -63,6 +63,17 @@ from host_brain.app.governed_route_executors import (
     FrozenChatRouteExecutor,
     FrozenDelegateRouteExecutor,
 )
+from host_brain.app.governed_task_authority import (
+    GOVERNED_HOST_AUTHORITY_INVALID,
+    GovernedHostAdapterError,
+    assert_stable_command_replay as _assert_stable_command_replay,
+    assert_stable_work_order_replay as _assert_stable_work_order_replay,
+    assert_work_order_command_binding as _assert_work_order_command_binding,
+    mapping as _mapping,
+    planning_node_binding as _planning_node_binding,
+    require_fail_closed_direct_skill_work_order as _require_fail_closed_direct_skill_work_order,
+    require_fail_closed_governed_work_order as _require_fail_closed_governed_work_order,
+)
 from host_brain.app.governed_skill_execution_ports import (
     GovernedSkillExecutionPorts,
     build_governed_skill_execution_ports,
@@ -87,7 +98,6 @@ _logger = logging.getLogger(__name__)
 
 GOVERNED_HOST_RUNTIME_INACTIVE = "GOVERNED_HOST_RUNTIME_INACTIVE"
 GOVERNED_HOST_ROUTE_UNSUPPORTED = "GOVERNED_HOST_ROUTE_UNSUPPORTED"
-GOVERNED_HOST_AUTHORITY_INVALID = "GOVERNED_HOST_AUTHORITY_INVALID"
 GOVERNED_HOST_GOVERNOR_GRANT_MISSING = "GOVERNED_HOST_GOVERNOR_GRANT_MISSING"
 GOVERNED_HOST_DRAIN_TIMEOUT = "GOVERNED_HOST_DRAIN_TIMEOUT"
 GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
@@ -113,34 +123,6 @@ _DIRECT_SKILL_BUDGET_LIMITS = BudgetAmount(
     retry_count=1,
     model_cost_micros=500_000,
 )
-_STABLE_REPLAY_COMMAND_FIELDS = (
-    "schema_version",
-    "command_id",
-    "surface",
-    "request_id",
-    "session_id",
-    "principal_id",
-    "ingress_claim_ref",
-    "ingress_audit_ref",
-    "input_ref",
-    "input_sha256",
-    "root_work_order_id",
-    "graph_id",
-    "graph_revision",
-    "route_type",
-    "target_id",
-    "business_scope",
-    "operation_fingerprint",
-)
-
-
-class GovernedHostAdapterError(RuntimeError):
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or GOVERNED_HOST_AUTHORITY_INVALID)
-        self.detail = str(detail or "governed Host adapter failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
-
 class _FrozenSkillWorker:
     def __init__(
         self,
@@ -148,10 +130,12 @@ class _FrozenSkillWorker:
         ledger: Any,
         execution_ports: GovernedSkillExecutionPorts,
         node_grant_verifier: DurableNodeGrantVerifier,
+        projections: Any | None = None,
     ) -> None:
         self._ledger = ledger
         self._execution_ports = execution_ports
         self._node_grant_verifier = node_grant_verifier
+        self._projections = projections
 
     async def execute_stream(
         self,
@@ -326,6 +310,41 @@ class _FrozenSkillWorker:
         )
         if worker_budget is not None:
             commit["budget_usage"] = worker_budget.to_payload()
+        if self._projections is not None:
+            projection_body = {
+                **commit,
+                "command_id": command.command_id,
+                "graph_id": str(execution_context.get("graph_id") or ""),
+                "graph_revision": int(execution_context.get("graph_revision") or 0),
+                "node_id": node_id,
+                "attempt_id": str(execution_context.get("attempt_id") or ""),
+                "node_grant_ref": node_grant_ref,
+            }
+            projection_body.pop("receipt_ref", None)
+            payload_digest = _sha256_json(projection_body)
+            projection_id = (
+                "worker-projection://skill/"
+                f"{payload_digest.split(':', 1)[1]}"
+            )
+            durable = self._projections.stage(
+                projection_id=projection_id,
+                projection={
+                    **projection_body,
+                    "projection_id": projection_id,
+                    "payload_digest": payload_digest,
+                    "schema_version": "Natsume.task_runtime.worker_projection.v1",
+                },
+            )
+            if (
+                not isinstance(durable, Mapping)
+                or str(durable.get("projection_id") or "") != projection_id
+                or str(durable.get("payload_digest") or "") != payload_digest
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "skill result could not be frozen in the canonical worker projection journal",
+                )
+            commit["receipt_ref"] = projection_id
         yield commit
 
 
@@ -741,7 +760,12 @@ class GovernedHostRuntime:
                         GOVERNED_HOST_AUTHORITY_INVALID,
                         "durable replay record has no explicit WorkOrderV3",
                     )
-                _assert_stable_work_order_replay(candidate_work_order, work_order)
+                _assert_stable_work_order_replay(
+                    candidate_work_order,
+                    work_order,
+                    candidate_command=candidate_command,
+                    durable_command=command,
+                )
                 _assert_work_order_command_binding(work_order, command)
                 if assignment is None or graph is None:
                     raise GovernedHostAdapterError(
@@ -892,12 +916,13 @@ def build_governed_host_runtime(
         model_attempt_service=model_attempt_service,
         production_authority_verifier=production_authority_verifier,
     )
+    projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     canonical = _FrozenSkillWorker(
         ledger=ledger,
         execution_ports=skill_execution_ports,
         node_grant_verifier=node_grant_verifier,
+        projections=projection_store,
     )
-    projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     chat_worker = None
     delegate_worker = None
     if projection_store is not None:
@@ -942,6 +967,11 @@ def build_governed_host_runtime(
             else None
         ),
         acceptance_effects_enabled=True,
+        execution_registry=getattr(
+            task_runtime_container,
+            "graph_execution_registry",
+            None,
+        ),
         owner_id=owner_id,
     )
     application = GovernedCommandApplication(
@@ -1251,6 +1281,7 @@ def _build_contracts(
         planner_ref=f"planner://governed-host/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
+        result_node_id=node_id,
         nodes=(node,),
     )
     command = build_host_command(
@@ -1298,266 +1329,6 @@ def _load_governor_grant(
         ) from exc
 
 
-def _assert_stable_command_replay(candidate: HostCommand, durable: HostCommand) -> None:
-    candidate_payload = candidate.to_dict()
-    durable_payload = durable.to_dict()
-    drift = [
-        field_name
-        for field_name in _STABLE_REPLAY_COMMAND_FIELDS
-        if candidate_payload.get(field_name) != durable_payload.get(field_name)
-    ]
-    if drift:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "replayed Host command changed stable semantics: " + ", ".join(drift),
-        )
-
-
-def _assert_stable_work_order_replay(candidate: WorkOrderV3, durable: WorkOrderV3) -> None:
-    _require_fail_closed_direct_skill_work_order(candidate)
-    _require_fail_closed_direct_skill_work_order(durable)
-    candidate_payload = _normalized_work_order_replay_payload(candidate)
-    durable_payload = _normalized_work_order_replay_payload(durable)
-    drift = [
-        field_name
-        for field_name in candidate_payload
-        if candidate_payload.get(field_name) != durable_payload.get(field_name)
-    ]
-    if drift:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "replayed WorkOrderV3 changed stable semantics: " + ", ".join(drift),
-        )
-
-
-def _normalized_work_order_replay_payload(work_order: WorkOrderV3) -> dict[str, Any]:
-    payload = work_order.to_dict()
-    authority_refs = {
-        str(work_order.approval_ref or "").strip(),
-        str(work_order.review_ref or "").strip(),
-    } - {""}
-    payload["approval_ref"] = "<durable-authority-ref>"
-    payload["review_ref"] = "<durable-authority-ref>"
-    payload["input_refs"] = [
-        "<durable-authority-ref>" if str(ref) in authority_refs else str(ref)
-        for ref in work_order.input_refs
-    ]
-    approval_policy = _mapping(payload.get("approval_policy"))
-    approval_policy["governor_grant_ref"] = "<durable-authority-ref>"
-    payload["approval_policy"] = approval_policy
-    review_policy = _mapping(payload.get("review_policy"))
-    review_policy["review_ref"] = "<durable-authority-ref>"
-    payload["review_policy"] = review_policy
-    metadata = _mapping(payload.get("metadata"))
-    lineage = _mapping(metadata.get("lineage"))
-    lineage["approval_ref"] = "<durable-authority-ref>"
-    lineage["review_ref"] = "<durable-authority-ref>"
-    metadata["lineage"] = lineage
-    planning_lineage = _mapping(metadata.get("planning_lineage"))
-    planning_lineage["approval_ref"] = "<durable-authority-ref>"
-    planning_lineage["review_ref"] = "<durable-authority-ref>"
-    metadata["planning_lineage"] = planning_lineage
-    payload["metadata"] = metadata
-    return payload
-
-
-def _assert_work_order_command_binding(work_order: WorkOrderV3, command: HostCommand) -> None:
-    approval_policy = _mapping(work_order.approval_policy)
-    review_policy = _mapping(work_order.review_policy)
-    expected_grant_ref = str(command.governor_grant_ref or "").strip()
-    expected_review_ref = str(work_order.review_ref or "").strip()
-    if (
-        work_order.root_work_order_id != command.root_work_order_id
-        or work_order.task_graph_id != command.graph_id
-        or work_order.graph_revision != command.graph_revision
-        or work_order.business_idempotency_scope != command.business_scope
-        or work_order.operation_fingerprint != command.operation_fingerprint
-        or work_order.approval_ref != expected_grant_ref
-        or not expected_review_ref.startswith("review-waiver://")
-        or expected_review_ref == expected_grant_ref
-        or approval_policy.get("governor_grant_ref") != expected_grant_ref
-        or review_policy.get("review_ref") != expected_review_ref
-        or command.input_ref not in set(work_order.input_refs)
-        or expected_grant_ref not in set(work_order.input_refs)
-        or command.target_id not in set(work_order.capability_requirements)
-    ):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill WorkOrderV3 differs from durable HostCommand lineage",
-        )
-
-
-def _planning_node_binding(work_order: WorkOrderV3, *, node_id: str) -> dict[str, Any]:
-    planning_lineage = _mapping(work_order.metadata.get("planning_lineage"))
-    raw_bindings = planning_lineage.get("node_bindings")
-    bindings = list(raw_bindings) if isinstance(raw_bindings, list) else []
-    matches = [
-        _mapping(binding)
-        for binding in bindings
-        if isinstance(binding, Mapping)
-        and str(binding.get("node_id") or "").strip() == str(node_id or "").strip()
-    ]
-    if len(matches) != 1:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            f"WorkOrder planning lineage requires exactly one binding for node {node_id}",
-        )
-    binding = matches[0]
-    if (
-        not str(binding.get("worker_route") or "").strip()
-        or not str(binding.get("target_id") or "").strip()
-        or not str(binding.get("objective") or "").strip()
-    ):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            f"WorkOrder planning binding for node {node_id} is incomplete",
-        )
-    return binding
-
-
-def _require_fail_closed_governed_work_order(
-    work_order: WorkOrderV3,
-    *,
-    command: HostCommand,
-) -> None:
-    if not isinstance(work_order, WorkOrderV3):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "governed execution requires an explicit WorkOrderV3",
-        )
-    try:
-        work_order.validate()
-    except Exception as exc:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            f"governed WorkOrderV3 is invalid: {exc}",
-        ) from exc
-    policy = work_order.budget_policy
-    limits = policy.limits.to_dict() if policy is not None else {}
-    approval_policy = _mapping(work_order.approval_policy)
-    planning_lineage = _mapping(work_order.metadata.get("planning_lineage"))
-    approval_binding = str(
-        approval_policy.get("governor_grant_ref")
-        or approval_policy.get("grant_ref")
-        or ""
-    ).strip()
-    if (
-        policy is None
-        or policy.on_exceeded != BudgetExceededAction.BLOCK
-        or any(int(value) <= 0 for value in limits.values())
-        or work_order.root_work_order_id != work_order.work_order_id
-        or work_order.parent_work_order_id is not None
-        or work_order.root_work_order_id != command.root_work_order_id
-        or work_order.task_graph_id != command.graph_id
-        or work_order.graph_revision != command.graph_revision
-        or work_order.business_idempotency_scope != command.business_scope
-        or work_order.operation_fingerprint != command.operation_fingerprint
-        or work_order.approval_ref != str(command.governor_grant_ref or "").strip()
-        or approval_binding != work_order.approval_ref
-        or command.input_ref not in set(work_order.input_refs)
-        or work_order.approval_ref not in set(work_order.input_refs)
-        or planning_lineage.get("graph_id") != work_order.task_graph_id
-        or planning_lineage.get("root_work_order_id") != work_order.root_work_order_id
-        or planning_lineage.get("revision") != work_order.graph_revision
-        or planning_lineage.get("approval_ref") != work_order.approval_ref
-        or planning_lineage.get("review_ref") != work_order.review_ref
-        or not isinstance(planning_lineage.get("node_bindings"), list)
-        or not planning_lineage.get("node_bindings")
-    ):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "governed WorkOrderV3 differs from durable HostCommand/planning lineage",
-        )
-
-
-def _require_fail_closed_direct_skill_work_order(work_order: WorkOrderV3) -> None:
-    if not isinstance(work_order, WorkOrderV3):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill execution requires an explicit WorkOrderV3",
-        )
-    try:
-        work_order.validate()
-    except Exception as exc:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            f"direct skill WorkOrderV3 is invalid: {exc}",
-        ) from exc
-    policy = work_order.budget_policy
-    if policy is None:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill WorkOrderV3 has no BudgetPolicy",
-        )
-    if policy.on_exceeded != BudgetExceededAction.BLOCK:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill BudgetPolicy must fail closed with BLOCK",
-        )
-    limits = policy.limits.to_dict()
-    if any(int(value) <= 0 for value in limits.values()):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill BudgetPolicy limits must all be finite and non-zero",
-        )
-    if (
-        work_order.root_work_order_id != work_order.work_order_id
-        or work_order.parent_work_order_id is not None
-        or not work_order.task_graph_id
-        or not work_order.task_node_id
-        or work_order.graph_revision < 1
-        or work_order.attempt != 0
-        or not work_order.capability_requirements
-        or not work_order.input_refs
-        or not work_order.approval_ref
-        or not work_order.review_ref
-        or not work_order.business_idempotency_scope
-        or not work_order.operation_fingerprint
-    ):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill WorkOrderV3 lineage is incomplete",
-        )
-    lineage = _mapping(work_order.metadata.get("lineage"))
-    expected_lineage = {
-        "root_work_order_id": work_order.root_work_order_id,
-        "task_graph_id": work_order.task_graph_id,
-        "task_node_id": work_order.task_node_id,
-        "graph_revision": work_order.graph_revision,
-        "attempt": work_order.attempt,
-        "capability_requirements": list(work_order.capability_requirements),
-        "approval_ref": work_order.approval_ref,
-        "review_ref": work_order.review_ref,
-        "business_idempotency_scope": work_order.business_idempotency_scope,
-        "operation_fingerprint": work_order.operation_fingerprint,
-    }
-    if lineage != expected_lineage:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill WorkOrderV3 metadata lineage differs from canonical fields",
-        )
-    planning_lineage = _mapping(work_order.metadata.get("planning_lineage"))
-    expected_binding = {
-        "node_id": work_order.task_node_id,
-        "objective": work_order.objective,
-        "worker_route": "skill",
-        "target_id": work_order.capability_requirements[0],
-    }
-    if (
-        planning_lineage.get("graph_id") != work_order.task_graph_id
-        or planning_lineage.get("root_work_order_id") != work_order.root_work_order_id
-        or planning_lineage.get("revision") != work_order.graph_revision
-        or planning_lineage.get("parent_revision") is not None
-        or planning_lineage.get("approval_ref") != work_order.approval_ref
-        or planning_lineage.get("review_ref") != work_order.review_ref
-        or planning_lineage.get("node_bindings") != [expected_binding]
-    ):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "direct skill WorkOrderV3 planning lineage differs from canonical fields",
-        )
-
-
 def _safe_durable_value(value: Any, *, path: str) -> Any:
     if isinstance(value, Mapping):
         safe: dict[str, Any] = {}
@@ -1574,10 +1345,6 @@ def _safe_durable_value(value: Any, *, path: str) -> Any:
     if isinstance(value, str):
         return value[:_MAX_DURABLE_TEXT]
     return str(value)[:1_000]
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _required_identifier(value: Any, *, field_name: str) -> str:

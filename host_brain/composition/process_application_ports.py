@@ -21,7 +21,6 @@ class ProcessApplicationPorts:
     model_transport: Callable[..., str | dict[str, Any]]
     graph_handler_bindings: Callable[[], Sequence[GraphHandlerBinding]]
     multimodal_observer_factory: Factory
-    legacy_runtime_task_registry_factory: Factory
     capability_gap_telemetry_factory: Factory
     capability_forge_service_factory: Factory
     routing_matrix_factory: Factory

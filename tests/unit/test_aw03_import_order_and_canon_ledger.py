@@ -43,6 +43,41 @@ def test_agent_runtime_and_persistence_use_precise_imports() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_task_repository_reexports_canonical_task_store_value_types() -> None:
+    from host_brain.persistence import task_repository
+    from host_brain.persistence import task_store_types
+
+    exported_names = (
+        "AcceptanceEffectCommitScope",
+        "AcceptanceEffectIntentSpec",
+        "AcceptanceEffectStatus",
+        "AttemptStatus",
+        "BudgetConsumptionResult",
+        "IdempotencyRecoveryAction",
+        "IdempotencyStatus",
+        "LeaseStatus",
+        "OperationReservationResult",
+        "OutboxMessage",
+        "RecoveryReport",
+        "TASK_STORE_BUDGET_EXCEEDED",
+        "TASK_STORE_CAS_CONFLICT",
+        "TASK_STORE_CANCELLATION_CONFLICT",
+        "TASK_STORE_DURABLE_DATA_INVALID",
+        "TASK_STORE_INVALID",
+        "TASK_STORE_IDEMPOTENCY_RECOVERY_REQUIRED",
+        "TASK_STORE_LEASE_CONFLICT",
+        "TASK_STORE_NOT_FOUND",
+        "TASK_STORE_OUTBOX_CONFLICT",
+        "TASK_STORE_OWNERSHIP_CONFLICT",
+        "TASK_STORE_SCHEMA_NOT_READY",
+        "TASK_STORE_SCHEDULER_CAPACITY",
+        "TaskStoreError",
+        "build_outbox_payload_ref",
+    )
+    for name in exported_names:
+        assert getattr(task_repository, name) is getattr(task_store_types, name)
+
+
 def test_agent_runtime_package_import_does_not_eager_load_persistence() -> None:
     program = "\n".join(
         (

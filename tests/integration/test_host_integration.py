@@ -120,7 +120,6 @@ def test_client(mem_ledger):
     _deps.get_process_service_container().skill_registry = None
     _deps.get_process_service_container().bond_stage_engine = None
     _deps.get_process_service_container().bond_update_queue = None
-    _deps.get_process_service_container().retrieval_pipeline = None
     _deps.get_process_service_container().obs_metrics_collector = None
 
 

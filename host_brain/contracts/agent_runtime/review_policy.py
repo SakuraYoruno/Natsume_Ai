@@ -47,7 +47,9 @@ _REVIEW_TRANSITIONS: dict[ReviewStatus, frozenset[ReviewStatus]] = {
             ReviewStatus.CANCELLED,
         }
     ),
-    ReviewStatus.APPROVED: frozenset({ReviewStatus.CONSUMED, ReviewStatus.EXPIRED}),
+    ReviewStatus.APPROVED: frozenset(
+        {ReviewStatus.CONSUMED, ReviewStatus.EXPIRED, ReviewStatus.CANCELLED}
+    ),
     ReviewStatus.REJECTED: frozenset(),
     ReviewStatus.EXPIRED: frozenset(),
     ReviewStatus.CONSUMED: frozenset(),

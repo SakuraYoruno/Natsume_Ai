@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     PLAN_CYCLE,
     REVIEW_TRANSITION_INVALID,
     SUB_AGENT_LINEAGE_INVALID,
+    TASK_GRAPH_INVALID,
     TASK_TRANSITION_INVALID,
     ContractViolation,
 )
@@ -48,6 +50,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     EventRedactionLevel,
     TaskEvent,
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
@@ -230,6 +233,7 @@ def test_t_nle_04_task_graph_round_trip_preserves_revision_and_dependencies() ->
         planner_ref="planner://planning-agent/1",
         status=TaskGraphStatus.CREATED,
         created_at=1_700_000_000_000,
+        result_node_id="node-2",
         nodes=(_task_node("node-1"), _task_node("node-2", dependencies=("node-1",))),
     )
     graph.validate()
@@ -237,6 +241,62 @@ def test_t_nle_04_task_graph_round_trip_preserves_revision_and_dependencies() ->
     restored = TaskGraph.from_mapping(graph.to_dict())
 
     assert restored.to_dict() == graph.to_dict()
+    assert restored.result_node_id == "node-2"
+
+
+def test_t_nle_04_task_graph_result_authority_is_optional_but_must_be_a_sink() -> None:
+    graph = TaskGraph(
+        graph_id="graph-result",
+        root_work_order_id="wo-root",
+        revision=1,
+        planner_ref="planner://result-authority",
+        status=TaskGraphStatus.CREATED,
+        created_at=1,
+        result_node_id="node-1",
+        nodes=(
+            _task_node("node-1"),
+            _task_node("node-2", dependencies=("node-1",)),
+        ),
+    )
+
+    with pytest.raises(ContractViolation) as not_sink:
+        graph.validate()
+    assert not_sink.value.reason_code == TASK_GRAPH_INVALID
+
+    payload = graph.to_dict()
+    payload.pop("result_node_id")
+    restored_legacy = TaskGraph.from_mapping(payload)
+    assert restored_legacy.result_node_id is None
+
+    payload["result_node_id"] = "unknown-node"
+    with pytest.raises(ContractViolation) as unknown:
+        TaskGraph.from_mapping(payload)
+    assert unknown.value.reason_code == TASK_GRAPH_INVALID
+
+
+def test_t_nle_04_multi_sink_result_authority_requires_frozen_atomic_completion() -> None:
+    graph = TaskGraph(
+        graph_id="graph-multi-sink-result",
+        root_work_order_id="wo-root",
+        revision=1,
+        planner_ref="planner://multi-sink-result",
+        status=TaskGraphStatus.CREATED,
+        created_at=1,
+        result_node_id="right",
+        nodes=(_task_node("left"), _task_node("right")),
+    )
+
+    with pytest.raises(ContractViolation) as legacy:
+        graph.validate()
+    assert legacy.value.reason_code == TASK_GRAPH_INVALID
+
+    atomic = replace(
+        graph,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+    atomic.validate()
+    restored = TaskGraph.from_mapping(atomic.to_dict())
+    assert restored.to_dict() == atomic.to_dict()
 
 
 def test_t_nle_04_task_graph_cycle_fails_closed_with_stable_reason() -> None:

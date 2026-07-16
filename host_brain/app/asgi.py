@@ -754,9 +754,12 @@ def create_app() -> FastAPI:
                     episodic_projection_store=episodic_projection_store,
                 )
                 set_memory_service_container(memory)
-                canonical_owner = (
+                logical_canonical_owner = (
                     runtime_settings.task_runtime_canonical_owner
                     or "host-task-runtime"
+                )
+                canonical_owner = task_runtime.execution_owner_id(
+                    logical_canonical_owner
                 )
                 governed_runtime = build_governed_host_runtime(
                     task_runtime_container=task_runtime,
@@ -772,6 +775,7 @@ def create_app() -> FastAPI:
                 internal_runtime = build_governed_internal_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
+                    token_service=get_token_service(),
                     result_repository=task_runtime.agent_result_repository,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
@@ -955,6 +959,7 @@ def create_app() -> FastAPI:
                 scheduler = build_process_scheduler_container(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
+                    token_service=get_token_service(),
                     evaluator=command_ingress.evaluator,
                     claim_result_store=command_ingress.store,
                     intent_engine=get_intent_engine(),

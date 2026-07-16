@@ -60,6 +60,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     EventRedactionLevel,
     TaskEvent,
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
@@ -241,7 +242,10 @@ def build_contract_schema_snapshot() -> dict[str, Any]:
                 "created_at",
                 "nodes",
             ],
-            enum_fields={"status": TaskGraphStatus},
+            enum_fields={
+                "status": TaskGraphStatus,
+                "completion_policy": TaskGraphCompletionPolicy,
+            },
         ),
         "TaskNode": _entry(
             TaskNode,

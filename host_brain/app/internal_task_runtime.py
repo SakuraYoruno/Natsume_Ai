@@ -18,18 +18,36 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetExceededAction,
+    BudgetPolicy,
+)
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
     GovernorGrantError,
     governor_grant_ref,
 )
+from host_brain.orchestration.node_grants import (
+    DurableNodeGrantVerifier,
+    NodeBoundGrantService,
+)
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
+from host_brain.task_runtime.worker_budget_usage import (
+    build_worker_budget_usage,
+    stable_worker_usage_id,
+)
+from host_brain.task_runtime.worker_registry import (
+    GovernedWorkerRegistryError,
+    GovernedWorkerRoute,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
 
@@ -42,8 +60,17 @@ INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED = (
     "INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED"
 )
 INTERNAL_AGENT_WORKER_ROUTE = "internal_agent"
+_INTERNAL_TASK_NODE_ROUTE = "delegate:agent_runtime"
 
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
+_INTERNAL_AGENT_BUDGET_LIMITS = BudgetAmount(
+    token_count=65_536,
+    tool_call_count=64,
+    time_ms=300_000,
+    concurrency=1,
+    retry_count=8,
+    model_cost_micros=2_000_000,
+)
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
 _FORBIDDEN_DURABLE_KEY = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|secret|signature|token)(?:$|_)",
@@ -51,10 +78,31 @@ _FORBIDDEN_DURABLE_KEY = re.compile(
 )
 _CALLER_AUTHORITY_KEYS = frozenset(
     {
+        "approval_ref",
+        "budget_policy",
+        "business_idempotency_scope",
         "runtime_assignment",
         "runtime_owner_confirmation",
         "task_runtime_owner_confirmation",
         "confirmed_owner",
+        "graph_revision",
+        "lineage",
+        "operation_fingerprint",
+        "parent_work_order_id",
+        "planning_lineage",
+        "review_ref",
+        "root_work_order_id",
+        "task_graph_id",
+        "task_node_id",
+    }
+)
+_CALLER_APPROVAL_AUTHORITY_KEYS = frozenset(
+    {
+        "approval_ref",
+        "confirmed",
+        "governor_grant_ref",
+        "review_ref",
+        "review_resume_token_ref",
     }
 )
 _STABLE_COMMAND_FIELDS = (
@@ -102,19 +150,64 @@ class _AgentWorker:
         executor: AgentRuntimeExecutor,
         result_repository: AgentExecutionResultRepository,
         executor_name: str,
+        node_grant_verifier: Any,
     ) -> None:
+        if not callable(getattr(node_grant_verifier, "verify", None)):
+            raise TypeError("node_grant_verifier must expose verify")
         self._executor = executor
         self._results = result_repository
         self._executor_name = str(executor_name)
+        self._node_grants = node_grant_verifier
 
     async def execute_stream(
         self,
         *,
         command: HostCommand,
-        work_order: AgentWorkOrder,
+        work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        result = await asyncio.to_thread(self._executor.execute, work_order)
+        if not isinstance(work_order, WorkOrderV3):
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "internal worker requires the admitted WorkOrderV3",
+            )
+        route = _internal_delegate_route(execution_context.get("worker_route"))
+        if route.target_id != str(command.target_id or "").strip():
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "internal TaskNode delegate target differs from HostCommand target",
+            )
+        verified_grant = self._node_grants.verify(
+            grant_ref=str(execution_context.get("node_grant_ref") or "").strip(),
+            request_id=str(command.request_id or "").strip(),
+            session_id=str(command.session_id or "").strip(),
+            principal_id=str(command.principal_id or "").strip(),
+            graph_id=str(execution_context.get("graph_id") or "").strip(),
+            root_work_order_id=str(
+                execution_context.get("work_order_id") or ""
+            ).strip(),
+            graph_revision=execution_context.get("graph_revision"),
+            node_id=str(execution_context.get("node_id") or "").strip(),
+            route=route.kind,
+            target_id=str(route.target_id or "").strip(),
+            parent_grant_ref=str(
+                execution_context.get("parent_grant_ref") or ""
+            ).strip(),
+        )
+        verified_payload = (
+            verified_grant.to_dict()
+            if callable(getattr(verified_grant, "to_dict", None))
+            else dict(verified_grant)
+            if isinstance(verified_grant, Mapping)
+            else {}
+        )
+        if not verified_payload:
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "internal node grant verifier returned no durable projection",
+            )
+        legacy_order = work_order.to_agent_work_order()
+        result = await asyncio.to_thread(self._executor.execute, legacy_order)
         if not isinstance(result, Mapping):
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_AUTHORITY_INVALID,
@@ -133,7 +226,7 @@ class _AgentWorker:
             or payload.get("detail")
             or status
         ).strip()
-        yield {
+        commit = {
             "phase": "COMMIT",
             "done": True,
             "decision": "APPROVE" if status == "EXECUTED" else "REJECT",
@@ -151,9 +244,25 @@ class _AgentWorker:
                 "executor": self._executor_name,
                 "command_id": command.command_id,
                 "attempt_id": str(execution_context.get("attempt_id") or ""),
+                "node_grant_ref": verified_payload["grant_ref"],
                 "result_receipt_ref": durable["receipt_ref"],
             },
         }
+        worker_budget = build_worker_budget_usage(
+            usage_id=stable_worker_usage_id(
+                graph_id=str(execution_context.get("graph_id") or ""),
+                graph_revision=int(execution_context.get("graph_revision") or 0),
+                node_id=str(execution_context.get("node_id") or ""),
+                attempt_id=str(execution_context.get("attempt_id") or ""),
+                route="delegate",
+            ),
+            observations=_trusted_agent_budget_observations(payload),
+            include_agent_tool_calls=True,
+            evidence_refs=(str(durable["receipt_ref"]),),
+        )
+        if worker_budget is not None:
+            commit["budget_usage"] = worker_budget.to_payload()
+        yield commit
 
 
 class _AgentWorkerResolver:
@@ -161,7 +270,8 @@ class _AgentWorkerResolver:
         self._canonical = canonical
 
     def resolve(self, *, executor: str, worker_route: str) -> _AgentWorker:
-        if str(worker_route or "").strip() != INTERNAL_AGENT_WORKER_ROUTE:
+        route = _internal_delegate_route(worker_route)
+        if route.canonical != _INTERNAL_TASK_NODE_ROUTE:
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_AUTHORITY_INVALID,
                 f"unsupported internal worker route: {worker_route}",
@@ -194,7 +304,7 @@ class _AgentResultVerifier:
         self,
         *,
         command: HostCommand,
-        work_order: AgentWorkOrder,
+        work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
         worker_commit: Mapping[str, Any],
         evidence_refs: tuple[str, ...] | list[str],
@@ -242,20 +352,39 @@ class _AgentResultAcceptance:
         self,
         *,
         command: HostCommand,
-        work_order: AgentWorkOrder,
+        work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
         worker_commit: Mapping[str, Any],
         evidence_refs: tuple[str, ...] | list[str],
         **_: Any,
     ) -> dict[str, Any]:
+        result = dict(worker_commit.get("result") or {})
+        inner_acceptance = (
+            dict(result.get("acceptance") or {})
+            if isinstance(result.get("acceptance"), Mapping)
+            else {}
+        )
+        inner_decision = str(inner_acceptance.get("decision") or "").strip().upper()
+        review_required = bool(result.get("review_required")) or inner_decision in {
+            "REVIEW",
+            "RETRY",
+            "SPLIT",
+        }
+        inner_accepted = inner_decision in {"", "NOT_RUN", "ACCEPT"}
         accepted = (
             str(worker_commit.get("decision") or "").strip().upper() == "APPROVE"
-            and str(dict(worker_commit.get("result") or {}).get("status") or "")
-            .strip()
-            .upper()
-            == "EXECUTED"
+            and str(result.get("status") or "").strip().upper() == "EXECUTED"
+            and inner_accepted
+            and not review_required
         )
-        reason = None if accepted else "INTERNAL_AGENT_ACCEPTANCE_FAILED"
+        if accepted:
+            reason = None
+        elif review_required:
+            reason = "INTERNAL_AGENT_REVIEW_REQUIRED"
+        elif inner_decision and not inner_accepted:
+            reason = f"INTERNAL_AGENT_ACCEPTANCE_{inner_decision}"
+        else:
+            reason = "INTERNAL_AGENT_ACCEPTANCE_FAILED"
         refs = list(evidence_refs)
         criteria_text = tuple(work_order.acceptance_criteria or ("result executed",))
         return {
@@ -367,9 +496,9 @@ class GovernedInternalRuntime:
                     INTERNAL_RUNTIME_GOVERNOR_GRANT_MISSING,
                     exc.detail,
                 ) from exc
-            candidate_order = _sanitize_work_order(work_order)
-            candidate_command, candidate_graph = _build_contracts(
-                work_order=candidate_order,
+            legacy_order = _sanitize_work_order(work_order)
+            candidate_command, candidate_order, candidate_graph = _build_contracts(
+                work_order=legacy_order,
                 request_id=request_id,
                 session_id=session_id,
                 ts_ms=ts_ms,
@@ -464,11 +593,16 @@ class InternalAgentCommandService:
             grant_ref = durable_command.governor_grant_ref
         else:
             sanitized = _sanitize_work_order(work_order)
+            principal_id = _required_identifier(
+                dict(command_authority or {}).get("principal_id"),
+                field_name="principal_id",
+            )
             intent = _build_governor_intent(
                 work_order=sanitized,
                 request_id=request_ref,
                 session_id=session_ref,
                 ts_ms=int(ts_ms),
+                principal_id=principal_id,
             )
             from host_brain.app.emotion_context import (  # noqa: PLC0415
                 build_chat_governance_snapshot,
@@ -529,10 +663,34 @@ class InternalAgentCommandService:
                 "terminal internal command has no durable HostCommand",
             )
         claim_ref = str(durable_command.ingress_claim_ref or "").strip()
-        if not claim_ref or not result_ref:
+        if not claim_ref:
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
-                "terminal internal command has no durable claim/result reference",
+                "terminal internal command has no durable claim reference",
+            )
+        if not result_ref:
+            projection = (
+                dict(receipt.get("projection") or {})
+                if isinstance(receipt.get("projection"), Mapping)
+                else {}
+            )
+            review = (
+                dict(projection.get("review") or {})
+                if isinstance(projection.get("review"), Mapping)
+                else {}
+            )
+            waiting_review = str(receipt.get("status") or "").strip().upper() in {
+                "WAITING_APPROVAL",
+                "WAITING_ACCEPTANCE_REVIEW",
+            }
+            if waiting_review and str(review.get("review_id") or "").strip():
+                # A pre-execution review has no worker receipt yet.  Leave the
+                # ingress claim result unbound so the approved continuation can
+                # atomically attach the eventual durable execution receipt.
+                return terminal
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+                "terminal internal command has no durable result reference",
             )
         try:
             self._claim_results.complete_claim(
@@ -552,15 +710,25 @@ def build_governed_internal_runtime(
     *,
     task_runtime_container: Any,
     ledger: Any,
+    token_service: Any,
     result_repository: AgentExecutionResultRepository,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     canonical_executor: AgentRuntimeExecutor | None = None,
 ) -> GovernedInternalRuntime:
+    review_store = getattr(task_runtime_container, "review_store", None)
+    if review_store is None:
+        raise TypeError("internal Agent Task Runtime review store is required")
+    node_grant_service = NodeBoundGrantService(
+        ledger=ledger,
+        token_service=token_service,
+    )
+    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
     canonical_worker = _AgentWorker(
         executor=canonical_executor or AgentRuntimeExecutor(),
         result_repository=result_repository,
         executor_name="canonical",
+        node_grant_verifier=node_grant_verifier,
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
@@ -570,11 +738,18 @@ def build_governed_internal_runtime(
         verifier=_AgentResultVerifier(result_repository),
         acceptance=_AgentResultAcceptance(),
         projection_reader=_AgentProjectionReader(result_repository),
+        review_runtime=TaskNodeReviewRuntime(review_store),
+        execution_registry=getattr(
+            task_runtime_container,
+            "graph_execution_registry",
+            None,
+        ),
         owner_id=owner_id,
     )
     application = GovernedCommandApplication(
         command_repository=task_runtime_container.command_repository,
         coordinator=coordinator,
+        node_grant_service=node_grant_service,
     )
     return GovernedInternalRuntime(
         application=application,
@@ -592,7 +767,7 @@ def _build_contracts(
     ts_ms: int,
     governor_grant_ref: str,
     command_authority: Mapping[str, Any],
-) -> tuple[HostCommand, TaskGraph]:
+) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     authority = dict(command_authority or {})
     principal_id = _required_identifier(
         authority.get("principal_id"),
@@ -629,6 +804,11 @@ def _build_contracts(
     ).hexdigest()[:40]
     graph_id = f"graph-internal-{suffix}"
     node_id = f"node-internal-{suffix}"
+    risk_level = max(
+        1,
+        min(5, int(dict(work_order.metadata or {}).get("risk_level") or 1)),
+    )
+    business_scope = f"internal-agent:{_scope_token(work_order.domain)}"
     operation_fingerprint = _sha256_json(
         {
             "principal_id": principal_id,
@@ -636,18 +816,95 @@ def _build_contracts(
             "work_order": work_order.to_dict(),
         }
     )
+    output_contract = {
+        "type": "durable_agent_result",
+        "required": ["decision", "result", "receipt_ref"],
+    }
+    review_policy, review_ref = _canonical_review_policy(
+        work_order,
+        suffix=suffix,
+    )
+    approval_policy = {
+        **dict(work_order.approval_policy or {}),
+        "required": True,
+        "governor_grant_ref": grant_ref,
+        "on_missing": "BLOCK",
+    }
+    budget_policy = BudgetPolicy(
+        scope=f"work-order:{work_order.work_order_id}",
+        limits=_INTERNAL_AGENT_BUDGET_LIMITS,
+        on_exceeded=BudgetExceededAction.BLOCK,
+        metadata={
+            "policy": "governed_internal_agent_default",
+            "policy_version": "governed_internal_agent_budget.v1",
+            "route_type": "delegate",
+            "fail_closed": True,
+            "source": "internal_task_runtime_composition",
+        },
+    )
+    budget_policy.validate()
+    canonical_order = WorkOrderV3(
+        work_order_id=work_order.work_order_id,
+        domain=work_order.domain,
+        run_mode=work_order.run_mode,
+        objective=work_order.objective,
+        workspace=deepcopy(dict(work_order.workspace or {})),
+        input_pack=deepcopy(dict(work_order.input_pack or {})),
+        allowed_actions=tuple(work_order.allowed_actions or ()),
+        forbidden_actions=tuple(work_order.forbidden_actions or ()),
+        acceptance_criteria=tuple(
+            work_order.acceptance_criteria or ("result executed",)
+        ),
+        verification_plan=deepcopy(dict(work_order.verification_plan or {})),
+        approval_policy=approval_policy,
+        review_policy=review_policy,
+        metadata={
+            **deepcopy(dict(work_order.metadata or {})),
+            "surface": HostCommandSurface.INTERNAL.value,
+            "planning_lineage": {
+                "graph_id": graph_id,
+                "root_work_order_id": work_order.work_order_id,
+                "revision": 1,
+                "parent_revision": None,
+                "approval_ref": grant_ref,
+                "review_ref": review_ref,
+                "node_bindings": [
+                    {
+                        "node_id": node_id,
+                        "objective": work_order.objective,
+                        "worker_route": "delegate",
+                        "target_id": "agent_runtime",
+                    }
+                ],
+            },
+        },
+        root_work_order_id=work_order.work_order_id,
+        parent_work_order_id=None,
+        task_graph_id=graph_id,
+        task_node_id=node_id,
+        graph_revision=1,
+        attempt=0,
+        capability_requirements=("agent_runtime",),
+        risk_level=risk_level,
+        input_refs=(input_ref, grant_ref),
+        output_contract=output_contract,
+        budget_policy=budget_policy,
+        business_idempotency_scope=business_scope,
+        operation_fingerprint=operation_fingerprint,
+        status_version=0,
+        approval_ref=grant_ref,
+        review_ref=review_ref,
+    )
+    canonical_order.validate()
     node = TaskNode(
         node_id=node_id,
         dependencies=(),
-        route=INTERNAL_AGENT_WORKER_ROUTE,
+        route=_INTERNAL_TASK_NODE_ROUTE,
         input_refs=(input_ref, grant_ref),
-        output_contract={
-            "type": "durable_agent_result",
-            "required": ["decision", "result", "receipt_ref"],
-        },
+        output_contract=output_contract,
         retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
-        risk_level=max(1, int(dict(work_order.metadata or {}).get("risk_level") or 1)),
-        acceptance_criteria=tuple(work_order.acceptance_criteria or ("result executed",)),
+        risk_level=risk_level,
+        acceptance_criteria=canonical_order.acceptance_criteria,
         status=TaskNodeStatus.READY,
         status_version=0,
     )
@@ -658,6 +915,7 @@ def _build_contracts(
         planner_ref=f"planner://governed-internal/{suffix}",
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
+        result_node_id=node_id,
         nodes=(node,),
     )
     command = build_host_command(
@@ -675,11 +933,11 @@ def _build_contracts(
         graph_revision=1,
         route_type=INTERNAL_AGENT_WORKER_ROUTE,
         target_id="agent_runtime",
-        business_scope=f"internal-agent:{_scope_token(work_order.domain)}",
+        business_scope=business_scope,
         operation_fingerprint=operation_fingerprint,
         created_at_ms=int(ts_ms),
     )
-    return command, graph
+    return command, canonical_order, graph
 
 
 def _build_governor_intent(
@@ -688,7 +946,9 @@ def _build_governor_intent(
     request_id: str,
     session_id: str,
     ts_ms: int,
+    principal_id: str,
 ) -> dict[str, Any]:
+    principal_ref = _required_identifier(principal_id, field_name="principal_id")
     nonce = hashlib.sha256(
         f"internal-governor\n{request_id}".encode("utf-8")
     ).hexdigest()
@@ -707,6 +967,8 @@ def _build_governor_intent(
             "target_id": "agent_runtime",
         },
         "nonce": nonce,
+        "person_id": principal_ref,
+        "principal_id": principal_ref,
         "route": "delegate",
         "target_id": "agent_runtime",
     }
@@ -719,6 +981,10 @@ def _sanitize_work_order(value: AgentWorkOrder | Mapping[str, Any]) -> AgentWork
     for key in _CALLER_AUTHORITY_KEYS:
         metadata.pop(key, None)
     payload["metadata"] = metadata
+    approval_policy = dict(payload.get("approval_policy") or {})
+    for key in _CALLER_APPROVAL_AUTHORITY_KEYS:
+        approval_policy.pop(key, None)
+    payload["approval_policy"] = approval_policy
     safe = _safe_value(payload, path="work_order")
     if not isinstance(safe, dict):
         raise GovernedInternalRuntimeError(
@@ -728,6 +994,80 @@ def _sanitize_work_order(value: AgentWorkOrder | Mapping[str, Any]) -> AgentWork
     sanitized = AgentWorkOrder.from_mapping(safe)
     sanitized.validate()
     return sanitized
+
+
+def _canonical_review_policy(
+    work_order: AgentWorkOrder,
+    *,
+    suffix: str,
+) -> tuple[dict[str, Any], str]:
+    policy = deepcopy(dict(work_order.review_policy or {}))
+    approval = dict(work_order.approval_policy or {})
+    required = bool(
+        work_order.review_required
+        or policy.get("durable_review_required")
+        or policy.get("require_durable_review")
+        or approval.get("require_review_token")
+        or approval.get("review_id")
+    )
+    if required:
+        for key in ("waiver_authority", "waiver_ref"):
+            policy.pop(key, None)
+        policy.update(
+            {
+                "review_required": True,
+                "durable_review_required": True,
+                "mode": "durable_task_node_review",
+                "reason": "internal_agent_review_policy",
+            }
+        )
+        return policy, f"review-policy://internal-agent/{suffix}"
+    review_ref = f"review-waiver://governor-grant/{suffix}"
+    policy.update(
+        {
+            "review_required": False,
+            "durable_review_required": False,
+            "require_durable_review": False,
+            "mode": "governor_grant_review_waiver",
+            "reason": "approved_internal_agent_execution",
+            "waiver_authority": "governor_grant",
+            "waiver_ref": review_ref,
+        }
+    )
+    return policy, review_ref
+
+
+def _internal_delegate_route(value: object) -> GovernedWorkerRoute:
+    try:
+        route = GovernedWorkerRoute.parse(str(value or ""))
+    except GovernedWorkerRegistryError as exc:
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "internal TaskNode route is invalid",
+        ) from exc
+    if route.kind != "delegate" or not route.target_id:
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "internal TaskNode route must be canonical delegate:<worker_key>",
+        )
+    return route
+
+
+def _trusted_agent_budget_observations(value: Any) -> Mapping[str, Any]:
+    result = value if isinstance(value, Mapping) else {}
+    metadata = result.get("metadata") if isinstance(result, Mapping) else None
+    if not isinstance(metadata, Mapping):
+        return {}
+    if str(metadata.get("execution_authority") or "").strip() != (
+        "canonical_agent_executor"
+    ):
+        return {}
+    return {
+        "model_attempts": list(metadata.get("model_attempts") or []),
+        "trace": dict(metadata.get("trace") or {})
+        if isinstance(metadata.get("trace"), Mapping)
+        else {},
+    }
 
 
 def _safe_value(value: Any, *, path: str) -> Any:

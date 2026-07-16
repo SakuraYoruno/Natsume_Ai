@@ -20,6 +20,8 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BUDGET_POLICY_SCHEMA_VERSION,
     BudgetPolicy,
 )
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.task_graph import normalize_task_retry_policy
 from host_brain.contracts.agent_runtime.work_order import (
     ALLOWED_AGENT_DOMAINS,
     ALLOWED_AGENT_RUN_MODES,
@@ -631,24 +633,31 @@ def _normalize_nodes(steps: Sequence[Mapping[str, Any]]) -> tuple[_ApprovedNode,
                 f"approved node {candidate_id} has an empty output_contract",
             )
         raw_retry = step.get("retry_policy")
-        retry_policy = _mapping_copy(
+        raw_retry_policy = _mapping_copy(
             raw_retry
-            or {
+            if raw_retry is not None
+            else {
                 "max_attempts": _positive_int(
                     step.get("retry_limit", 1),
                     field_name="retry_limit",
                 ),
-                "backoff_ms": _non_negative_int(
+                "retry_backoff_ms": _non_negative_int(
                     step.get("retry_backoff_ms", 0),
                     field_name="retry_backoff_ms",
                 ),
             },
             field_name="retry_policy",
         )
-        retry_policy["max_attempts"] = _positive_int(
-            retry_policy.get("max_attempts"),
-            field_name="retry_policy.max_attempts",
-        )
+        try:
+            retry_policy = normalize_task_retry_policy(
+                raw_retry_policy,
+                field_name=f"steps[{position}].retry_policy",
+            )
+        except ContractViolation as exc:
+            raise PlanIntentSearchError(
+                PLAN_INTENT_GRAPH_INVALID,
+                exc.detail,
+            ) from exc
         nodes.append(
             _ApprovedNode(
                 candidate_id=candidate_id,

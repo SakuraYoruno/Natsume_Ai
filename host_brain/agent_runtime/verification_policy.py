@@ -15,6 +15,11 @@ import subprocess
 import sys
 from typing import Any, Mapping, Protocol
 
+from host_brain.agent_runtime.workspace_paths import (
+    WorkspacePathViolation,
+    normalize_workspace_root,
+    resolve_workspace_path,
+)
 from host_brain.contracts.agent_runtime.contract_errors import (
     CONTRACT_FIELD_INVALID,
     VERIFICATION_RESULT_INVALID,
@@ -332,37 +337,26 @@ def _evidence_ref(verification_id: str, index: int, payload: Mapping[str, Any]) 
 
 def _normalize_workspace(workspace: Path) -> Path:
     try:
-        resolved = workspace.resolve(strict=True)
-    except OSError as exc:
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, "workspace must exist") from exc
-    if not resolved.is_dir():
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, "workspace must be a directory")
-    return resolved
+        return normalize_workspace_root(workspace)
+    except WorkspacePathViolation as exc:
+        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, exc.detail) from exc
 
 
-def _resolve_cwd(raw_cwd: Any, *, workspace: Path) -> Path:
+def _resolve_cwd(raw_cwd: Any, *, workspace: Path, base: Path | None = None) -> Path:
     if raw_cwd in (None, ""):
-        return workspace
+        return base or workspace
     if not isinstance(raw_cwd, str):
         raise _VerificationRejected(VERIFICATION_PLAN_INVALID, "command cwd must be a string")
-    candidate = Path(raw_cwd)
-    if candidate.is_absolute():
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, "command cwd must be relative to workspace")
     try:
-        resolved = (workspace / candidate).resolve(strict=True)
-    except OSError as exc:
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, "command cwd must exist inside workspace") from exc
-    if not _path_is_relative_to(resolved, workspace):
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, "command cwd escapes workspace")
-    return resolved
-
-
-def _path_is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
+        return resolve_workspace_path(
+            workspace,
+            raw_cwd,
+            base=base,
+            must_exist=True,
+            allow_root=True,
+        )
+    except WorkspacePathViolation as exc:
+        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, exc.detail) from exc
 
 
 def _parse_argv(raw: Any) -> list[str]:
@@ -409,40 +403,29 @@ def _command_specs(plan: Mapping[str, Any], *, workspace: Path) -> list[_Command
             _CommandSpec(
                 raw=raw_command,
                 argv=argv,
-                cwd=_resolve_cwd(raw_cwd, workspace=default_cwd),
+                cwd=_resolve_cwd(raw_cwd, workspace=workspace, base=default_cwd),
                 timeout_seconds=_timeout_seconds(raw_timeout, default=default_timeout),
             )
         )
     return specs
 
 
-def _looks_path_like(value: str) -> bool:
-    lowered = value.lower()
-    return (
-        "/" in value
-        or "\\" in value
-        or lowered.endswith((".py", ".json", ".toml", ".ini", ".cfg", ".txt", ".md", ".yml", ".yaml"))
-        or value in {".", ".."}
-        or value.startswith(".")
-    )
-
-
 def _validate_path_token(token: str, *, workspace: Path, cwd: Path) -> None:
-    if not token or "://" in token:
+    if not token or token.lower().startswith(("http://", "https://")):
         return
     path_part = token.split("::", 1)[0].strip().strip("\"'")
-    if not path_part or not _looks_path_like(path_part):
+    if not path_part:
         return
-    candidate = Path(path_part)
-    if any(part == ".." for part in candidate.parts):
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, f"path escapes workspace: {token}")
-    base = candidate if candidate.is_absolute() else cwd / candidate
     try:
-        resolved = base.resolve(strict=False)
-    except OSError as exc:
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, f"path is not safe: {token}") from exc
-    if not _path_is_relative_to(resolved, workspace):
-        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, f"path escapes workspace: {token}")
+        resolve_workspace_path(
+            workspace,
+            path_part,
+            base=cwd,
+            must_exist=False,
+            allow_root=True,
+        )
+    except WorkspacePathViolation as exc:
+        raise _VerificationRejected(VERIFICATION_WORKSPACE_ESCAPE, exc.detail) from exc
 
 
 def _validate_argv_paths(argv: list[str], *, workspace: Path, cwd: Path) -> None:

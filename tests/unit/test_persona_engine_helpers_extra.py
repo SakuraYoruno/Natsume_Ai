@@ -8,6 +8,7 @@ import pytest
 from host_brain.persona import self_model as self_model_mod
 from host_brain.persona.persona_engine import (
     PersonaEngine,
+    PersonaGrowthMigrationAuthority,
     SelfModelSnapshot,
     TraitChangeRecord,
 )
@@ -150,9 +151,14 @@ def test_get_self_model_snapshot_uses_self_model_and_filters_unknown_fields(monk
 
 def test_get_self_model_snapshot_falls_back_to_phase_one_when_self_model_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = PersonaEngine()
-    engine.apply_growth_delta(
+    engine.apply_migration_growth_delta(
         "fallback_user",
         TraitsDelta(warmth=-0.02, humor=0.03),
+        authority=PersonaGrowthMigrationAuthority(
+            migration_id="persona-migration:self-model-fallback-test",
+            actor_id="test:self-model",
+            evidence_ref="test:test_persona_engine_helpers_extra",
+        ),
         reason="fallback",
     )
 

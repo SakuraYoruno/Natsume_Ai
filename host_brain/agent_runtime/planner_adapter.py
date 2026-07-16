@@ -27,8 +27,10 @@ from host_brain.contracts.agent_runtime.contract_errors import (
 from host_brain.contracts.agent_runtime.task_graph import (
     TASK_GRAPH_SCHEMA_VERSION,
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
+    normalize_task_retry_policy,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
@@ -217,7 +219,9 @@ class PlannerNodeView:
     dependency_refs: tuple[str, ...] = ()
     input_refs: tuple[str, ...] = ()
     output_contract: dict[str, Any] = field(default_factory=dict)
-    retry_policy: dict[str, Any] = field(default_factory=dict)
+    retry_policy: dict[str, Any] = field(
+        default_factory=lambda: {"max_attempts": 1, "retry_backoff_ms": 0}
+    )
     risk_level: int = 1
     acceptance_criteria: tuple[str, ...] = ()
     allow_parallel: bool = True
@@ -236,7 +240,12 @@ class PlannerNodeView:
             dependency_refs=_text_tuple(data.get("dependency_refs")),
             input_refs=_text_tuple(data.get("input_refs")),
             output_contract=_mapping(data.get("output_contract")),
-            retry_policy=_mapping(data.get("retry_policy")),
+            retry_policy=normalize_task_retry_policy(
+                data.get("retry_policy")
+                if data.get("retry_policy") is not None
+                else {"max_attempts": 1, "retry_backoff_ms": 0},
+                field_name="planner_node.retry_policy",
+            ),
             risk_level=_positive_int(
                 data.get("risk_level", 1),
                 field_name="risk_level",
@@ -280,6 +289,10 @@ class PlannerNodeView:
                 TASK_GRAPH_INVALID,
                 "planner node risk_level must be between 1 and 5",
             )
+        normalize_task_retry_policy(
+            self.retry_policy,
+            field_name=f"planner node {self.node_id} retry_policy",
+        )
 
     def to_task_node(self) -> TaskNode:
         self.validate()
@@ -289,7 +302,10 @@ class PlannerNodeView:
             route=_task_route_binding(self.route_type, self.target_id),
             input_refs=_dedupe_text(self.input_refs, self.dependency_refs),
             output_contract=deepcopy(self.output_contract),
-            retry_policy=deepcopy(self.retry_policy),
+            retry_policy=normalize_task_retry_policy(
+                self.retry_policy,
+                field_name=f"planner node {self.node_id} retry_policy",
+            ),
             risk_level=self.risk_level,
             acceptance_criteria=self.acceptance_criteria,
         )
@@ -305,7 +321,10 @@ class PlannerNodeView:
             "dependency_refs": list(self.dependency_refs),
             "input_refs": list(self.input_refs),
             "output_contract": deepcopy(self.output_contract),
-            "retry_policy": deepcopy(self.retry_policy),
+            "retry_policy": normalize_task_retry_policy(
+                self.retry_policy,
+                field_name=f"planner node {self.node_id} retry_policy",
+            ),
             "risk_level": self.risk_level,
             "acceptance_criteria": list(self.acceptance_criteria),
             "allow_parallel": self.allow_parallel,
@@ -352,6 +371,55 @@ def _build_execution_batches(
     return tuple(batches)
 
 
+def _planner_result_node_id(
+    nodes: Sequence[PlannerNodeView],
+    *,
+    completion_policy: TaskGraphCompletionPolicy | None,
+) -> str | None:
+    """Select a safe durable result authority from planner-declared order."""
+
+    ordered = tuple(nodes)
+    depended_on = {
+        dependency
+        for node in ordered
+        for dependency in node.dependencies
+    }
+    sinks = tuple(node.node_id for node in ordered if node.node_id not in depended_on)
+    if not sinks:
+        raise ContractViolation(
+            PLAN_CYCLE if ordered else TASK_GRAPH_INVALID,
+            (
+                "planner dependency cycle has no sink result node"
+                if ordered
+                else "planner output has no node for result authority"
+            ),
+        )
+    # A legacy multi-sink Graph has no stable outer commit boundary.  Do not
+    # invent one result authority that could disagree with the node that
+    # happens to complete last.  Atomic Graph success freezes the outer
+    # boundary and may therefore select the last planner-declared sink.
+    if (
+        len(sinks) == 1
+        or completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    ):
+        return sinks[-1]
+    return None
+
+
+def _planner_completion_policy(value: Any) -> TaskGraphCompletionPolicy | None:
+    normalized = _text(getattr(value, "value", value)).upper()
+    if not normalized:
+        return None
+    try:
+        return TaskGraphCompletionPolicy(normalized)
+    except ValueError as exc:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            f"planner completion_policy is unsupported: {normalized}",
+        ) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class CanonicalPlannerOutput:
     """One immutable planner projection suitable for persistence or shadow use."""
@@ -377,6 +445,8 @@ class CanonicalPlannerOutput:
         planner_ref: str,
         created_at: int,
         nodes: Sequence[PlannerNodeView],
+        result_node_id: str | None = None,
+        completion_policy: TaskGraphCompletionPolicy | str | None = None,
         parallel_window: int | None = None,
     ) -> "CanonicalPlannerOutput":
         identity.validate()
@@ -388,6 +458,11 @@ class CanonicalPlannerOutput:
             if parallel_window is not None
             else min(_MAX_PARALLEL_WINDOW, max(1, len(normalized_nodes)))
         )
+        resolved_completion_policy = _planner_completion_policy(completion_policy)
+        resolved_result_node_id = _text(result_node_id) or _planner_result_node_id(
+            normalized_nodes,
+            completion_policy=resolved_completion_policy,
+        )
         task_graph = TaskGraph(
             graph_id=identity.graph_id,
             root_work_order_id=identity.root_work_order_id,
@@ -395,6 +470,8 @@ class CanonicalPlannerOutput:
             planner_ref=_text(planner_ref),
             status=TaskGraphStatus.CREATED,
             created_at=max(0, int(created_at)),
+            result_node_id=resolved_result_node_id,
+            completion_policy=resolved_completion_policy,
             nodes=tuple(node.to_task_node() for node in normalized_nodes),
         )
         task_graph.validate()
@@ -490,6 +567,8 @@ class CanonicalPlannerOutput:
             planner_ref=self.planner_ref,
             status=TaskGraphStatus.CREATED,
             created_at=self.created_at,
+            result_node_id=self.task_graph.result_node_id,
+            completion_policy=self.task_graph.completion_policy,
             nodes=tuple(node.to_task_node() for node in self.nodes),
         )
         expected_graph.validate()
@@ -581,20 +660,25 @@ class CanonicalPlannerOutput:
         """Return complete execution semantics without adapter provenance."""
 
         self.validate()
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "identity": self.identity.to_dict(),
             "parallel_window": self.parallel_window,
             "planner_nodes": [node.to_dict() for node in self.nodes],
             "execution_batches": [list(batch) for batch in self.execution_batches],
         }
+        if self.task_graph.result_node_id is not None:
+            payload["result_node_id"] = self.task_graph.result_node_id
+        if self.task_graph.completion_policy is not None:
+            payload["completion_policy"] = self.task_graph.completion_policy.value
+        return payload
 
     def to_shadow_projection(self) -> dict[str, Any]:
         """Return a trace-safe projection containing refs, lineage, and digests only."""
 
         self.validate()
         payload = self.to_dict()
-        return {
+        projection = {
             "schema_version": PLANNER_SHADOW_INPUT_SCHEMA_VERSION,
             **self.identity.to_dict(),
             "source_kind": self.source_kind,
@@ -620,6 +704,11 @@ class CanonicalPlannerOutput:
                 for node in self.nodes
             ],
         }
+        if self.task_graph.result_node_id is not None:
+            projection["result_node_id"] = self.task_graph.result_node_id
+        if self.task_graph.completion_policy is not None:
+            projection["completion_policy"] = self.task_graph.completion_policy.value
+        return projection
 
 
 def _normalize_node_id(value: Any, *, fallback: str) -> str:
@@ -772,6 +861,10 @@ def adapt_planning_agent_plan(
         planner_ref=planner_ref,
         created_at=resolved_created_at,
         nodes=nodes,
+        result_node_id=(
+            _text(getattr(plan, "result_node_id", "")) or None
+        ),
+        completion_policy=getattr(plan, "completion_policy", None),
     )
 
 
@@ -859,10 +952,8 @@ def adapt_skill_dag_plan(
                 input_refs=input_refs,
                 output_contract=output_contract,
                 retry_policy={
-                    "retry_limit": retry_limit,
+                    "max_attempts": retry_limit + 1,
                     "retry_backoff_ms": retry_backoff_ms,
-                    "idempotency_key": _text(getattr(source_node, "idempotency_key", "")),
-                    "fallback_policy": _text(getattr(source_node, "fallback_policy", "")),
                 },
                 risk_level=max(1, min(5, int(getattr(source_node, "risk_level", 1) or 1))),
                 acceptance_criteria=acceptance_criteria,
@@ -881,6 +972,10 @@ def adapt_skill_dag_plan(
         planner_ref=planner_ref,
         created_at=created_at,
         nodes=nodes,
+        result_node_id=(
+            _text(getattr(plan, "result_node_id", "")) or None
+        ),
+        completion_policy=getattr(plan, "completion_policy", None),
         parallel_window=parallel_window,
     )
     raw_source_batches = getattr(plan, "execution_batches", None)
@@ -979,6 +1074,12 @@ def build_planner_shadow_comparison(
     same_routes = source_routes == consumer_routes
     same_dependency_refs = source_dependency_refs == consumer_dependency_refs
     same_batches = source.execution_batches == consumer.execution_batches
+    same_result_authority = (
+        source.task_graph.result_node_id == consumer.task_graph.result_node_id
+    )
+    same_completion_policy = (
+        source.task_graph.completion_policy == consumer.task_graph.completion_policy
+    )
     source_semantic_digest = _semantic_digest(source.to_semantic_projection())
     consumer_semantic_digest = _semantic_digest(consumer.to_semantic_projection())
     same_semantics = source_semantic_digest == consumer_semantic_digest
@@ -992,6 +1093,8 @@ def build_planner_shadow_comparison(
         (same_routes, "ROUTE_BINDING_MISMATCH"),
         (same_dependency_refs, "DEPENDENCY_REF_MISMATCH"),
         (same_batches, "BATCH_MISMATCH"),
+        (same_result_authority, "RESULT_AUTHORITY_MISMATCH"),
+        (same_completion_policy, "COMPLETION_POLICY_MISMATCH"),
         (same_semantics, "SEMANTIC_MISMATCH"),
     ):
         if not matched:
@@ -1006,6 +1109,12 @@ def build_planner_shadow_comparison(
             "dependency_edges": source_edges,
             "route_bindings": source_routes,
             "dependency_refs": source_dependency_refs,
+            "result_node_id": source.task_graph.result_node_id,
+            "completion_policy": (
+                source.task_graph.completion_policy.value
+                if source.task_graph.completion_policy is not None
+                else None
+            ),
             "execution_batches": [list(batch) for batch in source.execution_batches],
             "semantic_digest": source_semantic_digest,
         },
@@ -1017,6 +1126,12 @@ def build_planner_shadow_comparison(
             "dependency_edges": consumer_edges,
             "route_bindings": consumer_routes,
             "dependency_refs": consumer_dependency_refs,
+            "result_node_id": consumer.task_graph.result_node_id,
+            "completion_policy": (
+                consumer.task_graph.completion_policy.value
+                if consumer.task_graph.completion_policy is not None
+                else None
+            ),
             "execution_batches": [list(batch) for batch in consumer.execution_batches],
             "semantic_digest": consumer_semantic_digest,
         },
@@ -1027,6 +1142,8 @@ def build_planner_shadow_comparison(
         "same_dependencies": same_dependencies,
         "same_routes": same_routes,
         "same_dependency_refs": same_dependency_refs,
+        "same_result_authority": same_result_authority,
+        "same_completion_policy": same_completion_policy,
         "same_execution_batches": same_batches,
         "same_semantics": same_semantics,
         "compatible": not mismatch_reasons,

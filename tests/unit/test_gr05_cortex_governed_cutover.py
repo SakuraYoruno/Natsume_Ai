@@ -43,7 +43,6 @@ def _ports() -> SimpleNamespace:
 
     return SimpleNamespace(
         record_user_turn=forbidden,
-        runtime_task_registry=forbidden,
         run_retrieval=run_retrieval,
         filter_retrieval_evidence_items_for_prompt=lambda **kwargs: (
             list(kwargs["retrieval_evidence_items"]),

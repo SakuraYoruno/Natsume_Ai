@@ -20,13 +20,7 @@ if TYPE_CHECKING:
     from host_brain.model_runtime.prompt_registry import PromptRegistry
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.bond.async_queue import BondUpdateQueue
-from host_brain.bond.bond_dynamics import BondDynamicsWriter
-from host_brain.bond.bond_stage_engine import BondStageEngine
-from host_brain.bond.milestone_tracker import MilestoneTracker
 from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient, build_neo4j_bond_client, load_neo4j_runtime_config  # 修复审计问题 #10
-from host_brain.bond.shared_memory_index import SharedMemoryIndex
-from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
@@ -39,12 +33,9 @@ from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
 from host_brain.channels.tts_context_router import TtsContextRouter
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
-from host_brain.memory.episodic_memory_graph import EpisodicMemoryGraph
-from host_brain.memory.consolidation_trigger import ConsolidationTrigger
 from host_brain.core.predictive_state import PredictiveStateEngine
 from host_brain.core.meta_learning_loop import MetaLearningLoop
 from host_brain.agents.planning_agent import PlanningAgent
-from host_brain.skills.skill_composer import SkillComposer
 from host_brain.executive_runtime.capability_synthesis import RuntimeCapabilityRegistry
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
@@ -91,7 +82,6 @@ from host_brain.composition.process_environment import (
     collect_dependency_probes,
     collect_dependency_probes_sync,
     get_activity_monitor,
-    get_context_compressor,
     get_edge_base_url,
     get_edge_base_urls,
     get_emotion_timeline,
@@ -454,12 +444,9 @@ from host_brain.composition.process_runtime_services import (
     get_bond_stage_engine,
     get_bond_update_queue,
     get_capability_forge_service,
-    get_capability_forge_token_service,
     get_capability_gap_telemetry,
     get_capability_scorecard_provider,
-    get_consolidation_trigger,
     get_distillation_engine,
-    get_episodic_memory_graph,
     get_graph_runtime,
     get_intent_engine,
     get_mcp_tool_broker,
@@ -477,11 +464,8 @@ from host_brain.composition.process_runtime_services import (
     get_reflection_chain,
     get_routing_matrix,
     get_runtime_capability_registry,
-    get_legacy_runtime_task_registry,
-    get_runtime_task_registry,
     get_semantic_recaller,
     get_shared_memory_index,
-    get_skill_composer,
     get_skill_registry,
     get_state_arbiter,
     get_state_write_arbiter,

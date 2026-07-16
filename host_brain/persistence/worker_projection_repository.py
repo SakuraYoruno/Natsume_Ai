@@ -71,6 +71,79 @@ class WorkerProjectionStoreError(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+def validate_worker_projection_payload(
+    projection: Mapping[str, Any],
+    *,
+    expected_projection_id: str | None = None,
+) -> dict[str, Any]:
+    """Validate one loaded projection exactly as a persisted Store record.
+
+    ``ExecutionProjectionReaderPort`` implementations are allowed to sit in
+    front of the SQLite store.  Consumers therefore must not trust a digest
+    string returned by the reader without rebuilding the canonical v1 body.
+    This helper returns only the normalized, digest-bound public projection;
+    unknown fields and identity drift fail closed.
+    """
+
+    if not isinstance(projection, Mapping):
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "worker projection payload must be an object",
+        )
+    payload = dict(projection)
+    projection_id = str(payload.get("projection_id") or "").strip()
+    if not _DURABLE_REF.fullmatch(projection_id):
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "projection_id must be a durable reference",
+        )
+    expected_id = str(expected_projection_id or "").strip()
+    if expected_id and projection_id != expected_id:
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "worker projection id differs from its committed receipt",
+        )
+    if payload.get("schema_version") != WORKER_PROJECTION_SCHEMA_VERSION:
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "worker projection schema version is invalid",
+        )
+    allowed_fields = {
+        *_BODY_FIELDS,
+        "projection_id",
+        "payload_digest",
+        "schema_version",
+        *(
+            key
+            for key in _OPTIONAL_BODY_FIELDS
+            if key in payload
+        ),
+    }
+    if set(payload) != allowed_fields:
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "worker projection contains missing or unknown fields",
+        )
+    _assert_secret_free(payload, path="projection")
+    body = _projection_body(payload)
+    digest = "sha256:" + hashlib.sha256(
+        _canonical_json(body).encode("utf-8")
+    ).hexdigest()
+    if payload.get("payload_digest") != digest or _SHA256.fullmatch(digest) is None:
+        raise WorkerProjectionStoreError(
+            WORKER_PROJECTION_INVALID,
+            "worker projection payload digest differs",
+        )
+    normalized = {
+        **body,
+        "projection_id": projection_id,
+        "payload_digest": digest,
+        "schema_version": WORKER_PROJECTION_SCHEMA_VERSION,
+    }
+    _validate_body(normalized)
+    return normalized
+
+
 class WorkerProjectionStore:
     """SQLite projection store shared by writer and terminal replay reader."""
 
@@ -145,32 +218,11 @@ class WorkerProjectionStore:
                 WORKER_PROJECTION_INVALID,
                 "projection_id must be a durable reference",
             )
-        payload = dict(projection or {})
-        if payload.get("projection_id") != projection_ref:
-            raise WorkerProjectionStoreError(
-                WORKER_PROJECTION_INVALID,
-                "projection payload id differs from projection_id",
-            )
-        if payload.get("schema_version") != WORKER_PROJECTION_SCHEMA_VERSION:
-            raise WorkerProjectionStoreError(
-                WORKER_PROJECTION_INVALID,
-                "worker projection schema version is invalid",
-            )
-        _assert_secret_free(payload, path="projection")
-        body = _projection_body(payload)
-        digest = "sha256:" + hashlib.sha256(_canonical_json(body).encode("utf-8")).hexdigest()
-        if payload.get("payload_digest") != digest or not _SHA256.fullmatch(digest):
-            raise WorkerProjectionStoreError(
-                WORKER_PROJECTION_INVALID,
-                "worker projection payload digest differs",
-            )
-        normalized = {
-            **body,
-            "projection_id": projection_ref,
-            "payload_digest": digest,
-            "schema_version": WORKER_PROJECTION_SCHEMA_VERSION,
-        }
-        _validate_body(normalized)
+        normalized = validate_worker_projection_payload(
+            projection,
+            expected_projection_id=projection_ref,
+        )
+        digest = normalized["payload_digest"]
         encoded = _canonical_json(normalized)
         created = int(self._clock())
         if created < 0:
@@ -261,21 +313,37 @@ class WorkerProjectionStore:
                 WORKER_PROJECTION_INVALID,
                 "persisted worker projection must be an object",
             )
-        _validate_body(value)
-        body = _projection_body(value)
-        expected_digest = "sha256:" + hashlib.sha256(_canonical_json(body).encode("utf-8")).hexdigest()
-        if (
-            value.get("schema_version") != WORKER_PROJECTION_SCHEMA_VERSION
-            or value.get("projection_id") != row["projection_id"]
-            or value.get("payload_digest") != row["payload_digest"]
-            or value.get("payload_digest") != expected_digest
-        ):
+        normalized = validate_worker_projection_payload(
+            value,
+            expected_projection_id=str(row["projection_id"]),
+        )
+        column_bindings = {
+            "schema_version": WORKER_PROJECTION_SCHEMA_VERSION,
+            "payload_digest": normalized["payload_digest"],
+            "command_id": normalized["command_id"],
+            "request_id": normalized["request_id"],
+            "graph_id": normalized["graph_id"],
+            "graph_revision": normalized["graph_revision"],
+            "node_id": normalized["node_id"],
+            "attempt_id": normalized["attempt_id"],
+            "route_type": normalized["route_type"],
+            "target_id": normalized["target_id"],
+            "decision": normalized["decision"],
+        }
+        if any(row[key] != value for key, value in column_bindings.items()):
             raise WorkerProjectionStoreError(
                 WORKER_PROJECTION_INVALID,
                 "persisted worker projection columns/payload drifted",
             )
-        _assert_secret_free(value, path="projection")
-        return value
+        return normalized
+
+
+def validate_worker_projection_record(
+    row: sqlite3.Row | Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a durable projection row for same-transaction consumers."""
+
+    return WorkerProjectionStore._record(row)  # noqa: SLF001 - module-owned validator
 
 
 def _validate_body(value: Mapping[str, Any]) -> None:
@@ -378,6 +446,8 @@ __all__ = [
     "WORKER_PROJECTION_NOT_FOUND",
     "WORKER_PROJECTION_REPLAY_DRIFT",
     "WORKER_PROJECTION_SCHEMA_NOT_READY",
+    "validate_worker_projection_payload",
+    "validate_worker_projection_record",
     "WORKER_PROJECTION_SCHEMA_VERSION",
     "WorkerProjectionStore",
     "WorkerProjectionStoreError",

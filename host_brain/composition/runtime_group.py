@@ -56,7 +56,8 @@ class GovernedRuntimeGroup:
                 await _await_call(self._runtimes[name].aclose())
             except BaseException as exc:
                 failures.append(exc)
-        self._active_names.clear()
+            else:
+                self._active_names.remove(name)
         if failures:
             raise RuntimeError("GOVERNED_RUNTIME_GROUP_CLOSE_FAILED") from failures[0]
 

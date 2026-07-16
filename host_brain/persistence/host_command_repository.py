@@ -368,6 +368,37 @@ class HostCommandRepository:
         finally:
             conn.close()
 
+    def get_by_graph(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+    ) -> dict[str, Any] | None:
+        """Resolve the immutable command admission for one exact Graph revision."""
+
+        normalized_graph = _required_text(
+            graph_id,
+            field_name="graph_id",
+            max_length=240,
+        )
+        revision = _required_int(
+            graph_revision,
+            field_name="graph_revision",
+            minimum=1,
+        )
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM host_command_journal
+                WHERE graph_id = ? AND graph_revision = ?
+                """,
+                (normalized_graph, revision),
+            ).fetchone()
+            return self._validated_record(conn, row) if row is not None else None
+        finally:
+            conn.close()
+
     def get_by_request(self, *, surface: str, request_id: str) -> dict[str, Any] | None:
         normalized_surface = _required_text(surface, field_name="surface", max_length=160)
         normalized_request = _required_text(request_id, field_name="request_id", max_length=240)

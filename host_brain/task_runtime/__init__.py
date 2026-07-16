@@ -1,11 +1,23 @@
 """Governed Task Runtime application boundary."""
 
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
+from .dag_scheduler import (
+    DagNodeScheduleCandidate,
+    DagScheduleDecision,
+    DagScheduleInputError,
+    compute_dag_schedule,
+)
 from .worker_budget_usage import (
     WorkerBudgetUsage,
     WorkerBudgetUsageError,
     build_worker_budget_usage,
     stable_worker_usage_id,
+)
+from .errors import RetryableWorkerPreparationError
+from .heartbeat import (
+    DurableExecutionHeartbeat,
+    DurableExecutionHeartbeatError,
+    DurableExecutionHeartbeatLifecycleError,
 )
 
 from .coordinator import (
@@ -22,11 +34,19 @@ __all__ = [
     "BudgetCharge",
     "BudgetRuntimeContext",
     "DurableBudgetRuntime",
+    "DagNodeScheduleCandidate",
+    "DagScheduleDecision",
+    "DagScheduleInputError",
     "GovernedExecutionReceipt",
     "GovernedRuntimeError",
     "GovernedTaskCoordinator",
+    "RetryableWorkerPreparationError",
+    "DurableExecutionHeartbeat",
+    "DurableExecutionHeartbeatError",
+    "DurableExecutionHeartbeatLifecycleError",
     "WorkerBudgetUsage",
     "WorkerBudgetUsageError",
     "build_worker_budget_usage",
     "stable_worker_usage_id",
+    "compute_dag_schedule",
 ]

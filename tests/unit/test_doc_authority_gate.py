@@ -34,7 +34,7 @@ def _minimal_repo(root: Path) -> None:
                 json.dumps(
                     {
                         "overall_status": "INCOMPLETE",
-                        "active_wave": "NE-00",
+                        "active_wave": "NE-01",
                         "active_wave_status": "IN_PROGRESS",
                         "historical_receipts_are_scope_bound": True,
                         "active_execution_contract": (
@@ -44,7 +44,7 @@ def _minimal_repo(root: Path) -> None:
                 ),
             )
         elif relative.endswith("NEXT_GENERATION_EVOLUTION_EXECUTION.md"):
-            _write(root / relative, "状态：NE-00_IN_PROGRESS / PROGRAM_INCOMPLETE\n")
+            _write(root / relative, "状态：NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE\n")
         else:
             _write(root / relative)
     for basename in authority.LEGACY_DOCUMENTS:
@@ -105,6 +105,22 @@ def test_machine_wave_status_must_match_execution_contract(tmp_path: Path) -> No
 
     assert any(
         row["reason_code"] == "DOC_MACHINE_STATUS_INVALID"
-        and "NE-00_COMPLETED" in row["message"]
+        and "NE-01_COMPLETED" in row["message"]
+        for row in failures
+    )
+
+
+def test_machine_wave_identifier_must_be_well_formed(tmp_path: Path) -> None:
+    _minimal_repo(tmp_path)
+    status_path = tmp_path / "configs" / "release" / "current_architecture_status.json"
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    payload["active_wave"] = "NEXT"
+    status_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    failures = authority.scan_repository(tmp_path)
+
+    assert any(
+        row["reason_code"] == "DOC_MACHINE_STATUS_INVALID"
+        and "NE-00 through NE-99" in row["message"]
         for row in failures
     )

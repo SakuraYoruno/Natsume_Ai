@@ -1,7 +1,23 @@
 {
-  "version": 3,
+  "version": 4,
   "name": "Natsume_Ai 文档过期门禁（代码事实对齐）",
   "default_max_age_days": 14,
+  "change_contract": {
+    "required": true,
+    "sources": [
+      "host_brain/*",
+      "edge_client/*",
+      "natsume_contracts/*",
+      "desktop_pet/*",
+      "tools/*",
+      "scripts/runtime/*"
+    ],
+    "documentation": [
+      "README.md",
+      "docs/*",
+      "configs/release/current_architecture_status.json"
+    ]
+  },
   "rules": [
     {
       "id": "arch-current",

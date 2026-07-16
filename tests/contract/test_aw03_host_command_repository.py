@@ -257,6 +257,10 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
 
     created = repository.admit(command, work_order, assignment, graph)
     replayed = repository.admit(command, work_order, assignment, graph)
+    by_graph = repository.get_by_graph(
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+    )
 
     assert created["created"] is True and created["replayed"] is False
     assert replayed["created"] is False and replayed["replayed"] is True
@@ -266,6 +270,9 @@ def test_aw03_admit_is_atomic_typed_and_exact_replay_is_read_only(tmp_path: Path
     assert isinstance(replayed["assignment"], ExecutorAssignment)
     assert isinstance(replayed["graph"], TaskGraph)
     assert replayed["assignment_id"] == assignment.assignment_id
+    assert by_graph is not None
+    assert by_graph["command"].command_id == command.command_id
+    assert by_graph["graph"].graph_id == graph.graph_id
     assert _counts(db_path) == {
         "host_command_journal": 1,
         "task_runtime_graph": 1,

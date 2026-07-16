@@ -12,7 +12,9 @@ from typing import Any
 
 from host_brain.audit.migration_compat import (
     PLATFORM_REGISTRY_DRAFT_CHECKSUM,
+    checksum_bound_schema_replay_postcondition_holds,
     evaluate_catalog_compatibility,
+    is_exact_checksum_bound_schema_replay_failure,
     is_exact_legacy_inline_schema_failure,
     is_exact_legacy_fts_failure,
     is_exact_platform_registry_draft_record,
@@ -355,6 +357,14 @@ class SQLiteMigrationRunner:
                         disposition = ASSET_DISPOSITION_APPLIED_WITH_COMPAT
                         applied_detail = (
                             "migration applied with checksum-bound legacy FTS compatibility"
+                        )
+                    elif is_exact_checksum_bound_schema_replay_failure(
+                        asset, exc
+                    ) and checksum_bound_schema_replay_postcondition_holds(conn, asset):
+                        disposition = ASSET_DISPOSITION_APPLIED_WITH_COMPAT
+                        applied_detail = (
+                            "migration receipt repaired after checksum-bound physical "
+                            "schema replay verification"
                         )
                     elif is_exact_legacy_inline_schema_failure(
                         asset, exc

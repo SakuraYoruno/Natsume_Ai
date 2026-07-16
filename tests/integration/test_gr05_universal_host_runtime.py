@@ -321,7 +321,10 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             ).fetchone()
         assert sorted(row[0] for row in routes) == ["chat", "delegate", "plan"]
         assert attempts == 5
-        assert projections == 4
+        # Chat/delegate already froze worker projections; the plan's skill
+        # node now does so as well, giving every accepted route the same B5
+        # result-authority journal.
+        assert projections == 5
         assert acceptance_effects == [
             ("conversation.user_turn", "GRAPH", "COMMITTED", 3),
             ("life.foreground_completed", "GRAPH", "COMMITTED", 3),
