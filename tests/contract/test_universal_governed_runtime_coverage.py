@@ -29,6 +29,7 @@ def test_all_four_routes_are_complete_without_claiming_full_architecture() -> No
     assert report.missing_route_controls == {}
     assert report.missing_architecture_controls == (
         "native_multi_node_task_graph",
+        "revision_plus_one_replan",
         "composition_without_global_service_locator",
     )
 
@@ -63,7 +64,7 @@ def test_manifest_requires_every_control_for_every_route(tmp_path: Path) -> None
 def test_manifest_distinguishes_partial_and_not_wired_from_pass(tmp_path: Path) -> None:
     report = load_universal_runtime_coverage(ROOT)
     assert "generic_three_layer_planning_search" not in report.missing_architecture_controls
-    assert "revision_plus_one_replan" not in report.missing_architecture_controls
+    assert "revision_plus_one_replan" in report.missing_architecture_controls
     assert "composition_without_global_service_locator" in report.missing_architecture_controls
 
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))

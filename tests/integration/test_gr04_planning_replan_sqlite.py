@@ -21,7 +21,11 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionAuthority,
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
-from host_brain.orchestration.planning_recovery import GovernedPlanningRecoveryService
+from host_brain.orchestration.planning_recovery import (
+    PLANNING_RECOVERY_NOT_REPLANNABLE,
+    GovernedPlanningRecoveryService,
+    PlanningRecoveryError,
+)
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
@@ -165,12 +169,16 @@ def _graph_outbox(graph_id: str, *, version: int, status: str) -> OutboxMessage:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "terminal_status",
-    [TaskGraphStatus.FAILED, TaskGraphStatus.BLOCKED],
+    ("terminal_status", "should_replan"),
+    [
+        (TaskGraphStatus.FAILED, True),
+        (TaskGraphStatus.BLOCKED, False),
+    ],
 )
-async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
+async def test_real_sqlite_only_failed_revision_admits_exact_revision_plus_one(
     tmp_path,
     terminal_status: TaskGraphStatus,
+    should_replan: bool,
 ) -> None:
     db_path = tmp_path / "planning-replan.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -242,6 +250,24 @@ async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
         execution_service=service,
         task_store=store,
     )
+    if not should_replan:
+        with pytest.raises(PlanningRecoveryError) as raised:
+            await recovery.prepare_failure_replan(
+                adapter.request,
+                authority=authority,
+                graph_id=graph_id,
+                previous_revision=1,
+                created_at=200,
+            )
+        assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+        with sqlite3.connect(db_path) as conn:
+            revision_count = conn.execute(
+                "SELECT COUNT(*) FROM host_command_journal"
+            ).fetchone()[0]
+        assert revision_count == 1
+        assert command_application.calls == 0
+        return
+
     replanned = await recovery.prepare_failure_replan(
         adapter.request,
         authority=authority,

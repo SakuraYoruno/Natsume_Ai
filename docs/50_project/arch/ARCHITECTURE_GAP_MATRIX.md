@@ -62,7 +62,7 @@ Cancellation 生产权限接线不会改变该定级。Gateway 认证后的 stru
 
 0096 task-bound Review continuation 与 single-node post-budget Operation continuation 是两条不同的窄链。后者只凭 exact COMMITTED checkpoint与既有 accepted BudgetUsage接管，不补造 usage、不重跑 worker。两者均不改变 cancellation production OFF，也不能把 general/batch/pre-budget recovery写成完成；完整架构仍为 `INCOMPLETE`。
 
-PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用同一读事务内真实 terminal payload ref；普通 scheduler/Operator 无新增扫描。pre-0095 ref 原样进入 failure evidence；只有旧版或替代 Store 未提供可选扩展字段时才合成 fallback，生产 DurableTaskStore 提供 inventory 后，缺行、畸形或歧义均 fail closed。`created_ts=0` 的 timestamp 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 Event candidate，因为两条历史 append 路径都可能用时钟替代零值，但其它字段必须 exact。
+PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用同一读事务内真实 terminal payload ref；普通 scheduler/Operator 无新增扫描。pre-0095 ref 原样进入 failure evidence；只有旧版或替代 Store 未提供可选扩展字段时才合成 fallback，生产 DurableTaskStore 提供 inventory 后，缺行、畸形或歧义均 fail closed。当前只允许静止 `FAILED` revision 重规划；`BLOCKED`、Review/Retry 可续跑状态、非终态/`RECOVERABLE` Attempt 与 active Lease 全部 fail closed。这只是双执行止血，不是 durable supersession；仍缺 predecessor 校验 + supersession + replacement admission 单事务，以及旧 revision 所有 mutation/continuation 入口的持久围栏，因此 `revision_plus_one_replan=PARTIAL_FAIL_CLOSED`。`created_ts=0` 的 timestamp 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 Event candidate，因为两条历史 append 路径都可能用时钟替代零值，但其它字段必须 exact。
 
 ## 3. Composition 与隔离
 
