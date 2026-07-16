@@ -12,6 +12,9 @@ from host_brain.task_runtime import coordinator as coordinator_module
 from host_brain.task_runtime import (
     graph_cancellation_runtime as graph_cancellation_runtime_module,
 )
+from host_brain.task_runtime import (
+    parallel_settlement_runtime as parallel_settlement_runtime_module,
+)
 from host_brain.task_runtime import runtime_outbox as runtime_outbox_module
 from host_brain.task_runtime.runtime_outbox import RuntimeOutbox
 
@@ -21,6 +24,10 @@ def _outbox_owners() -> tuple[ast.ClassDef, ...]:
         (
             graph_cancellation_runtime_module,
             "GraphCancellationRuntime",
+        ),
+        (
+            parallel_settlement_runtime_module,
+            "ParallelSettlementRuntime",
         ),
         (coordinator_module, "GovernedTaskCoordinator"),
     )
@@ -389,5 +396,5 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
     assert len(rows) == 58
     assert best_effort_count == 5
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "a50759475c981023dbbdc524137c1a93d1ed3bd995032444999322444fc26e84"
+        "26cbe9638cc6b5afd3bb67358f1d31ee319dbedea1563836372246a0275bfc12"
     )

@@ -116,9 +116,11 @@ flowchart TB
 
 主要代码：
 
-- `host_brain/task_runtime/coordinator.py`：节点推进、worker 调度、Verification 和 Acceptance。
+- `host_brain/task_runtime/coordinator.py`：DAG 执行循环、worker 调度、Verification/Acceptance，以及对窄 runtime service 的直接调用。
 - `host_brain/task_runtime/coordinator_records.py`：durable record 校验、并行节点 outcome 与稳定字段读取；纯叶子模块。
 - `host_brain/task_runtime/coordinator_receipts.py`：不可变 execution receipt、构造器与 terminal/commit event rendering；纯叶子模块并保持旧导入 identity。
+- `host_brain/task_runtime/parallel_settlement_projection.py`：0090 active re-entry、rejected Budget outcome 与 outcome snapshot 的 durable read/validation；只持同一 Store，无 mutation authority。
+- `host_brain/task_runtime/parallel_settlement_runtime.py`：0090 failure/review/Budget outcome resolution、ownership/CAS conflict 判定与 settlement orchestration；共享原 Store、BudgetRuntime、RuntimeOutbox 和 Projection，不建立第二事务或发布锁。
 - `host_brain/task_runtime/graph_cancellation_records.py`：取消 intent 校验、Node 状态投影与 Budget target/projection；不拥有取消编排 authority。
 - `host_brain/task_runtime/graph_cancellation_runtime.py`：两阶段取消 request/continue、exact replay、advance/finalize 与本地 cancel/join 编排；只依赖同一 Store、共享 Outbox/Registry、lease TTL 和只读 Projection。
 - `host_brain/task_runtime/graph_cancellation_projection.py`：读取取消 intent、Graph/Node/Budget/Attempt/decision durable facts并构造 terminal receipt；只持 Store，不拥有 mutation authority。
@@ -152,15 +154,15 @@ flowchart TB
 
 TaskStore 的 DAG state 与 READY claim 已从主文件拆出，`task_repository.py` 当前 4,522 行，低于既有 4.6k ceiling。该结构变化没有改变事务语义：scheduler snapshot 仍是一个一致读事务，claim/replay 仍共享一个 writer transaction；retry promotion 与随后 claim 仍是两个独立事务。TaskStore 已不再阻塞静态文件门禁，剩余问题集中在 Coordinator。
 
-Coordinator 的纯边界与四项 stateful/read-only 进程内边界已拆出，主文件由 5,860 降到 4,627 行。确定性 records/receipts/cancellation payload helpers 不依赖 runtime authority；RuntimeOutbox 统一 27 个构造与 31 个发布调用的单实例锁域；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join；GraphCancellationRuntime 与只读 GraphCancellationProjection 接管 request/continue/replay/finalize 及 durable terminal projection，且共享原 Store/Outbox/Registry。Coordinator 只保留公开取消薄委托与执行重入委托。发布锁仍不覆盖跨进程 claim/CAS，也没有 pending-intent scanner/takeover/continuation，因此静态 Gate 仍为红，不能把进程内编排拆分写成生产恢复闭环完成。
+执行层已完成十四刀结构拆分，Coordinator 主文件由 5,860 降到 3,808 行。确定性 records/receipts/cancellation payload helpers 不依赖 runtime authority；RuntimeOutbox 在 Coordinator、GraphCancellationRuntime 与 ParallelSettlementRuntime 间保持同一实例和 27 build/31 publish/58 calls/5 best-effort 的联合矩阵；LocalGraphExecutionRegistry 统一完整 stream tracking、revision 隔离和锁外 cancel/join。GraphCancellationRuntime/Projection 保持冻结取消边界；325 行 ParallelSettlementProjection 与 649 行 ParallelSettlementRuntime 接管 0090 settlement read/validation 与 runtime orchestration，且不反向持有 Coordinator、callback 或新锁。DurableTaskStore 仍是 0090 Graph/Budget/Outbox/decision 的唯一 UoW mutation authority。发布锁仍不覆盖跨进程 claim/CAS，也没有 pending-intent scanner/takeover/continuation，因此静态 Gate 仍仅因 Coordinator 未分类且超过 1.5k 为红；下一阶段继续拆 node lifecycle 与 DAG scheduling，不能把进程内拆分写成生产恢复闭环完成。
 
 pre-reservation 的普通或重试耗尽 failure 已由 `fail_running_attempt_bundle` 原子关闭 Attempt、Node、Graph 和 Lease，并生成四条 attempt/evidence-bound Outbox；如果 attempt 已存在 operation reservation 就拒绝进入该 bundle。Budget finalize 仍在 bundle 外。reservation 建立后，`DurableExecutionHeartbeat` 周期性先续 Lease、再续 Reservation，并在流事件与最终结果处提供 fail-closed checkpoint。续租支持同参响应丢失精确重放；心跳失败返回 `RECOVERY_REQUIRED`，不会提交 Worker 结果。
 
 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 在 B4 之上保留 B5A/B5B 的持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id` 和 0091 atomic success；atomic/bounded 两个能力开关独立且默认 `false`，Host、Scheduler、Internal 三处生产 composition 均 OFF。
 
-运行入口先验证 `0090` settlement 与 `0092` cancellation schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
+运行入口先验证 `0090` settlement 与 `0092` cancellation schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。0090 的 active re-entry、rejected Budget outcome 与 outcome snapshot read/validation 由 ParallelSettlementProjection 完成，resolution 与 settlement orchestration 由 ParallelSettlementRuntime 完成；`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
 
-0090/B4 继续从 durable Node、Attempt、Reservation、BudgetUsage 重建 failure/review/Budget canonical v2 decision。全节点 Accepted 时，B5 对每个 frozen worker projection 重算 canonical digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式 result projection 编译整图 effects 和公开结果。`complete_parallel_graph_success()` 在单 UoW 中提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、全图 effect intents 与 0091 decision。completed replay 只读 0091、不重编 effects；两次响应丢失后重读 terminal authority。
+0090/B4 继续从 durable Node、Attempt、Reservation、BudgetUsage 重建 failure/review/Budget canonical v2 decision；ParallelSettlementRuntime/Projection 取得 runtime orchestration/read owner，但 `task_parallel_settlement_store.py` 仍在唯一 UoW 中提交 Graph、可选 Budget、两类 Outbox 与 0090 decision。全节点 Accepted 时，B5 对每个 frozen worker projection 重算 canonical digest并绑定 command/request、route/target、graph/node/attempt、receipt 与 node grant；只有显式 result projection 编译整图 effects 和公开结果。`complete_parallel_graph_success()` 在单 UoW 中提交 Graph COMPLETED、Budget CONSUMED、两条 Outbox、全图 effect intents 与 0091 decision。completed replay 只读 0091、不重编 effects；两次响应丢失后重读 terminal authority。
 
 B5C 以迁移 0092 建立 canonical cancellation intent/decision/effect fence。Application 只提供无 HTTP/UI 暴露的内部入口，并要求 authority verifier 将 request、principal、source、reason 精确绑定既有 durable Graph revision；当前生产 composition 没有注入该 verifier。phase 1 UoW 先写 intent、Graph `BLOCKED` 及 Node/Attempt/Lease/Review/token/operation/effect fence，提交后 GraphCancellationRuntime 才通过共享 registry cancel/join 本进程 child 与 heartbeat。execute re-entry 由 Coordinator 薄委托该 Runtime 读取 durable intent 并继续 advance/finalize；只读 Projection 与本地 task handle 都不拥有取消 authority。
 

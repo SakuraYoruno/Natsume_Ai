@@ -109,12 +109,14 @@
     "native_multi_node_task_graph": {
       "status": "PARTIAL",
       "stage": "PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW",
-      "wiring_progress": "PRODUCTION_OFF. B4/0090 durable whole-Graph settlement and B5/0091 atomic success remain active shadow contracts. B5C adds migration 0092, canonical cancellation intent and decision contracts, an exact-Graph-revision verified internal Application boundary, phase-one durable Graph/Node/Attempt/Lease/Review/operation/effect fences, execute re-entry continuation, and phase-two Graph/Budget/Outbox finalization after reconciliation. NODE effects already authorized by an ACCEPTED Node and SUCCEEDED Attempt continue delivery; unauthorized NODE effects and incomplete-Graph GRAPH effects are fenced. 0091 success and 0092 cancellation are first-writer-wins and response loss permits only exact replay. Cancellation request/continue/replay/finalize now live in a dedicated GraphCancellationRuntime backed by a Store-only GraphCancellationProjection; both reuse the existing Store, RuntimeOutbox, and local Registry without a second authority, while Coordinator retains thin delegation. Production composition injects no cancellation authority verifier and exposes no HTTP/UI route. Automatic cross-process pending-intent reconciliation, takeover, continuation, revisioned 0090 identity, historical half-state repair, cross-process Outbox claim/CAS, Budget contention, and production canary remain incomplete. Atomic, bounded, and cancellation production paths remain OFF.",
+      "wiring_progress": "PRODUCTION_OFF. B4/0090 durable whole-Graph settlement and B5/0091 atomic success remain active shadow contracts. The Store-only ParallelSettlementProjection now owns the durable re-entry, rejected-Budget outcome, and outcome-snapshot reads and validation used by 0090; ParallelSettlementRuntime shares the existing TaskStore, DurableBudgetRuntime, and RuntimeOutbox and owns failure/review/Budget outcome resolution plus settlement orchestration. DurableTaskStore remains the only unit-of-work mutation authority for the canonical 0090 Graph/Budget/Outbox/decision commit, and the shared Outbox matrix remains 27 builds, 31 publishes, 58 combined calls, and 5 best-effort publishes. B5C adds migration 0092, canonical cancellation intent and decision contracts, an exact-Graph-revision verified internal Application boundary, phase-one durable Graph/Node/Attempt/Lease/Review/operation/effect fences, execute re-entry continuation, and phase-two Graph/Budget/Outbox finalization after reconciliation. NODE effects already authorized by an ACCEPTED Node and SUCCEEDED Attempt continue delivery; unauthorized NODE effects and incomplete-Graph GRAPH effects are fenced. 0091 success and 0092 cancellation are first-writer-wins and response loss permits only exact replay. Cancellation request/continue/replay/finalize live in a dedicated GraphCancellationRuntime backed by a Store-only GraphCancellationProjection; both reuse the existing Store, RuntimeOutbox, and local Registry without a second authority, while Coordinator retains thin delegation. Production composition injects no cancellation authority verifier and exposes no HTTP/UI route. Automatic cross-process pending-intent reconciliation, takeover, continuation, revisioned 0090 identity, historical half-state repair, cross-process Outbox claim/CAS, Budget contention, and production canary remain incomplete. Atomic, bounded, and cancellation production paths remain OFF.",
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/coordinator_records.py",
         "host_brain/task_runtime/coordinator_receipts.py",
+        "host_brain/task_runtime/parallel_settlement_projection.py",
+        "host_brain/task_runtime/parallel_settlement_runtime.py",
         "host_brain/task_runtime/graph_cancellation_records.py",
         "host_brain/task_runtime/graph_cancellation_runtime.py",
         "host_brain/task_runtime/graph_cancellation_projection.py",
@@ -151,6 +153,7 @@
         "tests/unit/test_ne01_dag_scheduler.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_aw02_task_runtime_composition.py",
+        "tests/unit/test_parallel_settlement_runtime_structure.py",
         "tests/contract/test_ne01_atomic_failure_bundle.py",
         "tests/contract/test_ne01_parallel_store_settlement.py",
         "tests/contract/test_ne01_parallel_success_contract.py",

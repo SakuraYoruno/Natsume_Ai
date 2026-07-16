@@ -62,6 +62,7 @@ from .coordinator_receipts import (
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
 from .local_graph_execution_registry import LocalGraphExecutionRegistry
+from .parallel_settlement_runtime import ParallelSettlementRuntime
 from .runtime_outbox import RuntimeOutbox
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
 from .errors import (
@@ -185,6 +186,11 @@ class GovernedTaskCoordinator:
             lease_ttl_ms=self._lease_ttl_ms,
         )
         self._budgets = DurableBudgetRuntime(task_store=task_store, outbox_factory=outbox_factory)
+        self._parallel_settlement = ParallelSettlementRuntime(
+            task_store=task_store,
+            budget_runtime=self._budgets,
+            runtime_outbox=self._runtime_outbox,
+        )
 
     def supports_completion_policy(self, value: str | None) -> bool:
         """Report process capability without selecting a Graph's semantics."""
@@ -394,7 +400,7 @@ class GovernedTaskCoordinator:
                     or set(statuses.values()).intersection(reentry_terminal_statuses)
                 )
             ):
-                await self._assert_parallel_reentry_idle(
+                await self._parallel_settlement.assert_parallel_reentry_idle(
                     admitted=admitted,
                     durable_nodes=durable_nodes,
                 )
@@ -408,17 +414,19 @@ class GovernedTaskCoordinator:
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "parallel re-entry has no durable non-accepted outcome",
                     )
-                budget, terminal_event = await self._resolve_parallel_outcomes(
-                    admitted=admitted,
-                    outcomes=outcomes,
-                    budget=budget,
+                budget, parallel_terminal = (
+                    await self._parallel_settlement.resolve_parallel_outcomes(
+                        admitted=admitted,
+                        outcomes=outcomes,
+                        budget=budget,
+                    )
                 )
-                if terminal_event is None:
+                if parallel_terminal is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "parallel re-entry did not produce a terminal decision",
                     )
-                yield terminal_event
+                yield parallel_terminal
                 return
 
             pre_review_node_id = next(
@@ -737,14 +745,14 @@ class GovernedTaskCoordinator:
 
             if statuses and all(status == "ACCEPTED" for status in statuses.values()):
                 if parallel_success_enabled:
-                    budget, terminal_event = await self._complete_parallel_success(
+                    budget, graph_terminal = await self._complete_parallel_success(
                         admitted=admitted,
                         command=command,
                         work_order=work_order,
                         budget=budget,
                         node_grant_refs=grant_refs,
                     )
-                    yield terminal_event
+                    yield graph_terminal
                     return
                 if budget.status == "ACTIVE":
                     budget = await self._budgets.finalize(
@@ -1178,8 +1186,8 @@ class GovernedTaskCoordinator:
                     raise errors[first_error_node]
                 outcomes: list[_ParallelNodeOutcome] = []
                 for binding in claimable:
-                    terminal_event = terminals.get(binding.node_id)
-                    if terminal_event is None:
+                    node_terminal = terminals.get(binding.node_id)
+                    if node_terminal is None:
                         if stop_batch:
                             continue
                         raise GovernedRuntimeError(
@@ -1189,13 +1197,15 @@ class GovernedTaskCoordinator:
                     outcomes.append(
                         _ParallelNodeOutcome.from_terminal_event(
                             node_id=binding.node_id,
-                            event=terminal_event,
+                            event=node_terminal,
                         )
                     )
-                budget, parallel_terminal = await self._resolve_parallel_outcomes(
-                    admitted=admitted,
-                    outcomes=tuple(outcomes),
-                    budget=budget,
+                budget, parallel_terminal = (
+                    await self._parallel_settlement.resolve_parallel_outcomes(
+                        admitted=admitted,
+                        outcomes=tuple(outcomes),
+                        budget=budget,
+                    )
                 )
                 if parallel_terminal is not None:
                     yield parallel_terminal
@@ -1205,7 +1215,7 @@ class GovernedTaskCoordinator:
 
             for binding in claimable:
                 node_admission = admitted.for_node(binding.node_id)
-                terminal_event: dict[str, Any] | None = None
+                node_terminal: dict[str, Any] | None = None
                 async for event in self._execute_node_stream(
                     admitted=node_admission,
                     command=command,
@@ -1215,140 +1225,43 @@ class GovernedTaskCoordinator:
                     defer_shared_terminal=parallel_success_enabled,
                 ):
                     if bool(event.get("done")):
-                        terminal_event = dict(event)
+                        node_terminal = dict(event)
                     else:
                         yield event
-                if terminal_event is None:
+                if node_terminal is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         f"TaskNode {binding.node_id} produced no durable terminal projection",
                     )
-                receipt = terminal_event.get("execution_receipt")
+                receipt = node_terminal.get("execution_receipt")
                 accepted = isinstance(receipt, Mapping) and bool(receipt.get("accepted"))
                 if parallel_success_enabled:
                     outcome = _ParallelNodeOutcome.from_terminal_event(
                         node_id=binding.node_id,
-                        event=terminal_event,
+                        event=node_terminal,
                     )
-                    budget, parallel_terminal = await self._resolve_parallel_outcomes(
-                        admitted=admitted,
-                        outcomes=(outcome,),
-                        budget=budget,
+                    budget, parallel_terminal = (
+                        await self._parallel_settlement.resolve_parallel_outcomes(
+                            admitted=admitted,
+                            outcomes=(outcome,),
+                            budget=budget,
+                        )
                     )
                     if parallel_terminal is not None:
                         yield parallel_terminal
                         return
                     continue
                 if not accepted:
-                    yield terminal_event
+                    yield node_terminal
                     return
                 latest_graph = await _maybe_await(
                     self._store.get_graph(admitted.graph_id, admitted.graph_revision)
                 )
                 if _status(latest_graph) == "COMPLETED":
-                    yield terminal_event
+                    yield node_terminal
                     return
 
-    async def _assert_parallel_reentry_idle(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        durable_nodes: Mapping[str, Mapping[str, Any]],
-    ) -> None:
-        active_node_statuses = frozenset(
-            {
-                "LEASED",
-                "RUNNING",
-                "EXECUTED",
-                "VERIFYING",
-                "VERIFIED",
-                "CANCEL_REQUESTED",
-            }
-        )
-        active_attempt_statuses = frozenset(
-            {
-                "CREATED",
-                "LEASED",
-                "RUNNING",
-                "RECOVERABLE",
-                "CANCEL_REQUESTED",
-            }
-        )
-        active_nodes = tuple(
-            sorted(
-                node_id
-                for node_id, node in durable_nodes.items()
-                if _status(node) in active_node_statuses
-            )
-        )
-        snapshot = _mapping(
-            await _maybe_await(
-                self._store.read_scheduler_snapshot(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                )
-            ),
-            field_name="parallel re-entry scheduler snapshot",
-        )
-        raw_leases = snapshot.get("active_leases")
-        raw_attempts = snapshot.get("attempts")
-        if not isinstance(raw_leases, list) or not isinstance(raw_attempts, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel re-entry scheduler snapshot is incomplete",
-            )
-        active_leases = tuple(
-            sorted(
-                _text(lease.get("lease_id"))
-                for lease in raw_leases
-                if isinstance(lease, Mapping) and _text(lease.get("lease_id"))
-            )
-        )
-        active_attempts = tuple(
-            sorted(
-                _text(attempt.get("attempt_id"))
-                for attempt in raw_attempts
-                if isinstance(attempt, Mapping)
-                and _status(attempt) in active_attempt_statuses
-                and _text(attempt.get("attempt_id"))
-            )
-        )
-        if active_nodes or active_leases or active_attempts:
-            raise GovernedRuntimeError(
-                GOVERNED_EXECUTION_IN_PROGRESS,
-                "parallel TaskGraph still has an in-progress durable batch",
-            )
 
-    async def _parallel_settlement_conflict_is_in_progress(
-        self,
-        *,
-        admitted: AdmittedExecution,
-    ) -> bool:
-        """Distinguish a settlement-window claim from durable state drift."""
-
-        try:
-            durable_nodes = {
-                binding.node_id: _mapping(
-                    await _maybe_await(
-                        self._store.get_node(
-                            admitted.graph_id,
-                            admitted.graph_revision,
-                            binding.node_id,
-                        )
-                    ),
-                    field_name=f"parallel settlement node {binding.node_id}",
-                )
-                for binding in admitted.nodes
-            }
-            await self._assert_parallel_reentry_idle(
-                admitted=admitted,
-                durable_nodes=durable_nodes,
-            )
-        except GovernedRuntimeError as exc:
-            return exc.reason_code == GOVERNED_EXECUTION_IN_PROGRESS
-        except Exception:
-            return False
-        return False
 
     async def _reentered_parallel_outcomes(
         self,
@@ -1389,699 +1302,9 @@ class GovernedTaskCoordinator:
             )
         return tuple(outcomes)
 
-    async def _resolve_parallel_outcomes(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        outcomes: tuple[_ParallelNodeOutcome, ...],
-        budget: BudgetRuntimeContext,
-    ) -> tuple[BudgetRuntimeContext, dict[str, Any] | None]:
-        if not outcomes:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel batch produced no node outcomes",
-            )
-        await self._validate_parallel_outcome_snapshot(
-            admitted=admitted,
-            outcomes=outcomes,
-        )
-        budget = await self._budgets.refresh(budget)
 
-        def first_status(*statuses: str) -> _ParallelNodeOutcome | None:
-            expected = frozenset(statuses)
-            return next((item for item in outcomes if item.status in expected), None)
 
-        recovery = first_status("RECOVERY_REQUIRED")
-        if recovery is not None:
-            return budget, self._parallel_event_with_budget(
-                recovery.event,
-                budget=budget,
-                graph_status="ACTIVE",
-                decision_ref=None,
-            )
 
-        budget_blocked = first_status("BUDGET_BLOCKED")
-        if budget.status == "EXCEEDED":
-            budget_blocked = await self._durable_budget_blocked_outcome(
-                admitted=admitted,
-                outcomes=outcomes,
-                budget=budget,
-            )
-        if budget.status == "EXCEEDED" or budget_blocked is not None:
-            if budget_blocked is None:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel Budget settlement lacks its rejected durable usage",
-                )
-            selected = budget_blocked
-            settlement_outcomes = tuple(
-                selected
-                if (
-                    outcome.node_id == selected.node_id
-                    and outcome.attempt_id == selected.attempt_id
-                )
-                else outcome
-                for outcome in outcomes
-            )
-            budget, graph_status, decision_ref = await self._settle_parallel_terminal(
-                admitted=admitted.for_node(selected.node_id),
-                outcomes=settlement_outcomes,
-                budget=budget,
-                graph_target_status="BLOCKED",
-                release_budget=True,
-                decision_kind="BUDGET",
-                selected_node_id=selected.node_id,
-            )
-            return budget, self._parallel_event_with_budget(
-                selected.event,
-                budget=budget,
-                graph_status=graph_status,
-                decision_ref=decision_ref,
-            )
-
-        failed = first_status("FAILED", "VERIFICATION_FAILED", "CANCELLED")
-        if failed is not None:
-            graph_target = (
-                "BLOCKED"
-                if failed.reason_code == GOVERNED_OPERATION_RECOVERY_REQUIRED
-                else "FAILED"
-            )
-            budget, graph_status, decision_ref = await self._settle_parallel_terminal(
-                admitted=admitted.for_node(failed.node_id),
-                outcomes=outcomes,
-                budget=budget,
-                graph_target_status=graph_target,
-                release_budget=True,
-                decision_kind="FAILURE",
-                selected_node_id=failed.node_id,
-            )
-            return budget, self._parallel_event_with_budget(
-                failed.event,
-                budget=budget,
-                graph_status=graph_status,
-                decision_ref=decision_ref,
-            )
-
-        review = first_status("WAITING_ACCEPTANCE_REVIEW", "WAITING_APPROVAL")
-        if review is not None:
-            budget, graph_status, decision_ref = await self._settle_parallel_terminal(
-                admitted=admitted.for_node(review.node_id),
-                outcomes=outcomes,
-                budget=budget,
-                graph_target_status="BLOCKED",
-                release_budget=False,
-                decision_kind="REVIEW",
-                selected_node_id=review.node_id,
-            )
-            return budget, self._parallel_event_with_budget(
-                review.event,
-                budget=budget,
-                graph_status=graph_status,
-                decision_ref=decision_ref,
-            )
-
-        retry = first_status("RETRY_PENDING")
-        if retry is not None:
-            return budget, self._parallel_event_with_budget(
-                retry.event,
-                budget=budget,
-                graph_status="ACTIVE",
-                decision_ref=None,
-            )
-
-        if all(item.accepted and item.status == "ACCEPTED" for item in outcomes):
-            return budget, None
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            "parallel batch returned an unsupported node-outcome combination",
-        )
-
-    async def _durable_budget_blocked_outcome(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        outcomes: tuple[_ParallelNodeOutcome, ...],
-        budget: BudgetRuntimeContext,
-    ) -> _ParallelNodeOutcome:
-        snapshot = _mapping(
-            await _maybe_await(
-                self._store.read_scheduler_snapshot(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                )
-            ),
-            field_name="parallel Budget outcome snapshot",
-        )
-        raw_usages = snapshot.get("budget_usage")
-        if not isinstance(raw_usages, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel Budget outcome has no durable usage ledger",
-            )
-        outcomes_by_lineage = {
-            (outcome.node_id, outcome.attempt_id): outcome for outcome in outcomes
-        }
-        rejected: list[tuple[tuple[int, int, str], Mapping[str, Any], _ParallelNodeOutcome]] = []
-        for raw_usage in raw_usages:
-            if not isinstance(raw_usage, Mapping):
-                continue
-            node_id = _text(raw_usage.get("node_id"))
-            attempt_id = _text(raw_usage.get("attempt_id"))
-            source = outcomes_by_lineage.get((node_id, attempt_id))
-            exceeded_dimensions = raw_usage.get("exceeded_dimensions")
-            if (
-                source is None
-                or _text(raw_usage.get("budget_id")) != budget.budget_id
-                or raw_usage.get("accepted") is not False
-                or not isinstance(exceeded_dimensions, list)
-                or not exceeded_dimensions
-            ):
-                continue
-            rejected.append(
-                (
-                    (
-                        int(raw_usage.get("reservation_version_after") or 0),
-                        int(raw_usage.get("created_ts_ms") or 0),
-                        _text(raw_usage.get("usage_id")),
-                    ),
-                    raw_usage,
-                    source,
-                )
-            )
-        if not rejected:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "EXCEEDED Budget has no rejected usage matching the latest Attempt lineage",
-            )
-        _, usage, source = min(rejected, key=lambda item: item[0])
-        usage_ref = _required_record_text(usage, "usage_id")
-        event = dict(source.event)
-        receipt_raw = event.get("execution_receipt")
-        receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
-        evidence_refs = tuple(
-            dict.fromkeys((*_evidence_refs(receipt), usage_ref))
-        )
-        receipt.update(
-            {
-                "status": "BUDGET_BLOCKED",
-                "accepted": False,
-                "reason_code": GOVERNED_BUDGET_EXCEEDED,
-                "evidence_refs": list(evidence_refs),
-            }
-        )
-        event.update(
-            {
-                "phase": "TERMINAL",
-                "done": True,
-                "decision": "REJECT",
-                "reason_code": GOVERNED_BUDGET_EXCEEDED,
-                "execution_receipt": receipt,
-            }
-        )
-        return _ParallelNodeOutcome(
-            node_id=source.node_id,
-            attempt_id=source.attempt_id,
-            status="BUDGET_BLOCKED",
-            accepted=False,
-            reason_code=GOVERNED_BUDGET_EXCEEDED,
-            event=event,
-        )
-
-    async def _validate_parallel_outcome_snapshot(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        outcomes: tuple[_ParallelNodeOutcome, ...],
-    ) -> None:
-        expected_durable_statuses = {
-            "ACCEPTED": frozenset({"ACCEPTED"}),
-            "RETRY_PENDING": frozenset({"RETRY_PENDING"}),
-            "FAILED": frozenset({"FAILED"}),
-            "BUDGET_BLOCKED": frozenset({"FAILED"}),
-            "VERIFICATION_FAILED": frozenset({"VERIFICATION_FAILED"}),
-            "WAITING_ACCEPTANCE_REVIEW": frozenset(
-                {"WAITING_ACCEPTANCE_REVIEW"}
-            ),
-            "WAITING_APPROVAL": frozenset({"WAITING_APPROVAL"}),
-            "CANCELLED": frozenset({"CANCELLED"}),
-            # Recovery may be detected before the active Attempt/Lease can be
-            # closed, or after a reservation conflict has already failed it.
-            "RECOVERY_REQUIRED": frozenset({"RUNNING", "FAILED"}),
-        }
-        expected_attempt_statuses = {
-            "ACCEPTED": frozenset({"SUCCEEDED"}),
-            "WAITING_ACCEPTANCE_REVIEW": frozenset({"SUCCEEDED"}),
-            "VERIFICATION_FAILED": frozenset({"SUCCEEDED"}),
-            "FAILED": frozenset({"FAILED"}),
-            "BUDGET_BLOCKED": frozenset({"FAILED"}),
-            "RETRY_PENDING": frozenset({"FAILED"}),
-            "CANCELLED": frozenset({"CANCELLED"}),
-            "RECOVERY_REQUIRED": frozenset({"RUNNING", "FAILED"}),
-        }
-        admitted_node_ids = {binding.node_id for binding in admitted.nodes}
-        observed_node_ids = [outcome.node_id for outcome in outcomes]
-        if (
-            len(set(observed_node_ids)) != len(observed_node_ids)
-            or not set(observed_node_ids).issubset(admitted_node_ids)
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel outcome set does not match the admitted TaskGraph",
-            )
-        snapshot = _mapping(
-            await _maybe_await(
-                self._store.read_scheduler_snapshot(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                )
-            ),
-            field_name="parallel outcome scheduler snapshot",
-        )
-        attempt_rows = snapshot.get("attempts")
-        if not isinstance(attempt_rows, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel outcome snapshot has no durable Attempts",
-            )
-        latest_attempt_by_node: dict[str, dict[str, Any]] = {}
-        for raw_attempt in attempt_rows:
-            if not isinstance(raw_attempt, Mapping):
-                continue
-            attempt_row = dict(raw_attempt)
-            node_id = _text(attempt_row.get("node_id"))
-            current = latest_attempt_by_node.get(node_id)
-            sort_key = (
-                int(attempt_row.get("attempt_no") or 0),
-                _text(attempt_row.get("attempt_id")),
-            )
-            current_key = (
-                int((current or {}).get("attempt_no") or 0),
-                _text((current or {}).get("attempt_id")),
-            )
-            if current is None or sort_key > current_key:
-                latest_attempt_by_node[node_id] = attempt_row
-        for outcome in outcomes:
-            allowed = expected_durable_statuses.get(outcome.status)
-            if allowed is None:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    f"parallel TaskNode {outcome.node_id} returned an unknown outcome",
-                )
-            durable_node = _mapping(
-                await _maybe_await(
-                    self._store.get_node(
-                        admitted.graph_id,
-                        admitted.graph_revision,
-                        outcome.node_id,
-                    )
-                ),
-                field_name=f"parallel outcome node {outcome.node_id}",
-            )
-            durable_status = _status(durable_node)
-            if durable_status not in allowed:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    (
-                        f"parallel TaskNode {outcome.node_id} receipt status "
-                        f"{outcome.status} conflicts with durable status {durable_status}"
-                    ),
-                )
-            durable_attempt = _mapping(
-                await _maybe_await(self._store.get_attempt(outcome.attempt_id)),
-                field_name=f"parallel outcome attempt {outcome.attempt_id}",
-            )
-            allowed_attempt_statuses = expected_attempt_statuses.get(outcome.status)
-            if (
-                allowed_attempt_statuses is None
-                or _text(durable_attempt.get("graph_id")) != admitted.graph_id
-                or int(durable_attempt.get("graph_revision") or 0)
-                != admitted.graph_revision
-                or _text(durable_attempt.get("node_id")) != outcome.node_id
-                or _status(durable_attempt) not in allowed_attempt_statuses
-                or _text(
-                    latest_attempt_by_node.get(outcome.node_id, {}).get("attempt_id")
-                )
-                != outcome.attempt_id
-            ):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    f"parallel TaskNode {outcome.node_id} receipt Attempt lineage drifted",
-                )
-
-    async def _settle_parallel_terminal(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        outcomes: tuple[_ParallelNodeOutcome, ...],
-        budget: BudgetRuntimeContext,
-        graph_target_status: str,
-        release_budget: bool,
-        decision_kind: str,
-        selected_node_id: str,
-    ) -> tuple[BudgetRuntimeContext, str, str]:
-        graph = _mapping(
-            await _maybe_await(
-                self._store.get_graph(admitted.graph_id, admitted.graph_revision)
-            ),
-            field_name="parallel settlement graph",
-        )
-        durable_nodes: dict[str, dict[str, Any]] = {}
-        for binding in admitted.nodes:
-            durable_nodes[binding.node_id] = _mapping(
-                await _maybe_await(
-                    self._store.get_node(
-                        admitted.graph_id,
-                        admitted.graph_revision,
-                        binding.node_id,
-                    )
-                ),
-                field_name=f"parallel settlement node {binding.node_id}",
-            )
-        budget = await self._budgets.refresh(budget)
-        settlement_snapshot = _mapping(
-            await _maybe_await(
-                self._store.read_scheduler_snapshot(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                )
-            ),
-            field_name="parallel settlement scheduler snapshot",
-        )
-        raw_attempts = settlement_snapshot.get("attempts")
-        if not isinstance(raw_attempts, list):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement snapshot has no durable Attempt journal",
-            )
-        latest_attempt_by_node: dict[str, dict[str, Any]] = {}
-        for raw_attempt in raw_attempts:
-            if not isinstance(raw_attempt, Mapping):
-                continue
-            attempt = dict(raw_attempt)
-            node_id = _text(attempt.get("node_id"))
-            if not node_id:
-                continue
-            current = latest_attempt_by_node.get(node_id)
-            attempt_key = (
-                int(attempt.get("attempt_no") or 0),
-                _text(attempt.get("attempt_id")),
-            )
-            current_key = (
-                int((current or {}).get("attempt_no") or 0),
-                _text((current or {}).get("attempt_id")),
-            )
-            if current is None or attempt_key > current_key:
-                latest_attempt_by_node[node_id] = attempt
-        expected_node_states = {
-            node_id: {
-                "status": _status(node),
-                "status_version": _version(node),
-            }
-            for node_id, node in sorted(durable_nodes.items())
-        }
-        decision_outcomes: list[dict[str, Any]] = []
-        rejected_budget_usage_refs: dict[tuple[str, str], str] = {}
-        all_budget_blocked_outcomes = tuple(
-            outcome for outcome in outcomes if outcome.status == "BUDGET_BLOCKED"
-        )
-        budget_blocked_outcomes = tuple(
-            outcome
-            for outcome in all_budget_blocked_outcomes
-            if outcome.node_id == selected_node_id
-        )
-        if all_budget_blocked_outcomes:
-            if decision_kind != "BUDGET" or len(budget_blocked_outcomes) != 1:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel Budget decision must select one blocked outcome",
-                )
-            raw_usages = settlement_snapshot.get("budget_usage")
-            if not isinstance(raw_usages, list):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel Budget decision has no durable usage ledger",
-                )
-            for outcome in budget_blocked_outcomes:
-                candidates: list[tuple[tuple[int, int, str], Mapping[str, Any]]] = []
-                for raw_usage in raw_usages:
-                    if not isinstance(raw_usage, Mapping):
-                        continue
-                    exceeded_dimensions = raw_usage.get("exceeded_dimensions")
-                    if (
-                        _text(raw_usage.get("budget_id")) != budget.budget_id
-                        or _text(raw_usage.get("node_id")) != outcome.node_id
-                        or _text(raw_usage.get("attempt_id")) != outcome.attempt_id
-                        or raw_usage.get("accepted") is not False
-                        or not isinstance(exceeded_dimensions, list)
-                        or not exceeded_dimensions
-                    ):
-                        continue
-                    candidates.append(
-                        (
-                            (
-                                int(raw_usage.get("reservation_version_after") or 0),
-                                int(raw_usage.get("created_ts_ms") or 0),
-                                _text(raw_usage.get("usage_id")),
-                            ),
-                            raw_usage,
-                        )
-                    )
-                if not candidates:
-                    raise GovernedRuntimeError(
-                        GOVERNED_DURABLE_STATE_CONFLICT,
-                        "parallel Budget decision lacks rejected durable usage lineage",
-                    )
-                _, selected_usage = min(candidates, key=lambda item: item[0])
-                rejected_budget_usage_refs[(outcome.node_id, outcome.attempt_id)] = (
-                    _required_record_text(selected_usage, "usage_id")
-                )
-        decision_terminal_statuses = frozenset(
-            {
-                "ACCEPTED",
-                "FAILED",
-                "RETRY_PENDING",
-                "VERIFICATION_FAILED",
-                "WAITING_ACCEPTANCE_REVIEW",
-                "CANCELLED",
-            }
-        )
-        decision_outcome_node_ids: set[str] = set()
-        for binding in admitted.nodes:
-            durable_status = _status(durable_nodes[binding.node_id])
-            if durable_status not in decision_terminal_statuses:
-                continue
-            durable_attempt = latest_attempt_by_node.get(binding.node_id)
-            if durable_attempt is None:
-                continue
-            attempt_id = _required_record_text(durable_attempt, "attempt_id")
-            node_admission = admitted.for_node(binding.node_id)
-            reservation = await self._try_operation(node_admission.reservation_id)
-            durable_evidence = tuple(
-                dict.fromkeys(
-                    reference
-                    for reference in (
-                        *_record_evidence_refs(durable_nodes[binding.node_id]),
-                        _text(durable_attempt.get("error_ref")),
-                        _text((reservation or {}).get("receipt_ref")),
-                        rejected_budget_usage_refs.get(
-                            (binding.node_id, attempt_id)
-                        ),
-                    )
-                    if reference
-                )
-            )
-            decision_status = (
-                "BUDGET_BLOCKED"
-                if (
-                    decision_kind == "BUDGET"
-                    and binding.node_id == selected_node_id
-                )
-                else durable_status
-            )
-            decision_outcome_node_ids.add(binding.node_id)
-            decision_outcomes.append(
-                {
-                    "node_id": binding.node_id,
-                    "attempt_id": attempt_id,
-                    "status": decision_status,
-                    "accepted": decision_status == "ACCEPTED",
-                    "reason_code": _canonical_parallel_outcome_reason_code(
-                        decision_status
-                    ),
-                    "evidence_refs": list(durable_evidence),
-                }
-            )
-        required_outcome_node_ids = {outcome.node_id for outcome in outcomes}
-        if not required_outcome_node_ids.issubset(decision_outcome_node_ids):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel decision cannot reconstruct every durable batch outcome",
-            )
-        graph_version = _version(graph)
-        budget_version = budget.version
-        graph_outbox = self._runtime_outbox.build(
-            command_id=admitted.command_id,
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=admitted.graph_id,
-            aggregate_version=graph_version + 1,
-            event_type=f"TASK_GRAPH_{graph_target_status}",
-        )
-        budget_outbox = (
-            self._runtime_outbox.build(
-                command_id=admitted.command_id,
-                aggregate_type="BUDGET_RESERVATION",
-                aggregate_id=budget.budget_id,
-                aggregate_version=budget_version + 1,
-                event_type="BUDGET_RESERVATION_RELEASED",
-            )
-            if release_budget
-            else None
-        )
-        decision_payload = {
-            "schema_version": "Natsume.task_runtime.parallel_settlement.v2",
-            "decision_kind": decision_kind,
-            "selected_node_id": selected_node_id,
-            "graph_id": admitted.graph_id,
-            "graph_revision": admitted.graph_revision,
-            "graph_status_before": _status(graph),
-            "graph_status_version_before": graph_version,
-            "graph_target_status": graph_target_status,
-            "budget_id": budget.budget_id,
-            "budget_status_before": budget.status,
-            "budget_status_version_before": budget_version,
-            "budget_target_status": (
-                BudgetReservationStatus.RELEASED.value if release_budget else None
-            ),
-            "node_states": expected_node_states,
-            "outcomes": decision_outcomes,
-            "graph_outbox_id": graph_outbox.outbox_id,
-            "budget_outbox_id": (
-                budget_outbox.outbox_id if budget_outbox is not None else None
-            ),
-        }
-        try:
-            decision = normalize_parallel_settlement_decision(decision_payload)
-        except ParallelSettlementContractError as exc:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"parallel settlement decision is invalid: {exc}",
-            ) from exc
-        decision_ref = decision.decision_ref
-        graph_outbox = self._runtime_outbox.build(
-            command_id=admitted.command_id,
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=admitted.graph_id,
-            aggregate_version=graph_version + 1,
-            event_type=f"TASK_GRAPH_{graph_target_status}",
-            evidence_refs=(decision_ref,),
-        )
-        budget_outbox = (
-            self._runtime_outbox.build(
-                command_id=admitted.command_id,
-                aggregate_type="BUDGET_RESERVATION",
-                aggregate_id=budget.budget_id,
-                aggregate_version=budget_version + 1,
-                event_type="BUDGET_RESERVATION_RELEASED",
-                evidence_refs=(decision_ref,),
-            )
-            if release_budget
-            else None
-        )
-        arguments = {
-            "budget_id": budget.budget_id,
-            "expected_graph_version": graph_version,
-            "expected_budget_version": budget_version,
-            "expected_node_states": expected_node_states,
-            "graph_target_status": graph_target_status,
-            "budget_target_status": (
-                BudgetReservationStatus.RELEASED.value if release_budget else None
-            ),
-            "decision_ref": decision_ref,
-            "decision_payload": decision.payload,
-            "graph_outbox": graph_outbox,
-            "budget_outbox": budget_outbox,
-        }
-        try:
-            settled_raw = await _maybe_await(
-                self._store.settle_parallel_graph_budget(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                    **arguments,
-                )
-            )
-        except Exception as first_exc:
-            first_reason = _exception_reason(first_exc, "")
-            if first_reason == _TASK_STORE_OWNERSHIP_CONFLICT or (
-                first_reason == _TASK_STORE_CAS_CONFLICT
-                and await self._parallel_settlement_conflict_is_in_progress(
-                    admitted=admitted
-                )
-            ):
-                raise GovernedRuntimeError(
-                    GOVERNED_EXECUTION_IN_PROGRESS,
-                    "parallel TaskGraph gained an in-progress child before settlement",
-                ) from first_exc
-            try:
-                settled_raw = await _maybe_await(
-                    self._store.settle_parallel_graph_budget(
-                        admitted.graph_id,
-                        admitted.graph_revision,
-                        **arguments,
-                    )
-                )
-            except Exception as replay_exc:
-                replay_reason = _exception_reason(replay_exc, "")
-                if replay_reason == _TASK_STORE_OWNERSHIP_CONFLICT or (
-                    replay_reason == _TASK_STORE_CAS_CONFLICT
-                    and await self._parallel_settlement_conflict_is_in_progress(
-                        admitted=admitted
-                    )
-                ):
-                    raise GovernedRuntimeError(
-                        GOVERNED_EXECUTION_IN_PROGRESS,
-                        "parallel TaskGraph gained an in-progress child before settlement",
-                    ) from replay_exc
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "parallel Graph/Budget settlement could not be committed or exactly replayed",
-                ) from replay_exc
-            _logger.warning(
-                "Replayed committed parallel Graph/Budget settlement",
-                extra={
-                    "graph_id": admitted.graph_id,
-                    "graph_revision": admitted.graph_revision,
-                    "decision_ref": decision_ref,
-                    "first_exception_type": type(first_exc).__name__,
-                },
-            )
-        settled = _mapping(settled_raw, field_name="parallel Graph/Budget settlement")
-        settled_graph = _mapping(
-            settled.get("graph"),
-            field_name="parallel Graph/Budget settlement graph",
-        )
-        settled_budget = _mapping(
-            settled.get("budget"),
-            field_name="parallel Graph/Budget settlement budget",
-        )
-        settled_decision = _mapping(
-            settled.get("decision"),
-            field_name="parallel Graph/Budget settlement decision",
-        )
-        expected_budget_status = (
-            BudgetReservationStatus.RELEASED.value if release_budget else budget.status
-        )
-        if (
-            _status(settled_graph) != graph_target_status
-            or _status(settled_budget) != expected_budget_status
-            or _text(settled_decision.get("decision_ref")) != decision_ref
-            or settled_decision.get("payload") != decision.payload
-        ):
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "parallel settlement returned an invalid Graph/Budget terminal state",
-            )
-        await self._runtime_outbox.publish_pending()
-        return budget.refreshed(settled_budget), _status(settled_graph), decision_ref
 
     async def _complete_parallel_success(
         self,
@@ -2555,31 +1778,6 @@ class GovernedTaskCoordinator:
         )
         return budget, approved_commit_event(public_projection, receipt)
 
-    @staticmethod
-    def _parallel_event_with_budget(
-        event: Mapping[str, Any],
-        *,
-        budget: BudgetRuntimeContext,
-        graph_status: str,
-        decision_ref: str | None,
-    ) -> dict[str, Any]:
-        projected = dict(event)
-        receipt_raw = projected.get("execution_receipt")
-        receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
-        projection_raw = receipt.get("projection")
-        projection = dict(projection_raw) if isinstance(projection_raw, Mapping) else {}
-        projection["budget"] = budget.execution_payload()
-        projection["parallel_settlement"] = {
-            "graph_status": graph_status,
-            "decision_ref": decision_ref,
-        }
-        if decision_ref:
-            receipt["evidence_refs"] = list(
-                dict.fromkeys((*_evidence_refs(receipt), decision_ref))
-            )
-        receipt["projection"] = projection
-        projected["execution_receipt"] = receipt
-        return projected
 
     async def _execute_node_stream(
         self,
@@ -4477,23 +3675,6 @@ def _projection_route_authority(
 
 
 
-def _canonical_parallel_outcome_reason_code(status: str) -> str | None:
-    normalized = _text(status).upper()
-    reasons = {
-        "ACCEPTED": None,
-        "BUDGET_BLOCKED": GOVERNED_BUDGET_EXCEEDED,
-        "FAILED": "GOVERNED_PARALLEL_NODE_FAILED",
-        "VERIFICATION_FAILED": "GOVERNED_PARALLEL_VERIFICATION_FAILED",
-        "WAITING_ACCEPTANCE_REVIEW": GOVERNED_REVIEW_REQUIRED,
-        "RETRY_PENDING": GOVERNED_EXECUTION_IN_PROGRESS,
-        "CANCELLED": "GOVERNED_PARALLEL_NODE_CANCELLED",
-    }
-    if normalized not in reasons:
-        raise GovernedRuntimeError(
-            GOVERNED_DURABLE_STATE_CONFLICT,
-            f"parallel decision outcome status is unsupported: {normalized}",
-        )
-    return reasons[normalized]
 
 
 
