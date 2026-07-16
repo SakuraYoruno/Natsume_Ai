@@ -7,35 +7,29 @@ import host_brain.task_runtime as task_runtime
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import coordinator_receipts
 from host_brain.task_runtime import coordinator_records
+from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import graph_cancellation_projection
 from host_brain.task_runtime import graph_cancellation_records
 from host_brain.task_runtime import graph_cancellation_runtime
 from host_brain.task_runtime import node_execution_runtime
 
 
-RECORD_NAMES = (
+DAG_RECORD_NAMES = (
     "_ParallelNodeOutcome",
     "_attempt_id",
     "_assert_durable_identity",
-    "_evidence_refs",
     "_mapping",
-    "_nested_mapping",
-    "_node_input_refs",
     "_optional_record_non_negative_int",
     "_record_evidence_refs",
     "_record_non_negative_int",
-    "_record_positive_int",
     "_required_record_text",
-    "_reservation_result",
     "_review_evidence_refs",
     "_status",
     "_text",
     "_version",
 )
-RECEIPT_NAMES = (
-    "GovernedExecutionReceipt",
+DAG_RECEIPT_NAMES = (
     "_digest_from_receipt_ref",
-    "_worker_receipt_ref",
     "build_execution_receipt",
     "terminal_event",
 )
@@ -86,7 +80,7 @@ def _runtime_import_tokens(tree: ast.Module) -> set[str]:
     return tokens
 
 
-def test_coordinator_reexports_the_exact_extracted_value_objects_and_helpers() -> None:
+def test_facade_keeps_compatibility_export_and_dag_owns_exact_helpers() -> None:
     assert (
         coordinator.GovernedExecutionReceipt
         is coordinator_receipts.GovernedExecutionReceipt
@@ -95,10 +89,24 @@ def test_coordinator_reexports_the_exact_extracted_value_objects_and_helpers() -
         task_runtime.GovernedExecutionReceipt
         is coordinator_receipts.GovernedExecutionReceipt
     )
-    for name in RECORD_NAMES:
-        assert getattr(coordinator, name) is getattr(coordinator_records, name)
-    for name in RECEIPT_NAMES:
-        assert getattr(coordinator, name) is getattr(coordinator_receipts, name)
+    for name in DAG_RECORD_NAMES:
+        assert getattr(dag_scheduling_runtime, name) is getattr(
+            coordinator_records,
+            name,
+        )
+    for name in DAG_RECEIPT_NAMES:
+        assert getattr(dag_scheduling_runtime, name) is getattr(
+            coordinator_receipts,
+            name,
+        )
+    assert not {
+        "_ParallelNodeOutcome",
+        "_attempt_id",
+        "_assert_durable_identity",
+        "_digest_from_receipt_ref",
+        "build_execution_receipt",
+        "terminal_event",
+    } & vars(coordinator).keys()
     runtime_record_names = {
         "_cancellation_budget_target",
         "_cancellation_final_node_states",
@@ -211,20 +219,36 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
         and node.attr in migrated_methods
         for node in ast.walk(owner)
     )
-    free_calls = {
+    coordinator_free_calls = {
         node.func.id
         for node in ast.walk(owner)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert not {
+        "_assert_durable_identity",
+        "build_execution_receipt",
+        "terminal_event",
+    } & coordinator_free_calls
+
+    dag_owner = next(
+        node
+        for node in _module_tree(dag_scheduling_runtime).body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "DurableDagSchedulingRuntime"
+    )
+    dag_free_calls = {
+        node.func.id
+        for node in ast.walk(dag_owner)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert {
         "_assert_durable_identity",
         "build_execution_receipt",
         "terminal_event",
-    } <= free_calls
-
+    } <= dag_free_calls
     identity_call_owners = {
         method.name
-        for method in owner.body
+        for method in dag_owner.body
         if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
         and any(
             isinstance(node, ast.Call)
@@ -233,7 +257,7 @@ def test_coordinator_uses_free_functions_instead_of_pure_bound_methods() -> None
             for node in ast.walk(method)
         )
     }
-    assert identity_call_owners == {"_execute_stream_impl"}
+    assert identity_call_owners == {"execute_stream"}
     node_execution_owner = next(
         node
         for node in _module_tree(node_execution_runtime).body
@@ -328,11 +352,16 @@ def test_cancellation_orchestration_is_owned_by_leaf_services() -> None:
     assert isinstance(request_calls[0].func.value, ast.Attribute)
     assert request_calls[0].func.value.attr == "_graph_cancellations"
 
+    dag_owner = next(
+        node
+        for node in _module_tree(dag_scheduling_runtime).body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "DurableDagSchedulingRuntime"
+    )
     execute_impl = next(
         node
-        for node in coordinator_owner.body
-        if isinstance(node, ast.AsyncFunctionDef)
-        and node.name == "_execute_stream_impl"
+        for node in dag_owner.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "execute_stream"
     )
     reentry_calls = [
         node

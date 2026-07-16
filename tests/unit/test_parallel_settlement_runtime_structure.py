@@ -9,6 +9,7 @@ import pytest
 
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import coordinator_records
+from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import parallel_settlement_projection
 from host_brain.task_runtime import parallel_settlement_runtime
 from host_brain.task_runtime.parallel_settlement_projection import (
@@ -275,7 +276,8 @@ def test_coordinator_wires_shared_settlement_dependencies_and_direct_calls() -> 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     )
 
-    execute = _method(owner, "_execute_stream_impl")
+    dag_owner = _class(dag_scheduling_runtime, "DurableDagSchedulingRuntime")
+    execute = _method(dag_owner, "execute_stream")
     service_calls = [
         node
         for node in ast.walk(execute)
@@ -447,16 +449,16 @@ def test_parallel_outcome_reason_mapping_is_canonical() -> None:
 
 
 def test_execute_stream_does_not_shadow_the_terminal_event_renderer() -> None:
-    source = inspect.getsource(coordinator)
-    module_table = symtable.symtable(source, "coordinator.py", "exec")
+    source = inspect.getsource(dag_scheduling_runtime)
+    module_table = symtable.symtable(source, "dag_scheduling_runtime.py", "exec")
     class_table = next(
         child
         for child in module_table.get_children()
-        if child.get_name() == "GovernedTaskCoordinator"
+        if child.get_name() == "DurableDagSchedulingRuntime"
     )
     execute_table = next(
         child
         for child in class_table.get_children()
-        if child.get_name() == "_execute_stream_impl"
+        if child.get_name() == "execute_stream"
     )
     assert not execute_table.lookup("terminal_event").is_local()

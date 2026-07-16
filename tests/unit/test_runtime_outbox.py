@@ -10,6 +10,9 @@ import pytest
 
 from host_brain.task_runtime import coordinator as coordinator_module
 from host_brain.task_runtime import (
+    dag_scheduling_runtime as dag_scheduling_runtime_module,
+)
+from host_brain.task_runtime import (
     graph_cancellation_runtime as graph_cancellation_runtime_module,
 )
 from host_brain.task_runtime import (
@@ -49,6 +52,10 @@ def _outbox_owners() -> tuple[ast.ClassDef, ...]:
         (
             node_execution_runtime_module,
             "DurableNodeExecutionRuntime",
+        ),
+        (
+            dag_scheduling_runtime_module,
+            "DurableDagSchedulingRuntime",
         ),
         (coordinator_module, "GovernedTaskCoordinator"),
     )
@@ -417,5 +424,5 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
     assert len(rows) == 58
     assert best_effort_count == 5
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "baba4d0824808b761c56b88131402ffc8848d598cf2654feffed303ae11785b9"
+        "f82e9172f261dccf0d915d6919b05999550c0ca13cc22c305e921f77428962a4"
     )

@@ -3017,7 +3017,9 @@ async def test_ne01_parallel_terminal_receipt_must_match_durable_node_state(
                 event["execution_receipt"] = receipt
             yield event
 
-    runtime._node_execution = SimpleNamespace(  # type: ignore[assignment]  # noqa: SLF001
+    # Test-only fault injection at the real scheduling owner. A constructor
+    # factory remains preferable if this seam is needed outside this contract.
+    runtime._dag_scheduling._node_execution = SimpleNamespace(  # type: ignore[assignment]  # noqa: SLF001
         execute_stream=forge_left_terminal
     )
     record = HostCommandRepository(db_path, clock=lambda: NOW).admit(*contracts)

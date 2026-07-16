@@ -467,22 +467,29 @@ def _coordinator(
     return coordinator
 
 
+class _BlockingDagScheduling:
+    def __init__(self, coordinator: "_BlockingCoordinator") -> None:
+        self._coordinator = coordinator
+
+    async def execute_stream(self, **kwargs: Any):
+        del kwargs
+        coordinator = self._coordinator
+        coordinator.execution_started.set()
+        try:
+            await coordinator.execution_gate.wait()
+        finally:
+            coordinator.order.append("local-cancel")
+        if False:
+            yield {}
+
+
 class _BlockingCoordinator(GovernedTaskCoordinator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.execution_started = asyncio.Event()
         self.execution_gate = asyncio.Event()
         self.order: list[str] = []
-
-    async def _execute_stream_impl(self, **kwargs: Any):
-        del kwargs
-        self.execution_started.set()
-        try:
-            await self.execution_gate.wait()
-        finally:
-            self.order.append("local-cancel")
-        if False:
-            yield {}
+        self._dag_scheduling = _BlockingDagScheduling(self)
 
 
 async def _drain_execution(

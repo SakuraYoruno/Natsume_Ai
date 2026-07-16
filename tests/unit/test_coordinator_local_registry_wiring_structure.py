@@ -189,7 +189,11 @@ def test_execute_stream_tracks_the_complete_inner_async_iteration() -> None:
         if isinstance(node, ast.AsyncFor)
         and isinstance(node.iter, ast.Call)
         and isinstance(node.iter.func, ast.Attribute)
-        and node.iter.func.attr == "_execute_stream_impl"
+        and node.iter.func.attr == "execute_stream"
+        and isinstance(node.iter.func.value, ast.Attribute)
+        and isinstance(node.iter.func.value.value, ast.Name)
+        and node.iter.func.value.value.id == "self"
+        and node.iter.func.value.attr == "_dag_scheduling"
     ]
     assert len(inner_loops) == 1
     assert id(inner_loops[0]) in track_nodes

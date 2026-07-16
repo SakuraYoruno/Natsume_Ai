@@ -23,8 +23,8 @@ from host_brain.model_runtime import (
     RouteDecision,
     model_attempt_result_trace,
 )
-from host_brain.task_runtime.coordinator import _precharged_tool_call_count
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
+from host_brain.task_runtime.node_execution_records import _precharged_tool_call_count
 from host_brain.task_runtime.worker_budget_usage import (
     MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION,
     WorkerBudgetUsage,
