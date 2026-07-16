@@ -58,6 +58,9 @@ from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_lif
 from host_brain.persistence.effect_reconciliation_query_repository import (
     EffectReconciliationQueryRepository,
 )
+from host_brain.persistence.terminal_reconciliation_query_repository import (
+    TerminalReconciliationQueryRepository,
+)
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
 )
@@ -99,6 +102,23 @@ def _build_effect_reconciliation_read_authority(
     )
 
 
+def _build_terminal_reconciliation_read_authority(
+    canonical_db_path: str,
+) -> TerminalReconciliationQueryRepository | None:
+    core_settings = get_core_settings()
+    if not core_settings.nle_operator_views_enabled:
+        return None
+    reconciliation_public_keys = core_settings.task_reconciliation_public_keys()
+    return TerminalReconciliationQueryRepository(
+        canonical_db_path,
+        reconciliation_proof_verifier=(
+            Ed25519ReconciliationProofVerifier(reconciliation_public_keys)
+            if reconciliation_public_keys
+            else None
+        ),
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ledger = _get_ledger_dep()
@@ -106,6 +126,9 @@ async def lifespan(_app: FastAPI):
     canonical_db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
     reconciliation_reader = _build_effect_reconciliation_read_authority(
         canonical_db_path
+    )
+    terminal_reconciliation_reader = (
+        _build_terminal_reconciliation_read_authority(canonical_db_path)
     )
     canon = build_process_canon_container(
         ledger=ledger,
@@ -120,6 +143,9 @@ async def lifespan(_app: FastAPI):
     _app.state.canon_container = canon
     _app.state.life_container = life
     _app.state.task_effect_reconciliation_read_authority = reconciliation_reader
+    _app.state.task_terminal_reconciliation_read_authority = (
+        terminal_reconciliation_reader
+    )
     register_projection_job(
         "remaining-operator-queries",
         lambda: refresh_remaining_query_projections(
@@ -142,6 +168,7 @@ async def lifespan(_app: FastAPI):
         _app.state.canon_container = None
         _app.state.life_container = None
         _app.state.task_effect_reconciliation_read_authority = None
+        _app.state.task_terminal_reconciliation_read_authority = None
         _logger.info("operator projection daemon shutdown: %s", stop_status)
 
 

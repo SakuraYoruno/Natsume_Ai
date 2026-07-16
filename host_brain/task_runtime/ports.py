@@ -556,6 +556,52 @@ class GraphCancellationEffectReconciliationStorePort(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class TerminalReconciliationStorePort(Protocol):
+    """Append-only inventory and exact Graph/Budget repair boundary."""
+
+    def inventory_terminal_reconciliation_cases(
+        self,
+        *,
+        limit: int = 500,
+    ) -> Mapping[str, Any]: ...
+
+    def assert_terminal_reconciliation_production_ready(self) -> None: ...
+
+    def list_terminal_reconciliation_candidates(
+        self,
+        graph_id: str | None = None,
+        graph_revision: int | None = None,
+        *,
+        classification: str | None = None,
+        limit: int = 100,
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
+    def read_terminal_reconciliation_case(
+        self,
+        case_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def record_terminal_reconciliation_proof(
+        self,
+        case_id: str,
+        *,
+        expected_case_snapshot_sha256: str,
+        expected_subject_snapshot_sha256: str,
+        action: str,
+        target_graph_status: str | None,
+        target_budget_status: str | None,
+        authority_kind: str,
+        reconciler_actor_id: str,
+        issued_ts_ms: int,
+        proof_id: str,
+        graph_outbox: Any | None,
+        budget_outbox: Any | None,
+        attestation_ref: str | None = None,
+        attestation_key_id: str | None = None,
+        attestation_signature: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+
 class GovernedWorkerPort(Protocol):
     """A worker selected by the frozen executor and node route."""
 
@@ -613,6 +659,7 @@ __all__ = [
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",
     "RuntimeOutboxPublisherPort",
+    "TerminalReconciliationStorePort",
     "TaskOutboxFactoryPort",
     "TaskStorePort",
     "VerificationPort",

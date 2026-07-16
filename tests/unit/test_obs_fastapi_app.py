@@ -53,6 +53,11 @@ def test_obs_fastapi_app_does_not_construct_task_reader_when_views_are_disabled(
         "EffectReconciliationQueryRepository",
         _MustNotConstruct,
     )
+    monkeypatch.setattr(
+        obs_fastapi_app_module,
+        "TerminalReconciliationQueryRepository",
+        _MustNotConstruct,
+    )
     try:
         with compose_durable_obs_projection_runtime(
             tmp_path,
@@ -61,6 +66,7 @@ def test_obs_fastapi_app_does_not_construct_task_reader_when_views_are_disabled(
             with TestClient(app) as client:
                 assert client.get("/health").status_code == 200
                 assert app.state.task_effect_reconciliation_read_authority is None
+                assert app.state.task_terminal_reconciliation_read_authority is None
     finally:
         get_core_settings.cache_clear()
 

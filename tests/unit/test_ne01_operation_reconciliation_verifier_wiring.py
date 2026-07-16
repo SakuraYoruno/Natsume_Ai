@@ -44,17 +44,26 @@ def test_empty_keyring_is_valid_only_while_reconciliation_operators_are_off() ->
     assert settings.task_graph_cancellation_operator_enabled is False
     assert settings.task_operation_reconciliation_operator_enabled is False
     assert settings.task_effect_reconciliation_operator_enabled is False
+    assert settings.task_terminal_reconciliation_operator_enabled is False
+    assert settings.task_terminal_reconciliation_auto_enabled is False
 
     for enabled_flag in (
         "HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED",
         "HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED",
         "HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED",
+        "HOST_TASK_TERMINAL_RECONCILIATION_OPERATOR_ENABLED",
     ):
         with pytest.raises(
             ValueError,
             match="TASK_RECONCILIATION_OPERATOR_REQUIRES_PUBLIC_KEYS",
         ):
             CoreSettings.model_validate({enabled_flag: True})
+
+    automatic = CoreSettings.model_validate(
+        {"HOST_TASK_TERMINAL_RECONCILIATION_AUTO_ENABLED": True}
+    )
+    assert automatic.task_terminal_reconciliation_auto_enabled is True
+    assert automatic.task_reconciliation_public_keys() == {}
 
 
 def test_cancellation_operator_requires_operation_reconciliation_before_startup() -> None:
@@ -103,6 +112,22 @@ def test_cancellation_operator_accepts_both_reconciliation_dependencies() -> Non
     assert settings.task_graph_cancellation_operator_enabled is True
     assert settings.task_operation_reconciliation_operator_enabled is True
     assert settings.task_effect_reconciliation_operator_enabled is True
+
+
+def test_terminal_reconciliation_operator_accepts_shared_ed25519_keyring() -> None:
+    raw_keyring, _ = _public_key_config("terminal-reconciler-v1")
+
+    settings = CoreSettings.model_validate(
+        {
+            "HOST_TASK_TERMINAL_RECONCILIATION_OPERATOR_ENABLED": True,
+            "HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON": raw_keyring,
+        }
+    )
+
+    assert settings.task_terminal_reconciliation_operator_enabled is True
+    assert tuple(settings.task_reconciliation_public_keys()) == (
+        "terminal-reconciler-v1",
+    )
 
 
 @pytest.mark.parametrize(

@@ -30,6 +30,9 @@ from host_brain.task_runtime.graph_cancellation_operation_reconciliation import 
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationService,
+)
 from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
@@ -129,6 +132,23 @@ class _TaskStore(_Closeable):
 
     def assert_effect_reconciliation_ready(self) -> None:
         self.events.append("task-store:effect-reconciliation-ready")
+
+    def assert_terminal_reconciliation_ready(self) -> None:
+        self.events.append("task-store:terminal-reconciliation-ready")
+
+    def inventory_terminal_reconciliation_cases(
+        self,
+        *,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        assert limit == 10_000
+        self.events.append("task-store:terminal-reconciliation-inventory")
+        return {
+            "status": "INVENTORIED",
+            "discovered_count": 0,
+            "inserted_count": 0,
+            "cases": (),
+        }
 
     def claim_pending_graph_cancellations(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return []
@@ -240,7 +260,9 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:outbox-ready",
         "task-store:cancellation-continuation-ready",
         "task-store:effect-reconciliation-ready",
+        "task-store:terminal-reconciliation-ready",
         f"task-store:recover:{container.recovery_id}",
+        "task-store:terminal-reconciliation-inventory",
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",
@@ -272,6 +294,12 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         container.effect_reconciliation_service,
         GraphCancellationEffectReconciliationService,
     )
+    assert isinstance(
+        container.terminal_reconciliation_service,
+        TerminalStateReconciliationService,
+    )
+    assert container.terminal_reconciliation_inventory["inserted_count"] == 0
+    assert container.terminal_reconciliation_auto_result["status"] == "DISABLED"
     assert container.graph_execution_registry is not None
     assert container.recovery_report.recovery_id == container.recovery_id
     execution_owner = container.execution_owner_id("configured-owner")
@@ -343,7 +371,7 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 8
+    assert len(events) == 9
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
@@ -351,8 +379,9 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
     assert events[4] == "task-store:effect-reconciliation-ready"
-    assert events[5].startswith("task-store:recover:task-runtime-startup::")
-    assert events[6:] == ["task-store:close", "migration:close"]
+    assert events[5] == "task-store:terminal-reconciliation-ready"
+    assert events[6].startswith("task-store:recover:task-runtime-startup::")
+    assert events[7:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -417,8 +446,10 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
     assert events[4] == "task-store:effect-reconciliation-ready"
-    assert events[5].startswith("task-store:recover:task-runtime-startup::")
-    assert events[6:] == [
+    assert events[5] == "task-store:terminal-reconciliation-ready"
+    assert events[6].startswith("task-store:recover:task-runtime-startup::")
+    assert events[7] == "task-store:terminal-reconciliation-inventory"
+    assert events[8:] == [
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",

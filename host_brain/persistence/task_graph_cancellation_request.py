@@ -377,6 +377,12 @@ class TaskGraphCancellationRequestMixin:
                     "completed Graph success authority wins the cancellation race",
                 )
             graph = self._require_graph(conn, graph_ref, int(revision))
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=int(revision),
+                action="Graph cancellation request",
+            )
             self._require_version(
                 graph,
                 expected_graph_version,

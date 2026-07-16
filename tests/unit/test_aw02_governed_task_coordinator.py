@@ -159,6 +159,7 @@ class _FakeTaskStore:
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
         return {
             "observed_ts_ms": 1,
+            "graph_record": dict(self.graph),
             "attempts": [dict(item) for item in self.attempts.values()],
             "active_leases": [],
             "budgets": [dict(self.budget)] if self.budget else [],

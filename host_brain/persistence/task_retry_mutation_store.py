@@ -312,6 +312,12 @@ class TaskRetryMutationStoreMixin:
                         terminalize_graph_on_budget_rejection
                     ),
                 )
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=str(attempt["graph_id"]),
+                graph_revision=int(attempt["graph_revision"]),
+                action="retry Budget mutation",
+            )
             self._require_version(
                 attempt,
                 expected_attempt_version,

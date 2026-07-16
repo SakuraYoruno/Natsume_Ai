@@ -115,6 +115,13 @@ class TaskBudgetUsageStoreMixin:
                     delta_digest=delta_digest,
                 )
 
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                action="Budget usage journal",
+            )
+
             row = self._require_budget(conn, budget_ref)
             self._assert_shared_budget_usage_binding(
                 conn,

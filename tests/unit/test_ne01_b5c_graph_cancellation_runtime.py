@@ -322,7 +322,12 @@ class _CancellationStore:
             self.graph["graph_id"],
             self.graph["revision"],
         )
-        return {"attempts": [], "active_leases": [], "budgets": []}
+        return {
+            "graph_record": deepcopy(self.graph),
+            "attempts": [],
+            "active_leases": [],
+            "budgets": [],
+        }
 
     def get_graph_cancellation_for_graph(
         self,

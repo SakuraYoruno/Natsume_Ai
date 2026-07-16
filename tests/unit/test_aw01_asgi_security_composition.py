@@ -193,8 +193,48 @@ def test_effect_reconciliation_operator_requires_secure_gateway() -> None:
         )
 
 
+def test_terminal_reconciliation_operator_requires_secure_gateway() -> None:
+    asgi._assert_task_terminal_reconciliation_operator_startup(
+        enabled=False,
+        command_ingress=None,
+        security=None,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "TASK_TERMINAL_RECONCILIATION_OPERATOR_"
+            "REQUIRES_SECURE_INGRESS_ENFORCE"
+        ),
+    ):
+        asgi._assert_task_terminal_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="SHADOW"),
+            security=None,
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_TERMINAL_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE",
+    ):
+        asgi._assert_task_terminal_reconciliation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="ENFORCE"),
+            security=None,
+        )
+    asgi._assert_task_terminal_reconciliation_operator_startup(
+        enabled=True,
+        command_ingress=SimpleNamespace(mode="ENFORCE"),
+        security=SimpleNamespace(
+            obs_command_composition=SimpleNamespace(
+                enabled=True,
+                execution_enabled=True,
+                ingress=SimpleNamespace(execute=lambda: None),
+            )
+        ),
+    )
+
+
 def test_cancellation_production_gate_checks_only_when_cancellation_is_enabled() -> None:
-    asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+    asgi._assert_graph_cancellation_reconciliation_production_ready(
         enabled=False,
         task_store=None,
     )
@@ -202,22 +242,38 @@ def test_cancellation_production_gate_checks_only_when_cancellation_is_enabled()
         RuntimeError,
         match="TASK_GRAPH_CANCELLATION_EFFECT_PRODUCTION_GATE_UNAVAILABLE",
     ):
-        asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+        asgi._assert_graph_cancellation_reconciliation_production_ready(
             enabled=True,
             task_store=object(),
+        )
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "TASK_GRAPH_CANCELLATION_TERMINAL_RECONCILIATION_"
+            "PRODUCTION_GATE_UNAVAILABLE"
+        ),
+    ):
+        asgi._assert_graph_cancellation_reconciliation_production_ready(
+            enabled=True,
+            task_store=SimpleNamespace(
+                assert_effect_reconciliation_production_ready=lambda: None,
+            ),
         )
 
     calls: list[str] = []
     store = SimpleNamespace(
         assert_effect_reconciliation_production_ready=(
-            lambda: calls.append("production-ready")
-        )
+            lambda: calls.append("effect-production-ready")
+        ),
+        assert_terminal_reconciliation_production_ready=(
+            lambda: calls.append("terminal-production-ready")
+        ),
     )
-    asgi._assert_graph_cancellation_effect_reconciliation_production_ready(
+    asgi._assert_graph_cancellation_reconciliation_production_ready(
         enabled=True,
         task_store=store,
     )
-    assert calls == ["production-ready"]
+    assert calls == ["effect-production-ready", "terminal-production-ready"]
 
 
 def test_asgi_builds_publishes_injects_and_closes_security_container(
@@ -375,6 +431,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
             "reconciliation_public_keys": {"reconciler-v1": b"k" * 32},
+            "terminal_reconciliation_auto_enabled": False,
         }
         events.append("task-runtime-built")
         return task_runtime_container

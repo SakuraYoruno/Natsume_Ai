@@ -416,12 +416,42 @@ def _assert_task_effect_reconciliation_operator_startup(
         )
 
 
-def _assert_graph_cancellation_effect_reconciliation_production_ready(
+def _assert_task_terminal_reconciliation_operator_startup(
+    *,
+    enabled: bool,
+    command_ingress: Any,
+    security: Any,
+) -> None:
+    """Fail closed before exposing historical terminal-state repair."""
+
+    if not enabled:
+        return
+    mode = getattr(command_ingress, "mode", None)
+    mode_value = getattr(mode, "value", mode)
+    if str(mode_value or "").strip().upper() != "ENFORCE":
+        raise RuntimeError(
+            "TASK_TERMINAL_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
+        )
+    composition = getattr(security, "obs_command_composition", None)
+    if (
+        composition is None
+        or not bool(getattr(composition, "enabled", False))
+        or not bool(getattr(composition, "execution_enabled", False))
+        or not callable(
+            getattr(getattr(composition, "ingress", None), "execute", None)
+        )
+    ):
+        raise RuntimeError(
+            "TASK_TERMINAL_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
+        )
+
+
+def _assert_graph_cancellation_reconciliation_production_ready(
     *,
     enabled: bool,
     task_store: Any,
 ) -> None:
-    """Block cancellation production on unresolved legacy Effect inventory."""
+    """Block cancellation on unresolved Effect or terminal inventory."""
 
     if not enabled:
         return
@@ -435,6 +465,17 @@ def _assert_graph_cancellation_effect_reconciliation_production_ready(
             "TASK_GRAPH_CANCELLATION_EFFECT_PRODUCTION_GATE_UNAVAILABLE"
         )
     checker()
+    terminal_checker = getattr(
+        task_store,
+        "assert_terminal_reconciliation_production_ready",
+        None,
+    )
+    if not callable(terminal_checker):
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_TERMINAL_RECONCILIATION_"
+            "PRODUCTION_GATE_UNAVAILABLE"
+        )
+    terminal_checker()
 
 
 def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
@@ -821,7 +862,34 @@ def create_app() -> FastAPI:
                     reconciliation_public_keys=(
                         runtime_settings.task_reconciliation_public_keys()
                     ),
+                    terminal_reconciliation_auto_enabled=bool(
+                        getattr(
+                            runtime_settings,
+                            "task_terminal_reconciliation_auto_enabled",
+                            False,
+                        )
+                    ),
                 )
+                terminal_reconciliation_read_authority = None
+                if bool(getattr(runtime_settings, "nle_operator_views_enabled", False)):
+                    from host_brain.persistence.reconciliation_proof_verifier import (  # noqa: PLC0415
+                        Ed25519ReconciliationProofVerifier,
+                    )
+                    from host_brain.persistence.terminal_reconciliation_query_repository import (  # noqa: PLC0415
+                        TerminalReconciliationQueryRepository,
+                    )
+
+                    read_keys = runtime_settings.task_reconciliation_public_keys()
+                    terminal_reconciliation_read_authority = (
+                        TerminalReconciliationQueryRepository(
+                            task_runtime.canonical_db_path,
+                            reconciliation_proof_verifier=(
+                                Ed25519ReconciliationProofVerifier(read_keys)
+                                if read_keys
+                                else None
+                            ),
+                        )
+                    )
                 from host_brain.channels.embodiment import (  # noqa: PLC0415
                     bind_embodiment_outbox_authority,
                     build_embodiment_receipt_audit_observer,
@@ -880,7 +948,14 @@ def create_app() -> FastAPI:
                         False,
                     )
                 )
-                _assert_graph_cancellation_effect_reconciliation_production_ready(
+                terminal_reconciliation_operator_enabled = bool(
+                    getattr(
+                        runtime_settings,
+                        "task_terminal_reconciliation_operator_enabled",
+                        False,
+                    )
+                )
+                _assert_graph_cancellation_reconciliation_production_ready(
                     enabled=cancellation_operator_enabled,
                     task_store=task_runtime.task_store,
                 )
@@ -908,6 +983,11 @@ def create_app() -> FastAPI:
                 )
                 _assert_task_effect_reconciliation_operator_startup(
                     enabled=effect_reconciliation_operator_enabled,
+                    command_ingress=command_ingress,
+                    security=security,
+                )
+                _assert_task_terminal_reconciliation_operator_startup(
+                    enabled=terminal_reconciliation_operator_enabled,
                     command_ingress=command_ingress,
                     security=security,
                 )
@@ -1239,6 +1319,14 @@ def create_app() -> FastAPI:
                     if effect_reconciliation_operator_enabled
                     else None
                 )
+                application.state.task_terminal_reconciliation_command_service = (
+                    task_runtime.terminal_reconciliation_service
+                    if terminal_reconciliation_operator_enabled
+                    else None
+                )
+                application.state.task_terminal_reconciliation_read_authority = (
+                    terminal_reconciliation_read_authority
+                )
                 application.state.command_ingress_container = command_ingress
                 application.state.memory_service_container = memory
                 yield
@@ -1261,6 +1349,8 @@ def create_app() -> FastAPI:
                 application.state.task_graph_cancellation_command_service = None
                 application.state.task_operation_reconciliation_command_service = None
                 application.state.task_effect_reconciliation_command_service = None
+                application.state.task_terminal_reconciliation_command_service = None
+                application.state.task_terminal_reconciliation_read_authority = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
                 try:
@@ -1358,6 +1448,8 @@ def create_app() -> FastAPI:
     application.state.memory_service_container = None
     application.state.task_runtime_container = None
     application.state.task_effect_reconciliation_command_service = None
+    application.state.task_terminal_reconciliation_command_service = None
+    application.state.task_terminal_reconciliation_read_authority = None
     application.state.governed_host_runtime = None
     application.state.governed_internal_runtime = None
     application.state.governed_scheduler_runtime = None

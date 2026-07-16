@@ -12,7 +12,11 @@ from fastapi import Depends, HTTPException, Query, Request
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
 from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
-from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreError
+from host_brain.persistence.task_repository import (
+    DurableTaskStore,
+    OutboxMessage,
+    TaskStoreError,
+)
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
@@ -23,6 +27,13 @@ from host_brain.app.observability_runtime.projection_runtime import (
 )
 from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.observability.projection_store import QueryProjectionError
+from host_brain.observability.operator_query_gateway import (
+    get_operator_query_context,
+)
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationError,
+    TerminalStateReconciliationService,
+)
 
 
 _service_provider: Callable[[], OperatorReadModelService] | None = None
@@ -144,6 +155,32 @@ _EFFECT_PROOF_PUBLIC_FIELDS = (
     "proof_digest",
     "issued_ts_ms",
 )
+_TERMINAL_CASE_LIST_FIELDS = (
+    "case_id",
+    "case_kind",
+    "classification",
+    "reason_code",
+    "graph_id",
+    "graph_revision",
+    "graph_status",
+    "budget_status",
+    "node_status",
+    "attempt_status",
+    "recommended_action",
+    "snapshot_sha256",
+)
+_TERMINAL_PROOF_PUBLIC_FIELDS = (
+    "proof_id",
+    "case_id",
+    "case_snapshot_sha256",
+    "authority_kind",
+    "action",
+    "target_graph_status",
+    "target_budget_status",
+    "subject_snapshot_sha256",
+    "proof_digest",
+    "issued_ts_ms",
+)
 
 
 def _text(value: Any) -> str:
@@ -216,6 +253,37 @@ def _validated_effect_reconciliation_reader(store: Any) -> Any:
             detail={
                 "reason_code": "TASK_EFFECT_RECONCILIATION_READ_UNAVAILABLE",
                 "detail": "canonical Task Runtime reconciliation reader is unavailable",
+            },
+        )
+    return store
+
+
+def _get_terminal_reconciliation_store(request: Request) -> Any:
+    """Resolve the query-only 0099 authority from this FastAPI instance."""
+
+    _require_operator_views_enabled()
+    store = getattr(
+        request.app.state,
+        "task_terminal_reconciliation_read_authority",
+        None,
+    )
+    return _validated_terminal_reconciliation_reader(store)
+
+
+def _validated_terminal_reconciliation_reader(store: Any) -> Any:
+    required = (
+        "list_terminal_reconciliation_candidates",
+        "list_terminal_reconciliation_cases",
+        "read_terminal_reconciliation_case",
+    )
+    if store is None or any(
+        not callable(getattr(store, method_name, None)) for method_name in required
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason_code": "TASK_TERMINAL_RECONCILIATION_READ_UNAVAILABLE",
+                "detail": "canonical terminal reconciliation reader is unavailable",
             },
         )
     return store
@@ -304,6 +372,60 @@ def _effect_reconciliation_challenge(value: Any) -> dict[str, Any]:
         "subject_snapshot_sha256": _text(source.get("subject_snapshot_sha256")),
         "signing_material": _exact_signing_material(source),
         "settlement": _settlement_summary(source.get("proof")),
+    }
+
+
+def _terminal_case_summary(value: Any) -> dict[str, Any]:
+    return _selected(value, _TERMINAL_CASE_LIST_FIELDS)
+
+
+def _terminal_resolution(case: dict[str, Any]) -> dict[str, Any]:
+    action = _text(case.get("recommended_action"))
+    graph_status = _text(case.get("graph_status")) or None
+    targets = {
+        "RELEASE_BUDGET": (graph_status, "RELEASED"),
+        "FAIL_GRAPH": ("FAILED", None),
+        "FAIL_GRAPH_AND_RELEASE_BUDGET": ("FAILED", "RELEASED"),
+        "NONE": (None, None),
+    }
+    target_graph_status, target_budget_status = targets.get(
+        action,
+        (None, None),
+    )
+    return {
+        "action": action,
+        "target_graph_status": target_graph_status,
+        "target_budget_status": target_budget_status,
+    }
+
+
+def _terminal_settlement_summary(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    selected = _selected(value, _TERMINAL_PROOF_PUBLIC_FIELDS)
+    return {
+        "record_ref": selected["proof_id"],
+        "case_id": selected["case_id"],
+        "authority_kind": selected["authority_kind"],
+        "action": selected["action"],
+        "target_graph_status": selected["target_graph_status"],
+        "target_budget_status": selected["target_budget_status"],
+        "case_snapshot_sha256": selected["case_snapshot_sha256"],
+        "subject_snapshot_sha256": selected["subject_snapshot_sha256"],
+        "binding_sha256": selected["proof_digest"],
+        "issued_ts_ms": selected["issued_ts_ms"],
+    }
+
+
+def _terminal_reconciliation_challenge(value: Any) -> dict[str, Any]:
+    source = dict(value) if isinstance(value, dict) else dict(value or {})
+    case = dict(source.get("case") or {})
+    subject = dict(source.get("subject") or {})
+    return {
+        "case": _terminal_case_summary(case),
+        "subject_snapshot_sha256": _text(subject.get("snapshot_sha256")),
+        "recommended_resolution": _terminal_resolution(case),
+        "settlement": _terminal_settlement_summary(source.get("proof")),
     }
 
 
@@ -469,12 +591,144 @@ async def get_task_effect_reconciliation_challenge(
         _raise_read_model_error(exc)
 
 
+@router.get("/task-runtime/terminal-reconciliation/candidates")
+async def list_task_terminal_reconciliation_candidates(
+    graph_id: str | None = Query(None, min_length=1, max_length=512),
+    graph_revision: int | None = Query(None, ge=1),
+    limit: int = Query(100, ge=1, le=500),
+    store: Any = Depends(_get_terminal_reconciliation_store),
+) -> dict[str, Any]:
+    """List persisted, unsettled 0099 repair subjects without raw snapshots."""
+
+    _require_operator_views_enabled()
+    try:
+        candidates = store.list_terminal_reconciliation_candidates(
+            graph_id,
+            graph_revision,
+            limit=limit,
+        )
+        return {
+            "schema_version": (
+                "Natsume.operator.terminal_reconciliation_candidates.v1"
+            ),
+            "read_only": True,
+            "count": len(candidates),
+            "candidates": [
+                {
+                    **_terminal_reconciliation_challenge(item),
+                    "settled": bool(item.get("proof")),
+                }
+                for item in candidates
+            ],
+        }
+    except TaskStoreError as exc:
+        _raise_read_model_error(exc)
+
+
+@router.get("/task-runtime/terminal-reconciliation/cases")
+async def list_task_terminal_reconciliation_cases(
+    classification: str | None = Query(None, min_length=1, max_length=64),
+    limit: int = Query(100, ge=1, le=500),
+    store: Any = Depends(_get_terminal_reconciliation_store),
+) -> dict[str, Any]:
+    """List immutable 0099 inventory with a bounded public summary."""
+
+    _require_operator_views_enabled()
+    try:
+        cases = store.list_terminal_reconciliation_cases(
+            classification=classification,
+            limit=limit,
+        )
+        return {
+            "schema_version": "Natsume.operator.terminal_reconciliation_cases.v1",
+            "read_only": True,
+            "count": len(cases),
+            "cases": [_terminal_case_summary(item) for item in cases],
+        }
+    except TaskStoreError as exc:
+        _raise_read_model_error(exc)
+
+
+@router.get("/task-runtime/terminal-reconciliation/challenge")
+async def get_task_terminal_reconciliation_challenge(
+    request: Request,
+    case_id: str = Query(..., min_length=1, max_length=512),
+    attestation_ref: str = Query(..., min_length=1, max_length=512),
+    attestation_key_id: str = Query(..., min_length=1, max_length=255),
+    issued_ts_ms: int = Query(..., ge=0),
+    store: Any = Depends(_get_terminal_reconciliation_store),
+) -> dict[str, Any]:
+    """Return the exact Store-verifiable Ed25519 bytes without writing."""
+
+    _require_operator_views_enabled()
+    try:
+        context = get_operator_query_context(request)
+        actor_id = _text(context.authority.principal_id)
+        bound_key_id = _text(context.authority.key_id)
+        if bound_key_id and bound_key_id != attestation_key_id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason_code": "TASK_TERMINAL_RECONCILIATION_KEY_MISMATCH",
+                    "detail": "requested signing key differs from authenticated authority",
+                },
+            )
+        aggregate = store.read_terminal_reconciliation_case(case_id)
+        challenge = TerminalStateReconciliationService(
+            task_store=store,
+            outbox_factory=OutboxMessage,
+            clock_ms=lambda: issued_ts_ms,
+        ).build_operator_challenge(
+            case_id=case_id,
+            reconciler_actor_id=actor_id,
+            issued_ts_ms=issued_ts_ms,
+            attestation_ref=attestation_ref,
+            attestation_key_id=attestation_key_id,
+        )
+        return {
+            "schema_version": (
+                "Natsume.operator.terminal_reconciliation_challenge.v1"
+            ),
+            "read_only": True,
+            **_terminal_reconciliation_challenge(aggregate),
+            "record_ref": challenge["proof_id"],
+            "graph_outbox_id": challenge["graph_outbox_id"],
+            "budget_outbox_id": challenge["budget_outbox_id"],
+            "signing_material": challenge["signing_material"],
+            "command_request": {
+                "case_id": challenge["case_id"],
+                "expected_case_snapshot_sha256": challenge[
+                    "case_snapshot_sha256"
+                ],
+                "expected_subject_snapshot_sha256": challenge[
+                    "subject_snapshot_sha256"
+                ],
+                "action": challenge["action"],
+                "target_graph_status": challenge["target_graph_status"],
+                "target_budget_status": challenge["target_budget_status"],
+                "issued_ts_ms": issued_ts_ms,
+                "attestation_ref": attestation_ref,
+                "attestation_key_id": attestation_key_id,
+            },
+        }
+    except TerminalStateReconciliationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": exc.reason_code, "detail": exc.detail},
+        ) from exc
+    except TaskStoreError as exc:
+        _raise_read_model_error(exc)
+
+
 __all__ = [
     "get_task_runtime_review_locator",
     "get_task_runtime_execution",
     "get_task_effect_reconciliation_challenge",
+    "get_task_terminal_reconciliation_challenge",
     "list_task_effect_reconciliation_candidates",
     "list_task_effect_reconciliation_cases",
+    "list_task_terminal_reconciliation_candidates",
+    "list_task_terminal_reconciliation_cases",
     "list_task_runtime_executions",
     "set_operator_read_model_service_provider",
 ]

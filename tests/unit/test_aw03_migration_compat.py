@@ -342,11 +342,11 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 98
-    assert upgraded.summary["applied_count"] == 15
+    assert upgraded.summary["current_version"] == 99
+    assert upgraded.summary["applied_count"] == 16
     assert (
         upgraded.records[-1].migration_id
-        == "0098_task_runtime_effect_reconciliation"
+        == "0099_task_runtime_terminal_reconciliation"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -405,7 +405,7 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    assert [record.migration_id for record in repaired.records[-9:]] == [
+    assert [record.migration_id for record in repaired.records[-10:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
@@ -415,6 +415,7 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
         "0096_task_runtime_review_continuation",
         "0097_node_grant_batch_uniqueness",
         "0098_task_runtime_effect_reconciliation",
+        "0099_task_runtime_terminal_reconciliation",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -469,9 +470,9 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     replayed = runner.apply_migrations(request_id="0094-receipt-replay", ts_ms=24)
 
     assert replayed.success is True, replayed.as_dict()
-    assert replayed.summary["current_version"] == 98
+    assert replayed.summary["current_version"] == 99
     assert replayed.records[-1].migration_id == (
-        "0098_task_runtime_effect_reconciliation"
+        "0099_task_runtime_terminal_reconciliation"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -507,9 +508,9 @@ def test_0095_fresh_schema_freezes_revision_column_guards_and_delivery_index(
     )
 
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 98
+    assert result.summary["current_version"] == 99
     assert result.records[-1].migration_id == (
-        "0098_task_runtime_effect_reconciliation"
+        "0099_task_runtime_terminal_reconciliation"
     )
     with sqlite3.connect(db_path) as conn:
         graph_revision = {
@@ -754,7 +755,7 @@ def test_0095_upgrade_backfills_only_exact_authority_then_unique_graph_fallback(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 98
+    assert upgraded.summary["current_version"] == 99
     with sqlite3.connect(db_path) as conn:
         revisions = dict(
             conn.execute(
@@ -1182,9 +1183,9 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 98
-    assert upgraded.summary["applied_count"] == 9
-    assert [record.migration_id for record in upgraded.records[-9:]] == [
+    assert upgraded.summary["current_version"] == 99
+    assert upgraded.summary["applied_count"] == 10
+    assert [record.migration_id for record in upgraded.records[-10:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
@@ -1194,6 +1195,7 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
         "0096_task_runtime_review_continuation",
         "0097_node_grant_batch_uniqueness",
         "0098_task_runtime_effect_reconciliation",
+        "0099_task_runtime_terminal_reconciliation",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -1262,11 +1264,11 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 98
-    assert upgraded.summary["applied_count"] == 8
+    assert upgraded.summary["current_version"] == 99
+    assert upgraded.summary["applied_count"] == 9
     assert (
         upgraded.records[-1].migration_id
-        == "0098_task_runtime_effect_reconciliation"
+        == "0099_task_runtime_terminal_reconciliation"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -1607,7 +1609,7 @@ def test_0097_fresh_schema_fences_node_grant_identity_and_duplicates(tmp_path) -
         ts_ms=60,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 98
+    assert result.summary["current_version"] == 99
 
     with sqlite3.connect(db_path) as conn:
         objects = {

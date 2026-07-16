@@ -114,6 +114,16 @@ class DurableBudgetRuntime:
                 GOVERNED_BUDGET_STATE_CONFLICT,
                 "scheduler snapshot does not expose durable budgets",
             )
+        graph_record = (
+            snapshot.get("graph_record") if isinstance(snapshot, Mapping) else None
+        )
+        if not isinstance(graph_record, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "scheduler snapshot does not expose the durable TaskGraph",
+            )
+        graph_status = str(graph_record.get("status") or "").strip().upper()
+        graph_accepts_new_budget_authority = graph_status in {"CREATED", "ACTIVE"}
         graph_budgets = [dict(item) for item in budgets if isinstance(item, Mapping)]
         if graph_budgets and any(str(item.get("budget_id")) != budget_id for item in graph_budgets):
             raise GovernedRuntimeError(
@@ -123,6 +133,12 @@ class DurableBudgetRuntime:
 
         record = await self._try_reconcile(budget_id)
         if record is None:
+            if not graph_accepts_new_budget_authority:
+                raise GovernedRuntimeError(
+                    GOVERNED_BUDGET_STATE_CONFLICT,
+                    "new graph-level BudgetReservation is forbidden for "
+                    f"TaskGraph status {graph_status or 'UNKNOWN'}",
+                )
             reservation = BudgetReservation(
                 budget_id=budget_id,
                 scope=policy.scope,
@@ -157,6 +173,12 @@ class DurableBudgetRuntime:
 
         self._assert_binding(admitted, policy, budget_id, record)
         if _status(record) == BudgetReservationStatus.PENDING.value:
+            if not graph_accepts_new_budget_authority:
+                raise GovernedRuntimeError(
+                    GOVERNED_BUDGET_STATE_CONFLICT,
+                    "BudgetReservation activation is forbidden for "
+                    f"TaskGraph status {graph_status or 'UNKNOWN'}",
+                )
             try:
                 record = dict(
                     await _maybe_await(

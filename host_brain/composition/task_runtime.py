@@ -56,6 +56,9 @@ from host_brain.task_runtime.graph_cancellation_operation_reconciliation import 
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationService,
+)
 from host_brain.task_runtime.local_graph_execution_registry import (
     LocalGraphExecutionRegistry,
 )
@@ -172,6 +175,9 @@ class ProcessTaskRuntimeContainer:
     cancellation_continuation_worker: GraphCancellationContinuationWorker
     operation_reconciliation_service: GraphCancellationOperationReconciliationService
     effect_reconciliation_service: GraphCancellationEffectReconciliationService
+    terminal_reconciliation_service: TerminalStateReconciliationService
+    terminal_reconciliation_inventory: Mapping[str, Any]
+    terminal_reconciliation_auto_result: Mapping[str, Any]
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
@@ -712,6 +718,7 @@ def build_process_task_runtime_container(
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
     reconciliation_public_keys: Mapping[str, bytes] | None = None,
+    terminal_reconciliation_auto_enabled: bool = False,
 ) -> ProcessTaskRuntimeContainer:
     """Migrate and construct one fail-closed durable infrastructure graph."""
 
@@ -756,8 +763,28 @@ def build_process_task_runtime_container(
         task_store.assert_outbox_delivery_ready()
         task_store.assert_graph_cancellation_continuation_ready()
         task_store.assert_effect_reconciliation_ready()
+        task_store.assert_terminal_reconciliation_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
+        terminal_reconciliation_inventory = (
+            task_store.inventory_terminal_reconciliation_cases(limit=10_000)
+        )
+        terminal_reconciliation_service = TerminalStateReconciliationService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+            clock_ms=now_ms,
+        )
+        terminal_reconciliation_auto_result = (
+            terminal_reconciliation_service.reconcile_exact_cases()
+            if bool(terminal_reconciliation_auto_enabled)
+            else {
+                "status": "DISABLED",
+                "candidate_count": 0,
+                "reconciled_count": 0,
+                "results": (),
+                "remaining_exact_cases": False,
+            }
+        )
         review_store = review_store_builder(canonical)
         constructed.append(("review_store", review_store))
         review_continuation_store = review_continuation_store_builder(canonical)
@@ -858,6 +885,11 @@ def build_process_task_runtime_container(
         cancellation_continuation_worker=cancellation_continuation_worker,
         operation_reconciliation_service=operation_reconciliation_service,
         effect_reconciliation_service=effect_reconciliation_service,
+        terminal_reconciliation_service=terminal_reconciliation_service,
+        terminal_reconciliation_inventory=dict(terminal_reconciliation_inventory),
+        terminal_reconciliation_auto_result=dict(
+            terminal_reconciliation_auto_result
+        ),
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
     )

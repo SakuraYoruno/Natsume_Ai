@@ -196,6 +196,9 @@ from host_brain.persistence.task_outbox_delivery_store import (
 from host_brain.persistence.task_budget_usage_store import (
     TaskBudgetUsageStoreMixin,
 )
+from host_brain.persistence.task_terminal_reconciliation_store import (
+    TaskTerminalReconciliationStoreMixin,
+)
 
 
 TASK_RUNTIME_TABLES = frozenset(
@@ -418,6 +421,7 @@ class DurableTaskStore(
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
+    TaskTerminalReconciliationStoreMixin,
     TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
@@ -680,8 +684,16 @@ class DurableTaskStore(
         outbox: OutboxMessage,
         ts_ms: int,
         attempt_id: str | None = None,
+        terminal_reconciliation_bypass: bool = False,
     ) -> dict[str, Any]:
         row = self._require_graph(conn, graph_id, revision)
+        if not terminal_reconciliation_bypass:
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=str(graph_id),
+                graph_revision=int(revision),
+                action="TaskGraph transition",
+            )
         self._require_version(
             row,
             expected_version,
@@ -1223,6 +1235,73 @@ class DurableTaskStore(
                 TASK_STORE_CANCELLATION_CONFLICT,
                 "durable Graph cancellation fences new execution authority: "
                 f"{row['intent_ref']}",
+            )
+
+    def _assert_graph_accepts_budget_authority(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Fence graph-bound Budget creation/activation inside the write UoW."""
+
+        graph = self._require_graph(conn, graph_id, graph_revision)
+        status = str(graph["status"] or "").strip().upper()
+        if status not in {
+            TaskGraphStatus.CREATED.value,
+            TaskGraphStatus.ACTIVE.value,
+        }:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                f"graph-bound BudgetReservation {action} requires a CREATED or "
+                f"ACTIVE TaskGraph, got {status or 'UNKNOWN'}",
+            )
+
+    @staticmethod
+    def _assert_no_terminal_reconciliation_fence(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_terminal_reconciliation_supersession'
+            """
+        ).fetchone()
+        if ready is None:
+            return
+        unresolved = conn.execute(
+            """
+            SELECT item.case_id
+            FROM task_runtime_terminal_reconciliation_case AS item
+            WHERE item.graph_id = ? AND item.graph_revision = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM task_runtime_terminal_reconciliation_proof AS proof
+                  WHERE proof.case_id = item.case_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM task_runtime_terminal_reconciliation_supersession AS supersession
+                  WHERE supersession.prior_case_id = item.case_id
+              )
+            ORDER BY item.created_ts_ms, item.case_id
+            LIMIT 1
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if unresolved is not None:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "inventoried terminal reconciliation case fences ordinary "
+                f"{str(action or 'authority mutation')}: "
+                f"{unresolved['case_id']}",
             )
 
 
@@ -2962,6 +3041,12 @@ class DurableTaskStore(
                     graph_id=str(graph_id),
                     graph_revision=int(graph_revision),
                 )
+                self._assert_graph_accepts_budget_authority(
+                    conn,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    action="creation",
+                )
             if attempt_id is not None:
                 self._require_attempt(conn, attempt_id)
             consumed = reservation.consumed.to_dict()
@@ -3024,6 +3109,24 @@ class DurableTaskStore(
                 )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             target = validate_budget_transition(str(row["status"]), target_status)
+            if row["graph_id"] is not None and row["graph_revision"] is not None:
+                self._assert_no_terminal_reconciliation_fence(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="Budget transition",
+                )
+            if (
+                target is BudgetReservationStatus.ACTIVE
+                and row["graph_id"] is not None
+                and row["graph_revision"] is not None
+            ):
+                self._assert_graph_accepts_budget_authority(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="activation",
+                )
             cursor = conn.execute(
                 """
                 UPDATE task_runtime_budget_reservation
@@ -3358,6 +3461,12 @@ class DurableTaskStore(
                     conn,
                     graph_id=str(row["graph_id"]),
                     graph_revision=int(row["graph_revision"]),
+                )
+                self._assert_no_terminal_reconciliation_fence(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="Budget consumption",
                 )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:

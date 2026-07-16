@@ -14,7 +14,11 @@ from typing import Any
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetPolicy,
+    BudgetReservation,
+)
 from host_brain.contracts.agent_runtime.review_policy import ReviewResumePhase
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -47,6 +51,7 @@ from host_brain.task_runtime import (
     GovernedTaskCoordinator,
     RetryableWorkerPreparationError,
 )
+from host_brain.task_runtime.budget_runtime import _budget_id
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
@@ -444,6 +449,21 @@ class _FailingHeartbeatStore:
         if self.heartbeat_calls <= 2:
             raise RuntimeError("lease heartbeat transport unavailable")
         return self._delegate.heartbeat_lease(*args, **kwargs)
+
+
+class _FailingExceededBudgetReleaseStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.release_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def transition_budget(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if str(kwargs.get("target_status") or "") == "RELEASED":
+            self.release_calls += 1
+            raise TimeoutError("simulated crash before exceeded Budget release")
+        return self._delegate.transition_budget(*args, **kwargs)
 
 
 class _Resolver:
@@ -3665,6 +3685,186 @@ async def test_gr03b_precharge_exceeded_blocks_before_worker_and_releases_budget
     assert len(snapshot["budget_usage"]) == 1
     assert snapshot["budget_usage"][0]["accepted"] is False
     assert snapshot["budget_usage"][0]["exceeded_dimensions"] == ["tool_call_count"]
+
+
+@pytest.mark.asyncio
+async def test_ne01_terminal_reentry_does_not_silently_release_blocked_budget(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    limited = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(work_order.budget_policy.limits, tool_call_count=0),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        limited,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    durable = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashing = _FailingExceededBudgetReleaseStore(durable)
+
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in _coordinator(
+                db_path,
+                [],
+                task_store=crashing,
+            ).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+    assert crashing.release_calls == 1
+    crashed = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert crashed["graph_record"]["status"] == "BLOCKED"
+    assert crashed["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert crashed["budgets"][0]["status"] == "EXCEEDED"
+    outbox_count = len(durable.list_pending_outbox(limit=100))
+
+    with pytest.raises(GovernedRuntimeError) as rejected:
+        _ = [
+            event
+            async for event in _coordinator(
+                db_path,
+                [],
+                task_store=durable,
+            ).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    assert rejected.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
+    assert "terminal reconciliation is required" in rejected.value.detail
+    unchanged = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert unchanged["graph_record"]["status"] == "BLOCKED"
+    assert unchanged["budgets"][0]["status"] == "EXCEEDED"
+    assert len(durable.list_pending_outbox(limit=100)) == outbox_count
+    inventory = durable.inventory_terminal_reconciliation_cases()
+    assert inventory["discovered_count"] == 1
+    assert inventory["inserted_count"] == 1
+    assert inventory["cases"][0]["classification"] == "SIGNED_REPAIR_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "preexisting_pending_budget",
+    (False, True),
+    ids=("missing-budget", "pending-budget"),
+)
+@pytest.mark.asyncio
+async def test_ne01_terminal_graph_reentry_cannot_create_or_activate_budget(
+    tmp_path: Path,
+    preexisting_pending_budget: bool,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    record = repository.admit(command, work_order, assignment, graph)
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    budget_id = _budget_id(admitted, work_order.budget_policy)
+    if preexisting_pending_budget:
+        store.create_budget_reservation(
+            BudgetReservation(
+                budget_id=budget_id,
+                scope=work_order.budget_policy.scope,
+                limits=work_order.budget_policy.limits,
+                reserved=work_order.budget_policy.limits,
+            ),
+            graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+            node_id=None,
+            attempt_id=None,
+            outbox=_runtime_outbox(
+                "BUDGET_RESERVATION",
+                budget_id,
+                0,
+                "BUDGET_RESERVATION_CREATED",
+            ),
+        )
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            2,
+            "TASK_GRAPH_FAILED",
+        ),
+    )
+    with sqlite3.connect(db_path) as conn:
+        before_budget = conn.execute(
+            """
+            SELECT budget_id, status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation ORDER BY budget_id
+            """
+        ).fetchall()
+        before_outbox_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+
+    calls: list[str] = []
+    with pytest.raises(GovernedRuntimeError) as rejected:
+        _ = [
+            event
+            async for event in _coordinator(db_path, calls).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    assert rejected.value.reason_code == "GOVERNED_BUDGET_STATE_CONFLICT"
+    assert calls == []
+    assert store.get_graph(graph.graph_id, graph.revision)["status"] == "FAILED"
+    with sqlite3.connect(db_path) as conn:
+        after_budget = conn.execute(
+            """
+            SELECT budget_id, status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation ORDER BY budget_id
+            """
+        ).fetchall()
+        after_outbox_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+    assert after_budget == before_budget
+    assert after_outbox_count == before_outbox_count
+    if preexisting_pending_budget:
+        assert after_budget == [(budget_id, "PENDING", 0, NOW)]
+    else:
+        assert after_budget == []
 
 
 @pytest.mark.asyncio

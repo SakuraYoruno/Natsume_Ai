@@ -234,6 +234,21 @@ def test_projection_serializer_normalizes_camel_case_private_aliases() -> None:
             "/obs/task-runtime/effect-reconciliation/challenge",
             "obs:task-runtime:read",
         ),
+        (
+            "GET",
+            "/obs/task-runtime/terminal-reconciliation/candidates",
+            "obs:task-runtime:read",
+        ),
+        (
+            "GET",
+            "/obs/task-runtime/terminal-reconciliation/cases",
+            "obs:task-runtime:read",
+        ),
+        (
+            "GET",
+            "/obs/task-runtime/terminal-reconciliation/challenge",
+            "obs:task-runtime:read",
+        ),
         ("GET", "/obs/summary", None),
     ],
 )
@@ -272,6 +287,9 @@ def test_authenticated_low_scope_principal_is_denied_sensitive_trace(monkeypatch
         "/obs/task-runtime/effect-reconciliation/candidates",
         "/obs/task-runtime/effect-reconciliation/cases",
         "/obs/task-runtime/effect-reconciliation/challenge",
+        "/obs/task-runtime/terminal-reconciliation/candidates",
+        "/obs/task-runtime/terminal-reconciliation/cases",
+        "/obs/task-runtime/terminal-reconciliation/challenge",
     ],
 )
 def test_effect_reconciliation_reads_require_exact_task_runtime_scope(
@@ -332,6 +350,18 @@ def test_effect_reconciliation_reads_require_exact_task_runtime_scope(
         ),
         (
             "/obs/task-runtime/effect-reconciliation/challenge",
+            "obs:task-runtime:read",
+        ),
+        (
+            "/obs/task-runtime/terminal-reconciliation/candidates",
+            "obs:task-runtime:read",
+        ),
+        (
+            "/obs/task-runtime/terminal-reconciliation/cases",
+            "obs:task-runtime:read",
+        ),
+        (
+            "/obs/task-runtime/terminal-reconciliation/challenge",
             "obs:task-runtime:read",
         ),
         ("/obs/sessions", "obs:session:read"),

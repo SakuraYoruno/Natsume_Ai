@@ -540,9 +540,15 @@ class DurableDagSchedulingRuntime:
                 if graph_status in {"CREATED", "ACTIVE"}:
                     graph = await self._node_lifecycle.transition_graph(final_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
-                budget = await self._budgets.finalize(
-                    budget, target_status=BudgetReservationStatus.RELEASED
-                )
+                    budget = await self._budgets.finalize(
+                        budget, target_status=BudgetReservationStatus.RELEASED
+                    )
+                else:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "terminal TaskGraph has an unsettled exceeded Budget; "
+                        "terminal reconciliation is required",
+                    )
             if budget.status == "RELEASED":
                 if graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}:
                     raise GovernedRuntimeError(
@@ -699,6 +705,16 @@ class DurableDagSchedulingRuntime:
                     selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                     terminal_node_id = _required_record_text(selected, "node_id")
                 terminal_admission = admitted.for_node(terminal_node_id or admitted.node_id)
+                if (
+                    failed_node_id is not None
+                    and graph_status == "BLOCKED"
+                    and budget.status in {"ACTIVE", "EXCEEDED"}
+                ):
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "BLOCKED failure Graph has an unsettled Budget; "
+                        "terminal reconciliation is required",
+                    )
                 if graph_status == "ACTIVE":
                     graph = await self._node_lifecycle.transition_graph(
                         terminal_admission,
@@ -720,9 +736,11 @@ class DurableDagSchedulingRuntime:
                 return
 
             if graph_status in {"FAILED", "CANCELLED", "COMPLETED"}:
-                if graph_status in {"FAILED", "CANCELLED"} and budget.status == "ACTIVE":
-                    budget = await self._budgets.finalize(
-                        budget, target_status=BudgetReservationStatus.RELEASED
+                if budget.status in {"ACTIVE", "EXCEEDED"}:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "terminal TaskGraph has an unsettled Budget; "
+                        "terminal reconciliation is required",
                     )
                 decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,

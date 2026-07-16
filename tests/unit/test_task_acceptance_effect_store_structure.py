@@ -7,6 +7,11 @@ from host_brain.persistence import (
     task_effect_reconciliation_common,
     task_record_codec,
     task_repository,
+    task_terminal_reconciliation_codec_validation,
+    task_terminal_reconciliation_common,
+    task_terminal_reconciliation_decision_authority,
+    task_terminal_reconciliation_projection,
+    task_terminal_reconciliation_schema,
 )
 from host_brain.persistence.task_acceptance_effect_delivery import (
     TaskAcceptanceEffectDeliveryMixin,
@@ -59,6 +64,15 @@ from host_brain.persistence.task_effect_reconciliation_read_store import (
 )
 from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
     TaskGraphCancellationEffectOverlayMixin,
+)
+from host_brain.persistence.task_terminal_reconciliation_store import (
+    TaskTerminalReconciliationStoreMixin,
+)
+from host_brain.persistence.task_terminal_reconciliation_mutation_store import (
+    TaskTerminalReconciliationMutationMixin,
+)
+from host_brain.persistence.task_terminal_reconciliation_read_store import (
+    TaskTerminalReconciliationReadMixin,
 )
 from host_brain.persistence.task_budget_usage_store import (
     TaskBudgetUsageStoreMixin,
@@ -116,6 +130,22 @@ EFFECT_RECONCILIATION_OVERLAY_METHODS = (
     "_assert_graph_cancellation_effect_reconciliation_overlay",
     "_graph_cancellation_pending_effect_ids",
 )
+TERMINAL_RECONCILIATION_READ_METHODS = (
+    "assert_terminal_reconciliation_ready",
+    "assert_terminal_reconciliation_production_ready",
+    "list_terminal_reconciliation_inventory_candidates",
+    "list_terminal_reconciliation_cases",
+    "list_terminal_reconciliation_candidates",
+    "read_terminal_reconciliation_case",
+    "_discover_terminal_reconciliation_cases_in_transaction",
+    "_terminal_reconciliation_subject",
+)
+TERMINAL_RECONCILIATION_MUTATION_METHODS = (
+    "inventory_terminal_reconciliation_cases",
+    "record_terminal_reconciliation_proof",
+    "_record_terminal_reconciliation_proof",
+    "_insert_terminal_reconciliation_case",
+)
 
 
 def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -> None:
@@ -135,6 +165,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskOperationReconciliationStoreMixin,
         TaskEffectReconciliationStoreMixin,
         TaskGraphCancellationEffectOverlayMixin,
+        TaskTerminalReconciliationStoreMixin,
         TaskBudgetUsageStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,
@@ -257,3 +288,51 @@ def test_effect_reconciliation_split_preserves_mro_method_owners_and_ceilings() 
     )
 
     assert len(inspect.getsource(task_repository).splitlines()) < 4_600
+
+
+def test_terminal_reconciliation_split_preserves_one_store_and_one_uow() -> None:
+    assert TaskTerminalReconciliationStoreMixin.__bases__ == (
+        TaskTerminalReconciliationMutationMixin,
+        TaskTerminalReconciliationReadMixin,
+    )
+    for name in TERMINAL_RECONCILIATION_READ_METHODS:
+        assert getattr(TaskTerminalReconciliationStoreMixin, name) is getattr(
+            TaskTerminalReconciliationReadMixin,
+            name,
+        )
+        assert getattr(task_repository.DurableTaskStore, name) is getattr(
+            TaskTerminalReconciliationReadMixin,
+            name,
+        )
+    for name in TERMINAL_RECONCILIATION_MUTATION_METHODS:
+        assert getattr(TaskTerminalReconciliationStoreMixin, name) is getattr(
+            TaskTerminalReconciliationMutationMixin,
+            name,
+        )
+        assert getattr(task_repository.DurableTaskStore, name) is getattr(
+            TaskTerminalReconciliationMutationMixin,
+            name,
+        )
+
+    focused_modules = {
+        task_terminal_reconciliation_codec_validation: 500,
+        task_terminal_reconciliation_common: 800,
+        task_terminal_reconciliation_decision_authority: 500,
+        task_terminal_reconciliation_projection: 800,
+        task_terminal_reconciliation_schema: 250,
+        inspect.getmodule(TaskTerminalReconciliationStoreMixin): 100,
+        inspect.getmodule(TaskTerminalReconciliationReadMixin): 1_500,
+        inspect.getmodule(TaskTerminalReconciliationMutationMixin): 1_000,
+    }
+    assert None not in focused_modules
+    for module, ceiling in focused_modules.items():
+        source = inspect.getsource(module)
+        assert len(source.splitlines()) < ceiling
+        assert "host_brain.persistence.task_repository" not in source
+
+    mutation_tree = ast.parse(
+        inspect.getsource(inspect.getmodule(TaskTerminalReconciliationMutationMixin))
+    )
+    assert "sqlite3.connect" not in ast.unparse(mutation_tree)
+    assert "conn.commit" not in ast.unparse(mutation_tree)
+    assert "conn.rollback" not in ast.unparse(mutation_tree)

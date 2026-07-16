@@ -3,7 +3,7 @@
 
 # 图 01：当前运行拓扑
 
-版本：v2.7
+版本：v2.8
 核对日期：2026-07-16
 
 ## 拓扑
@@ -18,11 +18,16 @@ flowchart LR
     subgraph HostProc["Host Main process"]
         HOST["host_brain.app.asgi:app\n默认 127.0.0.1:18080"]
         DOMAIN["Governed Runtime + Domain State"]
-        HOST --> DOMAIN
+        TERMINAL["0099 terminal inventory/reconcile\noperator + system auto 默认 OFF"]
+        HOSTTERMQUERY["terminal candidates / cases / challenge\nmode=ro + query_only"]
+        HOST --> DOMAIN --> TERMINAL
+        HOST --> HOSTTERMQUERY
     end
 
     subgraph ObsProc["Observability process"]
         OBS["host_brain.app.obs_fastapi_app:app\n默认 127.0.0.1:18082"]
+        TERMQUERY["terminal candidates / cases / challenge\nquery-only；obs:task-runtime:read"]
+        OBS --> TERMQUERY
     end
 
     subgraph EdgeProc["Edge process"]
@@ -52,8 +57,11 @@ flowchart LR
     DOMAIN --> CHR
     DOMAIN --> REDIS
     OBS -->|"read-only durable projection"| DOMAIN
+    HOSTTERMQUERY -->|"physical query-only"| TERMINAL
+    TERMQUERY -->|"mode=ro + query_only"| TERMINAL
     OP --> MON --> OBS
     MON -.->|"Operator BFF: task_graph.cancel\nexact revision；默认 OFF"| HOST
+    MON -.->|"task_terminal.reconcile\nENFORCE + Gateway + public key；默认 OFF"| HOST
     EDGE --> PET
     HOST -."static/compat hosting".-> MON
 ```
@@ -83,6 +91,7 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Cancellation、Operation 签名对账与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。0098 以 append-only case/proof 和 trusted overlay 处理 Effect 不确定性；PENDING proof 可进入新 decision evidence，FINALIZED correction 不改写旧 decision/fence/evidence。Budget 高竞争、目标部署 inventory remediation、部署密钥/凭据、完整 key lifecycle 与真实 canary仍缺，atomic/bounded/cancellation 均 OFF。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。0099 使用 immutable case/proof/supersession，readiness 严格比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec；单次最多 inventory 10,000 个 Graph。只有唯一 graph-scope exact FAILED bundle 可 default-off auto；结构漂移只 quarantine。未决 case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；0090 唯一、0091/0092 完整校验。System proof 以 case 时间跨进程收敛；healthy closure 仅 signed `NONE` 零业务写。主 Host/独立 Obs 物理 query-only。全部 reconciliation 默认 OFF、canary 未跑；外部 inventory/key lifecycle 与 general recovery未知，NE-01 保持 `IN_PROGRESS`。
+- Terminal challenge 已从 OperatorQueryGateway context 绑定 principal，并把 ref/key/time与确定性 Outbox编入 service/store 同一 final canonical bytes；authority key 漂移被拒绝，HTTP→真实 Ed25519→Store round-trip 已通过。该证据仍不证明外部 deployment key lifecycle 或 inventory remediation。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

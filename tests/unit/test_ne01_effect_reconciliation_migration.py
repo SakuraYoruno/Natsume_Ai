@@ -34,6 +34,10 @@ def _remove_0098_physical_receipt(store) -> None:
     """Restore the exact pre-0098 surface while retaining the 0097 fixtures."""
 
     with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DROP TABLE IF EXISTS task_runtime_terminal_reconciliation_proof")
+        conn.execute("DROP TABLE IF EXISTS task_runtime_terminal_reconciliation_case")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 99")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 99")
         for trigger in _0098_TRIGGERS:
             conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
         conn.execute("DROP TABLE IF EXISTS task_runtime_effect_reconciliation_proof")
@@ -45,6 +49,7 @@ def _remove_0098_physical_receipt(store) -> None:
         conn.execute("DELETE FROM schema_migrations WHERE migration_id = 98")
         conn.commit()
     store._effect_reconciliation_schema_ready = False
+    store._terminal_reconciliation_schema_ready = False
 
 
 def _apply_0098(store, *, request_id: str) -> None:
@@ -53,7 +58,7 @@ def _apply_0098(store, *, request_id: str) -> None:
         ts_ms=NOW,
     )
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] == 98
+    assert result.summary["current_version"] == 99
     store._effect_reconciliation_schema_ready = False
     store.assert_effect_reconciliation_ready(force_revalidate=True)
 
@@ -188,6 +193,8 @@ def test_0098_inventories_requested_failed_evidence_and_replays_receipt_loss(
     # Simulate SQL commit succeeding while the runner receipt was lost.  The
     # immutable inventory INSERT OR IGNORE must make exact replay idempotent.
     with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 99")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 99")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 98")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id = 98")
         conn.commit()

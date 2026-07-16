@@ -177,7 +177,8 @@ OPERATOR_QUERY_ROUTE_POLICIES = (
             r"/obs/task-runtime/(?:"
             r"executions(?:/[^/]+)?|"
             r"review-locator|"
-            r"effect-reconciliation/(?:candidates|cases|challenge)"
+            r"effect-reconciliation/(?:candidates|cases|challenge)|"
+            r"terminal-reconciliation/(?:candidates|cases|challenge)"
             r")"
         ),
         required_scope="obs:task-runtime:read",

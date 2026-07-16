@@ -27,6 +27,9 @@ from host_brain.task_runtime.graph_cancellation_operation_reconciliation import 
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationError,
+)
 from host_brain.app.observability_runtime.domain_command_ports import (
     OBS_DOMAIN_RESULT_SCHEMA,
     ObsDomainCommandError,
@@ -75,7 +78,7 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     registry = build_default_obs_domain_command_registry()
     expected = tuple(sorted(spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS))
 
-    assert len(expected) == 36
+    assert len(expected) == 37
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
 
@@ -521,4 +524,102 @@ def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
             asyncio.run(ObsCommandRouter(registry).route(envelope))
 
     assert raised.value.reason_code == "EFFECT_RECONCILIATION_UNCERTAIN"
+    assert raised.value.side_effects_may_have_run is True
+
+
+def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> None:
+    captured: dict[str, object] = {}
+
+    class _ReconciliationService:
+        @staticmethod
+        async def reconcile_terminal_state(**kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {
+                "status": "RECONCILED",
+                "case": {"case_id": kwargs["case_id"]},
+                "replayed": False,
+            }
+
+    registry = build_default_obs_domain_command_registry()
+    spec = registry.resolve_spec("task_terminal.reconcile")
+    assert spec is not None
+    assert spec.required_scopes == ("obs:write", "task-runtime:reconcile")
+    assert spec.authority_field == "reconciler_actor_id"
+    envelope = _envelope(
+        "task_terminal.reconcile",
+        {
+            "case_id": "terminal-reconciliation://case/" + "a" * 64,
+            "expected_case_snapshot_sha256": "sha256:" + "b" * 64,
+            "expected_subject_snapshot_sha256": "sha256:" + "c" * 64,
+            "action": "fail_graph_and_release_budget",
+            "target_graph_status": "failed",
+            "target_budget_status": "released",
+            "issued_ts_ms": 1_800_000_000_000,
+            "attestation_ref": "terminal-reconciliation://attestation/proof-1",
+            "attestation_key_id": "reconciler-v1",
+            "attestation_signature": "ed25519:" + "A" * 86 + "==",
+        },
+        principal_id="reconciler.authenticated",
+    )
+    state = SimpleNamespace(
+        task_terminal_reconciliation_command_service=_ReconciliationService(),
+    )
+    with bind_operator_command_runtime(state, raw_body=b"signed-terminal-proof"):
+        result = asyncio.run(
+            registry.resolve_port("task_terminal.reconcile").execute(envelope)
+        )
+
+    assert captured == {
+        "case_id": "terminal-reconciliation://case/" + "a" * 64,
+        "expected_case_snapshot_sha256": "sha256:" + "b" * 64,
+        "expected_subject_snapshot_sha256": "sha256:" + "c" * 64,
+        "action": "FAIL_GRAPH_AND_RELEASE_BUDGET",
+        "target_graph_status": "FAILED",
+        "target_budget_status": "RELEASED",
+        "reconciler_actor_id": "reconciler.authenticated",
+        "issued_ts_ms": 1_800_000_000_000,
+        "attestation_ref": "terminal-reconciliation://attestation/proof-1",
+        "attestation_key_id": "reconciler-v1",
+        "attestation_signature": "ed25519:" + "A" * 86 + "==",
+    }
+    assert result.success is True
+    assert result.side_effects_executed is True
+    assert result.result["output"]["reconciliation"]["status"] == "RECONCILED"
+
+
+def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
+    class _ReconciliationService:
+        @staticmethod
+        def reconcile_terminal_state(**_kwargs):  # noqa: ANN003
+            raise TerminalStateReconciliationError(
+                "TERMINAL_RECONCILIATION_UNCERTAIN",
+                "response lost",
+                side_effects_may_have_run=True,
+            )
+
+    registry = build_default_obs_domain_command_registry()
+    envelope = _envelope(
+        "task_terminal.reconcile",
+        {
+            "case_id": "terminal-reconciliation://case/" + "a" * 64,
+            "expected_case_snapshot_sha256": "sha256:" + "b" * 64,
+            "expected_subject_snapshot_sha256": "sha256:" + "c" * 64,
+            "action": "RELEASE_BUDGET",
+            "target_budget_status": "RELEASED",
+            "issued_ts_ms": 1_800_000_000_000,
+            "attestation_ref": "terminal-reconciliation://attestation/proof-1",
+            "attestation_key_id": "reconciler-v1",
+            "attestation_signature": "ed25519:" + "A" * 86 + "==",
+        },
+    )
+    state = SimpleNamespace(
+        task_terminal_reconciliation_command_service=_ReconciliationService(),
+    )
+    with bind_operator_command_runtime(state, raw_body=b"signed-terminal-proof"):
+        with pytest.raises(ObsCommandRoutingError) as raised:
+            asyncio.run(
+                ObsCommandRouter(registry).route(envelope)
+            )
+
+    assert raised.value.reason_code == "TERMINAL_RECONCILIATION_UNCERTAIN"
     assert raised.value.side_effects_may_have_run is True

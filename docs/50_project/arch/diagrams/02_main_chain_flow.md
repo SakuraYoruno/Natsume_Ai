@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.6
+版本：v2.7
 核对日期：2026-07-16
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -169,8 +169,12 @@ flowchart TD
     CANCEL_FINAL -.-> OUTBOX_REV
     EFFECT_RULE["accepted NODE effect 继续 delivery\n其他未授权 NODE/GRAPH effect 被 fence"] -.-> CANCEL_RECON
     FIRST["0091 success / 0092 cancel\nfirst-writer-wins + exact replay"] -.-> CANCEL_INTENT
-    CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
-    HISTORY["P1：历史 BLOCKED+failure / FAILED+ACTIVE Budget\n归 reconciliation，不由 ACTIVE 重入自动修复"] -.-> REENTRY
+    TERMINAL_GUARD["BLOCKED / FAILED / CANCELLED / COMPLETED\n+ 未结 Budget：Runtime 重入不静默修复"] -.-> TERMINAL_INV["0099 recover_startup 后单次最多 10,000 Graph\nappend-only case/proof/supersession；migration schema-only"]
+    TERMINAL_INV -.-> TERMINAL_AUTO["仅 FAILED + exact atomic failure bundle\n+ 唯一 graph-scope ACTIVE/EXCEEDED Budget\n显式 default-OFF system auto"]
+    TERMINAL_INV -.-> TERMINAL_SIGNED["BLOCKED failure / legacy CANCELLED\nEd25519 signed task_terminal.reconcile"]
+    TERMINAL_INV -.-> TERMINAL_QUARANTINE["child/missing/multi Budget 或完整终态漂移\nquarantine only"]
+    TERMINAL_INV -.-> TERMINAL_FENCE["unresolved current case: graph-wide fence\nGraph/cancel + Budget transition/consume/usage/retry\n0099 proof UoW only bypass"]
+    TERMINAL_FENCE -.-> TERMINAL_CHAIN["old case -> current replacement\nsupersession chain -> trusted proof"]
     REVIEW_QUEUE["0096 Review terminal mutation + enqueue\n同一事务；不复制业务 status"] --> REVIEW_CLAIM["claim + heartbeat + expired takeover\nowner/token/expiry/monotonic fence"]
     REVIEW_CLAIM --> REVIEW_ROUTE["immutable HostCommand surface\n重入 Host/Internal/Scheduler"]
     REVIEW_ROUTE --> REENTRY
@@ -205,8 +209,13 @@ flowchart TD
     style CANCEL_COMPLETE fill:#fff3cd,stroke:#a87500
     style EFFECT_RULE fill:#fff3cd,stroke:#a87500
     style FIRST fill:#fff3cd,stroke:#a87500
-    style CAS fill:#fff3cd,stroke:#a87500
-    style HISTORY fill:#fff3cd,stroke:#a87500
+    style TERMINAL_GUARD fill:#fff3cd,stroke:#a87500
+    style TERMINAL_INV fill:#fff3cd,stroke:#a87500
+    style TERMINAL_AUTO fill:#fff3cd,stroke:#a87500
+    style TERMINAL_SIGNED fill:#fff3cd,stroke:#a87500
+    style TERMINAL_QUARANTINE fill:#fff3cd,stroke:#a87500
+    style TERMINAL_FENCE fill:#fff3cd,stroke:#a87500
+    style TERMINAL_CHAIN fill:#fff3cd,stroke:#a87500
     style REVIEW_QUEUE fill:#d1e7dd,stroke:#177245
     style REVIEW_CLAIM fill:#d1e7dd,stroke:#177245
     style REVIEW_ROUTE fill:#d1e7dd,stroke:#177245
@@ -215,7 +224,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；未收敛事实只 durable defer。一般 Effect `FAILED` 不再自动解除 fence，只有 `COMMITTED + durable receipt` 自动收口。0098 将 legacy candidate 冻结成 append-only case：PENDING signed proof 可进入之后的新 decision evidence，FINALIZED correction 只在 trusted read 校验旧 decision ref/payload digest，旧 decision/fence/evidence 不变。Operation 与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；生产库存 remediation、Budget、部署密钥/凭据、完整 key lifecycle 与真实 canary仍缺，整体 cancellation 继续 OFF。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；0098 只处理 Effect 不确定性。0099 另行冻结 append-only case/proof/supersession，readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec。Classifier 要求唯一 0090、完整 0091/0092 validator 与 exact failure Outbox refs。已 inventoried 未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；旧 case 只能经 replacement/supersession 最终落到可信 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅在历史未决 + current healthy 时生成 signed `NONE` 且零业务写。这不是通用恢复器；两个入口默认 OFF，外部 deployment inventory/key lifecycle/canary未知，整体保持 `PRODUCTION_OFF / CANARY_NOT_RUN`。
 
 ## Plan 分支的真实边界
 
@@ -239,9 +248,9 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 delivery、0094 cancellation coordination、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`；取消业务 reconciliation、历史修复、Budget 高竞争、部署凭据和真实 canary尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 到 0099 terminal reconciliation 均有分范围证据。0099 只允许带唯一 graph-scope Budget 的 exact FAILED bundle 显式 auto；child/missing/multi Budget 与完整终态漂移必须 quarantine，不代表 general/multi-node/pre-budget recovery。部署 inventory/remediation、凭据/key lifecycle 与真实 canary仍未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093/0094/0096 coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
+5. 启动按 migration/readiness（含0099）→ `recover_startup` → 0099 单次最多 10,000 个 terminal Graph inventory → 可选 default-off exact auto → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，异常 fail closed。0099 不扫描并重做 worker；它只处理已终态 Graph 的显式 case/proof/supersession。
 
 ## 代码锚点
 
