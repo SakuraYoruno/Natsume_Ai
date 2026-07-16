@@ -39,7 +39,7 @@ def test_0100_catalog_checksum_and_append_only_schema_are_exact(
         ts_ms=100,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] >= 100
+    assert result.summary["current_version"] >= 101
 
     asset_path = (
         Path(__file__).parents[2]

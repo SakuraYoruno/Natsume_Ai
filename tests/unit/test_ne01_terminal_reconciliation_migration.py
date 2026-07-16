@@ -39,8 +39,8 @@ def _migrated_db(tmp_path, name: str) -> tuple[SQLiteMigrationRunner, Any]:
     runner = SQLiteMigrationRunner(db_path=db_path)
     result = runner.apply_migrations(request_id=f"0099:{name}", ts_ms=99)
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] >= 100
-    assert "0100_task_runtime_graph_revision_supersession" in {
+    assert result.summary["current_version"] >= 101
+    assert "0101_agent_workspace_authority" in {
         record.migration_id for record in result.records
     }
     return runner, db_path
@@ -319,8 +319,8 @@ def test_0099_is_schema_only_and_preserves_existing_authority_rows(tmp_path) -> 
 
     applied = runner.apply_migrations(request_id="0099-schema-only-reapply", ts_ms=100)
     assert applied.success is True, applied.as_dict()
-    assert applied.summary["current_version"] >= 100
-    assert "0100_task_runtime_graph_revision_supersession" in {
+    assert applied.summary["current_version"] >= 101
+    assert "0101_agent_workspace_authority" in {
         record.migration_id for record in applied.records
     }
 

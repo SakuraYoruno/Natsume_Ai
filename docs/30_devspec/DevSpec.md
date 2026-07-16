@@ -411,6 +411,10 @@ Identity Migration 在隔离环境执行，产出 diff、persona/relationship re
 - 使用解析后的路径边界，禁止字符串前缀判断逃逸。
 - Code/Skill 实验使用隔离 worktree/container；主工作区和 secret 默认只读。
 - subprocess 不是安全 sandbox；需要执行不可信材料时必须使用可验证隔离。
+- W1 的当前实现以 0101 `agent_workspace_authority` 为唯一持久权威：authority 必须不可变绑定 root WorkOrder、graph ID/revision、owner、逻辑 managed-root ref、source、isolation mode 与 canonical allow-list；数据库不得保存或选择物理根路径。
+- 租约必须保存 owner、token digest、expiry、单调 fencing token 和 status version。响应丢失只能精确重放；过期接管后的旧 fence 必须在文件回调前失败。WorkOrder 只可携带逻辑 `workspace_id`，raw lease token 只能由服务端 provider 注入。
+- `WorkspacePolicy` 未获得显式 allocator/provider 注入时必须拒绝 `durable_workspace`。当前生产 composition 尚未注入，W1 只定级为 `WIRED_NOT_PRODUCTION_INJECTED`；目录级 fence 不能被描述为 worktree/container 或 OS/tenant 隔离。
+- cleanup receipt 状态机只记录可信清理结果；当前 allocator 只返回配置根下受 fence 保护的目标且不执行递归删除。可信清理 continuation、租约 heartbeat、崩溃后文件系统对账与 handle-level TOCTOU 防护仍是未完成项。
 
 ## 13. Schema、Migration 与恢复合同
 

@@ -326,7 +326,7 @@ D1 已先关闭路由级最直接的多 app 串扰：`HostRoutePorts` 是每个 
 | Knowledge OS | Memory、Retrieval、Canon、Markdown KB | 缺统一 provenance、版本、过期、冲突与 Decision Record 生命周期 |
 | Identity | `release/identity_snapshot.py` | snapshot/diff/review/rollback 合同存在；gate 默认关闭，未形成真实 migration executor |
 | Runtime Guardian | health、degradation、heartbeat、service catalog | degradation/recovery evidence 已接部分生产链；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与 SLO owner 不完整 |
-| Workspace Isolation | `agent_runtime/workspace_paths.py`、`agent_runtime/workspace_policy.py`、`agent_runtime/agent_tools.py` | D0 canonical resolver 已封闭受管文件 I/O/list、截图、Verification cwd/argv 与 git cwd 的绝对路径、遍历、同前缀兄弟目录和已解析 link 逃逸。W0 又在 model/tool 前拒绝写能力 WorkOrder 的 `runtime_repo`、裸 path、git URL 和自定义 root，只保留运行时自有 `temp_workspace`；read-only inspect 仍可读主仓。工具列表取 run mode 与 WorkOrder allow/forbid 的交集；不支持的 shell 已撤下，默认 subprocess Python 不被视为隔离执行。状态为 `PARTIAL_W0_FAIL_CLOSED`，仍无 durable owner/lease/cleanup receipt、隔离 worktree 或 OS/tenant 边界，且有 handle-level TOCTOU 风险 |
+| Workspace Isolation | `agent_runtime/workspace_paths.py`、`agent_runtime/workspace_policy.py`、`agent_runtime/workspace_allocator.py`、`persistence/workspace_repository.py` | D0/W0 路径围栏与写能力熔断继续生效。0101 新增每 graph revision 唯一的 Workspace authority，绑定 root WorkOrder、owner、逻辑配置根、source、isolation mode 与 canonical allow-list；租约持久化 owner/token digest/expiry/单调 fence，支持精确重放和过期接管，cleanup receipt 终态不可变。数据库不保存物理根，WorkOrder 不携带 raw lease token。状态为 `PARTIAL_W1_AUTHORITY_WIRED / PRODUCTION_UNINJECTED`：生产 composition 未注入 allocator/server-side provider，可信清理器、heartbeat、worktree/container、OS/tenant 与 handle-level TOCTOU 防护仍缺 |
 
 ## 9. 仓库边界
 

@@ -23,7 +23,7 @@
     "terminal_reconciliation_auto": "DEFAULT_OFF",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "failure_replan": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET",
-    "workspace_write": "FAIL_CLOSED_W0_STOPGAP",
+    "workspace_write": "FAIL_CLOSED_W0_WITH_W1_DURABLE_AUTHORITY_UNINJECTED",
     "budget": "PARTIAL_CONTENTION_PROVEN",
     "production_canary": "NOT_RUN"
   },
@@ -654,16 +654,26 @@
       "status": "PARTIAL",
       "path_safety": "D0_WIRED",
       "write_fuse": "FAIL_CLOSED_W0_STOPGAP",
+      "durable_authority": "W1_WIRED_NOT_PRODUCTION_INJECTED",
+      "migration": "0101_agent_workspace_authority",
+      "physical_root_authority": "PROCESS_CONFIGURATION_ONLY",
+      "work_order_lease_payload": "LOGICAL_WORKSPACE_ID_ONLY",
+      "lease_fencing": "DURABLE_OWNER_TOKEN_DIGEST_EXPIRY_MONOTONIC_FENCE",
+      "cleanup": "RECEIPT_STATE_MACHINE_WIRED_TRUSTED_EXECUTOR_MISSING",
       "tool_authority": "RUN_MODE_INTERSECT_ALLOWED_MINUS_FORBIDDEN",
       "subprocess_python": "DENIED_AS_WORKSPACE_ISOLATION",
       "shell_execution": "REMOVED_UNTIL_CONTROLLED_CONTAINER_EXECUTOR_EXISTS",
       "evidence": [
         "host_brain/agent_runtime/workspace_paths.py",
         "host_brain/agent_runtime/workspace_policy.py",
+        "host_brain/agent_runtime/workspace_allocator.py",
         "host_brain/agent_runtime/agent_tools.py",
+        "host_brain/persistence/workspace_repository.py",
+        "host_brain/audit/migrations/0101_agent_workspace_authority.sql",
         "tests/unit/test_workspace_path_resolver.py",
         "tests/unit/test_agent_tool_workspace_paths.py",
         "tests/unit/test_ne01_workspace_w0_fuse.py",
+        "tests/unit/test_ne01_workspace_w1_authority.py",
         "tests/contract/test_nle_verification_gate_contract.py"
       ],
       "protected_surfaces": [
@@ -673,13 +683,14 @@
         "agent git cwd"
       ],
       "missing": [
-        "durable per-task workspace authority",
+        "production composition injection for durable workspace authority",
         "runtime_repo retirement for read-only inspection",
-        "collision-free leased workspace allocation and cleanup receipt",
+        "trusted cleanup executor and cleanup continuation",
+        "lease heartbeat and abandoned-workspace sweep",
         "OS/tenant/worktree isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path resolution rejects traversal, absolute/UNC/device paths, same-prefix sibling escapes, and resolved symlink/junction escapes on scoped Agent/Verification surfaces. W0 additionally rejects write-capable runtime_repo, arbitrary path, git_url, and custom root selectors before model/tool execution; only the runtime-owned temp_workspace is accepted. Read-only inspect may still read runtime_repo. Tool exposure now intersects run_mode with WorkOrder actions, subprocess Python is denied as an isolation boundary, and the unsupported shell tool is removed. This remains a fail-closed stopgap without durable ownership, collision fencing, cleanup continuation, worktree, OS, or tenant isolation."
+      "reason": "Canonical path resolution and the W0 write fuse remain active. Migration 0101 plus WorkspaceRepository/WorkspaceAllocator now bind one logical workspace to the exact graph revision, root WorkOrder, owner, configured managed-root reference, isolation mode and canonical allow-list. Lease acquisition/replay, expiry takeover, monotonic fencing and cleanup receipt state are durable; database rows never select a physical root, and raw lease tokens never enter WorkOrder payloads. WorkspacePolicy requires an injected allocator and server-side lease provider, which production composition does not yet supply, so the new path is fail closed by default. The allocator does not recursively delete, there is no trusted cleanup continuation or lease heartbeat, and directory fencing is not worktree/container, OS/tenant or handle-level isolation."
     },
     "evolution_lab": {"status": "PLACEHOLDER"},
     "counterfactual_analysis": {"status": "MISSING"},
