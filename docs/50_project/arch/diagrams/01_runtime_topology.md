@@ -53,6 +53,7 @@ flowchart LR
     DOMAIN --> REDIS
     OBS -->|"read-only durable projection"| DOMAIN
     OP --> MON --> OBS
+    MON -.->|"Operator BFF: task_graph.cancel\nexact revision；默认 OFF"| HOST
     EDGE --> PET
     HOST -."static/compat hosting".-> MON
 ```
@@ -82,6 +83,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。0096 已接通 task-bound Review 自动续跑、PRE null Attempt 和 claim/Task-lease hand-off；它未解决 0092 operation/effect cancellation reconciliation。Cancellation 生产 verifier/HTTP/UI/canary 仍缺，atomic/bounded/cancellation 均 OFF；Review 真实 canary、Budget 高竞争也未闭环。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`：Host/Internal/Scheduler 共享 Secure Ingress verifier，Gateway/BFF/UI 精确提交 revision；开启时要求 Secure Ingress `ENFORCE` 且 Gateway 可用，否则 Host 启动 fail closed。0096 已接通 task-bound Review 自动续跑，但它未解决 0092 operation/effect cancellation reconciliation。业务对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺，atomic/bounded/cancellation 均 OFF。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

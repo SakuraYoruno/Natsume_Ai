@@ -9,9 +9,18 @@ from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     OBS_COMMAND_ENVELOPE_SCHEMA,
     ObsCommandAuthority,
+    ObsCommandContractError,
     ObsCommandEnvelope,
     bind_server_authority,
 )
+from host_brain.observability.operator_command_gateway import (
+    bind_operator_command_runtime,
+)
+from host_brain.observability.command_router import (
+    ObsCommandRouter,
+    ObsCommandRoutingError,
+)
+from host_brain.composition.runtime_group import GraphCancellationOperatorError
 from host_brain.app.observability_runtime.domain_command_ports import (
     OBS_DOMAIN_RESULT_SCHEMA,
     ObsDomainCommandError,
@@ -24,6 +33,7 @@ def _envelope(
     payload: dict[str, object],
     *,
     principal_id: str = "principal.authenticated",
+    body_sha256: str = "0" * 64,
 ) -> ObsCommandEnvelope:
     registry = build_default_obs_domain_command_registry()
     spec = registry.resolve_spec(command_id)
@@ -44,6 +54,7 @@ def _envelope(
         authority=authority,
         claim_ref=f"secure-ingress://claim/{command_id}",
         audit_ref=f"audit://obs-command/{command_id}",
+        body_sha256=body_sha256,
     )
 
 
@@ -58,7 +69,7 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     registry = build_default_obs_domain_command_registry()
     expected = tuple(sorted(spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS))
 
-    assert len(expected) == 33
+    assert len(expected) == 34
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
 
@@ -179,3 +190,140 @@ def test_domain_exception_propagates_without_legacy_degraded_result(monkeypatch)
     monkeypatch.setattr(embodiment, "submit_avatar_behavior", _fail)
     with pytest.raises(RuntimeError, match="edge unavailable"):
         _execute("avatar.behavior.apply", {"behavior_id": "thinking"})
+
+
+def test_task_graph_cancel_manifest_owns_scope_and_denies_caller_authority() -> None:
+    registry = build_default_obs_domain_command_registry()
+    spec = registry.resolve_spec("task_graph.cancel")
+    assert spec is not None
+    assert spec.action == "obs:command:task_graph.cancel"
+    assert spec.required_scopes == ("obs:write", "task-runtime:cancel")
+    assert "task-review:write" not in spec.required_scopes
+
+    base_payload: dict[str, object] = {
+        "graph_id": "graph-cancel-1",
+        "graph_revision": 3,
+        "reason_code": "OPERATOR_REQUESTED",
+    }
+    for denied_field in ("source", "request_identity"):
+        with pytest.raises(
+            ObsCommandContractError,
+            match="OBS_COMMAND_PAYLOAD_FIELD_DENIED",
+        ):
+            spec.payload_schema.validate({
+                **base_payload,
+                denied_field: "caller-forged-authority",
+            })
+
+    authority = ObsCommandAuthority.bind(
+        principal_id="principal.authenticated",
+        tenant_id="tenant-test",
+        request_id="request-task-graph-cancel",
+    )
+    validated = spec.payload_schema.validate({
+        **base_payload,
+        "principal_id": "principal.caller-forged",
+    })
+    bound = bind_server_authority(validated, spec=spec, authority=authority)
+    assert bound["principal_id"] == "principal.authenticated"
+    assert "source" not in bound
+    assert "request_identity" not in bound
+
+
+def test_task_graph_cancel_passes_authenticated_authority_and_marks_pending_intent_committed() -> None:
+    captured: dict[str, object] = {}
+
+    class _CancellationService:
+        @staticmethod
+        async def request_graph_cancellation(**kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {
+                "graph_id": kwargs["graph_id"],
+                "graph_revision": kwargs["graph_revision"],
+                "status": "PENDING",
+            }
+
+    registry = build_default_obs_domain_command_registry()
+    port = registry.resolve_port("task_graph.cancel")
+    assert port is not None
+    authenticated_body_sha256 = "a" * 64
+    envelope = _envelope(
+        "task_graph.cancel",
+        {
+            "graph_id": "graph-cancel-2",
+            "graph_revision": 7,
+            "reason_code": "operator_requested",
+            "principal_id": "principal.caller-forged",
+        },
+        principal_id="principal.authenticated",
+        body_sha256=authenticated_body_sha256,
+    )
+    state = SimpleNamespace(
+        task_graph_cancellation_command_service=_CancellationService(),
+    )
+    with bind_operator_command_runtime(
+        state,
+        raw_body=b"different-untrusted-runtime-fallback",
+    ):
+        result = asyncio.run(port.execute(envelope))
+
+    assert captured["graph_id"] == "graph-cancel-2"
+    assert captured["graph_revision"] == 7
+    assert captured["reason_code"] == "OPERATOR_REQUESTED"
+    assert set(captured) == {
+        "graph_id",
+        "graph_revision",
+        "reason_code",
+        "authority",
+    }
+    authority = captured["authority"]
+    assert isinstance(authority, dict)
+    assert authority == {
+        "allowed": True,
+        "audit_ref": "audit://obs-command/task_graph.cancel",
+        "body_sha256": authenticated_body_sha256,
+        "claim_ref": "secure-ingress://claim/task_graph.cancel",
+        "duplicate": False,
+        "principal_id": "principal.authenticated",
+        "tenant_id": "tenant-test",
+        "request_id": "request-task_graph.cancel",
+        "action": "obs:command:task_graph.cancel",
+        "required_scopes": ("obs:write", "task-runtime:cancel"),
+    }
+    assert result.success is True
+    assert result.side_effects_executed is True
+    assert result.result["principal_id"] == "principal.authenticated"
+    assert result.result["output"]["cancellation"] == {
+        "graph_id": "graph-cancel-2",
+        "graph_revision": 7,
+        "status": "PENDING",
+    }
+
+
+def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
+    class _CancellationService:
+        @staticmethod
+        async def request_graph_cancellation(**_kwargs):  # noqa: ANN003
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_REJECTED",
+                side_effects_may_have_run=False,
+            )
+
+    registry = build_default_obs_domain_command_registry()
+    envelope = _envelope(
+        "task_graph.cancel",
+        {
+            "graph_id": "graph-cancel-rejected",
+            "graph_revision": 3,
+            "reason_code": "OPERATOR_REQUESTED",
+        },
+    )
+    state = SimpleNamespace(
+        task_graph_cancellation_command_service=_CancellationService(),
+    )
+    with bind_operator_command_runtime(state, raw_body=b"trusted-body"):
+        with pytest.raises(ObsCommandRoutingError) as raised:
+            asyncio.run(ObsCommandRouter(registry).route(envelope))
+
+    assert raised.value.reason_code == "GRAPH_CANCELLATION_REJECTED"
+    assert raised.value.side_effects_may_have_run is False

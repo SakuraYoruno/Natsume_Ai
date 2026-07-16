@@ -80,6 +80,40 @@ sequenceDiagram
 
 目标是所有有副作用的 Operator 动作都进入 Governed Runtime。当前仍有部分专用 control endpoint 直接调用 domain/embodiment port，因此 Operator 统一 authority 属于需要继续收敛的边界，不能把整个 Observability 面描述成纯读取后宣称完成。
 
+TaskGraph 取消是已接通但默认关闭的窄切片：
+
+```mermaid
+sequenceDiagram
+    participant U as Task Runtime UI
+    participant B as Same-origin Operator BFF
+    participant C as Operator Command Gateway
+    participant V as Secure Ingress Verifier
+    participant G as Governed Runtime Group
+    participant R as Host / Internal / Scheduler
+    participant S as Durable Stores
+
+    U->>B: task_graph.cancel(graph_id, exact revision, reason)
+    B->>C: canonical command envelope
+    C->>S: commit Secure Ingress audit + claim
+    C->>V: server-owned structured authority
+    V->>S: resolve committed authority by audit_ref
+    V-->>G: verified request identity = audit_ref
+    G->>S: resolve exact HostCommand surface
+    G->>R: route to owning runtime
+    alt command returns
+        R->>S: request/replay 0092 intent
+        R-->>G: durable cancellation state
+    else downstream error
+        G->>S: read exact revision cancellation intent
+        S-->>G: none / matching / unreadable
+        G-->>C: not-executed / may-have-run / uncertain
+    end
+    C-->>B: durable command receipt
+    B-->>U: refresh durable TaskGraph detail
+```
+
+该命令要求 `obs:write + task-runtime:cancel`，Host、Internal、Scheduler 共享同一个 verifier；Application 不接受 UI/调用方自报 request identity 或 source。`HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED` 默认 `false`，显式开启时 Secure Ingress 必须为 `ENFORCE` 且 Operator Command Gateway 必须可用，否则 ASGI 在开放路由前启动失败。这里证明的是 `WIRED_DEFAULT_OFF`，不是 cancellation 已完成或已生产启用；签名业务对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺。
+
 ## Task/Review 观测
 
 ```mermaid
@@ -99,7 +133,7 @@ flowchart LR
     Q --> API --> PAGE
 ```
 
-UI 应按范围显示真实能力边界：task-bound Review 在一次性 token 被消费、拒绝或到期后会由 0096 worker 自动续跑/收口；非 Task subject 不会被自动调度。ReviewStore 仍是 decision/token authority，0096 coordination 只负责 claim、takeover 和重入，不得在 UI 中被显示成第二个 Review status。Review HTTP 决策要求独立 `review.operator / review:decide` principal；Operator credential/UI 与真实 canary仍未部署完成。
+UI 应按范围显示真实能力边界：TaskGraph 取消必须由用户选择 exact revision，命令完成后刷新 durable projection，不能先把按钮响应显示成 Graph 已 `CANCELLED`。task-bound Review 在一次性 token 被消费、拒绝或到期后会由 0096 worker 自动续跑/收口；非 Task subject 不会被自动调度。ReviewStore 仍是 decision/token authority，0096 coordination 只负责 claim、takeover 和重入，不得在 UI 中被显示成第二个 Review status。Review HTTP 决策要求独立 `review.operator / review:decide` principal；部署凭据与真实 canary仍未完成。
 
 ## 生命周期
 

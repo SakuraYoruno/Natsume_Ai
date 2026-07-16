@@ -121,8 +121,11 @@ class _AuthorityVerifier:
 
     def verify_graph_cancellation(self, **binding: Any) -> dict[str, Any]:
         self.calls.append(dict(binding))
+        authority = dict(binding.pop("authority"))
         return {
             **binding,
+            "request_id": authority["request_id"],
+            "request_identity": authority["audit_ref"],
             **self.drift,
             "principal_id": "principal-verified",
         }
@@ -146,8 +149,11 @@ def _cancel_arguments(command: Any, graph: TaskGraph) -> dict[str, Any]:
         "command_id": command.command_id,
         "graph_id": graph.graph_id,
         "graph_revision": graph.revision,
-        "request_id": "request-b5c-cancel",
-        "request_identity": "authority://verified/principal-b5c",
+        "authority": {
+            "request_id": "request-b5c-cancel",
+            "audit_ref": "authority://verified/principal-b5c",
+            "principal_id": "principal-verified",
+        },
         "source": "USER",
         "reason_code": "USER_REQUESTED",
     }

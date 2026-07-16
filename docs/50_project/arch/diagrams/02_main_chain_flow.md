@@ -143,7 +143,13 @@ flowchart TD
     TAKEOVER --> DRAIN["canonical total_pending=0 才 DRAINED\nclaim/backoff/blocked backlog 为 DEFERRED"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
-    CANCEL_ENTRY["内部 verified cancellation entry\nexact Graph revision；生产未注入 verifier"] -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    CANCEL_UI["Task Runtime UI\nexact Graph revision"] -.-> CANCEL_BFF["同源 Operator BFF\ntask_graph.cancel"]
+    CANCEL_BFF -.-> CANCEL_GATE["Operator Command Gateway\nobs:write + task-runtime:cancel"]
+    CANCEL_OFF["feature flag 默认 OFF\n非 ENFORCE / Gateway 不可用\n启动 fail closed"] -.-> CANCEL_GATE
+    CANCEL_GATE -.-> CANCEL_ENTRY["共享 Secure Ingress verifier\ncommitted audit/claim + canonical body"]
+    CANCEL_ENTRY -.-> CANCEL_ROUTE["immutable HostCommand surface\nHost / Internal / Scheduler"]
+    CANCEL_ROUTE -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    CANCEL_ROUTE -.-> CANCEL_UNCERTAIN["下游异常后读 exact durable intent\n无 intent=未执行；匹配=可能已执行\n无法证明则保守 uncertain"]
     CANCEL_INTENT -.-> CANCEL_LOCAL["intent 提交后才 cancel/join\n本地 child + heartbeat"]
     CANCEL_INTENT -.-> CANCEL_RECON["active ownership / operation / effect / review\nadvance + reconciliation gate"]
     CANCEL_SCAN["0094 composition-owned scanner\nrecovery-scoped owner"] -.-> CANCEL_CLAIM["coordination claim + heartbeat\nexpired takeover / stale fence"]
@@ -169,6 +175,12 @@ flowchart TD
     style OUTBOX_REV fill:#d1e7dd,stroke:#177245
     style EVENT_REV fill:#d1e7dd,stroke:#177245
     style CANCEL_ENTRY fill:#fff3cd,stroke:#a87500
+    style CANCEL_UI fill:#fff3cd,stroke:#a87500
+    style CANCEL_BFF fill:#fff3cd,stroke:#a87500
+    style CANCEL_GATE fill:#fff3cd,stroke:#a87500
+    style CANCEL_OFF fill:#fff3cd,stroke:#a87500
+    style CANCEL_ROUTE fill:#fff3cd,stroke:#a87500
+    style CANCEL_UNCERTAIN fill:#fff3cd,stroke:#a87500
     style CANCEL_INTENT fill:#fff3cd,stroke:#a87500
     style CANCEL_LOCAL fill:#fff3cd,stroke:#a87500
     style CANCEL_SCAN fill:#fff3cd,stroke:#a87500
@@ -190,7 +202,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination；0095 收口 revisioned Graph Outbox/Event/Operator identity；0096 收口 task-bound Review continuation；0097 收口 node-grant batch 跨进程唯一性。ReviewStore 的终态 mutation 与 coordination enqueue 原子提交，worker 按原 surface 重入；PRE 不造 Attempt，POST 不重跑 worker。credential 覆盖 budget window，但 READY 与首次 worker 校验仍受 live claim fence 约束，随后由 Task lease 管已开始执行。0092 intent/decision 仍是取消业务 authority；operation/effect/review cancellation facts 未 reconciliation 时只 durable defer。缺失的生产 verifier/HTTP/UI 是 cancellation 边界；Review 决策已有独立 `review:decide` policy，但 Operator credential/UI 与真实 canary 仍缺。
+0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination；0095 收口 revisioned Graph Outbox/Event/Operator identity；0096 收口 task-bound Review continuation；0097 收口 node-grant batch 跨进程唯一性。ReviewStore 的终态 mutation 与 coordination enqueue 原子提交，worker 按原 surface 重入；PRE 不造 Attempt，POST 不重跑 worker。credential 覆盖 budget window，但 READY 与首次 worker 校验仍受 live claim fence 约束，随后由 Task lease 管已开始执行。0092 intent/decision 仍是取消业务 authority；operation/effect/review cancellation facts 未 reconciliation 时只 durable defer。Cancellation 的共享生产 verifier、Gateway/BFF/UI 与 exact surface 路由已接线但默认 OFF；部署凭据与真实 canary仍缺。Review 决策已有独立 `review:decide` policy，但真实 canary 也未完成。
 
 ## Plan 分支的真实边界
 
@@ -214,7 +226,7 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 delivery、0094 cancellation coordination、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation 生产 verifier/HTTP/UI、取消业务 reconciliation、历史半提交、Budget 高竞争和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 delivery、0094 cancellation coordination、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`；取消业务 reconciliation、历史修复、Budget 高竞争、部署凭据和真实 canary尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093/0094/0096 coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
 

@@ -3869,6 +3869,136 @@
         ]
       }
     },
+    "/v1/host/obs-commands/task_graph.cancel": {
+      "post": {
+        "operationId": "execute_task_graph_cancel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_graph.cancel",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "graph_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "graph_revision": {
+                        "type": "integer"
+                      },
+                      "reason_code": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "graph_id",
+                      "graph_revision",
+                      "reason_code"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_graph.cancel",
+        "x-natsume-action": "obs:command:task_graph.cancel",
+        "x-natsume-command-id": "task_graph.cancel",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-runtime:cancel"
+        ]
+      }
+    },
     "/v1/host/obs-commands/task_review.approve": {
       "post": {
         "operationId": "execute_task_review_approve",

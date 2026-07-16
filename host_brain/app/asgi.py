@@ -100,6 +100,9 @@ from host_brain.composition.task_runtime import (
     build_process_task_runtime_container,
 )
 from host_brain.task_runtime.review_command_service import TaskReviewCommandService
+from host_brain.secure_ingress.graph_cancellation_authority import (
+    SecureIngressGraphCancellationAuthorityVerifier,
+)
 from host_brain.scheduler.task_registry import (
     SchedulerTaskConfig,
     TaskPriority,
@@ -311,6 +314,36 @@ def _command_ingress_hmac_secrets() -> dict[str, str]:
     if scheduler_key and scheduler_secret:
         configured.setdefault(scheduler_key, scheduler_secret)
     return configured
+
+
+def _assert_graph_cancellation_operator_startup(
+    *,
+    enabled: bool,
+    command_ingress: Any,
+    security: Any,
+) -> None:
+    """Fail closed before route activation when cancellation authority is absent."""
+
+    if not enabled:
+        return
+    mode = getattr(command_ingress, "mode", None)
+    mode_value = getattr(mode, "value", mode)
+    if str(mode_value or "").strip().upper() != "ENFORCE":
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
+        )
+    composition = getattr(security, "obs_command_composition", None)
+    if (
+        composition is None
+        or not bool(getattr(composition, "enabled", False))
+        or not bool(getattr(composition, "execution_enabled", False))
+        or not callable(
+            getattr(getattr(composition, "ingress", None), "execute", None)
+        )
+    ):
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
+        )
 
 
 def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
@@ -732,11 +765,28 @@ def create_app() -> FastAPI:
                 canon_container = canon
                 application.state.canon_container = canon
                 runtime_settings = get_core_settings()
+                cancellation_operator_enabled = bool(
+                    getattr(
+                        runtime_settings,
+                        "task_graph_cancellation_operator_enabled",
+                        False,
+                    )
+                )
                 ingress_settings = get_input_settings()
                 command_ingress = build_process_command_ingress_container(
                     canonical_db_path=task_runtime.canonical_db_path,
                     mode=ingress_settings.secure_ingress_mode,
                     hmac_secrets=_command_ingress_hmac_secrets(),
+                )
+                _assert_graph_cancellation_operator_startup(
+                    enabled=cancellation_operator_enabled,
+                    command_ingress=command_ingress,
+                    security=security,
+                )
+                cancellation_authority_verifier = (
+                    SecureIngressGraphCancellationAuthorityVerifier(
+                        command_ingress.store
+                    )
                 )
                 internal_ingress = InternalAgentIngress(
                     evaluator=command_ingress.evaluator,
@@ -772,6 +822,9 @@ def create_app() -> FastAPI:
                     capability_broker=get_capability_broker(),
                     model_attempt_service=ApplicationModelAttemptServicePort(),
                     production_authority_verifier=verify_durable_production_authority,
+                    cancellation_authority_verifier=(
+                        cancellation_authority_verifier
+                    ),
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
                 )
@@ -785,6 +838,9 @@ def create_app() -> FastAPI:
                     canonical_executor=AgentRuntimeExecutor(
                         model_attempt_service=get_model_attempt_service(),
                         prompt_registry=get_prompt_registry(),
+                    ),
+                    cancellation_authority_verifier=(
+                        cancellation_authority_verifier
                     ),
                 )
 
@@ -994,6 +1050,9 @@ def create_app() -> FastAPI:
                         scheduler_settings.clock_poll_interval_seconds
                     ),
                     clock_batch_limit=scheduler_settings.clock_batch_limit,
+                    cancellation_authority_verifier=(
+                        cancellation_authority_verifier
+                    ),
                 )
                 runtime_group = GovernedRuntimeGroup(
                     {
@@ -1008,6 +1067,10 @@ def create_app() -> FastAPI:
                     review_continuation_worker_id=(
                         f"{task_runtime.recovery_id}::review-continuation"
                     ),
+                    graph_cancellation_operator_enabled=(
+                        cancellation_operator_enabled
+                    ),
+                    graph_cancellation_state_reader=task_runtime.task_store,
                 )
                 review_commands = TaskReviewCommandService(
                     review_store=task_runtime.review_store,
@@ -1035,6 +1098,9 @@ def create_app() -> FastAPI:
                 application.state.governed_scheduler_runtime = scheduler.runtime
                 application.state.scheduler_container = scheduler
                 application.state.task_review_command_service = review_commands
+                application.state.task_graph_cancellation_command_service = (
+                    runtime_group
+                )
                 application.state.command_ingress_container = command_ingress
                 application.state.memory_service_container = memory
                 yield
@@ -1054,6 +1120,7 @@ def create_app() -> FastAPI:
                 application.state.governed_scheduler_runtime = None
                 application.state.scheduler_container = None
                 application.state.task_review_command_service = None
+                application.state.task_graph_cancellation_command_service = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
                 try:
@@ -1155,6 +1222,7 @@ def create_app() -> FastAPI:
     application.state.governed_scheduler_runtime = None
     application.state.scheduler_container = None
     application.state.task_review_command_service = None
+    application.state.task_graph_cancellation_command_service = None
     application.state.canon_container = None
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports

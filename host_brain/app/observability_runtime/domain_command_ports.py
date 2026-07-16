@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Callable, Mapping
 
@@ -18,8 +17,10 @@ from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     ObsCommandEnvelope,
     ObsCommandExecutionResult,
+    ObsCommandPortExecutionError,
     ObsCommandPortRegistry,
 )
+from host_brain.composition.runtime_group import GraphCancellationOperatorError
 from host_brain.observability.operator_command_gateway import operator_runtime_value
 
 
@@ -96,22 +97,14 @@ class _DomainCommandPort:
         payload["_operator_authority"] = {
             "allowed": True,
             "audit_ref": envelope.audit_ref,
-            "body_sha256": str(
-                operator_runtime_value("command_body_sha256")
-                or hashlib.sha256(
-                    json.dumps(
-                        dict(envelope.payload),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode("utf-8")
-                ).hexdigest()
-            ),
+            "body_sha256": envelope.body_sha256,
             "claim_ref": envelope.claim_ref,
             "duplicate": False,
             "principal_id": envelope.authority.principal_id,
+            "tenant_id": envelope.authority.tenant_id,
             "request_id": envelope.authority.request_id,
+            "action": envelope.action,
+            "required_scopes": tuple(envelope.required_scopes),
         }
         # This value was injected by bind_server_authority.  Do not read
         # envelope.authority here: the payload is the command/domain boundary.
@@ -526,6 +519,38 @@ def _security_hunt(payload: Mapping[str, Any], _request_id: str) -> Any:
     })
 
 
+async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_graph_cancellation_command_service")
+    request_cancellation = getattr(service, "request_graph_cancellation", None)
+    if not callable(request_cancellation):
+        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_UNAVAILABLE")
+    authority = payload.get("_operator_authority")
+    if not isinstance(authority, Mapping):
+        raise ObsDomainCommandError("OBS_DOMAIN_BOUND_AUTHORITY_INVALID")
+    try:
+        result = request_cancellation(
+            graph_id=_required_text(payload, "graph_id"),
+            graph_revision=int(payload["graph_revision"]),
+            reason_code=_required_text(payload, "reason_code").upper(),
+            authority=dict(authority),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except GraphCancellationOperatorError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "cancellation": dict(result),
+    }
+
+
 def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
     service = _task_review_service()
     review_id = _required_text(payload, "review_id")
@@ -615,6 +640,7 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "bond.event.submit": _bond_event,
     "edge.command.push": _edge_command_push,
     "security.hunt.run_once": _security_hunt,
+    "task_graph.cancel": _task_graph_cancel,
     "task_review.approve": _task_review_approve,
     "task_review.reject": _task_review_reject,
     "task_review.resume": _task_review_resume,

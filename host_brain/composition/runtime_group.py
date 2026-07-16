@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 import inspect
 import time
@@ -27,6 +28,18 @@ _WAITING_REVIEW_STATUSES = frozenset(
 _DENIED_REVIEW_STATUSES = frozenset({"REJECTED", "EXPIRED", "CANCELLED"})
 
 
+class GraphCancellationOperatorError(RuntimeError):
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        side_effects_may_have_run: bool,
+    ) -> None:
+        self.reason_code = str(reason_code)
+        self.side_effects_may_have_run = bool(side_effects_may_have_run)
+        super().__init__(self.reason_code)
+
+
 class GovernedRuntimeGroup:
     def __init__(
         self,
@@ -38,6 +51,8 @@ class GovernedRuntimeGroup:
         claim_result_store: Any | None = None,
         review_continuation_worker_factory: Callable[..., Any] | None = None,
         review_continuation_worker_id: str | None = None,
+        graph_cancellation_operator_enabled: bool = False,
+        graph_cancellation_state_reader: Any | None = None,
     ) -> None:
         normalized = {
             str(name).strip(): runtime
@@ -57,6 +72,20 @@ class GovernedRuntimeGroup:
         self._review_worker: Any | None = None
         self._review_worker_started = False
         self._continuation_open = False
+        self._graph_cancellation_operator_enabled = bool(
+            graph_cancellation_operator_enabled
+        )
+        self._graph_cancellation_state_reader = graph_cancellation_state_reader
+        if self._graph_cancellation_operator_enabled and not callable(
+            getattr(
+                graph_cancellation_state_reader,
+                "get_graph_cancellation_for_graph",
+                None,
+            )
+        ):
+            raise TypeError(
+                "enabled Graph cancellation Operator requires a durable state reader"
+            )
 
         review_dependencies = (
             review_store,
@@ -199,6 +228,161 @@ class GovernedRuntimeGroup:
             claim=normalized_claim,
         )
         return result
+
+    async def request_graph_cancellation(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        reason_code: str,
+        authority: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Route one authenticated Operator cancellation to its owning surface."""
+
+        if not self._graph_cancellation_operator_enabled:
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_OPERATOR_DISABLED",
+                side_effects_may_have_run=False,
+            )
+        if not self._continuation_open or not self._active_names:
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_RUNTIME_INACTIVE",
+                side_effects_may_have_run=False,
+            )
+        graph_ref = str(graph_id or "").strip()
+        if (
+            not graph_ref
+            or type(graph_revision) is not int
+            or graph_revision < 1
+            or not isinstance(authority, Mapping)
+        ):
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_COMMAND_INVALID",
+                side_effects_may_have_run=False,
+            )
+        getter = getattr(self._command_repository, "get_by_graph", None)
+        if not callable(getter):
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_COMMAND_REPOSITORY_UNAVAILABLE",
+                side_effects_may_have_run=False,
+            )
+        try:
+            record_raw = getter(
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+            )
+            record_raw = await _await_call(record_raw)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # This port is read-only and is invoked before a surface runtime
+            # receives the command.  A lookup failure therefore cannot have
+            # installed a cancellation intent and must not be reported as an
+            # execution-uncertain mutation.
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_COMMAND_LOOKUP_UNAVAILABLE",
+                side_effects_may_have_run=False,
+            ) from exc
+        try:
+            record = _mapping(
+                record_raw,
+                field_name="durable cancellation admission",
+            )
+        except RuntimeError as exc:
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_COMMAND_NOT_FOUND",
+                side_effects_may_have_run=False,
+            ) from exc
+        command = record.get("command")
+        if (
+            not isinstance(command, HostCommand)
+            or command.graph_id != graph_ref
+            or command.graph_revision != graph_revision
+        ):
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_COMMAND_BINDING_DRIFT",
+                side_effects_may_have_run=False,
+            )
+        runtime_name = _SURFACE_RUNTIME.get(command.surface.value)
+        runtime = self._runtimes.get(str(runtime_name or ""))
+        cancellation = getattr(runtime, "request_graph_cancellation", None)
+        if runtime is None or not callable(cancellation):
+            raise GraphCancellationOperatorError(
+                f"GRAPH_CANCELLATION_SURFACE_UNAVAILABLE:{command.surface.value}",
+                side_effects_may_have_run=False,
+            )
+        normalized_reason = str(reason_code or "").strip().upper()
+        try:
+            result_raw = cancellation(
+                record,
+                authority=dict(authority),
+                source="OPERATOR",
+                reason_code=normalized_reason,
+            )
+            result_raw = await _await_call(result_raw)
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            may_have_run = await self._cancellation_intent_matches(
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                reason_code=normalized_reason,
+                authority=authority,
+            )
+            raise GraphCancellationOperatorError(
+                "GRAPH_CANCELLATION_EXECUTION_UNCERTAIN"
+                if may_have_run
+                else "GRAPH_CANCELLATION_REJECTED",
+                side_effects_may_have_run=may_have_run,
+            ) from exc
+        return _mapping(result_raw, field_name="graph cancellation result")
+
+    async def _cancellation_intent_matches(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        reason_code: str,
+        authority: Mapping[str, Any],
+    ) -> bool:
+        getter = getattr(
+            self._graph_cancellation_state_reader,
+            "get_graph_cancellation_for_graph",
+            None,
+        )
+        if not callable(getter):
+            return True
+        try:
+            record_raw = getter(graph_id, graph_revision)
+            record_raw = await _await_call(record_raw)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return True
+        if record_raw is None:
+            return False
+        if not isinstance(record_raw, Mapping):
+            return True
+        record = dict(record_raw)
+        payload_raw = record.get("payload")
+        payload = dict(payload_raw) if isinstance(payload_raw, Mapping) else record
+        try:
+            return all(
+                (
+                    str(payload.get("request_id") or "").strip()
+                    == str(authority.get("request_id") or "").strip(),
+                    str(payload.get("request_identity") or "").strip()
+                    == str(authority.get("audit_ref") or "").strip(),
+                    str(payload.get("source") or "").strip().upper()
+                    == "OPERATOR",
+                    str(payload.get("reason_code") or "").strip().upper()
+                    == reason_code,
+                    str(payload.get("graph_id") or "").strip() == graph_id,
+                    int(payload.get("graph_revision") or 0) == graph_revision,
+                )
+            )
+        except (TypeError, ValueError):
+            return True
 
     async def _stop_review_worker(self) -> None:
         self._continuation_open = False
@@ -402,4 +586,4 @@ def _continuation_result_ref(
     return receipt_ref or None
 
 
-__all__ = ["GovernedRuntimeGroup"]
+__all__ = ["GovernedRuntimeGroup", "GraphCancellationOperatorError"]

@@ -37,6 +37,68 @@ def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) ->
     }
 
 
+def test_disabled_graph_cancellation_operator_has_no_startup_dependency() -> None:
+    asgi._assert_graph_cancellation_operator_startup(
+        enabled=False,
+        command_ingress=None,
+        security=None,
+    )
+
+
+@pytest.mark.parametrize("mode", ("OFF", "SHADOW", None))
+def test_graph_cancellation_operator_requires_enforced_ingress(mode) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE",
+    ):
+        asgi._assert_graph_cancellation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode=mode),
+            security=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "composition",
+    (
+        None,
+        SimpleNamespace(enabled=False, execution_enabled=True, ingress=object()),
+        SimpleNamespace(enabled=True, execution_enabled=False, ingress=object()),
+        SimpleNamespace(
+            enabled=True,
+            execution_enabled=True,
+            ingress=SimpleNamespace(execute=None),
+        ),
+    ),
+)
+def test_graph_cancellation_operator_requires_executable_gateway(
+    composition,
+) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE",
+    ):
+        asgi._assert_graph_cancellation_operator_startup(
+            enabled=True,
+            command_ingress=SimpleNamespace(mode="ENFORCE"),
+            security=SimpleNamespace(obs_command_composition=composition),
+        )
+
+
+def test_graph_cancellation_operator_accepts_complete_startup_authority() -> None:
+    asgi._assert_graph_cancellation_operator_startup(
+        enabled=True,
+        command_ingress=SimpleNamespace(mode=SimpleNamespace(value="ENFORCE")),
+        security=SimpleNamespace(
+            obs_command_composition=SimpleNamespace(
+                enabled=True,
+                execution_enabled=True,
+                ingress=SimpleNamespace(execute=lambda *_args, **_kwargs: None),
+            )
+        ),
+    )
+
+
 def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch,
 ) -> None:
@@ -84,7 +146,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     scheduler_service = object()
     internal_service = object()
     command_evaluator = object()
-    command_store = object()
+    class CommandStore:
+        @staticmethod
+        def resolve_committed_authority_by_audit(*, audit_ref):  # noqa: ANN001
+            del audit_ref
+            return None
+
+    command_store = CommandStore()
 
     class CommandIngressContainer:
         evaluator = command_evaluator
@@ -133,6 +201,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         )
         review_continuation_store = object()
         command_repository = object()
+        task_store = object()
         recovery_id = "test-recovery"
 
         @staticmethod
@@ -198,6 +267,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["capability_broker"] is capability_broker
         assert kwargs["model_attempt_service"] is model_attempt_service
         assert kwargs["production_authority_verifier"] is asgi.verify_durable_production_authority
+        captured["cancellation_authority_verifier"] = kwargs[
+            "cancellation_authority_verifier"
+        ]
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         events.append("governed-runtime-built")
@@ -211,6 +283,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         assert kwargs["canonical_executor"] is canonical_executor
+        assert kwargs["cancellation_authority_verifier"] is captured[
+            "cancellation_authority_verifier"
+        ]
         events.append("internal-runtime-built")
         return internal_runtime
 
@@ -239,6 +314,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "review_continuation_worker_id": (
                 "test-recovery::review-continuation"
             ),
+            "graph_cancellation_operator_enabled": False,
+            "graph_cancellation_state_reader": task_runtime_container.task_store,
         }
         return runtime_group
 
@@ -248,6 +325,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["evaluator"] is command_evaluator
         assert kwargs["claim_result_store"] is command_store
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
+        assert kwargs["cancellation_authority_verifier"] is captured[
+            "cancellation_authority_verifier"
+        ]
         events.append("scheduler-runtime-built")
         return scheduler_container
 
@@ -297,6 +377,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "get_core_settings",
         lambda: SimpleNamespace(
             task_runtime_canonical_owner="test-canonical-owner",
+            task_graph_cancellation_operator_enabled=False,
         ),
     )
     monkeypatch.setattr(asgi, "get_intent_engine", object)

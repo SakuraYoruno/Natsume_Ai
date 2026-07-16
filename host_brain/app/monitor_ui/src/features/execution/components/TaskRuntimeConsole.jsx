@@ -1,4 +1,5 @@
 import {
+  Ban,
   CheckCircle2,
   CircleDashed,
   Clock3,
@@ -18,6 +19,8 @@ const STATUS_CLASS = {
   APPROVED: 'border-blue-200 bg-blue-50 text-blue-700',
   ACTIVE: 'border-blue-200 bg-blue-50 text-blue-700',
   RUNNING: 'border-blue-200 bg-blue-50 text-blue-700',
+  BLOCKED: 'border-amber-200 bg-amber-50 text-amber-700',
+  CANCEL_REQUESTED: 'border-amber-200 bg-amber-50 text-amber-700',
   PENDING: 'border-amber-200 bg-amber-50 text-amber-700',
   WAITING_APPROVAL: 'border-amber-200 bg-amber-50 text-amber-700',
   EXPIRED: 'border-gray-200 bg-gray-100 text-gray-600',
@@ -65,6 +68,56 @@ export function TaskGraphPicker({ executions = [], selectedKey, onSelect }) {
             })}
           </select>
         </label>
+      </div>
+    </section>
+  )
+}
+
+export function TaskGraphCancellationPanel({
+  execution,
+  reasonCode,
+  setReasonCode,
+  busy = false,
+  onCancel,
+}) {
+  if (!execution) return null
+  const terminal = execution.terminal === true || [
+    'COMPLETED',
+    'FAILED',
+    'CANCELLED',
+  ].includes(String(execution.status || '').toUpperCase())
+  return (
+    <section className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4" aria-label="TaskGraph cancellation command">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <div className="flex items-center gap-2 text-sm font-semibold text-rose-800">
+            <Ban size={16} />
+            取消 exact TaskGraph revision
+          </div>
+          <p className="mt-1 text-xs leading-5 text-rose-700">
+            目标 {execution.graph_id}@{execution.revision}。命令通过 Operator Gateway 与独立 task-runtime:cancel scope；受理后可能先保持 BLOCKED，页面只刷新 durable 状态，不乐观宣称已完成。
+          </p>
+        </div>
+        <div className="flex min-w-[280px] flex-1 flex-wrap items-end justify-end gap-2">
+          <label className="min-w-[220px] flex-1 text-xs font-medium text-rose-800">
+            Reason code
+            <input
+              className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 font-mono text-xs text-gray-800"
+              value={reasonCode}
+              disabled={busy || terminal}
+              onChange={(event) => setReasonCode(event.target.value.toUpperCase())}
+              placeholder="OPERATOR_REQUESTED"
+            />
+          </label>
+          <button
+            className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            disabled={busy || terminal || !reasonCode}
+            onClick={onCancel}
+          >
+            {terminal ? 'Graph 已终态' : busy ? '正在受理…' : '取消此 revision'}
+          </button>
+        </div>
       </div>
     </section>
   )

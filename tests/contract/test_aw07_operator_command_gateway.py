@@ -97,6 +97,7 @@ def _envelope(command_id: str, payload: dict[str, object]) -> ObsCommandEnvelope
         authority=authority,
         claim_ref="claim://operator/contract",
         audit_ref="audit://operator/contract",
+        body_sha256="0" * 64,
     )
 
 

@@ -598,6 +598,47 @@ class GovernedInternalRuntime:
                 if self._in_flight == 0:
                     self._condition.notify_all()
 
+    async def request_graph_cancellation(
+        self,
+        record: Mapping[str, Any],
+        *,
+        authority: Mapping[str, Any],
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Cancel one exact Internal admission through verified authority."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INACTIVE,
+                    "internal runtime is not accepting cancellation commands",
+                )
+            self._in_flight += 1
+        try:
+            command = dict(record or {}).get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.INTERNAL
+            ):
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                    "cancellation admission is not owned by the Internal runtime",
+                )
+            return await self._application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                authority=dict(authority or {}),
+                source=source,
+                reason_code=reason_code,
+            )
+        finally:
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
     def existing_command(self, *, request_id: str) -> Mapping[str, Any] | None:
         return self._commands.get_by_request(
             surface=HostCommandSurface.INTERNAL.value,
@@ -772,6 +813,7 @@ def build_governed_internal_runtime(
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     canonical_executor: AgentRuntimeExecutor | None = None,
+    cancellation_authority_verifier: Any | None = None,
 ) -> GovernedInternalRuntime:
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
@@ -819,6 +861,7 @@ def build_governed_internal_runtime(
         command_repository=task_runtime_container.command_repository,
         coordinator=coordinator,
         node_grant_service=node_grant_service,
+        cancellation_authority_verifier=cancellation_authority_verifier,
     )
     return GovernedInternalRuntime(
         application=application,

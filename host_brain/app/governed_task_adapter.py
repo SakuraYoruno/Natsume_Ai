@@ -635,6 +635,53 @@ class GovernedHostRuntime:
             ).strip()
         )
 
+    async def request_graph_cancellation(
+        self,
+        record: Mapping[str, Any],
+        *,
+        authority: Mapping[str, Any],
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Cancel one exact Host-surface admission through verified authority."""
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting cancellation commands",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface
+                not in {
+                    HostCommandSurface.CHAT,
+                    HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.GATEWAY,
+                }
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "cancellation admission is not owned by the Host runtime",
+                )
+            return await self._application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                authority=dict(authority or {}),
+                source=source,
+                reason_code=reason_code,
+            )
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+
     async def execute_stream(
         self,
         *,
@@ -955,6 +1002,7 @@ def build_governed_host_runtime(
     capability_broker: Any,
     model_attempt_service: Any,
     production_authority_verifier: Any,
+    cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     allow_uncomposed_acceptance_effects: bool = False,
@@ -1043,6 +1091,7 @@ def build_governed_host_runtime(
         command_repository=task_runtime_container.command_repository,
         coordinator=coordinator,
         node_grant_service=node_grant_service,
+        cancellation_authority_verifier=cancellation_authority_verifier,
     )
     effect_dispatcher = None
     try:

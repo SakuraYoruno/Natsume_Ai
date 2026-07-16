@@ -143,6 +143,7 @@ class ObsCommandEnvelope:
     authority: ObsCommandAuthority
     claim_ref: str
     audit_ref: str
+    body_sha256: str
     correlation_id: str | None = None
 
 
@@ -159,6 +160,20 @@ class ObsCommandPort(Protocol):
         self,
         envelope: ObsCommandEnvelope,
     ) -> ObsCommandExecutionResult | Awaitable[ObsCommandExecutionResult]: ...
+
+
+class ObsCommandPortExecutionError(RuntimeError):
+    """Trusted command-port failure with an explicit execution certainty."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        side_effects_may_have_run: bool,
+    ) -> None:
+        self.reason_code = str(reason_code)
+        self.side_effects_may_have_run = bool(side_effects_may_have_run)
+        super().__init__(self.reason_code)
 
 
 class SecureIngressClaimResultStore(Protocol):
@@ -497,6 +512,15 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
     ),
     _spec("security.hunt.run_once", "security:hunt:write", _schema(optional=("reason",), strings=("reason",))),
     _spec(
+        "task_graph.cancel",
+        "task-runtime:cancel",
+        _schema(
+            required=("graph_id", "graph_revision", "reason_code"),
+            strings=("graph_id", "reason_code"),
+            integers=("graph_revision",),
+        ),
+    ),
+    _spec(
         "task_review.approve",
         "task-review:write",
         _schema(
@@ -520,8 +544,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 33:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_33_ACTIVE_FAMILIES")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 34:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_34_ACTIVE_FAMILIES")
 
 
 __all__ = [
@@ -534,6 +558,7 @@ __all__ = [
     "ObsCommandExecutionResult",
     "ObsCommandPayloadSchema",
     "ObsCommandPort",
+    "ObsCommandPortExecutionError",
     "ObsCommandPortRegistry",
     "ObsCommandSpec",
     "SecureIngressClaimResultStore",

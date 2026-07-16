@@ -28,6 +28,23 @@ export function fetchTaskReviewLocator(reviewId) {
   return endpointGet(TASK_REVIEW_LOCATOR_ENDPOINT, { review_id: value })
 }
 
+export function cancelTaskGraph(graphId, graphRevision, reasonCode) {
+  const graph = typeof graphId === 'string' ? graphId.trim() : ''
+  const reason = typeof reasonCode === 'string' ? reasonCode.trim().toUpperCase() : ''
+  if (!graph) throw new Error('graph_id is required')
+  if (!Number.isInteger(graphRevision) || graphRevision < 1) {
+    throw new Error('graph_revision must be a positive integer')
+  }
+  if (!/^[A-Z][A-Z0-9_]{1,127}$/.test(reason)) {
+    throw new Error('reason_code must be canonical uppercase')
+  }
+  return endpointPost(execution.taskGraphCancel, {
+    graph_id: graph,
+    graph_revision: graphRevision,
+    reason_code: reason,
+  })
+}
+
 export function approveTaskReview(review, actorId) {
   return endpointPost(
     execution.taskReviewApprove,

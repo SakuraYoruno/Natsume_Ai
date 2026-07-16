@@ -901,6 +901,118 @@ class SQLiteSecureIngressStore:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def resolve_committed_authority_by_audit(
+        self,
+        *,
+        audit_ref: str,
+    ) -> dict[str, Any] | None:
+        """Resolve one canonical ALLOW audit and its committed claim.
+
+        This is a read-only authority projection.  It deliberately returns no
+        credential proof or secret material; callers must still enforce their
+        own server-owned surface/action/scope/body contract.
+        """
+
+        reference = str(audit_ref or "").strip()
+        if not reference.startswith("secure-ingress-audit://"):
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                    audit.audit_ref AS audit_ref,
+                    audit.claim_ref AS audit_claim_ref,
+                    audit.request_id AS audit_request_id,
+                    audit.surface AS audit_surface,
+                    audit.action AS audit_action,
+                    audit.method AS audit_method,
+                    audit.normalized_path AS audit_normalized_path,
+                    audit.principal_id AS audit_principal_id,
+                    audit.tenant_id AS audit_tenant_id,
+                    audit.requested_scopes_json AS audit_requested_scopes_json,
+                    audit.required_scopes_json AS audit_required_scopes_json,
+                    audit.body_sha256 AS audit_body_sha256,
+                    audit.decision AS audit_decision,
+                    audit.reason_code AS audit_reason_code,
+                    audit.stage AS audit_stage,
+                    audit.side_effects_executed AS audit_side_effects_executed,
+                    audit.ts_ms AS audit_ts_ms,
+                    claim.claim_ref AS claim_ref,
+                    claim.request_id AS claim_request_id,
+                    claim.surface AS claim_surface,
+                    claim.action AS claim_action,
+                    claim.principal_id AS claim_principal_id,
+                    claim.required_scopes_json AS claim_required_scopes_json,
+                    claim.body_sha256 AS claim_body_sha256,
+                    claim.claim_status AS claim_status,
+                    claim.result_ref AS claim_result_ref,
+                    claim.expires_at_ms AS claim_expires_at_ms
+                FROM secure_ingress_audit AS audit
+                JOIN secure_ingress_idempotency_claim AS claim
+                  ON claim.claim_ref = audit.claim_ref
+                WHERE audit.audit_ref = ?
+                LIMIT 1
+                """,
+                (reference,),
+            ).fetchone()
+        if row is None or str(row["claim_status"]) != "COMMITTED":
+            return None
+        try:
+            audit_required = self._string_tuple(
+                row["audit_required_scopes_json"]
+            )
+            claim_required = self._string_tuple(
+                row["claim_required_scopes_json"]
+            )
+            audit_requested = self._string_tuple(
+                row["audit_requested_scopes_json"]
+            )
+            if (
+                str(row["audit_claim_ref"] or "") != str(row["claim_ref"] or "")
+                or str(row["audit_request_id"] or "")
+                != str(row["claim_request_id"] or "")
+                or str(row["audit_surface"] or "")
+                != str(row["claim_surface"] or "")
+                or str(row["audit_action"] or "")
+                != str(row["claim_action"] or "")
+                or str(row["audit_principal_id"] or "")
+                != str(row["claim_principal_id"] or "")
+                or str(row["audit_body_sha256"] or "")
+                != str(row["claim_body_sha256"] or "")
+                or audit_required != claim_required
+            ):
+                return None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return {
+            "audit_ref": str(row["audit_ref"]),
+            "claim_ref": str(row["claim_ref"]),
+            "request_id": str(row["audit_request_id"]),
+            "surface": str(row["audit_surface"]),
+            "action": str(row["audit_action"]),
+            "method": str(row["audit_method"]),
+            "normalized_path": str(row["audit_normalized_path"]),
+            "principal_id": str(row["audit_principal_id"]),
+            "tenant_id": str(row["audit_tenant_id"]),
+            "requested_scopes": audit_requested,
+            "required_scopes": audit_required,
+            "body_sha256": str(row["audit_body_sha256"]),
+            "decision": str(row["audit_decision"]),
+            "reason_code": str(row["audit_reason_code"]),
+            "stage": str(row["audit_stage"]),
+            "side_effects_executed": bool(
+                int(row["audit_side_effects_executed"])
+            ),
+            "audit_ts_ms": int(row["audit_ts_ms"]),
+            "claim_status": str(row["claim_status"]),
+            "claim_result_ref": (
+                str(row["claim_result_ref"])
+                if row["claim_result_ref"] is not None
+                else None
+            ),
+            "claim_expires_at_ms": int(row["claim_expires_at_ms"]),
+        }
+
     @staticmethod
     def _within_validity(at_ms: int, valid_from_ms: int, valid_until_ms: Any) -> bool:
         return int(at_ms) >= int(valid_from_ms) and (

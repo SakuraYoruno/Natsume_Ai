@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 已封口整图成功；0092 新增 exact-revision verified internal cancellation、两阶段 intent/fence/reconciliation/final decision 和 first-writer 竞争语义；0094 新增 composition-owned pending-intent scanner、持久 coordination claim/heartbeat/defer/expired takeover 与 exact HostCommand admission 重建；0095 将 Graph Outbox、投递顺序、Runtime Event、Operator read model 与 multi-revision marker 扫描统一到 exact revision。accepted NODE effect 继续 delivery，未授权 effect 被 fence。生产 composition 未注入 verifier，且无 HTTP/UI 入口或 canary；operation/effect 等业务 reconciliation 尚未完整自动收敛 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091 已封口整图成功；0092 新增 exact-revision verified cancellation、两阶段 intent/fence/reconciliation/final decision 和 first-writer 竞争语义；0094 新增 composition-owned pending-intent scanner、持久 coordination claim/heartbeat/defer/expired takeover 与 exact HostCommand admission 重建；0095 将 Graph Outbox、投递顺序、Runtime Event、Operator read model 与 multi-revision marker 扫描统一到 exact revision。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`：共享 Secure Ingress verifier 注入三运行时，Operator Gateway/BFF/UI 精确提交 revision，异常后读取 durable intent 判定副作用确定性。operation/effect 等业务 reconciliation、历史修复、Budget 高竞争、部署凭据与真实 canary 尚未完成 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -70,6 +70,11 @@ Chat / Host Input / Gateway
 - `host_brain/app/governed_task_adapter.py`
 - `host_brain/app/governed_task_authority.py`
 - `host_brain/orchestration/governed_command.py`
+- `host_brain/secure_ingress/graph_cancellation_authority.py`
+- `host_brain/composition/runtime_group.py`
+- `host_brain/observability/command_ports.py`
+- `host_brain/app/observability_runtime/domain_command_ports.py`
+- `host_brain/app/monitor_ui/src/features/execution/taskRuntimeApi.js`
 - `host_brain/task_runtime/coordinator.py`
 - `host_brain/task_runtime/coordinator_records.py`
 - `host_brain/task_runtime/coordinator_receipts.py`
@@ -153,13 +158,15 @@ B5 terminal success 不复用 0090 的 failure decision。每个 Accepted 节点
 
 0095 已封闭历史 marker 的 revision 身份边界。`task_runtime_outbox.graph_revision` 对 `TASK_GRAPH` 必须是指向现存 Graph 的正整数，对非 Graph aggregate 必须为 `NULL`；物理形状固定为 `INTEGER / nullable / no default / non-PK`。迁移接受 0090/0091/0092 decision、0092 intent、Attempt lineage、graph ID 唯一 revision，以及 HostCommand 的两种 exact authority：immutable `command_id` evidence 绑定正常 multi-revision CREATED；Migration Runner 注册 deterministic `natsume_sha256_hex`，以 revision-bound command ID 重算升级前五段 governed digest，同时匹配 legacy `outbox_id + idempotency_key`，绑定 ACTIVE 等非 attempt transition。升级本身不改变 Outbox ID/key，`graph_revision` 只是新增精确维度，因此 response-loss replay 不断裂。多个来源冲突或自定义 producer 历史行仍无法唯一归属时，整笔迁移事务失败而不猜测。0090 `taskbatch` 的缺 decision row/错绑扫描现在按 `graph_id + graph_revision` 完整覆盖多 revision 历史，所有 decision getter 也复核 Graph Outbox 的 exact revision。
 
-B5C 在其上新增迁移 0092 和两阶段 Graph cancellation。Application 的内部入口必须通过 authority verifier 将 request、principal、source、reason 绑定到 exact durable Graph revision；当前生产 composition 没有注入 verifier，也没有 HTTP/UI 暴露，所以默认 fail closed。Store phase 1 先持久化 intent，将 Graph 置为 `BLOCKED`，再取消/围栏 Node、Attempt、Lease、Review/token、operation 与未授权 effect；`GraphCancellationRuntime` 只有在该提交后才通过共享 registry cancel/join 本进程 child/heartbeat。execute re-entry 由 Coordinator 薄委托该 Runtime，从 durable intent 继续 advance/finalize；只读 `GraphCancellationProjection` 只持 Store，本地 task registry 不构成 authority。0096 的 Review continuation 是另一条独立协调链，不取得 0092 cancellation authority。
+B5C 在其上新增迁移 0092 和两阶段 Graph cancellation。`task_graph.cancel` 已接入 Operator Command Gateway、同源 BFF 与 Task Runtime UI，payload 精确绑定 `graph_id + graph_revision + reason_code`，权限固定为 `obs:write + task-runtime:cancel`。Gateway 认证后的 server-owned authority 携带 durable audit/claim、request/principal/tenant、认证 body digest、action/scopes；同一 `SecureIngressGraphCancellationAuthorityVerifier` 注入 Host/Internal/Scheduler，重读 committed 且未写入 terminal `claim_result_ref` 的 authority 并核对 canonical body 后才以 `audit_ref` 签发 request identity，settled authority 不可复用为 bearer。Application 不接受调用方自报 request identity/source。Store phase 1 先持久化 intent，将 Graph 置为 `BLOCKED`，再取消/围栏 Node、Attempt、Lease、Review/token、operation 与未授权 effect；`GraphCancellationRuntime` 只有在该提交后才通过共享 registry cancel/join 本进程 child/heartbeat。异常确定性只有经 cancellation handler 翻译为 OBS 封闭端口异常后才可进入 NOT_EXECUTED，任意依赖异常保持 uncertain。execute re-entry 由 Coordinator 薄委托该 Runtime，从 durable intent 继续 advance/finalize；只读 `GraphCancellationProjection` 只持 Store，本地 task registry 不构成 authority。0096 的 Review continuation 是另一条独立协调链，不取得 0092 cancellation authority。
+
+`GovernedRuntimeGroup` 先按 exact revision 读取 immutable HostCommand surface，再把命令路由回 Host、Internal 或 Scheduler owner。若下游抛错，它重读 exact revision 的 0092 intent；只有 request、audit identity、OPERATOR、reason、graph/revision 全匹配时才报告可能已有副作用，无 intent 则明确按未执行拒绝，读取失败或畸形事实保守标记不确定。Task Runtime UI 随后刷新 durable detail，不把命令返回直接显示成 `CANCELLED`。
 
 final cancellation 只有在 active ownership 与 operation/effect/review 不确定性全部 reconciliation 后才以一个 UoW 提交 Graph `CANCELLED`、Budget 释放/取消、Outbox 和 canonical decision。operation reconciliation proof 在动态 evidence 构造和终态 getter 中都会重验结构、digest、key 与签名；同 revision 的 Review create/approve/resume 在事务内被 0092 intent fence。`ACCEPTED` Node + `SUCCEEDED` Attempt 已确认的 NODE effect 保留 delivery authority；其他 NODE effect 与未完成 Graph 的 GRAPH effect 被 fence。0091 success 与 0092 cancellation first-writer-wins；请求响应丢失只允许四字段 authority 完全一致的 exact replay，publisher 故障不会阻止 durable intent 后的本地 cancel/join。基础设施 shutdown/disconnect cancellation 不会自动写成业务取消。
 
 0094 由 `ProcessTaskRuntimeContainer` 拥有 composition worker 与一个 process-shared `LocalGraphExecutionRegistry`。Host、Internal、Scheduler Coordinator 和 worker 的 `GraphCancellationRuntime` 共用该 registry 确认本进程 quiescence，但 durable authority 仍只属于 0092 intent/decision。0094 readiness/codec 锁定 exact frozen columns，额外 `status` 等业务字段一律拒绝；`intent_ref` 物理 identity 必须是 `TEXT NOT NULL PRIMARY KEY`，不允许 SQLite rowid PK NULL/复合 FK 豁免留下幽灵行。worker 以 recovery-scoped owner 扫描并 claim/heartbeat/defer/takeover；这四类变更在取得 `BEGIN IMMEDIATE` 写锁后才采样时钟。它按 exact Graph revision 重建 HostCommand admission 并重入现有 Runtime；若未显式传入 `local_pending`，Runtime 必须先对共享 registry 执行 `cancel_and_join`，本地 pending 非空时不得 advance/finalize，worker 只能 durable defer。仅在 0092 intent `FINALIZED` 且 decision 存在后才 complete/清理 0094 协调行。
 
-该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，0094 已补充跨进程 scanner、协调 claim/heartbeat/defer、expired takeover 与 exact admission 重建，但生产 authority provider、受控 HTTP/UI 入口、canary 和完整 operation/effect reconciliation 未完成。B4/0090、B5/0091 语义继续有效；0093 已收口 Outbox delivery claim，0095 已收口 revisioned 0090/TaskGraph Outbox identity，0096 已收口 Review continuation、PRE optional Attempt 和长等待 grant renewal。Budget 高竞争与历史半提交仍是缺口。
+该路径仍不能默认启用。当前定级是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：B5C 合同、Store 和重入路径已有证据，0094 已补充跨进程 scanner、协调 claim/heartbeat/defer、expired takeover 与 exact admission 重建；生产 authority provider、Operator Gateway/BFF/UI 和三 surface 路由已接线但开关默认关闭。`HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED=true` 时，ASGI 要求 Secure Ingress=`ENFORCE` 且 Operator Command Gateway 可用，否则在开放路由前 fail closed。完整 operation/effect reconciliation、历史修复、Budget 高竞争、部署凭据与真实 canary 未完成。B4/0090、B5/0091 语义继续有效；0093 已收口 Outbox delivery claim，0095 已收口 revisioned 0090/TaskGraph Outbox identity，0096 已收口 Review continuation、PRE optional Attempt 和长等待 grant renewal。
 
 执行层已完成十八刀结构拆分，mixed-file 静态门禁继续绿色且未抬高 ceiling。第十八刀完成时 `DurableDagSchedulingRuntime` 为 1,172 行；本切片加入 Review continuation 接线后当前为 1,228 行，另有 38 行纯 `dag_scheduling_records.py`。它从冻结 HEAD 65219 迁出 `execute_stream`（原 988 行）、reentered outcomes、`supports` 与 `run_claimed_node`，规范化/精确 AST hash 已冻结。Runtime 仅注入同一 Store、共享 Outbox/Budget/Lifecycle/NodeExecution/Projection/0090/0091/Cancellation/Review、flags、reader 与 progress buffer，无 Coordinator callback、新锁或第二 persistence authority；调用矩阵为 Store 9、Budget 9、Lifecycle 18、NodeProjection 12、NodeExecution 6、Settlement 4、Success 1、Review 4、Cancellation 1、Outbox 1 build/6 publish/0 best-effort，全局 Outbox 仍为 27/31/58/5。`coordinator.py` 当前 259 行，只保留 composition、公开 cancel/supports/execute facade、registry track 与 node-grant preclaim verifier 注入。该 1,228 行 Runtime 是临时 outer orchestrator，仍集中 review、terminal-state 与 fanout 协调并列为后续结构拆分；0094 已补齐 cancellation continuation 的跨进程协调层，但没有完成 operation/effect 业务 reconciliation。状态保持 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。
 
@@ -171,10 +178,10 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 仍缺：
 
-- B5C durable cancellation 仍是 production-off shadow；0092、verified internal entry、两阶段 fence/final decision 已实现，但生产 verifier/入口/canary 未接线；
+- B5C durable cancellation 仍是 production-off shadow；0092、两阶段 fence/final decision、共享生产 verifier、Operator Gateway/BFF/UI 与三 surface 路由已实现，但开关默认 OFF，部署凭据/真实 canary 未完成；
 - 历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE Budget` 半提交状态仍待 reconciliation；0096 已把 `WAITING_APPROVAL` 作为无 Attempt 的合法统一 outcome observation；
 - 0095 已补齐 stable-ID Graph revision/payload、deterministic 历史回填、多 revision marker、source-fenced Runtime Event/Review/Operator exact read；仍需持续守护不可解析 producer 整事务失败、legacy payload/event replay、零重复投影、receipt-loss、trigger/index readiness 与多 revision 回归矩阵；
-- 0094 scanner/worker 已跨进程 claim、heartbeat、defer、expired takeover 并重入既有 cancellation runtime；operation/effect 等业务 reconciliation 仍可能持续 defer，生产 verifier/入口/canary 尚缺；
+- 0094 scanner/worker 已跨进程 claim、heartbeat、defer、expired takeover 并重入既有 cancellation runtime；operation/effect 等业务 reconciliation 仍可能持续 defer，历史修复、部署凭据与真实 canary 尚缺；
 - 0093 已以 durable claim/CAS 和可关闭后台 worker 收口跨进程 Outbox drain，仍需保持 expiry 自动 takeover、stale fence、同 aggregate 顺序、非空 backlog 不得误报 DRAINED 和 append/complete 响应丢失故障矩阵；
 - 生产 resolver 尚未把现实瞬态准备故障映射到显式 marker；promotion 与 claim 也不是同一决策事务；
 - Budget 并发 CAS 仍有固定重试上限与 `ALREADY_EXCEEDED` 语义缺口；reservation 后 worker/commit 失败的即时 reconciliation 也未闭环；
@@ -312,7 +319,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ## 10. 当前最高优先级缺口
 
-1. 为 B5C 注入生产 authority provider 与受控 HTTP/UI 入口，维持 0094 scanner/claim/heartbeat/defer/expired-takeover 故障矩阵，并补齐 operation/effect 业务 reconciliation 与取消/0091 success 的生产故障矩阵；此前不启用 canary。
+1. 守护 B5C 已接线的 Secure Ingress authority、Operator Gateway/BFF/UI、三 surface exact 路由、默认 OFF 与启动 fail-closed 合同；维持 0094 scanner/claim/heartbeat/defer/expired-takeover 故障矩阵，并补齐 operation/effect 业务 reconciliation、历史修复、部署凭据及取消/0091 success 的生产故障矩阵；此前不启用 canary。
 2. 将历史 `BLOCKED + failure Node` / `FAILED + ACTIVE Budget` 半提交修复归入 reconciliation；持续守护 0096 PRE optional-attempt、POST no-rerun 与 claim-fenced continuation。
 3. 维持 0093/0095 故障矩阵：deterministic legacy identity、升级 ID/key 稳定、revisioned/legacy payload、trigger/index readiness、source-ref 一对一、append-success/complete-loss exact replay、零重复 Event、per-revision 顺序和 Event/Review/Operator exact read；不得把 delivery claim 误当成 0092 cancellation claim。
 4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源，收敛 Budget CAS/`ALREADY_EXCEEDED` 并发语义，并完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。

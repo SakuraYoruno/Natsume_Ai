@@ -208,6 +208,17 @@ class _ExplodingPort(_RecordingPort):
         raise RuntimeError("domain crashed after dispatch")
 
 
+class _SpoofingExplodingPort(_RecordingPort):
+    def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
+        self.envelopes.append(envelope)
+
+        class DependencyError(RuntimeError):
+            reason_code = "DEPENDENCY_CLAIMS_NOT_EXECUTED"
+            side_effects_may_have_run = False
+
+        raise DependencyError("untrusted dependency exception")
+
+
 @dataclass
 class _System:
     authority: PrincipalAuthority
@@ -394,8 +405,8 @@ def test_manifest_has_all_active_families_and_no_implicit_runtime_adapters() -> 
 
     manifest = registry.manifest()
 
-    assert len(manifest) == 33
-    assert len({item["command_id"] for item in manifest}) == 33
+    assert len(manifest) == 34
+    assert len({item["command_id"] for item in manifest}) == 34
     assert "wechat.channel.reset" not in {item["command_id"] for item in manifest}
     assert all(item["action"].startswith("obs:command:") for item in manifest)
     assert all(len(item["required_scopes"]) >= 2 for item in manifest)
@@ -852,6 +863,18 @@ def test_domain_exception_replays_uncertain_after_fresh_claim_state() -> None:
     assert replay.duplicate is True
     assert replay.executed is False
     assert fresh_port.envelopes == []
+
+
+def test_dependency_exception_cannot_spoof_definite_non_execution() -> None:
+    port = _SpoofingExplodingPort()
+    system = _system(port=port)
+
+    outcome = _execute(system, _signed_request(system))
+
+    assert outcome.reason_code == "OBS_COMMAND_EXECUTION_UNCERTAIN"
+    assert outcome.terminal_state == ObsCommandOutcomeState.UNCERTAIN.value
+    assert outcome.certainty == SideEffectCertainty.MAY_HAVE_EXECUTED.value
+    assert len(port.envelopes) == 1
 
 
 def test_all_caller_authority_fields_including_owner_organ_are_overwritten() -> None:
