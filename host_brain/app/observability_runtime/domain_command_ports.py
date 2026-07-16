@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import inspect
 from dataclasses import asdict, dataclass, is_dataclass
+from functools import partial
 from typing import Any, Callable, Mapping
 
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     ObsCommandEnvelope,
@@ -364,17 +366,27 @@ def _canon_payload(payload: Mapping[str, Any], fields: tuple[str, ...]) -> dict[
     return {field: payload[field] for field in fields if field in payload}
 
 
-def _canon_submit(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_submit(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     body = canon_routes.CanonProposalSubmitRequest(**_canon_payload(payload, (
         "proposal_id", "target_doc_id", "proposed_title", "proposed_tags",
         "proposed_body", "proposer_node_id", "summary",
     )))
-    return canon_routes.submit_proposal(body)
+    return canon_routes.submit_proposal(body, _route_ports=route_ports)
 
 
-def _canon_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_approve(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
@@ -383,20 +395,38 @@ def _canon_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
         "base_version", "approval_token_ref", "actor_id", "session_id",
         "trace_id", "evidence_refs",
     )))
-    return canon_routes.approve_proposal(proposal_id, body)
+    return canon_routes.approve_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
-def _canon_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_reject(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
     body = canon_routes.CanonProposalRejectRequest(**_canon_payload(payload, (
         "reason", "rejector_node_id",
     )))
-    return canon_routes.reject_proposal(proposal_id, body)
+    return canon_routes.reject_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
-def _canon_rollback(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_rollback(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
@@ -405,7 +435,11 @@ def _canon_rollback(payload: Mapping[str, Any], _request_id: str) -> Any:
         "base_version", "approval_token_ref", "actor_id", "session_id",
         "trace_id", "evidence_refs",
     )))
-    return canon_routes.rollback_proposal(proposal_id, body)
+    return canon_routes.rollback_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
 def _scheduler_service() -> Any:
@@ -462,14 +496,19 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
     return await output if inspect.isawaitable(output) else output
 
 
-def _tool_execute(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _tool_execute(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import tool_routes
 
     body = tool_routes.ToolExecuteRequest(**_canon_payload(payload, (
         "tool_id", "intent_id", "session_id", "seq", "args", "context",
         "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id",
     )))
-    return tool_routes.execute_tool(body)
+    return tool_routes.execute_tool(body, _route_ports=route_ports)
 
 
 def _mate_action(payload: Mapping[str, Any], request_id: str) -> Any:
@@ -496,14 +535,22 @@ def _mate_say(payload: Mapping[str, Any], _request_id: str) -> Any:
     )
 
 
-def _bond_event(payload: Mapping[str, Any], request_id: str) -> Any:
+def _bond_event(
+    payload: Mapping[str, Any],
+    request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import bond_routes
 
     body_values = _canon_payload(payload, (
         "user_id", "update_kind", "evidence_refs", "emotion_tag", "emotion_intensity",
     ))
     body_values["request_id"] = request_id
-    return bond_routes.submit_bond_event(bond_routes.BondEventRequest(**body_values))
+    return bond_routes.submit_bond_event(
+        bond_routes.BondEventRequest(**body_values),
+        _route_ports=route_ports,
+    )
 
 
 def _edge_command_push(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -808,16 +855,35 @@ _HANDLERS: Mapping[str, DomainHandler] = {
 }
 
 
-def build_default_obs_domain_command_registry() -> ObsCommandPortRegistry:
+_ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
+    "canon.proposal.submit": _canon_submit,
+    "canon.proposal.approve": _canon_approve,
+    "canon.proposal.reject": _canon_reject,
+    "canon.proposal.rollback": _canon_rollback,
+    "tool.execute": _tool_execute,
+    "bond.event.submit": _bond_event,
+}
+
+
+def build_default_obs_domain_command_registry(
+    *,
+    route_ports: HostRoutePorts | None = None,
+) -> ObsCommandPortRegistry:
     """Bind every manifest command to its fail-closed domain adapter."""
 
     manifest_ids = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
     if set(_HANDLERS) != manifest_ids:
         raise RuntimeError("OBS_DOMAIN_COMMAND_PORT_MANIFEST_MISMATCH")
+    effective_ports = route_ports or HostRoutePorts()
+    handlers = dict(_HANDLERS)
+    handlers.update({
+        command_id: partial(handler, route_ports=effective_ports)
+        for command_id, handler in _ROUTE_PORT_HANDLERS.items()
+    })
     return ObsCommandPortRegistry(
         ports={
             command_id: _DomainCommandPort(command_id, handler)
-            for command_id, handler in _HANDLERS.items()
+            for command_id, handler in handlers.items()
         },
     )
 

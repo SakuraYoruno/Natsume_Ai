@@ -23,6 +23,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from host_brain.canon.application import CanonApplicationService
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.core.errors import (
     CANON_SYNC_FAILED,
     WCANON_DOC_NOT_FOUND,
@@ -42,31 +46,11 @@ from host_brain.memory.canon_apply_service import (
 
 _logger = logging.getLogger("Natsume.canon_routes")
 
-# ---------------------------------------------------------------------------
-# 路由实例（prefix 由 router registry 注册时指定）
-# ---------------------------------------------------------------------------
-router = APIRouter(prefix="/canon", tags=["canon"])
-
-# ---------------------------------------------------------------------------
-# Interface adapter dependency injection. The route never owns a repository or
-# domain store; production composition injects one explicit application service.
-# ---------------------------------------------------------------------------
-_canon_service_provider: Optional[Any] = None
-
-
-def set_canon_service_provider(provider: Any) -> None:
-    """Inject the production Canon application service provider."""
-
-    global _canon_service_provider
-    if provider is not None and not callable(provider):
-        raise TypeError("Canon service provider must be callable")
-    _canon_service_provider = provider
-
-
-def _get_canon_service() -> CanonApplicationService:
-    if _canon_service_provider is None:
+def _get_canon_service(route_ports: HostRoutePorts) -> CanonApplicationService:
+    provider = route_ports.canon_service_provider
+    if provider is None:
         raise RuntimeError("Canon application service is not configured")
-    service = _canon_service_provider()
+    service = provider()
     if not isinstance(service, CanonApplicationService):
         raise RuntimeError("Canon service provider returned an invalid service")
     return service
@@ -222,7 +206,6 @@ def _coerce_proposed_tags(raw: Any) -> list[str]:
 # GET /canon/proposals — 列出提案（分页，可按 status 过滤）
 # ---------------------------------------------------------------------------
 
-@router.get("/proposals", response_model=CanonProposalListResponse)
 async def list_proposals(
     status: Optional[str] = None,
     canon_kind: Optional[str] = None,
@@ -230,6 +213,8 @@ async def list_proposals(
     page: int = 1,
     page_size: int = 20,
     after_id: Optional[int] = None,
+    *,
+    _route_ports: HostRoutePorts,
 ) -> CanonProposalListResponse:
     """列出 World Canon 提案（分页，可按 status/canon_kind/target_doc_id 过滤）。
 
@@ -245,7 +230,7 @@ async def list_proposals(
     del after_id  # legacy integer cursors are not stable across projection rebuilds
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
         items_raw, total = service.list_proposals(
             status=status,
             canon_kind=canon_kind,
@@ -271,14 +256,17 @@ async def list_proposals(
 # POST /canon/proposals — 提交新提案
 # ---------------------------------------------------------------------------
 
-@router.post("/proposals", response_model=CanonProposalResponse, status_code=201)
-async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResponse:
+async def submit_proposal(
+    body: CanonProposalSubmitRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonProposalResponse:
     """提交新的 World Canon Evolution 提案（status=pending）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
 
         # 幂等检查：相同 proposal_id 已存在则返回 409
         existing = service.get_proposal(body.proposal_id)
@@ -320,14 +308,17 @@ async def submit_proposal(body: CanonProposalSubmitRequest) -> CanonProposalResp
 # GET /canon/proposals/{proposal_id} — 查询单个提案
 # ---------------------------------------------------------------------------
 
-@router.get("/proposals/{proposal_id}", response_model=CanonProposalResponse)
-async def get_proposal(proposal_id: str) -> CanonProposalResponse:
+async def get_proposal(
+    proposal_id: str,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonProposalResponse:
     """查询单个 World Canon 提案详情。"""
     # Compatibility fallback:
     # `/proposals/stats` is a dedicated endpoint, but this dynamic route is
     # registered earlier and may catch "stats" first in some runtimes.
     if str(proposal_id).strip().lower() == "stats":
-        stats = await get_proposal_stats()
+        stats = await get_proposal_stats(_route_ports=_route_ports)
         payload = stats.model_dump() if hasattr(stats, "model_dump") else (
             stats.dict() if hasattr(stats, "dict") else stats
         )
@@ -336,7 +327,7 @@ async def get_proposal(proposal_id: str) -> CanonProposalResponse:
     request_id = new_request_id()
 
     try:
-        row = _get_canon_service().get_proposal(proposal_id)
+        row = _get_canon_service(_route_ports).get_proposal(proposal_id)
         if row is None:
             raise HTTPException(
                 status_code=404,
@@ -355,14 +346,18 @@ async def get_proposal(proposal_id: str) -> CanonProposalResponse:
 # POST /canon/proposals/{proposal_id}/approve — 审核通过提案
 # ---------------------------------------------------------------------------
 
-@router.post("/proposals/{proposal_id}/approve", response_model=CanonProposalResponse)
-async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) -> CanonProposalResponse:
+async def approve_proposal(
+    proposal_id: str,
+    body: CanonProposalApproveRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonProposalResponse:
     """审核通过 World Canon 提案，触发 SSOT 文件写入并记录 canon_change_log。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
 
         # 检查提案是否存在
         existing = service.get_proposal(proposal_id)
@@ -435,14 +430,18 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
 # POST /canon/proposals/{proposal_id}/reject — 拒绝提案
 # ---------------------------------------------------------------------------
 
-@router.post("/proposals/{proposal_id}/reject", response_model=CanonProposalResponse)
-async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) -> CanonProposalResponse:
+async def reject_proposal(
+    proposal_id: str,
+    body: CanonProposalRejectRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonProposalResponse:
     """拒绝 World Canon 提案（status=rejected，不修改 SSOT 文件）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
 
         rejector_node_id = body.rejector_node_id or f"api.canon_proposals.reject::{request_id}"
         row = service.reject_proposal(
@@ -478,14 +477,18 @@ async def reject_proposal(proposal_id: str, body: CanonProposalRejectRequest) ->
 # POST /canon/proposals/{proposal_id}/rollback — 回滚已 APPLIED 的提案（P1-R114-1）
 # ---------------------------------------------------------------------------
 
-@router.post("/proposals/{proposal_id}/rollback", response_model=CanonProposalRollbackResponse)
-async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest) -> CanonProposalRollbackResponse:
+async def rollback_proposal(
+    proposal_id: str,
+    body: CanonProposalRollbackRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonProposalRollbackResponse:
     """回滚已 APPLIED 的 World Canon 提案，将 SSOT 文件恢复到 base_version。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
 
         result = service.apply(
             CanonApplyCommand(
@@ -551,14 +554,16 @@ async def rollback_proposal(proposal_id: str, body: CanonProposalRollbackRequest
 # GET /canon/documents — 列出当前 World Canon 文档（SSOT 快照）
 # ---------------------------------------------------------------------------
 
-@router.get("/documents", response_model=CanonDocumentListResponse)
-async def list_documents() -> CanonDocumentListResponse:
+async def list_documents(
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonDocumentListResponse:
     """列出当前 World Canon 文档（SSOT 快照）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        docs = _get_canon_service().list_documents()
+        docs = _get_canon_service(_route_ports).list_documents()
         items = [
             CanonDocumentResponse(
                 doc_id=doc["doc_id"],
@@ -591,14 +596,17 @@ async def list_documents() -> CanonDocumentListResponse:
 # GET /canon/documents/{doc_id} — 查询单个 World Canon 文档
 # ---------------------------------------------------------------------------
 
-@router.get("/documents/{doc_id}", response_model=CanonDocumentResponse)
-async def get_document(doc_id: str) -> CanonDocumentResponse:
+async def get_document(
+    doc_id: str,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonDocumentResponse:
     """查询单个 World Canon 文档。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        doc = _get_canon_service().get_document(doc_id)
+        doc = _get_canon_service(_route_ports).get_document(doc_id)
         if doc is None:
             raise HTTPException(
                 status_code=404,
@@ -637,8 +645,11 @@ class CanonHotwordsResponse(BaseModel):
     timestamp: int
 
 
-@router.get("/hotwords", response_model=CanonHotwordsResponse)
-async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
+async def get_hotwords(
+    max_words: int = 200,
+    *,
+    _route_ports: HostRoutePorts,
+) -> CanonHotwordsResponse:
     """返回当前 World Canon 热词列表（供 Edge ASR 模块拉取注入）。
 
     从所有 active 文档的 title/tags 中提取热词，去重排序后返回。
@@ -649,7 +660,7 @@ async def get_hotwords(max_words: int = 200) -> CanonHotwordsResponse:
     max_words = min(max(1, max_words), 500)
 
     try:
-        hotwords = _get_canon_service().extract_hotwords(max_words=max_words)
+        hotwords = _get_canon_service(_route_ports).extract_hotwords(max_words=max_words)
         return CanonHotwordsResponse(
             hotwords=hotwords,
             total=len(hotwords),
@@ -684,9 +695,10 @@ class CanonProposalStatsResponse(BaseModel):
     timestamp: int
 
 
-@router.get("/proposals/stats", response_model=CanonProposalStatsResponse)
 async def get_proposal_stats(
     window_minutes: int = 1440,
+    *,
+    _route_ports: HostRoutePorts,
 ) -> CanonProposalStatsResponse:
     """Canon 提案统计（pending/applied/rejected 分布 + 最近提案列表）。
 
@@ -696,7 +708,7 @@ async def get_proposal_stats(
     ts_ms = int(time.time() * 1000)
 
     try:
-        service = _get_canon_service()
+        service = _get_canon_service(_route_ports)
 
         # 全量统计（不限时间窗口）
         _all_pending, total_pending = service.list_proposals(status="pending", limit=1, offset=0)
@@ -741,3 +753,79 @@ async def get_proposal_stats(
     except Exception as exc:
         _logger.error("get_proposal_stats 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+def create_canon_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create a Canon router bound only to one application's route ports."""
+
+    router = APIRouter(prefix="/canon", tags=["canon"])
+
+    def add(path: str, endpoint: Any, *, methods: list[str], **kwargs: Any) -> None:
+        router.add_api_route(
+            path,
+            bind_host_route_endpoint(endpoint, route_ports),
+            methods=methods,
+            **kwargs,
+        )
+
+    add("/proposals", list_proposals, methods=["GET"], response_model=CanonProposalListResponse)
+    add(
+        "/proposals",
+        submit_proposal,
+        methods=["POST"],
+        response_model=CanonProposalResponse,
+        status_code=201,
+    )
+    # Static route must precede the dynamic proposal-id route.
+    add(
+        "/proposals/stats",
+        get_proposal_stats,
+        methods=["GET"],
+        response_model=CanonProposalStatsResponse,
+    )
+    add(
+        "/proposals/{proposal_id}",
+        get_proposal,
+        methods=["GET"],
+        response_model=CanonProposalResponse,
+    )
+    add(
+        "/proposals/{proposal_id}/approve",
+        approve_proposal,
+        methods=["POST"],
+        response_model=CanonProposalResponse,
+    )
+    add(
+        "/proposals/{proposal_id}/reject",
+        reject_proposal,
+        methods=["POST"],
+        response_model=CanonProposalResponse,
+    )
+    add(
+        "/proposals/{proposal_id}/rollback",
+        rollback_proposal,
+        methods=["POST"],
+        response_model=CanonProposalRollbackResponse,
+    )
+    add("/documents", list_documents, methods=["GET"], response_model=CanonDocumentListResponse)
+    add(
+        "/documents/{doc_id}",
+        get_document,
+        methods=["GET"],
+        response_model=CanonDocumentResponse,
+    )
+    add("/hotwords", get_hotwords, methods=["GET"], response_model=CanonHotwordsResponse)
+    return router
+
+
+__all__ = [
+    "CanonProposalApproveRequest",
+    "CanonProposalRejectRequest",
+    "CanonProposalRollbackRequest",
+    "CanonProposalSubmitRequest",
+    "approve_proposal",
+    "create_canon_router",
+    "reject_proposal",
+    "rollback_proposal",
+    "submit_proposal",
+]

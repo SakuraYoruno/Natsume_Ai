@@ -11,8 +11,9 @@ from host_brain.app.http_hooks import add_request_id_and_audit as _add_request_i
 from host_brain.app.http_hooks import global_exception_handler as _global_exception_handler_fn
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.pentest_secure_run_routes import PentestSecureRunCompositionProvider
-from host_brain.app.router_registry import register_host_routers, wire_route_providers
+from host_brain.app.router_registry import register_host_routers
 from host_brain.app.runtime_metrics import RuntimeMetrics, build_metrics_response
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse, MetricsResponse
 from host_brain.app.server_config import configure_http_middleware
@@ -29,6 +30,7 @@ def create_host_fastapi_app(
     get_tool_broker: Callable[[], Any],
     get_tool_catalog: Callable[[], Any],
     get_bond_engine: Callable[[], Any],
+    get_bond_writer: Callable[[], Any] | None = None,
     chat_endpoint: Callable[[ChatRequest, Request], Awaitable[Response]],
     edge_events_endpoint: Callable[[EdgeEventsRequest], Awaitable[EdgeEventsResponse]],
     root_endpoint: Callable[[], Awaitable[Response]],
@@ -47,15 +49,16 @@ def create_host_fastapi_app(
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
     canon_service_provider: Callable[[], Any | None] | None = None,
+    route_ports: HostRoutePorts | None = None,
     input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
-    wire_route_providers(
-        get_ledger=get_ledger,
-        get_tool_broker=get_tool_broker,
-        get_tool_catalog=get_tool_catalog,
-        get_bond_engine=get_bond_engine,
-        logger=logger,
+    del get_ledger  # Route adapters no longer resolve the process ledger.
+    effective_route_ports = route_ports or HostRoutePorts(
         canon_service_provider=canon_service_provider,
+        tool_broker_provider=get_tool_broker,
+        tool_catalog_provider=get_tool_catalog,
+        bond_engine_provider=get_bond_engine,
+        bond_writer_provider=get_bond_writer,
     )
     app = FastAPI(
         title="Natsume AI Host Brain",
@@ -68,6 +71,7 @@ def create_host_fastapi_app(
     register_host_routers(
         app,
         input_runtime_ports=input_runtime_ports,
+        route_ports=effective_route_ports,
         obs_command_ingress_provider=obs_command_ingress_provider,
         pentest_secure_run_composition_provider=(
             pentest_secure_run_composition_provider

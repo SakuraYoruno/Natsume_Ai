@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 import time
 from typing import Any
@@ -9,15 +8,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router
-from host_brain.app.bond_routes import (
-    router as bond_router,
-    set_bond_engine_provider as _set_bond_engine_provider,
-    set_bond_writer_provider as _set_bond_writer_provider,
-)
-from host_brain.app.canon_routes import (
-    router as canon_router,
-    set_canon_service_provider as _set_canon_service_provider,
-)
+from host_brain.app.bond_routes import create_bond_router
+from host_brain.app.canon_routes import create_canon_router
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.health_routes import router as health_router
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -34,7 +27,7 @@ from host_brain.app.pentest_secure_run_routes import (
 )
 from host_brain.app.pentest_routes import router as pentest_router
 from host_brain.app.prompt_config_routes import router as prompt_config_router
-from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
+from host_brain.app.tool_routes import create_tool_router
 from host_brain.observability.command_http import (
     ObsCommandIngressProvider,
     create_obs_command_http_router,
@@ -46,34 +39,11 @@ from host_brain.skills.signed_intake_http import (
     create_signed_skill_provider_intake_router,
 )
 
-
-def wire_route_providers(
-    *,
-    get_ledger: Callable[[], Any],
-    get_tool_broker: Callable[[], Any],
-    get_tool_catalog: Callable[[], Any],
-    get_bond_engine: Callable[[], Any],
-    logger: logging.Logger,
-    canon_service_provider: Callable[[], Any | None] | None = None,
-) -> None:
-    if canon_service_provider is None:
-        raise RuntimeError("Canon composition provider is required")
-    _set_canon_service_provider(canon_service_provider)
-    _set_tool_providers(
-        broker_provider=get_tool_broker,
-        catalog_provider=get_tool_catalog,
-        ledger_provider=get_ledger,
-    )
-    _set_bond_engine_provider(get_bond_engine)
-    from host_brain.composition.process_services import get_bond_dynamics_writer  # noqa: PLC0415
-
-    _set_bond_writer_provider(get_bond_dynamics_writer)
-
-
 def register_host_routers(
     app: FastAPI,
     *,
     input_runtime_ports: InputRuntimeApplicationPorts,
+    route_ports: HostRoutePorts,
     obs_command_ingress_provider: ObsCommandIngressProvider | None = None,
     pentest_secure_run_composition_provider: (
         PentestSecureRunCompositionProvider | None
@@ -160,7 +130,7 @@ def register_host_routers(
         request.state.scheduler_command_service = service
         return service
 
-    app.include_router(canon_router)
+    app.include_router(create_canon_router(route_ports))
     scheduler_dependencies = [
         Depends(require_scheduler_authority),
         Depends(bind_scheduler_service),
@@ -171,10 +141,9 @@ def register_host_routers(
         prefix="/host-scheduler",
         dependencies=scheduler_dependencies,
     )
-    app.include_router(tool_router)
-    app.include_router(tool_kits_alias_router)
+    app.include_router(create_tool_router(route_ports))
     app.include_router(prompt_config_router)
-    app.include_router(bond_router)
+    app.include_router(create_bond_router(route_ports))
     app.include_router(agent_router)
     app.include_router(
         create_input_router(
@@ -216,4 +185,4 @@ def register_host_routers(
     app.include_router(health_router)
 
 
-__all__ = ["register_host_routers", "wire_route_providers"]
+__all__ = ["register_host_routers"]

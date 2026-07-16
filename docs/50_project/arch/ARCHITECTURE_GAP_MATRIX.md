@@ -68,10 +68,10 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
-| 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
+| 显式 Composition Root | `PARTIAL_D1_ROUTE_SCOPE` | `ProcessTaskRuntimeContainer`、`HostRoutePorts`、Canon/Tool/Bond router factories、multi-app isolation tests | Task container 良好；Canon/Tool/Bond HTTP 与对应 OBS adapters 已 app-local，无 module setter/fallback。Capability Forge、Scheduler/Review、Life/Tribe 及其余 Host/Obs/Worker 对象图仍有全局 registry | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
 | 执行巨石拆分 | `PARTIAL_GATE_RED` | `dag_scheduling_runtime.py`、focused Budget/Operation/Effect Store modules、`coordinator.py` | `task_repository.py` 当前 4,145 行；新 Budget/Operation/finalizer modules 均 <1,500且无第二 Store authority。全仓仍有 3 个既存未分类 >1,500 行违规，因此不能写 green | NE-01 Lane D 未决 |
-| Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI、部分 typed ports、Effect/terminal query-only repositories | Obs terminal三 GET 已 query-only + scoped，exact-binding round-trip已接；lifecycle/provider 仍跨全局对象图共享 | NE-01 |
+| Host/Obs/Worker scope 隔离 | `PARTIAL_D1` | 独立 ASGI、`HostRoutePorts`、部分 typed ports、Effect/terminal query-only repositories | Canon/Tool/Bond 的 Host+OBS adapter 已共享同一 app-local ports，多 app 生命周期隔离已测；其余 OBS handlers、lifecycle/provider 与 Worker/Tribe 仍跨全局对象图共享 | NE-01 |
 | Workspace ownership | `PARTIAL_W0_FAIL_CLOSED` | `workspace_paths.py`、`workspace_policy.py`、`agent_tools.py`、W0/resolver/verification tests | 写能力 WorkOrder 在 durable grant 前只允许 runtime-owned temp root；`runtime_repo`/裸 path/git URL/自定义 root 拒绝。工具 authority 取 run-mode 与 allow/forbid 交集；默认 subprocess Python 和未实现 shell 不再暴露为隔离执行器。仍缺 per-task durable owner/lease、唯一 worktree、cleanup continuation/receipt、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |
 

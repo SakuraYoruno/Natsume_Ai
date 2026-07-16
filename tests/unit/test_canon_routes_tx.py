@@ -15,6 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 from host_brain.app import canon_routes
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.canon.application import CanonApplicationService
 from host_brain.memory.canon_apply_service import CanonApplyCommand, CanonApplyResult
 from tests.fakes.canon_runtime import compose_canon_test_runtime
@@ -62,11 +63,8 @@ def route_runtime(tmp_path):
             world_root=tmp_path / "world",
             apply_service=apply_port,
         )
-        canon_routes.set_canon_service_provider(lambda: service)
-        try:
-            yield runtime, service, apply_port
-        finally:
-            canon_routes.set_canon_service_provider(None)
+        route_ports = HostRoutePorts(canon_service_provider=lambda: service)
+        yield runtime, service, apply_port, route_ports
 
 
 def _submit(service: CanonApplicationService, proposal_id: str = "p-route") -> dict:
@@ -99,7 +97,8 @@ def _approve_request(proposal: dict) -> canon_routes.CanonProposalApproveRequest
 
 
 def test_route_module_has_no_store_or_ledger_locator() -> None:
-    assert hasattr(canon_routes, "set_canon_service_provider")
+    assert hasattr(canon_routes, "create_canon_router")
+    assert not hasattr(canon_routes, "set_canon_service_provider")
     assert not hasattr(canon_routes, "_canon_store")
     assert not hasattr(canon_routes, "_canon_store_lock")
     assert not hasattr(canon_routes, "_ledger_provider")
@@ -107,24 +106,25 @@ def test_route_module_has_no_store_or_ledger_locator() -> None:
 
 
 def test_route_provider_fails_closed_when_not_composed() -> None:
-    canon_routes.set_canon_service_provider(None)
     with pytest.raises(RuntimeError, match="not configured"):
-        canon_routes._get_canon_service()
+        canon_routes._get_canon_service(HostRoutePorts())
 
-    canon_routes.set_canon_service_provider(lambda: object())
-    try:
-        with pytest.raises(RuntimeError, match="invalid service"):
-            canon_routes._get_canon_service()
-    finally:
-        canon_routes.set_canon_service_provider(None)
+    with pytest.raises(RuntimeError, match="invalid service"):
+        canon_routes._get_canon_service(HostRoutePorts(
+            canon_service_provider=lambda: object(),
+        ))
 
 
 def test_approve_routes_one_typed_command_through_application(route_runtime) -> None:
-    _runtime, service, apply_port = route_runtime
+    _runtime, service, apply_port, route_ports = route_runtime
     proposal = _submit(service)
 
     response = asyncio.run(
-        canon_routes.approve_proposal(proposal["proposal_id"], _approve_request(proposal))
+        canon_routes.approve_proposal(
+            proposal["proposal_id"],
+            _approve_request(proposal),
+            _route_ports=route_ports,
+        )
     )
 
     assert response.status == "APPLIED"
@@ -136,7 +136,7 @@ def test_approve_routes_one_typed_command_through_application(route_runtime) -> 
 
 
 def test_approve_unexpected_failure_is_mapped_to_500(route_runtime) -> None:
-    _runtime, service, apply_port = route_runtime
+    _runtime, service, apply_port, route_ports = route_runtime
     proposal = _submit(service, "p-route-failure")
     apply_port.error = RuntimeError("apply port unavailable")
 
@@ -145,6 +145,7 @@ def test_approve_unexpected_failure_is_mapped_to_500(route_runtime) -> None:
             canon_routes.approve_proposal(
                 proposal["proposal_id"],
                 _approve_request(proposal),
+                _route_ports=route_ports,
             )
         )
 
@@ -153,7 +154,7 @@ def test_approve_unexpected_failure_is_mapped_to_500(route_runtime) -> None:
 
 
 def test_reject_commits_through_canon_repository_journal(route_runtime) -> None:
-    runtime, service, _apply_port = route_runtime
+    runtime, service, _apply_port, route_ports = route_runtime
     proposal = _submit(service, "p-route-reject")
     before = runtime.container.repository.journal_count()
 
@@ -164,6 +165,7 @@ def test_reject_commits_through_canon_repository_journal(route_runtime) -> None:
                 reason="insufficient evidence",
                 rejector_node_id="canon-reviewer",
             ),
+            _route_ports=route_ports,
         )
     )
 

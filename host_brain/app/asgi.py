@@ -31,6 +31,7 @@ from host_brain.composition.process_services import (
     get_token_service,
     get_tool_broker,
     get_tool_catalog,
+    get_bond_dynamics_writer,
     get_model_attempt_service,
     get_prompt_registry,
     get_capability_broker,
@@ -42,6 +43,7 @@ from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -734,6 +736,14 @@ def create_app() -> FastAPI:
         current = canon_container
         return current.application if current is not None else None
 
+    route_ports = HostRoutePorts(
+        canon_service_provider=canon_service_provider,
+        tool_broker_provider=get_tool_broker,
+        tool_catalog_provider=get_tool_catalog,
+        bond_engine_provider=resolve_bond_engine,
+        bond_writer_provider=get_bond_dynamics_writer,
+    )
+
     def life_command_authority_provider(
         ledger: Any,
     ) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
@@ -838,6 +848,7 @@ def create_app() -> FastAPI:
                         getattr(ledger, "canonical_db_path", "") or ""
                     ),
                     token_service=get_token_service(),
+                    route_ports=route_ports,
                 )
             except Exception:
                 logger.error(
@@ -1421,6 +1432,7 @@ def create_app() -> FastAPI:
         get_tool_broker=get_tool_broker,
         get_tool_catalog=get_tool_catalog,
         get_bond_engine=resolve_bond_engine,
+        get_bond_writer=get_bond_dynamics_writer,
         chat_endpoint=chat_endpoint_with_runtime,
         edge_events_endpoint=edge_events_endpoint_with_runtime,
         root_endpoint=root_endpoint,
@@ -1441,6 +1453,7 @@ def create_app() -> FastAPI:
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
         canon_service_provider=canon_service_provider,
+        route_ports=route_ports,
         input_runtime_ports=input_runtime_ports,
     )
     application.state.security_service_container = None

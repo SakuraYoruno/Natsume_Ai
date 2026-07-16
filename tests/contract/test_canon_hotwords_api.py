@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import json
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("Natsume_AUDIT_DB", ":memory:")
@@ -55,15 +56,20 @@ def client(tmp_path, monkeypatch):
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
 
-    from host_brain.app.asgi import app
+    from host_brain.app.host_route_ports import HostRoutePorts
     container = build_process_canon_container(
         ledger=ledger,
         canonical_db_path=db_path,
         world_root=tmp_path / "world",
     )
     container.application.sync_startup(import_legacy=False)
-    cr.set_canon_service_provider(lambda: container.application)
-    return TestClient(app)
+    app = FastAPI()
+    app.include_router(cr.create_canon_router(HostRoutePorts(
+        canon_service_provider=lambda: container.application,
+    )))
+    with TestClient(app) as test_client:
+        yield test_client
+    ledger.close()
 
 
 # ---------------------------------------------------------------------------

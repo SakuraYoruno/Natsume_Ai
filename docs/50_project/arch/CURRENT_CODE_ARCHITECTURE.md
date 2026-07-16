@@ -28,7 +28,7 @@
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE` | 两批已删除 6 个零消费者槽位和 4 个死 accessor，并收掉第二批 7 个宽泛重导出；排除 6 个 lock 与 `application_ports` 后，模块级 `ProcessServiceContainer` 仍有 53 个可变服务引用及大量 locator |
+| Composition | `INCOMPLETE / D1_ROUTE_SCOPE_WIRED` | 两批已删除 6 个零消费者槽位和 4 个死 accessor，并收掉第二批 7 个宽泛重导出；D1 用 immutable `HostRoutePorts` 清除 Canon/Tool/Bond route module provider/setter/fallback，并把同一 ports 注入对应 OBS command adapters。多 Host app 已证明隔离；排除 6 个 lock 与 `application_ports` 后，模块级 `ProcessServiceContainer` 仍有 53 个可变服务引用及大量其他 locator |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -305,6 +305,8 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 - `process_services.py` 与 `process_runtime_services.py` 仍暴露数十个 `get_*()` accessor；
 - 数十个生产 Python 文件仍直接或间接依赖该 locator；
 - `host_brain.app` 仍承担部分真实 service factory 和 wiring。
+
+D1 已先关闭路由级最直接的多 app 串扰：`HostRoutePorts` 是每个 FastAPI app 捕获的 frozen provider bundle，Canon/Tool/Bond 均由 `create_*_router(ports)` 构造；原 module setter/global provider 和 Tool fallback 到 `process_services` 已删除。同一 bundle 还经 Security composition 传入 Canon/Tool/Bond 的 OBS command adapter。双/三 Host app 交错请求、构造和关闭均只命中自己的 fake service。这个结论仅覆盖三类路由；OBS 的 Capability Forge、Scheduler/Review runtime lookup、Life/Tribe 与其余 process locator 仍在。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
 

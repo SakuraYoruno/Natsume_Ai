@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.broker import ToolBroker, RESULT_SUCCESS, RESULT_REJECTED
-from host_brain.app.tool_routes import router, set_tool_providers
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.tool_routes import create_tool_router
 from fastapi import FastAPI
 
 
@@ -55,12 +56,10 @@ def _make_test_app() -> tuple[FastAPI, ToolCatalog, ToolBroker]:
     broker.register_handler("read_tool_01", lambda args, ctx: {"result": "read_ok"})
 
     app = FastAPI()
-    app.include_router(router)
-    set_tool_providers(
-        broker_provider=lambda: broker,
-        catalog_provider=lambda: catalog,
-        ledger_provider=lambda: ledger,
-    )
+    app.include_router(create_tool_router(HostRoutePorts(
+        tool_broker_provider=lambda: broker,
+        tool_catalog_provider=lambda: catalog,
+    )))
     return app, catalog, broker
 
 

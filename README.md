@@ -16,7 +16,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_W0_FAIL_CLOSED` | D0 scoped I/O/Verification 路径围栏保留；在 durable WorkspaceGrant 建立前，写能力 WorkOrder 仅可使用运行时自有 `temp_workspace`，`runtime_repo`/裸路径/git clone/自定义根全部拒绝。工具 authority 取 `run_mode ∩ allowed_actions − forbidden_actions`；虚假 shell 已移除，默认 subprocess Python 不再冒充隔离执行器。该熔断不是 durable owner、隔离 worktree 或 OS/tenant 边界 |
-| 显式 Composition | `INCOMPLETE` | 两批已删除 6 个零消费者全局槽位、4 个死 accessor，并收掉第二批 7 个宽泛重导出；排除 6 个 lock 与 `application_ports` 端口束后仍有 53 个可变服务引用，尚未形成 Host/Obs/Worker 显式 scopes |
+| 显式 Composition | `INCOMPLETE / D1_ROUTE_SCOPE_WIRED` | 两批已删除 6 个零消费者全局槽位、4 个死 accessor，并收掉第二批 7 个宽泛重导出；D1 又以 immutable `HostRoutePorts` 将 Canon/Tool/Bond HTTP 与对应 OBS command adapter 绑定到单个 app，删除三类模块 provider/setter 和 `process_services` fallback，多 Host app 交错构造/关闭互不污染。排除 6 个 lock 与 `application_ports` 后全局 container 仍有 53 个可变服务引用，Capability Forge/Scheduler/Review 等 locator 及 Host/Obs/Worker scopes 尚未完成 |
 | Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
 | Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |

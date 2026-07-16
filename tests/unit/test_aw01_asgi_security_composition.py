@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from host_brain.app import asgi
+from host_brain.app.host_route_ports import HostRoutePorts
 
 
 def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) -> None:
@@ -418,6 +419,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         return FastAPI()
 
     def fake_build_container(**kwargs):
+        assert isinstance(kwargs.pop("route_ports"), HostRoutePorts)
         assert kwargs == {
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,

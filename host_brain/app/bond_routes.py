@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -24,49 +24,29 @@ from host_brain.bond.bond_stage_engine import (
 )
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.user_identity import collapse_bond_user_ids, resolve_bond_user_id
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.bond_routes")
 _EVIDENCE_REFS_REQUIRED_DETAIL = "evidence_refs 不能为空（FR-BOND-002）"
 
-# ---------------------------------------------------------------------------
-# 路由实例
-# ---------------------------------------------------------------------------
-router = APIRouter(prefix="/bond", tags=["bond"])
-
-# ---------------------------------------------------------------------------
-# 依赖注入
-# ---------------------------------------------------------------------------
-_engine_provider: Optional[Callable[[], BondStageEngine]] = None
-_writer_provider: Optional[Callable[[], BondDynamicsWriter]] = None
+def _get_engine(route_ports: HostRoutePorts) -> BondStageEngine:
+    provider = route_ports.bond_engine_provider
+    engine = provider() if provider is not None else None
+    if engine is None:
+        raise RuntimeError("BondStageEngine provider not configured")
+    return engine
 
 
-def set_bond_engine_provider(provider: Optional[Callable[[], BondStageEngine]]) -> None:
-    """由 router registry 注入 BondStageEngine 获取回调。"""
-    global _engine_provider
-    _engine_provider = provider
-
-
-def set_bond_writer_provider(provider: Optional[Callable[[], BondDynamicsWriter]]) -> None:
-    """Inject the governed BondDynamics command writer used by POST routes."""
-    global _writer_provider
-    _writer_provider = provider
-
-
-def _get_engine() -> BondStageEngine:
-    if _engine_provider is not None:
-        return _engine_provider()
-    raise RuntimeError("BondStageEngine provider not configured")
-
-
-def _get_writer() -> BondDynamicsWriter:
-    if _writer_provider is not None:
-        return _writer_provider()
-    # Isolated router tests historically inject only the stage engine.  The
-    # fallback still goes through BondDynamicsWriter and therefore keeps the
-    # single-writer/evidence contract; production wiring injects the configured
-    # persistent writer provider.
-    return BondDynamicsWriter(stage_engine=_get_engine())
+def _get_writer(route_ports: HostRoutePorts) -> BondDynamicsWriter:
+    provider = route_ports.bond_writer_provider
+    writer = provider() if provider is not None else None
+    if writer is None:
+        raise RuntimeError("BondDynamicsWriter provider not configured")
+    return writer
 
 
 # ---------------------------------------------------------------------------
@@ -135,13 +115,15 @@ class BondHealthResponse(BaseModel):
 # GET /bond/health
 # ---------------------------------------------------------------------------
 
-@router.get("/health", response_model=BondHealthResponse)
-async def bond_health() -> BondHealthResponse:
+async def bond_health(
+    *,
+    _route_ports: HostRoutePorts,
+) -> BondHealthResponse:
     """BondStageEngine 健康状态检查。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     try:
-        engine = _get_engine()
+        engine = _get_engine(_route_ports)
         users = collapse_bond_user_ids(engine.list_users())
         return BondHealthResponse(
             status="OK",
@@ -167,13 +149,15 @@ async def bond_health() -> BondHealthResponse:
 # GET /bond/users
 # ---------------------------------------------------------------------------
 
-@router.get("/users", response_model=Dict[str, Any])
-async def list_bond_users() -> Dict[str, Any]:
+async def list_bond_users(
+    *,
+    _route_ports: HostRoutePorts,
+) -> Dict[str, Any]:
     """列出所有有 Bond 状态的用户 ID。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     try:
-        engine = _get_engine()
+        engine = _get_engine(_route_ports)
         users = collapse_bond_user_ids(engine.list_users())
         return {
             "users": users,
@@ -191,13 +175,16 @@ async def list_bond_users() -> Dict[str, Any]:
 # GET /bond/summary/{user_id}
 # ---------------------------------------------------------------------------
 
-@router.get("/summary/{user_id}", response_model=BondSummaryResponse)
-async def get_bond_summary(user_id: str) -> BondSummaryResponse:
+async def get_bond_summary(
+    user_id: str,
+    *,
+    _route_ports: HostRoutePorts,
+) -> BondSummaryResponse:
     """获取 context-pack-safe Bond Summary（不含数值，供语义内核消费）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     try:
-        engine = _get_engine()
+        engine = _get_engine(_route_ports)
         canonical_user_id = resolve_bond_user_id(user_id)
         summary = engine.get_summary(canonical_user_id)
         return BondSummaryResponse(
@@ -219,13 +206,16 @@ async def get_bond_summary(user_id: str) -> BondSummaryResponse:
 # GET /bond/stage/{user_id}
 # ---------------------------------------------------------------------------
 
-@router.get("/stage/{user_id}", response_model=BondStageResponse)
-async def get_bond_stage(user_id: str) -> BondStageResponse:
+async def get_bond_stage(
+    user_id: str,
+    *,
+    _route_ports: HostRoutePorts,
+) -> BondStageResponse:
     """查询用户当前 Bond 阶段与积分状态（含数值，仅供管理/调试使用）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     try:
-        engine = _get_engine()
+        engine = _get_engine(_route_ports)
         canonical_user_id = resolve_bond_user_id(user_id)
         state = engine.get_state(canonical_user_id)
         stage_index = STAGE_ORDER.index(state.current_stage) if state.current_stage in STAGE_ORDER else 0
@@ -252,8 +242,11 @@ async def get_bond_stage(user_id: str) -> BondStageResponse:
 # POST /bond/event
 # ---------------------------------------------------------------------------
 
-@router.post("/event", response_model=BondEventResponse, status_code=200)
-async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
+async def submit_bond_event(
+    body: BondEventRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> BondEventResponse:
     """提交 Bond 事件，触发积分计算与阶段晋级判断。
 
     - evidence_refs 不能为空（FR-BOND-002）
@@ -273,7 +266,7 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
         )
 
     try:
-        writer = _get_writer()
+        writer = _get_writer(_route_ports)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -324,3 +317,43 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
     except Exception as exc:
         _logger.error("submit_bond_event 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create Bond routes with app-local engine and writer providers."""
+
+    router = APIRouter(prefix="/bond", tags=["bond"])
+
+    def add(path: str, endpoint: Any, *, methods: list[str], **kwargs: Any) -> None:
+        router.add_api_route(
+            path,
+            bind_host_route_endpoint(endpoint, route_ports),
+            methods=methods,
+            **kwargs,
+        )
+
+    add("/health", bond_health, methods=["GET"], response_model=BondHealthResponse)
+    add("/users", list_bond_users, methods=["GET"], response_model=Dict[str, Any])
+    add(
+        "/summary/{user_id}",
+        get_bond_summary,
+        methods=["GET"],
+        response_model=BondSummaryResponse,
+    )
+    add(
+        "/stage/{user_id}",
+        get_bond_stage,
+        methods=["GET"],
+        response_model=BondStageResponse,
+    )
+    add(
+        "/event",
+        submit_bond_event,
+        methods=["POST"],
+        response_model=BondEventResponse,
+        status_code=200,
+    )
+    return router
+
+
+__all__ = ["BondEventRequest", "create_bond_router", "submit_bond_event"]

@@ -9,6 +9,7 @@ import pytest
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.canon.application import CanonApplicationService
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.memory.canon_world_store import WorldCanonStore
 from host_brain.memory.long_term_distiller import LongTermMemoryDistiller
 from host_brain.observability.degradation_state import (
@@ -144,27 +145,25 @@ def test_canon_approve_route_uses_stored_proposal_content(tmp_path) -> None:
             "evidence_refs": ("audit://unit/review",),
         }
         token = issuer.issue_approved_token(**binding)
-        cr.set_canon_service_provider(lambda: service)
-        try:
-            response = asyncio.run(
-                cr.approve_proposal(
-                    "prop-approve-stored",
-                    cr.CanonProposalApproveRequest(
-                        apply_id="unit-apply",
-                        subject_version=binding["subject_version"],
-                        subject_hash=binding["subject_hash"],
-                        target_doc_id=binding["target_doc_id"],
-                        base_version=binding["base_version"],
-                        approval_token_ref=token,
-                        actor_id=binding["actor_id"],
-                        session_id=binding["session_id"],
-                        trace_id=binding["trace_id"],
-                        evidence_refs=list(binding["evidence_refs"]),
-                    ),
-                )
+        route_ports = HostRoutePorts(canon_service_provider=lambda: service)
+        response = asyncio.run(
+            cr.approve_proposal(
+                "prop-approve-stored",
+                cr.CanonProposalApproveRequest(
+                    apply_id="unit-apply",
+                    subject_version=binding["subject_version"],
+                    subject_hash=binding["subject_hash"],
+                    target_doc_id=binding["target_doc_id"],
+                    base_version=binding["base_version"],
+                    approval_token_ref=token,
+                    actor_id=binding["actor_id"],
+                    session_id=binding["session_id"],
+                    trace_id=binding["trace_id"],
+                    evidence_refs=list(binding["evidence_refs"]),
+                ),
+                _route_ports=route_ports,
             )
-        finally:
-            cr.set_canon_service_provider(None)
+        )
 
         doc = service.get_document("wc-stored-approve")
         assert response.status == "APPLIED"

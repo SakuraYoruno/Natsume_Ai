@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from host_brain.app.router_registry import register_host_routers
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.app.host_route_ports import HostRoutePorts
 
 
 def test_both_scheduler_prefixes_use_one_service_with_explicit_authority() -> None:
@@ -38,6 +39,7 @@ def test_both_scheduler_prefixes_use_one_service_with_explicit_authority() -> No
     register_host_routers(
         app,
         input_runtime_ports=build_input_runtime_application_ports(),
+        route_ports=HostRoutePorts(),
         scheduler_command_ingress_provider=Ingress,
         scheduler_command_service_provider=lambda: service,
     )

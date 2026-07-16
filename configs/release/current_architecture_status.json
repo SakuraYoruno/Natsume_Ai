@@ -578,6 +578,10 @@
     "explicit_composition_root": {
       "status": "PARTIAL",
       "global_service_locator": "PRESENT",
+      "per_app_route_scope": "WIRED_CANON_TOOL_BOND_AND_OBS_ADAPTERS",
+      "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
+      "multi_app_isolation": "PROVEN_FOR_CANON_TOOL_BOND",
+      "remaining_locator_boundary": "Capability Forge, Scheduler, Task Review, Life, Tribe, and other process services remain outside this slice",
       "mixed_file_gate": "RED_3_EXISTING_UNCLASSIFIED_OVER_1500",
       "mixed_file_gate_findings": [
         "host_brain/app/governed_task_adapter.py:1539",
@@ -608,9 +612,17 @@
         ]
       },
       "evidence_refs": [
+        "host_brain/app/host_route_ports.py",
+        "host_brain/app/app_factory.py",
+        "host_brain/app/router_registry.py",
+        "host_brain/app/canon_routes.py",
+        "host_brain/app/tool_routes.py",
+        "host_brain/app/bond_routes.py",
+        "host_brain/app/observability_runtime/domain_command_ports.py",
         "host_brain/composition/process_service_container.py",
         "host_brain/composition/process_services.py",
         "host_brain/composition/process_runtime_services.py",
+        "tests/unit/test_ne01_host_route_scope.py",
         "tests/contract/test_ne01_process_service_container_cleanup.py"
       ]
     },
