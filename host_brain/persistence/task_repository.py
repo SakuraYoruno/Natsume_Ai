@@ -1202,7 +1202,42 @@ class DurableTaskStore(
         return rows[0]
 
     @staticmethod
+    def _assert_graph_revision_not_superseded(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_graph_revision_supersession'
+            """
+        ).fetchone()
+        if ready is None:
+            return
+        row = conn.execute(
+            """
+            SELECT supersession_id, replacement_revision
+            FROM task_runtime_graph_revision_supersession
+            WHERE graph_id = ? AND previous_revision = ?
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if row is not None:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "superseded Graph revision fences ordinary "
+                f"{str(action or 'execution authority')}: "
+                f"{row['supersession_id']} -> revision "
+                f"{int(row['replacement_revision'])}",
+            )
+
+    @classmethod
     def _assert_graph_not_cancelling(
+        cls,
         conn: sqlite3.Connection,
         *,
         graph_id: str,
@@ -1214,6 +1249,12 @@ class DurableTaskStore(
         separately require 0092 through ``assert_graph_cancellation_ready``.
         """
 
+        cls._assert_graph_revision_not_superseded(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action="execution mutation",
+        )
         ready = conn.execute(
             """
             SELECT 1 FROM sqlite_master
@@ -1247,6 +1288,12 @@ class DurableTaskStore(
     ) -> None:
         """Fence graph-bound Budget creation/activation inside the write UoW."""
 
+        self._assert_graph_revision_not_superseded(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action=f"BudgetReservation {action}",
+        )
         graph = self._require_graph(conn, graph_id, graph_revision)
         status = str(graph["status"] or "").strip().upper()
         if status not in {
@@ -1258,6 +1305,33 @@ class DurableTaskStore(
                 f"graph-bound BudgetReservation {action} requires a CREATED or "
                 f"ACTIVE TaskGraph, got {status or 'UNKNOWN'}",
             )
+
+    def assert_no_terminal_reconciliation_fence_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Apply the canonical unresolved-0099 fence inside a caller UoW.
+
+        This narrow public hook lets higher-level repositories compose terminal
+        reconciliation validation without opening a second transaction or
+        depending on the private helper's implementation shape.
+        """
+
+        if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "terminal reconciliation fence requires an active SQLite transaction",
+            )
+        self._assert_no_terminal_reconciliation_fence(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action=action,
+        )
 
     @staticmethod
     def _assert_no_terminal_reconciliation_fence(

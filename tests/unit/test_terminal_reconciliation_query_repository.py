@@ -30,7 +30,7 @@ def _migrated_db(tmp_path: Path) -> Path:
         ts_ms=1_910_000_000_000,
     )
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] == 99
+    assert result.summary["current_version"] >= 100
     return db_path
 
 

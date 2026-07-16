@@ -1526,6 +1526,11 @@ def _find_node(
     conn: sqlite3.Connection,
     binding: TaskReviewSubjectBinding,
 ) -> sqlite3.Row | None:
+    _assert_graph_revision_not_superseded(
+        conn,
+        graph_id=binding.graph_id,
+        graph_revision=binding.graph_revision,
+    )
     return conn.execute(
         """
         SELECT * FROM task_runtime_node
@@ -1533,6 +1538,38 @@ def _find_node(
         """,
         (binding.graph_id, binding.graph_revision, binding.node_id),
     ).fetchone()
+
+
+def _assert_graph_revision_not_superseded(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> None:
+    ready = conn.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'task_runtime_graph_revision_supersession'
+        """
+    ).fetchone()
+    if ready is None:
+        return
+    row = conn.execute(
+        """
+        SELECT supersession_id, replacement_revision
+        FROM task_runtime_graph_revision_supersession
+        WHERE graph_id = ? AND previous_revision = ?
+        """,
+        (str(graph_id), int(graph_revision)),
+    ).fetchone()
+    if row is not None:
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CLAIM_LOST,
+            "superseded Graph revision fences Review continuation: "
+            f"{row['supersession_id']} -> revision "
+            f"{int(row['replacement_revision'])}",
+        )
 
 
 def _require_continuation(conn: sqlite3.Connection, review_id: str) -> sqlite3.Row:

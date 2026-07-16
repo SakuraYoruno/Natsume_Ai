@@ -34,6 +34,11 @@ def _remove_0098_physical_receipt(store) -> None:
     """Restore the exact pre-0098 surface while retaining the 0097 fixtures."""
 
     with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "DROP TABLE IF EXISTS task_runtime_graph_revision_supersession"
+        )
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 100")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 100")
         conn.execute("DROP TABLE IF EXISTS task_runtime_terminal_reconciliation_proof")
         conn.execute("DROP TABLE IF EXISTS task_runtime_terminal_reconciliation_case")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 99")
@@ -58,7 +63,7 @@ def _apply_0098(store, *, request_id: str) -> None:
         ts_ms=NOW,
     )
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] == 99
+    assert result.summary["current_version"] >= 100
     store._effect_reconciliation_schema_ready = False
     store.assert_effect_reconciliation_ready(force_revalidate=True)
 
@@ -193,6 +198,11 @@ def test_0098_inventories_requested_failed_evidence_and_replays_receipt_loss(
     # Simulate SQL commit succeeding while the runner receipt was lost.  The
     # immutable inventory INSERT OR IGNORE must make exact replay idempotent.
     with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "DROP TABLE IF EXISTS task_runtime_graph_revision_supersession"
+        )
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 100")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 100")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 99")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id = 99")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 98")

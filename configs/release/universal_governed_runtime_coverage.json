@@ -289,19 +289,24 @@
     },
     "revision_plus_one_replan": {
       "status": "PARTIAL",
-      "safety_stopgap_boundary": "Only a durable FAILED predecessor may currently enter explicit replanning. BLOCKED predecessors, Review-waiting or retry-pending nodes, continuable execution states, non-terminal or RECOVERABLE Attempts, and any active Lease fail closed before PlanningSearch. This closes the known old-revision continuation window, but it is not durable supersession: predecessor validation and replacement admission are not yet one atomic transaction, and no append-only supersession authority fences every old-revision mutation entry.",
+      "durable_supersession_boundary": "Migration 0100 adds append-only graph-revision supersession authority. HostCommandRepository.admit_replan owns one BEGIN IMMEDIATE transaction that revalidates the same-root FAILED predecessor, exact terminal Graph Outbox, quiescent Node/Attempt/Lease/Operation/Review/Budget/Effect/cancellation/0099 facts, admits revision+1 Graph and HostCommand, then appends one deterministic supersession row. Exact response-loss replay requires the same committed row; injected failure after insertion rolls back replacement and supersession together. Ordinary TaskStore mutations, READY claim, retry, Budget writes, and Review continuation read the same durable fence. The SQL trigger freezes Graph FAILED-to-CREATED/root/version binding and foreign-key existence; exact HostCommand-to-Graph lineage is deliberately enforced by the repository transaction rather than a cross-table trigger so 0088 receipt-loss table rebuild remains compatible.",
       "failure_evidence_boundary": "read_scheduler_snapshot defaults include_graph_outboxes=false, preserving ordinary scheduling and Operator hot paths. PlanningRecovery explicitly requests true, reads exact Graph Outboxes in the same read transaction, and selects exactly one terminal row matching graph id, revision, status/version. It uses that durable payload_ref so pre-0095 evidence is not rewritten into a nonexistent ref. A synthesized revisioned fallback is used only when an older or alternative Store omits the optional graph_outboxes extension; production DurableTaskStore supplies it when requested, and malformed, missing, or ambiguous present inventory fails closed.",
       "missing": [
-        "append-only durable graph-revision supersession authority",
-        "one atomic predecessor validation, supersession, and replacement admission transaction",
-        "old-revision fences on Review continuation, READY claim, retry, Budget activation, and coordinator replay"
+        "automatic failure-triggered replanning rather than the current explicit governed request",
+        "a wider proven-safe predecessor classifier; the current subset rejects every historical Review continuation and every Acceptance Effect instead of inferring quiescence",
+        "production canary and full cross-process Review-decision versus supersession race evidence"
       ],
       "evidence_refs": [
+        "host_brain/audit/migrations/0100_task_runtime_graph_revision_supersession.sql",
         "host_brain/orchestration/failure_replan_intent.py",
         "host_brain/orchestration/planning_recovery.py",
+        "host_brain/orchestration/planning_admission.py",
+        "host_brain/persistence/host_command_repository.py",
+        "host_brain/persistence/graph_revision_supersession_schema.py",
         "host_brain/persistence/task_dag_state_store.py",
         "host_brain/app/governed_task_adapter.py",
         "tests/unit/test_gr04_planning_recovery.py",
+        "tests/unit/test_ne01_graph_revision_supersession_migration.py",
         "tests/integration/test_gr04_planning_replan_sqlite.py"
       ]
     },

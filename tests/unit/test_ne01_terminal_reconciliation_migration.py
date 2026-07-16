@@ -39,10 +39,10 @@ def _migrated_db(tmp_path, name: str) -> tuple[SQLiteMigrationRunner, Any]:
     runner = SQLiteMigrationRunner(db_path=db_path)
     result = runner.apply_migrations(request_id=f"0099:{name}", ts_ms=99)
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 99
-    assert result.records[-1].migration_id == (
-        "0099_task_runtime_terminal_reconciliation"
-    )
+    assert result.summary["current_version"] >= 100
+    assert "0100_task_runtime_graph_revision_supersession" in {
+        record.migration_id for record in result.records
+    }
     return runner, db_path
 
 
@@ -281,6 +281,11 @@ def _insert_proof(conn: sqlite3.Connection, values: tuple[Any, ...]) -> None:
 def test_0099_is_schema_only_and_preserves_existing_authority_rows(tmp_path) -> None:
     runner, db_path = _migrated_db(tmp_path, "0099-schema-only.sqlite3")
     with _connect(db_path) as conn:
+        conn.execute(
+            "DROP TABLE IF EXISTS task_runtime_graph_revision_supersession"
+        )
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 100")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 100")
         for trigger in TRIGGERS:
             conn.execute(f"DROP TRIGGER {trigger}")
         conn.execute(f"DROP TABLE {SUPERSESSION_TABLE}")
@@ -314,10 +319,10 @@ def test_0099_is_schema_only_and_preserves_existing_authority_rows(tmp_path) -> 
 
     applied = runner.apply_migrations(request_id="0099-schema-only-reapply", ts_ms=100)
     assert applied.success is True, applied.as_dict()
-    assert applied.summary["current_version"] == 99
-    assert applied.records[-1].migration_id == (
-        "0099_task_runtime_terminal_reconciliation"
-    )
+    assert applied.summary["current_version"] >= 100
+    assert "0100_task_runtime_graph_revision_supersession" in {
+        record.migration_id for record in applied.records
+    }
 
     with _connect(db_path) as conn:
         assert tuple(conn.execute(f"SELECT COUNT(*) FROM {CASE_TABLE}").fetchone()) == (0,)
