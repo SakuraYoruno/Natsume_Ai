@@ -75,12 +75,12 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
-# 0089 contains an ALTER TABLE followed by an index creation inside one
-# explicit transaction.  The SQL transaction may commit before the runner can
-# persist its migration receipt.  On the next startup SQLite then reports a
-# duplicate column even though the complete physical migration is present.
-# Repair is allowed only for this exact checksum and only after validating the
-# column constraint plus the exact graph-scoped index shape.
+# 0089 and 0093 contain ALTER TABLE statements followed by indexes/triggers in
+# one explicit transaction.  SQL may commit before the runner persists its
+# migration receipt; the next startup then sees a duplicate column although
+# the complete physical migration exists.  Repair is allowed only for exact
+# checksums and only after every column constraint, index and trigger required
+# by the corresponding frozen asset has been validated.
 CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
     str,
     tuple[
@@ -89,6 +89,7 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
         dict[str, tuple[str, bool]],
         dict[str, tuple[str, tuple[str, ...]]],
         tuple[str, ...],
+        dict[str, tuple[str, tuple[str, ...]]],
     ],
 ] = {
     "0089_task_runtime_dag_scheduling.sql": (
@@ -110,7 +111,91 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
         (
             "check(retry_not_before_msisnullorretry_not_before_ms>=0)",
         ),
-    )
+        {},
+    ),
+    "0093_task_runtime_outbox_claim.sql": (
+        "5ac7145decc5bcc9cea9bb8378d9cdf93c0196adcb7b8c3dccecf8cff77b16be",
+        "task_runtime_outbox",
+        {
+            "claim_owner": ("TEXT", False),
+            "claim_token": ("TEXT", False),
+            "claim_expires_ts_ms": ("INTEGER", False),
+            "claim_fencing_token": ("INTEGER", True),
+            "attempt_count": ("INTEGER", True),
+            "last_error": ("TEXT", False),
+        },
+        {
+            "idx_task_runtime_outbox_delivery_ready": (
+                "task_runtime_outbox",
+                (
+                    "status",
+                    "available_ts_ms",
+                    "claim_expires_ts_ms",
+                    "created_ts_ms",
+                    "outbox_id",
+                ),
+            ),
+            "idx_task_runtime_outbox_aggregate_delivery_order": (
+                "task_runtime_outbox",
+                (
+                    "aggregate_type",
+                    "aggregate_id",
+                    "status",
+                    "aggregate_version",
+                    "created_ts_ms",
+                    "outbox_id",
+                ),
+            ),
+        },
+        (
+            "check(claim_ownerisnullortypeof(claim_owner)='text')",
+            "check(claim_tokenisnullortypeof(claim_token)='text')",
+            "check(claim_expires_ts_msisnullor(typeof(claim_expires_ts_ms)='integer'andclaim_expires_ts_ms>=0))",
+            "check(typeof(claim_fencing_token)='integer'andclaim_fencing_token>=0)",
+            "check(typeof(attempt_count)='integer'andattempt_count>=0andattempt_count=claim_fencing_token)",
+            "check(last_errorisnullor(typeof(last_error)='text'andlength(trim(last_error))>0andlength(last_error)<=2000))",
+        ),
+        {
+            "trg_task_runtime_outbox_claim_insert_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeinsertontask_runtime_outbox",
+                    "new.claim_ownerisnotnull",
+                    "new.claim_tokenisnotnull",
+                    "new.claim_expires_ts_msisnotnull",
+                    "typeof(new.claim_owner)='text'",
+                    "typeof(new.claim_token)='text'",
+                    "typeof(new.claim_expires_ts_ms)='integer'",
+                    "new.claim_expires_ts_ms>=0",
+                    "typeof(new.claim_fencing_token)='integer'",
+                    "typeof(new.attempt_count)='integer'",
+                    "new.claim_fencing_token>0",
+                    "new.attempt_count>0",
+                    "new.claim_fencing_token=new.attempt_count",
+                    "raise(abort,'task_runtime_outboxclaimstateisinvalid')",
+                ),
+            ),
+            "trg_task_runtime_outbox_claim_update_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeupdateofstatus,claim_owner,claim_token,claim_expires_ts_ms,claim_fencing_token,attempt_countontask_runtime_outbox",
+                    "new.claim_ownerisnotnull",
+                    "new.claim_tokenisnotnull",
+                    "new.claim_expires_ts_msisnotnull",
+                    "typeof(new.claim_owner)='text'",
+                    "typeof(new.claim_token)='text'",
+                    "typeof(new.claim_expires_ts_ms)='integer'",
+                    "new.claim_expires_ts_ms>=0",
+                    "typeof(new.claim_fencing_token)='integer'",
+                    "typeof(new.attempt_count)='integer'",
+                    "new.claim_fencing_token>0",
+                    "new.attempt_count>0",
+                    "new.claim_fencing_token=new.attempt_count",
+                    "raise(abort,'task_runtime_outboxclaimstateisinvalid')",
+                ),
+            ),
+        },
+    ),
 }
 
 # A draft of 0072 reached one workspace database before the physical asset was
@@ -574,7 +659,14 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
     frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
     if frozen is None:
         return False
-    _checksum, table, required_columns, required_indexes, sql_fragments = frozen
+    (
+        _checksum,
+        table,
+        required_columns,
+        required_indexes,
+        sql_fragments,
+        required_triggers,
+    ) = frozen
     try:
         table_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -613,6 +705,31 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
                 ).fetchall()
             )
             if actual_index_columns != expected_index_columns:
+                return False
+
+        for trigger_name, (trigger_table, expected_fragments) in (
+            required_triggers.items()
+        ):
+            trigger_row = conn.execute(
+                """
+                SELECT tbl_name, sql FROM sqlite_master
+                WHERE type = 'trigger' AND name = ?
+                """,
+                (trigger_name,),
+            ).fetchone()
+            if (
+                trigger_row is None
+                or str(trigger_row[0]) != trigger_table
+                or trigger_row[1] is None
+            ):
+                return False
+            normalized_trigger_sql = re.sub(
+                r"\s+", "", str(trigger_row[1]).lower()
+            )
+            if any(
+                fragment not in normalized_trigger_sql
+                for fragment in expected_fragments
+            ):
                 return False
     except (IndexError, sqlite3.DatabaseError):
         return False

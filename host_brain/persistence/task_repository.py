@@ -179,6 +179,9 @@ from host_brain.persistence.task_dag_state_store import (
 from host_brain.persistence.task_ready_claim_store import (
     TaskReadyClaimStoreMixin,
 )
+from host_brain.persistence.task_outbox_delivery_store import (
+    TaskOutboxDeliveryStoreMixin,
+)
 
 
 TASK_STORE_RECONCILIATION_PROOF_REQUIRED = "TASK_STORE_RECONCILIATION_PROOF_REQUIRED"
@@ -472,6 +475,7 @@ def build_reconciliation_attestation_binding(
 
 
 class DurableTaskStore(
+    TaskOutboxDeliveryStoreMixin,
     TaskAcceptanceEffectStagingMixin,
     TaskAcceptanceEffectDeliveryMixin,
     TaskParallelSuccessStoreMixin,
@@ -504,6 +508,7 @@ class DurableTaskStore(
         self._reconciliation_proof_verifier = reconciliation_proof_verifier
         if verify_schema:
             self.assert_schema_ready()
+            self._initialize_outbox_delivery_capability()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(
@@ -3662,17 +3667,16 @@ class DurableTaskStore(
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        ts_ms = self._now()
         conn = self._connect()
         try:
             rows = conn.execute(
                 """
                 SELECT * FROM task_runtime_outbox
-                WHERE status = 'PENDING' AND available_ts_ms <= ?
+                WHERE status = 'PENDING'
                 ORDER BY created_ts_ms, outbox_id
                 LIMIT ?
                 """,
-                (ts_ms, max(1, int(limit))),
+                (max(1, int(limit)),),
             ).fetchall()
             return [_outbox_record(row) for row in rows]
         finally:
@@ -3684,6 +3688,7 @@ class DurableTaskStore(
         *,
         expected_version: int,
     ) -> dict[str, Any]:
+        self._require_legacy_outbox_settlement()
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_outbox(conn, outbox_id)

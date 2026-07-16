@@ -1011,6 +1011,87 @@ def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
             TASK_STORE_DURABLE_DATA_INVALID,
             f"durable OutboxMessage violates contract: {exc}",
         ) from exc
+    claim_columns = {
+        "claim_owner",
+        "claim_token",
+        "claim_expires_ts_ms",
+        "claim_fencing_token",
+        "attempt_count",
+        "last_error",
+    }
+    present_claim_columns = claim_columns.intersection(record)
+    if present_claim_columns and present_claim_columns != claim_columns:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "task_runtime_outbox durable claim columns are incomplete",
+        )
+    if present_claim_columns:
+        owner = record["claim_owner"]
+        token = record["claim_token"]
+        expires = record["claim_expires_ts_ms"]
+        claim_values = (owner, token, expires)
+        claim_is_empty = all(value is None for value in claim_values)
+        claim_is_complete = all(value is not None for value in claim_values)
+        if not claim_is_empty and not claim_is_complete:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "task_runtime_outbox durable claim is partial",
+            )
+        raw_fence = record["claim_fencing_token"]
+        raw_attempts = record["attempt_count"]
+        if (
+            type(raw_fence) is not int
+            or type(raw_attempts) is not int
+            or (expires is not None and type(expires) is not int)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "task_runtime_outbox durable claim counters require integer storage",
+            )
+        fence = raw_fence
+        attempts = raw_attempts
+        expiry = expires
+        if (
+            fence < 0
+            or attempts < 0
+            or fence != attempts
+            or (expiry is not None and expiry < 0)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "task_runtime_outbox durable claim counters are invalid",
+            )
+        if claim_is_complete:
+            if (
+                str(record["status"]) != "PENDING"
+                or not isinstance(owner, str)
+                or not owner.strip()
+                or not isinstance(token, str)
+                or not token.strip()
+                or fence < 1
+                or attempts < 1
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "task_runtime_outbox live claim binding is invalid",
+                )
+        elif str(record["status"]) != "PENDING" and any(
+            value is not None for value in claim_values
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "terminal task_runtime_outbox row retains a delivery claim",
+            )
+        last_error = record["last_error"]
+        if last_error is not None and (
+            not isinstance(last_error, str)
+            or not last_error.strip()
+            or len(last_error) > 2_000
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "task_runtime_outbox last_error is invalid",
+            )
     record["evidence_refs"] = evidence_refs
     return record
 

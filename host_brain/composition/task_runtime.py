@@ -252,7 +252,7 @@ class ProcessTaskRuntimeContainer:
         batch_limit: int = 1_000,
         max_batches: int = 64,
     ) -> Mapping[str, Any]:
-        """Publish every currently pending row, bounded for shutdown safety."""
+        """Publish ready rows and report durable deferred work truthfully."""
 
         self._assert_process_owner()
         limit = max(1, int(batch_limit))
@@ -270,12 +270,54 @@ class ProcessTaskRuntimeContainer:
                 )
             total_scanned += scanned
             total_published += published
-            if scanned == 0 or scanned < limit:
+            backlog = result.get("backlog")
+            if not isinstance(backlog, Mapping):
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_DRAIN_FAILED,
+                    "outbox publisher omitted durable backlog state",
+                )
+            try:
+                remaining = int(backlog["total_pending"])
+                delivery_ready = int(backlog["delivery_ready_count"])
+                raw_wakeup = backlog["next_wakeup_ts_ms"]
+                next_wakeup = None if raw_wakeup is None else int(raw_wakeup)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_DRAIN_FAILED,
+                    "outbox publisher returned invalid durable backlog state",
+                ) from exc
+            if (
+                remaining < 0
+                or delivery_ready < 0
+                or delivery_ready > remaining
+                or (remaining == 0 and next_wakeup is not None)
+                or (remaining > 0 and next_wakeup is None)
+            ):
+                raise TaskRuntimeContainerError(
+                    TASK_RUNTIME_DRAIN_FAILED,
+                    "outbox publisher returned impossible durable backlog state",
+                )
+            if remaining == 0:
                 summary = {
                     "status": "DRAINED",
                     "batch_count": batch_no,
                     "pending_scanned": total_scanned,
                     "published_count": total_published,
+                    "remaining_pending": 0,
+                    "delivery_ready_count": 0,
+                    "next_wakeup_ts_ms": None,
+                }
+                self._last_drain_result = summary
+                return summary
+            if delivery_ready == 0:
+                summary = {
+                    "status": "DEFERRED",
+                    "batch_count": batch_no,
+                    "pending_scanned": total_scanned,
+                    "published_count": total_published,
+                    "remaining_pending": remaining,
+                    "delivery_ready_count": 0,
+                    "next_wakeup_ts_ms": next_wakeup,
                 }
                 self._last_drain_result = summary
                 return summary
@@ -535,6 +577,7 @@ def build_process_task_runtime_container(
 
         task_store = task_store_builder(canonical)
         constructed.append(("task_store", task_store))
+        task_store.assert_outbox_delivery_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         review_store = review_store_builder(canonical)
@@ -558,11 +601,13 @@ def build_process_task_runtime_container(
         outbox_publisher = outbox_publisher_builder(
             task_store=task_store,
             event_store=event_store,
+            worker_id=f"{recovery_id}::outbox",
         )
         constructed.append(("outbox_publisher", outbox_publisher))
         startup_publish_result = outbox_publisher.publish_pending(
             limit=max(1, int(startup_outbox_limit))
         )
+        outbox_publisher.start()
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)
         raise TaskRuntimeContainerConstructionError(

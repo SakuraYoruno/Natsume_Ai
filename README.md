@@ -108,7 +108,9 @@ request
 
 当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；Executive 的生产入口、SkillDag 执行和内存任务 registry 已删除。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。
 
-Durable 启动门禁当前按 `migration → task_store.recover_startup → 构造 publisher → 发布 recovery outbox → 稍后激活 runtime` 执行；恢复步骤抛错会在路由开放前 fail closed。ASGI 会把配置中的逻辑 owner 派生为每次 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner，避免重启后的旧 owner 身份复用。
+Durable 启动门禁当前按 `migration → 逐 Store readiness → task_store.recover_startup → 构造 publisher → 发布 recovery outbox → 启动 Outbox 后台 worker → 稍后激活 runtime` 执行；恢复步骤抛错会在路由开放前 fail closed。ASGI 会把配置中的逻辑 owner 派生为每次 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner，避免重启后的旧 owner 身份复用。
+
+0093 已把 Task Runtime Outbox drain 从单进程锁升级为持久化跨进程权威：每次 claim 绑定 `owner + token + expiry + 单调递增 fencing token`，过期 claim 可由新 owner takeover，且同一 `aggregate_type + aggregate_id` 严格按 version/creation/id 顺序投递。Publisher 每次只做 `claim 一条 → 幂等 append runtime event → 用 owner/token/fence/version 封口`；append 失败会释放 claim 并持久化 backoff 与错误，append 成功但 complete 丢失时则由幂等 event append 与过期 takeover 收敛。Composition 直接使用当次 boot/construction 的 `recovery_id::outbox` 作为唯一 publisher owner，并在启动发布后拉起可关闭的后台续投线程；线程根据 canonical backlog 中 aggregate head 的最早 available/claim-expiry 时间等待，并以有界轮询兜底，所以旧进程死亡时即使 claim 尚未到期，新进程也会在到期后自动接管。Publisher close 会与前台 publish 临界区线性化，必须等待已进入的发布，避免 close 返回后继续访问 Store。显式 drain 只有数据库 `total_pending=0` 才能返回 `DRAINED`，仍有活 claim、backoff 或被 predecessor 阻塞的消息时返回 `DEFERRED`。`list_pending_outbox` 保持完整 PENDING inventory，投递 eligibility 只属于 claim/backlog API；0093 readiness 是 Store 实例级状态，正常构造/显式 assert 验证后由热路径复用，只有显式诊断 `force_revalidate` 才重扫 schema/全表；逐条 claim/complete/release 只保留事务内 CAS、trigger 与记录校验。Event append/claim complete 已提交后，如果 backlog 诊断读取失败，只返回脱敏 `DEGRADED`，不会把已提交投递伪报为失败。进程内 asyncio/threading 锁仅作降噪，不再被当作跨进程 authority。
 
 `schedule_retry` 提交后若仅丢失响应，同一确定性调用会严格核对 Attempt、Node、Lease、Graph、Budget、BudgetUsage 及关联 Outbox 后返回原决定，不重复扣减 retry budget。普通或重试耗尽的 pre-reservation resolver failure 通过 `fail_running_attempt_bundle` 在一个事务内落 `Attempt FAILED`、`Node FAILED`、`Graph FAILED/BLOCKED`、`Lease RELEASED` 和四条 attempt/evidence-bound Outbox；一旦已有 operation reservation，该边界拒绝接管。Budget finalize 仍在该事务之外。
 
@@ -128,7 +130,7 @@ B5C 的取消 authority 是 graph revision 级、两阶段且 first-writer-wins�
 
 取消不会撤销已经验收的事实：`NODE` scope 且所属 Node 已 `ACCEPTED`、Attempt 已 `SUCCEEDED` 的 effect 继续按既有 delivery authority 派发/重试；未验收 NODE effect 与未完成 Graph 的 GRAPH effect 被 fence。`RESERVED/RECOVERY_REQUIRED` operation 或不确定 effect 必须先 reconciliation，不能抢跑 final cancellation。取消 intent 建立后，同 revision 的 `task-node://` Review 不得再创建、批准或消费 resume token；Graph/Node URI 段统一按 canonical percent-encoding 生成和匹配，相邻 revision 不受影响。调用方断开、进程 shutdown 等基础设施 `CancelledError` 也不会自动伪装成业务取消；worker 自发取消转为 `RECOVERY_REQUIRED`，并行 supervisor 会立即停批和 join siblings，Graph 保持 `ACTIVE` 等待 durable recovery。只有经过 verifier 的 durable request 才能建立取消意图。
 
-这仍是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`，不是 Lane B 或完整架构完成。B5C 的合同、0092 Store UoW、Coordinator 重入路径和内部验证边界已有证据，但生产 authority verifier/入口/canary 尚未接线，跨进程自动 reconciliation、takeover、continuation 也未实现。0090/B4、0091/B5 的既有语义继续有效；revisioned 0090 marker、历史半提交修复、跨进程 Outbox claim/CAS、Budget 高竞争与统一 `WAITING_APPROVAL` 仍是缺口，因此生产 atomic/bounded/cancellation 必须保持关闭。
+这仍是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`，不是 Lane B 或完整架构完成。0093 只收口了 Task Runtime Outbox 的跨进程 claim/CAS 与有序投递；B5C 的生产 authority verifier/受控入口/canary 仍未接线，0092 pending cancellation 也没有自动 scanner、claim、reconciliation、takeover 和 continuation worker。revisioned 0090 marker、历史半提交修复、Budget 高竞争与统一 `WAITING_APPROVAL` 仍是缺口，因此生产 atomic/bounded/cancellation 必须保持关闭。
 
 ### Planning Search
 

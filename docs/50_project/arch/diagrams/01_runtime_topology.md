@@ -82,6 +82,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 两阶段 cancellation 已有证据；取消仅有 exact-revision verified internal boundary，生产 composition 未注入 verifier，也无 HTTP/UI 或跨进程自动 reconciliation/takeover/continuation。atomic、bounded、cancellation 与 Host/Scheduler/Internal 生产开关均 OFF；revisioned 0090、多进程 Outbox 与 canary 未闭环。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 两阶段 cancellation 与 0093 跨进程 Outbox durable claim/CAS 已有证据；取消仍只有 exact-revision verified internal boundary，生产 composition 未注入 verifier，也无 HTTP/UI 或 pending-intent scanner/claim/reconciliation/takeover/continuation。atomic、bounded、cancellation 与 Host/Scheduler/Internal 生产开关均 OFF；revisioned 0090、Budget 高竞争与 canary 未闭环。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

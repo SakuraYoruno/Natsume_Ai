@@ -253,14 +253,14 @@ claim runnable node
 | atomic 成功 UoW | 全 Node Accepted 后单事务提交 Graph COMPLETED、Budget CONSUMED、两 Outbox、全图 effect intents 与 0091 decision；结果只取显式 result 的 canonical projection | `B5_SHADOW_WIRED` |
 | projection / replay | projection 重算 digest并绑定 command/request/route/target/graph/node/attempt/receipt/grant；completed replay 只读 0091、不重编 effects；双响应丢失重读 terminal authority | `B5_ADVERSARIAL_PROVEN_SHADOW` |
 | Durable Graph 取消 | 仅内部 Application entry；verifier 必须 exact-bind request/principal/source/reason/Graph revision，生产 composition 未注入且无 HTTP/UI。0092 phase 1 先提交 intent、Graph BLOCKED 与 Node/Attempt/Lease/Review/operation/effect fences，再 cancel/join 本地 child；execute re-entry 可 advance/finalize。phase 2 等 active/uncertain facts 对账后提交 Graph CANCELLED、Budget、Outbox 与 decision。accepted NODE effect 继续 delivery，其他未授权 effect 被 fence；0091/0092 first-writer-wins，请求/封口 response-loss exact replay | `B5C_SHADOW_WIRED_PRODUCTION_OFF` |
-| Outbox 并发发布 | Coordinator asyncio lock 保护本实例；`RuntimeOutboxPublisher` 的实例 `threading.Lock` 把同进程 Host/Internal/Scheduler 共享实例的 list/append/mark drain 串行化，线程合同 peak=1。跨进程仍缺 durable claim/CAS | `P1_CROSS_PROCESS_UNPROVEN` |
+| Outbox 并发发布 | 0093 持久化 owner/token/expiry/单调 fence；expired claim 可由新 owner takeover，stale owner 不能 complete/release，同 aggregate predecessor 未完成时禁止越过。`RuntimeOutboxPublisher` 逐条 claim→幂等 append→fenced complete，失败 fenced release/backoff；composition-owned 后台 worker 按 aggregate-head available/expiry 自动续投。`DRAINED` 当且仅当 `total_pending=0`，否则为 `DEFERRED`；完整 inventory、delivery-ready backlog 与 per-Store readiness mode 分开 | `WIRED_0093_DURABLE_CLAIM_AND_LIVENESS` |
 | Budget 并发 CAS | B4 可由 child 记录 usage/`EXCEEDED`，outer 再统一 release；固定 CAS 重试上限及 `ALREADY_EXCEEDED` 在 concurrency > 4 下的唯一语义仍未收敛 | `P1_SEMANTICS_INCOMPLETE` |
 | Retry/backoff | Coordinator 仅对 reservation 前显式 marker 重试；并行 deferred child 使用 domain-separated node-only usage identity 与 `schedule_retry_node_outcome`，保持 Graph ACTIVE，提交响应丢失 exact replay 不重复扣费；预算拒绝只落 Budget `EXCEEDED` 与 node-local terminal，再交 outer 裁决。生产 resolver 尚无现实 marker 来源 | `PARTIAL_B4_SAFE_RETRY` |
 | Pre-reservation failure | 普通/耗尽 failure 通过 `fail_running_attempt_bundle` 原子落 Attempt FAILED、Node FAILED、Graph FAILED/BLOCKED、Lease RELEASED 和四条 attempt/evidence-bound Outbox；已有 reservation 时拒绝，Budget finalize 在 bundle 外 | `WIRED_NARROW_BOUNDARY` |
 | 执行心跳 | reservation 后后台先续 Lease 再续 Reservation；流事件和最终结果均 checkpoint，停止/join 后才用最新 version COMMIT。续租同参响应丢失可精确重放 | `WIRED` |
 | 心跳失败 | 任一续租或版本检查失败返回 `RECOVERY_REQUIRED`，Worker 结果绝不 COMMIT；在线 takeover、即时 reconciliation 与自动 continuation 尚未实现 | `FAIL_CLOSED_PARTIAL_RECOVERY` |
 
-启动恢复数据流为 migration → `task_store.recover_startup` → publisher → recovery outbox publish → runtime activation；恢复抛错会在 admission 可用前 fail closed。ASGI 还会把配置逻辑 owner 派生为每次 container construction 唯一的 execution owner。该顺序只持久化并发布恢复判定，不会自动 continuation，也没有补齐在线 takeover 或即时 reconciliation。
+启动恢复数据流为 migration → TaskStore 0093 readiness → `task_store.recover_startup` → publisher → recovery outbox publish → Outbox background worker → runtime activation；恢复抛错会在 admission 可用前 fail closed。ASGI 还会把配置逻辑 owner 派生为每次 container construction 唯一的 execution owner。该顺序已能自动续投和 takeover 到期 Outbox claim，但不会自动 continuation recoverable Attempt 或 0092 cancellation，也没有补齐后两者的在线 takeover/即时 reconciliation。
 
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
@@ -505,7 +505,7 @@ All ingress sources
 
 1. 为 B5C 接入生产 authority provider/受控入口和跨进程 pending-intent worker，补齐自动 reconciliation/takeover/continuation 故障矩阵；通过后才允许 cancellation/atomic/bounded production canary。
 2. 在 reconciliation 中识别并修复历史 `BLOCKED + failure Node` / `FAILED + ACTIVE Budget` 半提交状态，并将 `WAITING_APPROVAL` 纳入统一 optional-attempt observation。
-3. 为 TaskGraph Outbox 增加 revisioned aggregate identity，并为跨进程 drain 建立 durable claim/CAS 或单 writer；前者用于补齐 multi-revision taskbatch marker 历史扫描，后者用于跨进程发布 authority。
+3. 为 TaskGraph Outbox 增加 revisioned aggregate identity，补齐 multi-revision taskbatch marker 历史扫描；跨进程 drain authority 已由 0093 durable claim/CAS 收口，但仍须保留 expired takeover、stale fence、同 aggregate 顺序和 append/complete 响应丢失回归矩阵。
 4. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker，收敛 Budget CAS 固定重试与 `ALREADY_EXCEEDED` 语义，再完成 promotion+claim 单事务、reservation 后即时 reconciliation 与 mid-attempt online takeover。
 5. 让 Resume 在消费一次性 token 后可受治理地重新调度原 graph continuation，并明确长时间等待后的 child-grant renewal/derivation。
 6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。

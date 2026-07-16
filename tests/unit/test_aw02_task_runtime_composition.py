@@ -74,10 +74,17 @@ class _OutboxPublisher(_Closeable):
         *,
         task_store: Any,
         event_store: Any,
+        worker_id: str,
     ) -> None:
         super().__init__("publisher", events)
         self.task_store = task_store
         self.event_store = event_store
+        self.worker_id = worker_id
+        self.backlog: dict[str, int | None] = {
+            "total_pending": 0,
+            "delivery_ready_count": 0,
+            "next_wakeup_ts_ms": None,
+        }
 
     def publish_pending(self, *, limit: int) -> dict[str, Any]:
         self.events.append(f"publisher:publish:{limit}")
@@ -86,7 +93,11 @@ class _OutboxPublisher(_Closeable):
             "pending_scanned": 0,
             "published_count": 0,
             "published": [],
+            "backlog": dict(self.backlog),
         }
+
+    def start(self) -> None:
+        self.events.append("publisher:start")
 
 
 class _TaskStore(_Closeable):
@@ -98,6 +109,9 @@ class _TaskStore(_Closeable):
     ) -> None:
         super().__init__("task-store", events)
         self.recovery_error = recovery_error
+
+    def assert_outbox_delivery_ready(self) -> None:
+        self.events.append("task-store:outbox-ready")
 
     def recover_startup(self, *, recovery_id: str) -> RecoveryReport:
         self.events.append(f"task-store:recover:{recovery_id}")
@@ -197,6 +211,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "migration:build",
         "migration:apply:startup::task-runtime",
         "task-store:build",
+        "task-store:outbox-ready",
         f"task-store:recover:{container.recovery_id}",
         "review-store:build",
         "worker-projection-store:build",
@@ -207,6 +222,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "event-store:build",
         "publisher:build",
         "publisher:publish:23",
+        "publisher:start",
     ]
     assert container.infrastructure_ready
     assert container.ledger is not None
@@ -215,6 +231,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     )
     assert container.outbox_publisher.task_store is container.task_store
     assert container.outbox_publisher.event_store is container.event_store
+    assert container.outbox_publisher.worker_id == f"{container.recovery_id}::outbox"
     assert container.recovery_report.recovery_id == container.recovery_id
     execution_owner = container.execution_owner_id("configured-owner")
     assert execution_owner.startswith("configured-owner::runtime::")
@@ -285,13 +302,14 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 5
+    assert len(events) == 6
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
     ]
-    assert events[2].startswith("task-store:recover:task-runtime-startup::")
-    assert events[3:] == ["task-store:close", "migration:close"]
+    assert events[2] == "task-store:outbox-ready"
+    assert events[3].startswith("task-store:recover:task-runtime-startup::")
+    assert events[4:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -348,8 +366,9 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         "migration:apply:startup::task-runtime",
         "task-store:build",
     ]
-    assert events[2].startswith("task-store:recover:task-runtime-startup::")
-    assert events[3:] == [
+    assert events[2] == "task-store:outbox-ready"
+    assert events[3].startswith("task-store:recover:task-runtime-startup::")
+    assert events[4:] == [
         "review-store:build",
         "worker-projection-store:build",
         "repository:build",
@@ -406,6 +425,37 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
     assert not container.activated
     asyncio.run(container.aclose())
     assert len(events) == 14
+
+
+def test_drain_outbox_reports_deferred_when_pending_row_is_not_claimable(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    container = _build_fake_container(tmp_path, events)
+    container.outbox_publisher.backlog = {  # type: ignore[attr-defined]
+        "total_pending": 2,
+        "delivery_ready_count": 0,
+        "next_wakeup_ts_ms": 9_999,
+    }
+
+    result = asyncio.run(container.drain_outbox())
+
+    assert result == {
+        "status": "DEFERRED",
+        "batch_count": 1,
+        "pending_scanned": 0,
+        "published_count": 0,
+        "remaining_pending": 2,
+        "delivery_ready_count": 0,
+        "next_wakeup_ts_ms": 9_999,
+    }
+    assert container.last_drain_result == result
+    container.outbox_publisher.backlog = {  # type: ignore[attr-defined]
+        "total_pending": 0,
+        "delivery_ready_count": 0,
+        "next_wakeup_ts_ms": None,
+    }
+    asyncio.run(container.aclose())
 
 
 def test_canonical_authority_mismatch_builds_nothing(tmp_path: Path) -> None:

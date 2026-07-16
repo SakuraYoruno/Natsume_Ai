@@ -158,11 +158,11 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 92
-    assert upgraded.summary["applied_count"] == 9
+    assert upgraded.summary["current_version"] == 93
+    assert upgraded.summary["applied_count"] == 10
     assert (
         upgraded.records[-1].migration_id
-        == "0092_task_runtime_graph_cancellation"
+        == "0093_task_runtime_outbox_claim"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -221,10 +221,11 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    assert [record.migration_id for record in repaired.records[-3:]] == [
+    assert [record.migration_id for record in repaired.records[-4:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
+        "0093_task_runtime_outbox_claim",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -242,6 +243,24 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
         assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is True
 
         conn.execute("DROP INDEX idx_task_runtime_node_retry_due")
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
+
+
+def test_0093_receipt_loss_replay_requires_claim_indexes_and_guards(tmp_path) -> None:
+    db_path = tmp_path / "0093-receipt-loss.sqlite3"
+    runner = SQLiteMigrationRunner(db_path=db_path)
+    seeded = runner.apply_migrations(request_id="0093-seed", ts_ms=22)
+    assert seeded.success is True, seeded.as_dict()
+
+    asset = _asset(
+        "0093_task_runtime_outbox_claim.sql",
+        "5ac7145decc5bcc9cea9bb8378d9cdf93c0196adcb7b8c3dccecf8cff77b16be",
+    )
+    failure = sqlite3.OperationalError("duplicate column name: claim_owner")
+    assert is_exact_checksum_bound_schema_replay_failure(asset, failure) is True
+    with sqlite3.connect(db_path) as conn:
+        assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is True
+        conn.execute("DROP TRIGGER trg_task_runtime_outbox_claim_update_guard")
         assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
 
 
@@ -306,12 +325,13 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 92
-    assert upgraded.summary["applied_count"] == 3
-    assert [record.migration_id for record in upgraded.records[-3:]] == [
+    assert upgraded.summary["current_version"] == 93
+    assert upgraded.summary["applied_count"] == 4
+    assert [record.migration_id for record in upgraded.records[-4:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
+        "0093_task_runtime_outbox_claim",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -380,11 +400,11 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 92
-    assert upgraded.summary["applied_count"] == 2
+    assert upgraded.summary["current_version"] == 93
+    assert upgraded.summary["applied_count"] == 3
     assert (
         upgraded.records[-1].migration_id
-        == "0092_task_runtime_graph_cancellation"
+        == "0093_task_runtime_outbox_claim"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(

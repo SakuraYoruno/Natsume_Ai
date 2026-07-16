@@ -133,10 +133,13 @@ flowchart TD
     REVIEW --> ATOMIC
     ATOMIC --> MATCH["terminal replay：Graph target + status_version 精确匹配\nReview BLOCKED→FAILED 不泄漏旧 ref"]
     BUDGET --> USAGE["selected=BUDGET_BLOCKED 绑定 rejected usage\n被动 blocked sibling 无需本地 usage"]
-    ATOMIC --> PUB["Outbox publish\nCoordinator asyncio lock + 共享 publisher 实例锁"]
+    ATOMIC --> PUB["0093 durable Outbox claim\nboot/recovery-scoped 唯一 owner"]
+    PUB --> APPEND["逐条：owner + token + expiry + 单调 fence\n幂等 append runtime event"]
+    APPEND --> COMPLETE["fenced complete\n失败 release + durable backoff/error"]
+    TAKEOVER["后台 worker 按 aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 aggregate 严禁越过 predecessor"] -.-> PUB
+    TAKEOVER --> DRAIN["canonical total_pending=0 才 DRAINED\nclaim/backoff/blocked backlog 为 DEFERRED"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
-    P1["P1：跨进程 Outbox drain\n仍缺 durable claim/CAS"] -.-> PUB
     CANCEL_ENTRY["内部 verified cancellation entry\nexact Graph revision；生产未注入 verifier"] -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
     CANCEL_INTENT -.-> CANCEL_LOCAL["intent 提交后才 cancel/join\n本地 child + heartbeat"]
     CANCEL_INTENT -.-> CANCEL_RECON["active ownership / operation / effect / review\nadvance + reconciliation gate"]
@@ -150,7 +153,7 @@ flowchart TD
 
     style LIMIT fill:#fff3cd,stroke:#a87500
     style OFF fill:#fff3cd,stroke:#a87500
-    style P1 fill:#fff3cd,stroke:#a87500
+    style TAKEOVER fill:#d1e7dd,stroke:#177245
     style CANCEL_ENTRY fill:#fff3cd,stroke:#a87500
     style CANCEL_INTENT fill:#fff3cd,stroke:#a87500
     style CANCEL_LOCAL fill:#fff3cd,stroke:#a87500
@@ -165,7 +168,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。B5C 的 0092 contract/Store/re-entry 路径已经存在，但 verifier 尚未在生产 composition 注入，图中的 cancellation branch 没有 HTTP/UI 入口，也没有跨进程自动 reconciliation worker。该图不是 production wiring。
+0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Task Runtime Outbox 的跨进程 claim/CAS、expired takeover、同 aggregate 顺序、失败 backoff 与后台自动续投；只有 canonical total_pending=0 才能声明 DRAINED。这不是 0092 cancellation continuation。B5C 的 verifier 尚未在生产 composition 注入，cancellation branch 没有 HTTP/UI 入口，也没有跨进程 pending-intent scanner/claim/reconciliation worker。该图不是 production cancellation wiring。
 
 ## Plan 分支的真实边界
 
@@ -189,9 +192,9 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 verified two-phase cancellation 已实现 shadow path；accepted NODE effect 保留，未授权 effect 被 fence，success/cancel first-writer-wins。生产 verifier/入口、跨进程自动 reconciliation/takeover/continuation、revisioned 0090、历史半提交、统一 `WAITING_APPROVAL`、跨进程 Outbox、Budget 高竞争和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 verified two-phase cancellation 与 0093 Outbox durable delivery 已有 shadow/contract 证据。生产 cancellation verifier/入口、0092 pending-intent scanner/claim/reconciliation/takeover/continuation、revisioned 0090、历史半提交、统一 `WAITING_APPROVAL`、Budget 高竞争和 canary 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. 启动按 migration → `recover_startup` → recovery outbox publish → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。这不代表自动 continuation、在线 takeover 或即时 reconciliation 已完成。
+5. 启动按 migration → `recover_startup` → recovery outbox publish → outbox background worker → runtime activation 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093 Outbox 支持在线过期 takeover，但这不代表 0092 cancellation 自动 continuation 或即时 reconciliation 已完成。
 
 ## 代码锚点
 

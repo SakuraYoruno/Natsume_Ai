@@ -156,6 +156,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 业务取消必须来自已验证且绑定 exact Graph revision 的用户、Operator 或系统策略 authority；持久 cancellation intent 必须先于任何本进程 task/heartbeat 中断，客户端断开、shutdown 或任意 `CancelledError` 不得自行成为业务取消事实。
 - 取消采用两阶段和 first-writer-wins：第一阶段持久化 intent、Graph/Node/Attempt/Lease/Review/operation/effect fence，第二阶段只在所有 active 或不确定事实完成 reconciliation 后原子提交 Graph/Budget/Outbox/cancellation decision。取消 intent 后禁止产生新的 claim、charge、未授权 COMMIT 或 0091 success；已先提交的终局成功不得被取消覆盖。
 - 已由 `ACCEPTED` Node 与 `SUCCEEDED` Attempt 确认的 NODE effect 是既成 acceptance authority，取消后仍可继续可靠派发；未验收 NODE effect 和未完成 Graph 的 GRAPH effect 必须被 fence。`RESERVED/RECOVERY_REQUIRED` operation 或不确定 effect 必须阻断 final cancellation，直至产生可审计 reconciliation evidence。
+- Task Runtime Outbox 必须提供跨进程 owner/token/expiry/单调 fencing claim，允许后台 worker 在 expiry 后自动 takeover，并以幂等 append 与 fenced complete/release 阻止 stale owner。同 aggregate 不得越过 predecessor；只有 canonical `total_pending=0` 才可声明 `DRAINED`，非空但暂无 ready head 必须报 `DEFERRED`。完整 PENDING inventory、delivery-ready backlog 与单 Store 实例 readiness 是三个不可混同的边界。
 
 ### FR-NLE-003：验证、Review 与回放
 

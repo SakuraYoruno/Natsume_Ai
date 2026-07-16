@@ -188,7 +188,9 @@ HTTP Chat / ASR / Gateway
 
 关键边界：Input Runtime 不执行工具，Cortex 不写 Task 第二真相，worker 不修改冻结图，外部副作用必须发生在 Acceptance 之后。
 
-Task composition 在开放运行时前依次完成 migration、`task_store.recover_startup`、publisher 构造与 recovery outbox 发布；任一恢复异常 fail closed。ASGI 把逻辑 owner 派生为当前 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner。执行中 heartbeat 已续租 Lease/Reservation 并阻断失去所有权后的 COMMIT，但启动门禁和心跳都不会自动续跑 recoverable attempt，也不等价于在线 takeover 或即时 reconciliation 已完成。
+Task composition 在开放运行时前依次完成 migration、TaskStore 0093 readiness、`task_store.recover_startup`、publisher 构造、recovery outbox 发布与 Outbox 后台 worker 启动；任一恢复异常 fail closed。ASGI 把逻辑 owner 派生为当前 `ProcessTaskRuntimeContainer` 构造唯一的 execution owner。0093 worker 能自动接管到期 Outbox claim，但执行 heartbeat 仍只能阻断失去 Lease/Reservation 所有权后的 COMMIT；它不会自动续跑 recoverable Attempt，也不代表 0092 cancellation 的在线 takeover 或即时 reconciliation 已完成。
+
+0093 将 Task Runtime Outbox delivery 独立收口为 durable authority：Store 持久化 claim owner/token/expiry/单调 fence，允许 expired takeover 并阻止同 aggregate 越过 predecessor；Publisher 逐条 `claim → idempotent append → fenced complete`，append 失败则 release 并设置 retry backoff/last error。Composition 将当次 boot/construction 唯一 `recovery_id` 派生为 Outbox owner，启动可关闭后台 worker，并按 aggregate-head 的最早 available/claim-expiry 与有界轮询自动续投。Drain 只在 canonical `total_pending=0` 时返回 `DRAINED`；非空但暂无 ready head 的 inventory 返回 `DEFERRED + next_wakeup_ts_ms`。`list_pending_outbox` 是完整 inventory，claim/backlog 才是 delivery-ready 视图；readiness 缓存在单个 Store 实例，热路径不重扫。这不会自动处理 0092 cancellation intent；其 scanner/claim/reconciliation/takeover/continuation 仍未实现。
 
 节点局部执行由 [`DurableNodeExecutionRuntime`](../../../host_brain/task_runtime/node_execution_runtime.py) 编排：它复用同一个 Store、RuntimeOutbox、BudgetRuntime、NodeLifecycle 以及 worker/verifier/acceptance/review authority，完整保留 heartbeat、reservation 后禁止 retry、verification evidence 和 acceptance/review 顺序。只读 [`NodeExecutionProjection`](../../../host_brain/task_runtime/node_execution_projection.py) 与纯 [`node_execution_records`](../../../host_brain/task_runtime/node_execution_records.py) 不拥有 mutation authority。
 
@@ -296,7 +298,7 @@ Composition Root 只负责把两侧构造并连接
 | P1 | Persona candidate 尚未进入统一 proposal/Review/版本激活 | 旧直写虽已封口，但人格长期演化仍不可用 | Persona Evolution Authority |
 | P1 | B5 terminal success 尚未 production canary | shadow 已覆盖单节点、串行、多 terminal、篡改与响应丢失；atomic/bounded 和三处生产 composition 必须保持关闭 | Governed Execution |
 | P0 | B5C 生产 authority 接线与跨进程 takeover/continuation/reconciliation 未完成 | durable intent/fence 与 execute re-entry 已有，但生产 verifier/受控入口和自动 pending-intent worker 尚缺，不能自动跨进程收敛 | Governed Execution |
-| P1 | Outbox publisher 只有同进程实例锁 | Host/Internal/Scheduler 共享实例的 drain 已串行，但多进程仍没有 durable Outbox claim/CAS 或单 writer | Durable Outbox Authority |
+| P1 | legacy TaskGraph Outbox 身份与 0093 故障矩阵尚需继续收敛 | delivery 已有跨进程 durable claim/CAS 与后台自动 takeover，但 multi-revision aggregate identity 仍缺；需持续验证 stale fence、append/complete 响应丢失、严格顺序、`DRAINED/DEFERRED`、inventory/ready 分离与 per-Store readiness | Durable Outbox Authority |
 | P1 | Budget CAS 高竞争语义未收敛 | 固定重试上限与 `ALREADY_EXCEEDED` 在 concurrency > 4 时仍不能作为完整生产合同 | Governed Execution |
 | P1 | 全局 ProcessServiceContainer 和 accessor 仍存在 | 资源归属、测试隔离和进程边界不清 | Composition Kernel |
 | P1 | Host Plan 不生成竞争路径 | 通用智能规划目标尚未实现 | Planning and Decision |

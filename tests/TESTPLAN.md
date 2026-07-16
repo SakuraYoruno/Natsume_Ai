@@ -177,7 +177,7 @@
 - T-NLE-03：Canon Apply 强制绑定 token/subject/version/expiry/once；缺失、过期、串用、版本漂移和重复消费均拒绝；direct writer 为 0。
 - T-NLE-04：WorkOrder v2/v3 round-trip 兼容；TaskGraph/Verification/Review schema 稳定；非法版本和非法状态迁移 fail closed。
 - T-NLE-05：每个 graph revision 只规划并冻结一次；失败重规划创建同一 graph 的 `revision+1`；顺序/并行/混合依赖正确；Child WorkOrder→SubAgentRequest lineage/授权完整；cycle 返回 `PLAN_CYCLE`。
-- T-NLE-06：TaskStore 的 CAS、attempt、lease、heartbeat、重启恢复、业务幂等 reservation、budget reservation/usage 和 transactional outbox 可并发验证。
+- T-NLE-06：TaskStore 的 CAS、attempt、lease、heartbeat、重启恢复、业务幂等 reservation、budget reservation/usage 和 transactional outbox 可并发验证；Outbox 必须覆盖双进程唯一 claim、expired takeover、stale fence 拒绝、同 aggregate 严格顺序、release backoff，以及 append 成功但 complete 前进程死亡后的幂等收敛。新进程在旧 claim 到期前启动时必须由后台续投线程在到期后自动接管；只要 canonical DB 仍有 PENDING，drain 就不得误报 `DRAINED`。完整 PENDING inventory 与 delivery-ready backlog 必须分离，逐条 claim/complete/release 不得重复执行 schema/全表 readiness 扫描。Publisher close 必须等待已进入的前台 publish；event 已提交后的 backlog 读取故障只能降级且不得泄漏底层错误详情或制造假失败。
 - T-NLE-07：Task scheduler 的 READY、依赖、retry/backoff、cancel 和 recovery 决策可回放；重放/预览不产生真实副作用。
 - T-NLE-08：required verification 的 `FAIL/ERROR/NOT_RUN` 均不得进入 `VERIFIED/ACCEPTED`；命令验证受 allowlist/timeout/workspace policy 约束。
 - T-NLE-09：每条 acceptance criterion 都有 evidence/verdict；确定性 FAIL 不可被 LLM Critic 覆盖为 ACCEPT。

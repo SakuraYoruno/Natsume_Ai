@@ -121,4 +121,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 与 0092 verified two-phase cancellation 已有 shadow 证据，accepted NODE effect 保留、未授权 effect 被 fence，success/cancel first-writer-wins。生产 composition 尚未注入 cancellation verifier，也无 HTTP/UI 或跨进程自动 reconciliation/takeover/continuation；atomic/bounded/cancellation 均 OFF。下一步是生产 authority 接线、pending-intent worker、revisioned 0090、多进程 Outbox 与 canary，不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 verified two-phase cancellation 与 0093 Outbox durable claim/CAS 已有证据，accepted NODE effect 保留、未授权 effect 被 fence，success/cancel first-writer-wins。生产 composition 尚未注入 cancellation verifier，也无 HTTP/UI 或 pending-intent scanner/claim/reconciliation/takeover/continuation；atomic/bounded/cancellation 均 OFF。下一步是生产 authority 接线、pending-intent worker、revisioned 0090 与 canary，不能宣称 Lane B 或完整架构完成。
