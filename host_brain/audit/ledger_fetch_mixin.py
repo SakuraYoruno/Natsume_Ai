@@ -55,6 +55,144 @@ class LedgerFetchMixin:
         if last_exc is not None:
             raise last_exc
 
+    def _insert_many_atomic(
+        self,
+        table: str,
+        payloads: list[dict[str, Any]],
+    ) -> None:
+        """Append a batch in one SQLite transaction or append none of it."""
+
+        prepared: list[tuple[str, list[Any]]] = []
+        for payload in payloads:
+            keys = list(payload)
+            if not keys:
+                raise ValueError("atomic audit batch contains an empty payload")
+            serialized = [
+                self._encode_value(table, key, payload[key]) for key in keys
+            ]
+            placeholders = ", ".join("?" for _ in keys)
+            columns = ", ".join(keys)
+            prepared.append(
+                (
+                    f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+                    serialized,
+                )
+            )
+        if not prepared:
+            return
+        last_exc: Exception | None = None
+        for attempt in range(WRITE_RETRY_MAX):
+            try:
+                with self._write_lock:
+                    with self._conn:
+                        for sql, serialized in prepared:
+                            self._conn.execute(sql, serialized)
+                return
+            except sqlite3.OperationalError as exc:
+                if (
+                    "database is locked" in str(exc).lower()
+                    and attempt < WRITE_RETRY_MAX - 1
+                ):
+                    last_exc = exc
+                    time.sleep(WRITE_RETRY_DELAY_S * (attempt + 1))
+                    continue
+                raise
+        if last_exc is not None:
+            raise last_exc
+
+    def _insert_governor_batch_once(
+        self,
+        payloads: list[dict[str, Any]],
+    ) -> bool:
+        """Atomically append one deterministic node-grant batch once.
+
+        ``NodeBoundGrantService`` performs an optimistic replay read before
+        minting credentials.  That read cannot serialize two processes.  This
+        writer transaction therefore acquires ``BEGIN IMMEDIATE`` first and
+        rechecks the deterministic request/stage/intent identity before any
+        row is inserted.  ``False`` tells the losing process to reload the
+        winner's exact durable batch.
+        """
+
+        if not payloads:
+            raise ValueError("node-grant governor batch must not be empty")
+        request_ids = {str(row.get("request_id") or "").strip() for row in payloads}
+        stages = {str(row.get("stage") or "").strip() for row in payloads}
+        intent_ids = [str(row.get("intent_id") or "").strip() for row in payloads]
+        if (
+            len(request_ids) != 1
+            or "" in request_ids
+            or len(stages) != 1
+            or "" in stages
+            or any(not intent_id for intent_id in intent_ids)
+            or len(set(intent_ids)) != len(intent_ids)
+        ):
+            raise ValueError(
+                "node-grant governor batch requires one request/stage and unique intents"
+            )
+
+        prepared: list[tuple[str, list[Any]]] = []
+        for payload in payloads:
+            keys = list(payload)
+            serialized = [
+                self._encode_value("governor_log", key, payload[key]) for key in keys
+            ]
+            placeholders = ", ".join("?" for _ in keys)
+            columns = ", ".join(keys)
+            prepared.append(
+                (
+                    f"INSERT INTO governor_log ({columns}) VALUES ({placeholders})",
+                    serialized,
+                )
+            )
+
+        request_id = next(iter(request_ids))
+        stage = next(iter(stages))
+        guard_placeholders = ", ".join("?" for _ in intent_ids)
+        guard_sql = (
+            "SELECT intent_id FROM governor_log "
+            "WHERE request_id = ? AND stage = ? "
+            f"AND intent_id IN ({guard_placeholders}) LIMIT 1"
+        )
+        guard_params = [request_id, stage, *intent_ids]
+        last_exc: Exception | None = None
+        for attempt in range(WRITE_RETRY_MAX):
+            try:
+                with self._write_lock:
+                    if self._conn.in_transaction:
+                        raise RuntimeError(
+                            "node-grant batch append requires an independent transaction"
+                        )
+                    try:
+                        self._conn.execute("BEGIN IMMEDIATE")
+                        existing = self._conn.execute(
+                            guard_sql,
+                            guard_params,
+                        ).fetchone()
+                        if existing is not None:
+                            self._conn.rollback()
+                            return False
+                        for sql, serialized in prepared:
+                            self._conn.execute(sql, serialized)
+                        self._conn.commit()
+                        return True
+                    except BaseException:
+                        if self._conn.in_transaction:
+                            self._conn.rollback()
+                        raise
+            except sqlite3.OperationalError as exc:
+                if (
+                    "database is locked" in str(exc).lower()
+                    and attempt < WRITE_RETRY_MAX - 1
+                ):
+                    last_exc = exc
+                    time.sleep(WRITE_RETRY_DELAY_S * (attempt + 1))
+                    continue
+                raise
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("node-grant batch append exhausted without a result")
+
     def fetch_by_request_id(self, table: str, request_id: str) -> list[dict[str, Any]]:
         """按 request_id 直接过滤查询（SQL 级，BUG-BE-002 修复）。"""
         _obs_tables = frozenset({

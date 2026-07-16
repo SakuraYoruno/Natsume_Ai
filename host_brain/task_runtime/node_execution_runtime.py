@@ -97,6 +97,7 @@ class DurableNodeExecutionRuntime:
         "_budgets",
         "_lease_ttl_ms",
         "_node_lifecycle",
+        "_node_grant_verifier",
         "_operation_ttl_ms",
         "_owner_id",
         "_projection",
@@ -114,6 +115,7 @@ class DurableNodeExecutionRuntime:
         runtime_outbox: RuntimeOutbox,
         budget_runtime: DurableBudgetRuntime,
         node_lifecycle: DurableNodeLifecycleRuntime,
+        node_grant_verifier: Any | None,
         worker_resolver: GovernedWorkerResolverPort,
         verifier: VerificationPort,
         acceptance: AcceptancePort,
@@ -128,6 +130,7 @@ class DurableNodeExecutionRuntime:
         self._runtime_outbox = runtime_outbox
         self._budgets = budget_runtime
         self._node_lifecycle = node_lifecycle
+        self._node_grant_verifier = node_grant_verifier
         self._workers = worker_resolver
         self._verifier = verifier
         self._acceptance = acceptance
@@ -201,6 +204,59 @@ class DurableNodeExecutionRuntime:
 
         attempt_no = len(attempt_numbers) + 1
         attempt_id = _attempt_id(admitted, attempt_no=attempt_no)
+        review_continuation_authority: dict[str, Any] | None = None
+        if node_grant_ref is not None and self._node_grant_verifier is not None:
+            verify_for_claim = getattr(
+                self._node_grant_verifier,
+                "verify_for_claim",
+                None,
+            )
+            if not callable(verify_for_claim):
+                verify_for_claim = getattr(
+                    self._node_grant_verifier,
+                    "verify",
+                    None,
+                )
+            if not callable(verify_for_claim):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "node grant has no pre-claim authority verifier",
+                )
+            frozen_route = GovernedWorkerRoute.parse(admitted.worker_route)
+            target_id = frozen_route.target_id or command.target_id
+            preverified = await _maybe_await(
+                verify_for_claim(
+                    grant_ref=node_grant_ref,
+                    request_id=command.request_id,
+                    session_id=command.session_id,
+                    principal_id=command.principal_id,
+                    graph_id=admitted.graph_id,
+                    root_work_order_id=str(
+                        getattr(work_order, "root_work_order_id", "")
+                        or command.root_work_order_id
+                        or ""
+                    ).strip(),
+                    graph_revision=admitted.graph_revision,
+                    node_id=admitted.node_id,
+                    route=frozen_route.kind,
+                    target_id=str(target_id or "").strip(),
+                    parent_grant_ref=str(
+                        command.governor_grant_ref or ""
+                    ).strip(),
+                )
+            )
+            authority_raw = getattr(
+                preverified,
+                "review_continuation_authority",
+                None,
+            )
+            if authority_raw is not None:
+                if not isinstance(authority_raw, Mapping):
+                    raise GovernedRuntimeError(
+                        GOVERNED_ADMISSION_INVALID,
+                        "pre-claim Review continuation authority is malformed",
+                    )
+                review_continuation_authority = dict(authority_raw)
         claimed_raw = await _maybe_await(
             self._store.claim_ready_node(
                 attempt_id=attempt_id,
@@ -230,6 +286,7 @@ class DurableNodeExecutionRuntime:
                     event_type="TASK_ATTEMPT_LEASED",
                     attempt_id=attempt_id,
                 ),
+                review_continuation_authority=review_continuation_authority,
             )
         )
         claimed = _mapping(claimed_raw, field_name="atomic READY claim")

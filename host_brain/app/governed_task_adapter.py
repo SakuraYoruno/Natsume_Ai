@@ -9,10 +9,11 @@ worker or during graph execution.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -200,6 +201,12 @@ class _FrozenSkillWorker:
             node_id=node_id,
             route="skill",
             target_id=target,
+            attempt_id=str(execution_context.get("attempt_id") or "").strip(),
+            lease_id=str(execution_context.get("lease_id") or "").strip(),
+            lease_owner_id=str(
+                execution_context.get("lease_owner_id") or ""
+            ).strip(),
+            fencing_token=execution_context.get("fencing_token"),
         )
         if verified_grant.grant_ref != node_grant_ref:
             raise GovernedHostAdapterError(
@@ -785,6 +792,59 @@ class GovernedHostRuntime:
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
 
+    async def continue_review_admission(
+        self,
+        record: Mapping[str, Any],
+        claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact durable Host admission after Review resolution."""
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting Review continuation",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface
+                not in {
+                    HostCommandSurface.CHAT,
+                    HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.GATEWAY,
+                }
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "Review continuation Host admission is incomplete or misrouted",
+                )
+            operation = self._application.execute_review_continuation(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+                continuation_claim=dict(claim or {}),
+            )
+            return await _review_continuation_result(
+                operation,
+                transform=self._dispatch_accepted_effects,
+            )
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+
     async def _execute_plan_stream(
         self,
         *,
@@ -908,8 +968,12 @@ def build_governed_host_runtime(
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
         token_service=token_service,
+        review_store=task_runtime_container.review_continuation_store,
     )
-    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
+    node_grant_verifier = DurableNodeGrantVerifier(
+        ledger=ledger,
+        review_store=task_runtime_container.review_continuation_store,
+    )
     skill_execution_ports = build_governed_skill_execution_ports(
         skill_registry=skill_registry,
         capability_broker=capability_broker,
@@ -966,6 +1030,7 @@ def build_governed_host_runtime(
             if getattr(task_runtime_container, "review_store", None) is not None
             else None
         ),
+        node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
         execution_registry=getattr(
             task_runtime_container,
@@ -1381,6 +1446,37 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
         allow_nan=False,
     )
     return _sha256_text(payload)
+
+
+async def _review_continuation_result(
+    operation: Any,
+    *,
+    transform: Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    current = await operation if inspect.isawaitable(operation) else operation
+    if isinstance(current, Mapping):
+        return await transform(dict(current))
+    if not hasattr(current, "__aiter__"):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Review continuation returned no durable Host result",
+        )
+    terminal: dict[str, Any] | None = None
+    async for raw_event in current:
+        if not isinstance(raw_event, Mapping):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "Review continuation emitted a non-mapping Host event",
+            )
+        event = await transform(dict(raw_event))
+        if bool(event.get("done")):
+            terminal = event
+    if terminal is None:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Review continuation emitted no durable Host terminal result",
+        )
+    return terminal
 
 
 __all__ = [

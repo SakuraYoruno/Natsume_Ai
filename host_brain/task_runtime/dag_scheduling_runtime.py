@@ -15,7 +15,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 
 from .admission import AdmittedExecution, AdmittedTaskNode
-from .budget_runtime import DurableBudgetRuntime
+from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
 from .coordinator_receipts import (
     _digest_from_receipt_ref,
     build_execution_receipt,
@@ -313,8 +313,12 @@ class DurableDagSchedulingRuntime:
                     )
                 review_admission = admitted.for_node(pre_review_node_id)
                 review_node = durable_nodes[pre_review_node_id]
-                if graph_status in {"CREATED", "ACTIVE"}:
-                    graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
+                if graph_status == "CREATED":
+                    graph = await self._node_lifecycle.transition_graph(
+                        review_admission,
+                        graph,
+                        "ACTIVE",
+                    )
                     graph_status = _status(graph)
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
@@ -352,8 +356,12 @@ class DurableDagSchedulingRuntime:
                         review_node,
                         evidence_refs=pre_review_refs,
                     )
-                    if graph_status == "BLOCKED":
-                        await self._node_lifecycle.transition_graph(review_admission, graph, "CANCELLED")
+                    if graph_status in {"ACTIVE", "BLOCKED"}:
+                        await self._node_lifecycle.transition_graph(
+                            review_admission,
+                            graph,
+                            "CANCELLED",
+                        )
                     budget = await self._budgets.finalize(
                         budget, target_status=BudgetReservationStatus.RELEASED
                     )
@@ -365,7 +373,7 @@ class DurableDagSchedulingRuntime:
                 await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
-                    attempt_id=_attempt_id(review_admission, attempt_no=1),
+                    attempt_id=None,
                     status=status,
                     verification_status="NOT_RUN",
                     accepted=False,
@@ -376,7 +384,14 @@ class DurableDagSchedulingRuntime:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield terminal_event(receipt)
+                waiting_event = terminal_event(receipt)
+                if status == "WAITING_APPROVAL" and graph_status == "ACTIVE":
+                    budget, waiting_event = await self._settle_waiting_approval(
+                        admitted=admitted,
+                        receipt_event=waiting_event,
+                        budget=budget,
+                    )
+                yield waiting_event
                 return
 
             post_review_node_id = next(
@@ -874,12 +889,18 @@ class DurableDagSchedulingRuntime:
             if review_binding is not None:
                 binding = review_binding
                 review_admission = admitted.for_node(binding.node_id)
+                if graph_status == "CREATED":
+                    graph = await self._node_lifecycle.transition_graph(
+                        review_admission,
+                        graph,
+                        "ACTIVE",
+                    )
+                    graph_status = _status(graph)
                 review_node = await self._node_lifecycle.transition_node(
                     review_admission,
                     durable_nodes[binding.node_id],
                     "WAITING_APPROVAL",
                 )
-                graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
                     context=build_review_context(
@@ -895,7 +916,7 @@ class DurableDagSchedulingRuntime:
                 await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
-                    attempt_id=_attempt_id(review_admission, attempt_no=1),
+                    attempt_id=None,
                     status="WAITING_APPROVAL",
                     verification_status="NOT_RUN",
                     accepted=False,
@@ -906,7 +927,12 @@ class DurableDagSchedulingRuntime:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield terminal_event(receipt)
+                budget, waiting_event = await self._settle_waiting_approval(
+                    admitted=admitted,
+                    receipt_event=terminal_event(receipt),
+                    budget=budget,
+                )
+                yield waiting_event
                 return
 
             # Atomic-success Graphs freeze their outer terminal authority in
@@ -1163,6 +1189,36 @@ class DurableDagSchedulingRuntime:
                 )
             )
         return tuple(outcomes)
+
+    async def _settle_waiting_approval(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        receipt_event: Mapping[str, Any],
+        budget: BudgetRuntimeContext,
+    ) -> tuple[BudgetRuntimeContext, dict[str, Any]]:
+        receipt = receipt_event.get("execution_receipt")
+        node_id = _text(receipt.get("node_id")) if isinstance(receipt, Mapping) else ""
+        if not node_id:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "pre-execution review outcome has no TaskNode identity",
+            )
+        outcome = _ParallelNodeOutcome.from_terminal_event(
+            node_id=node_id,
+            event=receipt_event,
+        )
+        budget, terminal = await self._parallel_settlement.resolve_parallel_outcomes(
+            admitted=admitted,
+            outcomes=(outcome,),
+            budget=budget,
+        )
+        if terminal is None:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "pre-execution review did not produce a blocking settlement",
+            )
+        return budget, terminal
 
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value

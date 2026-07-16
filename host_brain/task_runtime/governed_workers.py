@@ -49,6 +49,9 @@ class FrozenNodeInput:
     graph_revision: int
     node_id: str
     attempt_id: str
+    lease_id: str
+    lease_owner_id: str
+    fencing_token: int
     route: str
     target_id: str
     objective: str
@@ -76,6 +79,9 @@ class FrozenNodeInput:
             "graph_revision": self.graph_revision,
             "node_id": self.node_id,
             "attempt_id": self.attempt_id,
+            "lease_id": self.lease_id,
+            "lease_owner_id": self.lease_owner_id,
+            "fencing_token": self.fencing_token,
             "route": self.route,
             "target_id": self.target_id,
             "objective": self.objective,
@@ -105,6 +111,10 @@ class NodeGrantVerifierPort(Protocol):
         node_id: str,
         route: str,
         target_id: str,
+        attempt_id: str | None = None,
+        lease_id: str | None = None,
+        lease_owner_id: str | None = None,
+        fencing_token: int | None = None,
     ) -> Any: ...
 
 
@@ -162,6 +172,10 @@ class GovernedFrozenNodeWorker:
             node_id=frozen.node_id,
             route=frozen.route,
             target_id=frozen.target_id,
+            attempt_id=frozen.attempt_id,
+            lease_id=frozen.lease_id,
+            lease_owner_id=frozen.lease_owner_id,
+            fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
 
@@ -272,6 +286,23 @@ def _freeze_node_input(
     graph_id = _required(context.get("graph_id"), "graph_id")
     node_id = _required(context.get("node_id"), "node_id")
     attempt_id = _required(context.get("attempt_id"), "attempt_id")
+    lease_id = _required(context.get("lease_id"), "lease_id")
+    lease_owner_id = _required(
+        context.get("lease_owner_id"),
+        "lease_owner_id",
+    )
+    try:
+        fencing_token = int(context.get("fencing_token"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "fencing_token must be a positive integer",
+        ) from exc
+    if fencing_token < 1:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "fencing_token must be a positive integer",
+        )
     route_value = _required(context.get("worker_route"), "worker_route")
     route = GovernedWorkerRoute.parse(route_value)
     if route.kind != expected_route_kind or not route.target_id:
@@ -335,6 +366,9 @@ def _freeze_node_input(
         graph_revision=revision,
         node_id=node_id,
         attempt_id=attempt_id,
+        lease_id=lease_id,
+        lease_owner_id=lease_owner_id,
+        fencing_token=fencing_token,
         route=route.kind,
         target_id=route.target_id,
         objective=_required(binding.get("objective"), "node binding objective"),

@@ -25,6 +25,7 @@ from host_brain.persistence.agent_execution_repository import (
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 
 
@@ -191,6 +192,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
         infrastructure = SimpleNamespace(
             task_store=task_store,
             review_store=review_store,
+            review_continuation_store=ReviewContinuationStore(db_path),
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
         )

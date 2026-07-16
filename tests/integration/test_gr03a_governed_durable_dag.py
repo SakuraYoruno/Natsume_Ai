@@ -552,6 +552,7 @@ def _coordinator(
     bounded_fanout_enabled: bool = False,
     fanout_event_buffer_size: int = 32,
     outbox_publisher: Any = None,
+    node_grant_verifier: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
@@ -574,6 +575,7 @@ def _coordinator(
             acceptance if acceptance is not None else _Acceptance(acceptance_decision)
         ),
         review_runtime=review_runtime,
+        node_grant_verifier=node_grant_verifier,
         owner_id="gr03a-worker",
         lease_ttl_ms=lease_ttl_ms,
         operation_ttl_ms=operation_ttl_ms,

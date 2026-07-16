@@ -158,7 +158,10 @@ flowchart TD
     FIRST["0091 success / 0092 cancel\nfirst-writer-wins + exact replay"] -.-> CANCEL_INTENT
     CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
     HISTORY["P1：历史 BLOCKED+failure / FAILED+ACTIVE Budget\n归 reconciliation，不由 ACTIVE 重入自动修复"] -.-> REENTRY
-    PREVIEW["P1：WAITING_APPROVAL 仍走 pre-review 专线\n未统一 optional-attempt observation"] -.-> SNAP
+    REVIEW_QUEUE["0096 Review terminal mutation + enqueue\n同一事务；不复制业务 status"] --> REVIEW_CLAIM["claim + heartbeat + expired takeover\nowner/token/expiry/monotonic fence"]
+    REVIEW_CLAIM --> REVIEW_ROUTE["immutable HostCommand surface\n重入 Host/Internal/Scheduler"]
+    REVIEW_ROUTE --> REENTRY
+    PREVIEW["WAITING_APPROVAL 合法 attempt_id=null\nPOST 仍绑定原 SUCCEEDED Attempt"] --> SNAP
 
     style LIMIT fill:#fff3cd,stroke:#a87500
     style OFF fill:#fff3cd,stroke:#a87500
@@ -179,12 +182,15 @@ flowchart TD
     style FIRST fill:#fff3cd,stroke:#a87500
     style CAS fill:#fff3cd,stroke:#a87500
     style HISTORY fill:#fff3cd,stroke:#a87500
-    style PREVIEW fill:#fff3cd,stroke:#a87500
+    style REVIEW_QUEUE fill:#d1e7dd,stroke:#177245
+    style REVIEW_CLAIM fill:#d1e7dd,stroke:#177245
+    style REVIEW_ROUTE fill:#d1e7dd,stroke:#177245
+    style PREVIEW fill:#d1e7dd,stroke:#177245
     style RECOVERY fill:#fff3cd,stroke:#a87500
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination/continuation；0095 保持升级前 Graph Outbox ID/key，以 deterministic HostCommand/governed identity 回填历史 revision，并新增 `@revision` payload、per-revision head、multi-revision marker 与 exact Event/Review/Operator read。旧 payload/journal 只走兼容 replay，source-ref unique partial 围栏防止 append-success/complete-loss 重投产生第二 Event。0092 intent/decision 仍是取消业务 authority；operation/effect/review 未 reconciliation 时只 durable defer。生产 verifier/HTTP/UI/canary 尚缺，该图不是 production cancellation wiring。
+0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Outbox 跨进程投递；0094 收口 pending cancellation coordination；0095 收口 revisioned Graph Outbox/Event/Operator identity；0096 收口 task-bound Review continuation；0097 收口 node-grant batch 跨进程唯一性。ReviewStore 的终态 mutation 与 coordination enqueue 原子提交，worker 按原 surface 重入；PRE 不造 Attempt，POST 不重跑 worker。credential 覆盖 budget window，但 READY 与首次 worker 校验仍受 live claim fence 约束，随后由 Task lease 管已开始执行。0092 intent/decision 仍是取消业务 authority；operation/effect/review cancellation facts 未 reconciliation 时只 durable defer。缺失的生产 verifier/HTTP/UI 是 cancellation 边界；Review 决策已有独立 `review:decide` policy，但 Operator credential/UI 与真实 canary 仍缺。
 
 ## Plan 分支的真实边界
 
@@ -208,9 +214,9 @@ flowchart LR
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 durable delivery、0094 continuation 与 0095 stable-ID revisioned Outbox/payload/source-fenced Event/Review/Operator 已有证据。生产 verifier/HTTP/UI、业务 reconciliation、历史半提交、统一 `WAITING_APPROVAL`、Budget 高竞争和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 two-phase cancellation、0093 delivery、0094 cancellation coordination、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation 生产 verifier/HTTP/UI、取消业务 reconciliation、历史半提交、Budget 高竞争和 canary 尚未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox background worker → runtime activation/cancellation worker 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093 Outbox 与 0094 cancellation coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
+5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093/0094/0096 coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
 
 ## 代码锚点
 

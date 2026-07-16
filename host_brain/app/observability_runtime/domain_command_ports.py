@@ -527,31 +527,61 @@ def _security_hunt(payload: Mapping[str, Any], _request_id: str) -> Any:
 
 
 def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
-
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.approve_review(review_id, _canon_payload(payload, (
-        "actor_id", "subject_ref", "subject_version", "resume_phase", "checkpoint_id",
-    )))
+    approved = service.approve_review(
+        review_id,
+        actor_id=_required_text(payload, "actor_id"),
+        expected_subject_ref=_required_text(payload, "subject_ref"),
+        expected_subject_version=int(payload["subject_version"]),
+        expected_resume_phase=_required_text(payload, "resume_phase"),
+        expected_checkpoint_id=_required_text(payload, "checkpoint_id"),
+    )
+    return {"accepted": True, **dict(approved)}
 
 
 def _task_review_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
-
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.reject_review(review_id, {
-        "actor_id": _required_text(payload, "actor_id"),
-    })
+    record = service.reject_review(
+        review_id,
+        actor_id=_required_text(payload, "actor_id"),
+    )
+    return {"accepted": True, "review": dict(record)}
 
 
 def _task_review_resume(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
+    from host_brain.observability.degradation_state import (  # noqa: PLC0415
+        require_degradation_capability,
+    )
 
+    require_degradation_capability(
+        capability_id="remote_review_resume",
+        static_risk_level=4,
+    )
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.resume_review(review_id, _canon_payload(payload, (
-        "resume_token_ref", "subject_ref", "subject_version", "resume_phase",
-        "checkpoint_id", "resume_result_ref",
-    )))
+    resume = service.resume_review(
+        review_id,
+        resume_token_ref=_required_text(payload, "resume_token_ref"),
+        subject_ref=_required_text(payload, "subject_ref"),
+        subject_version=int(payload["subject_version"]),
+        resume_phase=_required_text(payload, "resume_phase"),
+        checkpoint_id=_required_text(payload, "checkpoint_id"),
+        resume_result_ref=_optional_text(payload, "resume_result_ref"),
+    )
+    return {"accepted": True, "resume": dict(resume)}
+
+
+def _task_review_service() -> Any:
+    service = operator_runtime_value("task_review_command_service")
+    required = ("approve_review", "reject_review", "resume_review")
+    if service is None or any(
+        not callable(getattr(service, method_name, None))
+        for method_name in required
+    ):
+        raise ObsDomainCommandError("OBS_TASK_REVIEW_DOMAIN_UNAVAILABLE")
+    return service
 
 
 _HANDLERS: Mapping[str, DomainHandler] = {

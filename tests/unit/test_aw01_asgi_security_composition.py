@@ -78,7 +78,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     governed_runtime = object()
     internal_runtime = object()
     scheduler_runtime = object()
-    runtime_group = object()
+    runtime_group = SimpleNamespace(wake_review_continuation=lambda: None)
     internal_ingress = object()
     scheduler_ingress = object()
     scheduler_service = object()
@@ -125,6 +125,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         bound_runtime = None
         canonical_db_path = ledger.canonical_db_path
         agent_result_repository = object()
+        review_store = SimpleNamespace(
+            create_review=lambda *_args, **_kwargs: {},
+            approve_review=lambda *_args, **_kwargs: {},
+            reject_review=lambda *_args, **_kwargs: {},
+            resume_review=lambda *_args, **_kwargs: {},
+        )
+        review_continuation_store = object()
+        command_repository = object()
+        recovery_id = "test-recovery"
 
         @staticmethod
         def execution_owner_id(logical_owner_id: str) -> str:
@@ -216,11 +225,20 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         events.append("memory-built")
         return memory_container
 
-    def fake_runtime_group(runtimes):
+    def fake_runtime_group(runtimes, **kwargs):
         assert runtimes == {
             "host": governed_runtime,
             "internal_agent": internal_runtime,
             "scheduler": scheduler_runtime,
+        }
+        assert kwargs == {
+            "review_store": task_runtime_container.review_continuation_store,
+            "review_decision_store": task_runtime_container.review_store,
+            "command_repository": task_runtime_container.command_repository,
+            "claim_result_store": command_store,
+            "review_continuation_worker_id": (
+                "test-recovery::review-continuation"
+            ),
         }
         return runtime_group
 

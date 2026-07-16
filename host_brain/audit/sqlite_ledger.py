@@ -402,6 +402,15 @@ class SQLiteLedger(
         # mirror it into the durable JSON tokens column before column filtering.
         # Old rows without this binding intentionally remain unusable for
         # scoped proactive/embodiment grants.
+        self._insert("governor_log", self._governor_payload(row))
+
+    def log_governor_batch(self, rows: list[dict[str, Any]]) -> bool:
+        """Persist one deterministic node-grant batch, or report a replay race."""
+
+        payloads = [self._governor_payload(row) for row in rows]
+        return self._insert_governor_batch_once(payloads)
+
+    def _governor_payload(self, row: dict[str, Any]) -> dict[str, Any]:
         durable_row = dict(row)
         binding = durable_row.get("approved_action_binding")
         if isinstance(binding, dict):
@@ -416,7 +425,7 @@ class SQLiteLedger(
             payload["tribe_params_snapshot"] = json.dumps(
                 payload["tribe_params_snapshot"], ensure_ascii=False, default=str
             )
-        self._insert("governor_log", payload)
+        return payload
 
     def log_skill_exec(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SKILL_EXEC_COLUMNS}

@@ -616,6 +616,14 @@ class TaskParallelSettlementStoreMixin:
         }
         for outcome in decision.payload["outcomes"]:
             node_id = str(outcome["node_id"])
+            outcome_status = str(outcome["status"])
+            if outcome_status == TaskNodeStatus.WAITING_APPROVAL.value:
+                if outcome["attempt_id"] is not None:
+                    raise TaskStoreError(
+                        reason_code,
+                        f"parallel settlement pre-execution review bound an Attempt: {node_id}",
+                    )
+                continue
             attempt_id = str(outcome["attempt_id"])
             attempt = conn.execute(
                 "SELECT * FROM task_runtime_attempt WHERE attempt_id = ?",
@@ -630,7 +638,7 @@ class TaskParallelSettlementStoreMixin:
                 """,
                 (str(graph_id), int(revision), node_id),
             ).fetchone()
-            allowed = expected_attempt_statuses.get(str(outcome["status"]))
+            allowed = expected_attempt_statuses.get(outcome_status)
             if (
                 attempt is None
                 or (

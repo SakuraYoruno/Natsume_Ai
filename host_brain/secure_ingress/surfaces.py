@@ -18,6 +18,7 @@ class IngressSurface(str, Enum):
     GATEWAY = "gateway"
     BRIDGE = "bridge"
     INTERNAL_AGENT = "internal_agent"
+    REVIEW_OPERATOR = "review_operator"
     SCHEDULER_ADMIN = "scheduler_admin"
 
 
@@ -74,6 +75,14 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
         action="internal:agent:execute",
         required_scopes=("internal:agent:execute",),
         default_path="/internal/codex/work-orders/execute",
+    ),
+    IngressSurface.REVIEW_OPERATOR: IngressSurfacePolicy(
+        surface=IngressSurface.REVIEW_OPERATOR,
+        surface_id="review.operator",
+        audience="internal",
+        action="review:decide",
+        required_scopes=("review:decide",),
+        default_path="/internal/codex/reviews",
     ),
     IngressSurface.SCHEDULER_ADMIN: IngressSurfacePolicy(
         surface=IngressSurface.SCHEDULER_ADMIN,

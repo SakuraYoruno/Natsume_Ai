@@ -18,6 +18,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
@@ -231,6 +232,10 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
         infrastructure = SimpleNamespace(
             task_store=task_store,
             review_store=ReviewStore(db_path, clock=lambda: NOW),
+            review_continuation_store=ReviewContinuationStore(
+                db_path,
+                clock=lambda: NOW,
+            ),
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(
                 task_store,

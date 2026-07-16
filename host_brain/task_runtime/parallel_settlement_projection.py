@@ -293,6 +293,19 @@ class ParallelSettlementProjection:
                         f"{outcome.status} conflicts with durable status {durable_status}"
                     ),
                 )
+            if outcome.status == "WAITING_APPROVAL":
+                if outcome.attempt_id is not None:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        f"parallel TaskNode {outcome.node_id} pre-execution review "
+                        "bound a TaskAttempt",
+                    )
+                continue
+            if not outcome.attempt_id:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"parallel TaskNode {outcome.node_id} receipt has no TaskAttempt",
+                )
             durable_attempt = _mapping(
                 await _maybe_await(self._store.get_attempt(outcome.attempt_id)),
                 field_name=f"parallel outcome attempt {outcome.attempt_id}",

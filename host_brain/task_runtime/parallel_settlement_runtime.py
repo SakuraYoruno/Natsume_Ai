@@ -363,6 +363,7 @@ class ParallelSettlementRuntime:
                 "FAILED",
                 "RETRY_PENDING",
                 "VERIFICATION_FAILED",
+                "WAITING_APPROVAL",
                 "WAITING_ACCEPTANCE_REVIEW",
                 "CANCELLED",
             }
@@ -373,9 +374,13 @@ class ParallelSettlementRuntime:
             if durable_status not in decision_terminal_statuses:
                 continue
             durable_attempt = latest_attempt_by_node.get(binding.node_id)
-            if durable_attempt is None:
+            if durable_status != "WAITING_APPROVAL" and durable_attempt is None:
                 continue
-            attempt_id = _required_record_text(durable_attempt, "attempt_id")
+            attempt_id = (
+                None
+                if durable_status == "WAITING_APPROVAL"
+                else _required_record_text(durable_attempt or {}, "attempt_id")
+            )
             node_admission = admitted.for_node(binding.node_id)
             reservation = await self._try_operation(node_admission.reservation_id)
             durable_evidence = tuple(
@@ -383,10 +388,10 @@ class ParallelSettlementRuntime:
                     reference
                     for reference in (
                         *_record_evidence_refs(durable_nodes[binding.node_id]),
-                        _text(durable_attempt.get("error_ref")),
+                        _text((durable_attempt or {}).get("error_ref")),
                         _text((reservation or {}).get("receipt_ref")),
                         rejected_budget_usage_refs.get(
-                            (binding.node_id, attempt_id)
+                            (binding.node_id, attempt_id or "")
                         ),
                     )
                     if reference
@@ -635,6 +640,7 @@ def _canonical_parallel_outcome_reason_code(status: str) -> str | None:
         "BUDGET_BLOCKED": GOVERNED_BUDGET_EXCEEDED,
         "FAILED": "GOVERNED_PARALLEL_NODE_FAILED",
         "VERIFICATION_FAILED": "GOVERNED_PARALLEL_VERIFICATION_FAILED",
+        "WAITING_APPROVAL": GOVERNED_REVIEW_REQUIRED,
         "WAITING_ACCEPTANCE_REVIEW": GOVERNED_REVIEW_REQUIRED,
         "RETRY_PENDING": GOVERNED_EXECUTION_IN_PROGRESS,
         "CANCELLED": "GOVERNED_PARALLEL_NODE_CANCELLED",

@@ -44,6 +44,19 @@ class _NodeGrants:
             grant_refs={node.node_id: f"node-grant://{node.node_id}" for node in graph.nodes},
         )
 
+    def derive_review_continuation(self, **kwargs: Any) -> _Batch:
+        self.calls.append(dict(kwargs))
+        graph = kwargs["task_graph"]
+        return _Batch(
+            parent_grant_ref=kwargs["parent_grant_ref"],
+            task_graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+            grant_refs={
+                node.node_id: f"review-node-grant://{node.node_id}"
+                for node in graph.nodes
+            },
+        )
+
 
 class _Coordinator:
     def __init__(self) -> None:
@@ -52,6 +65,10 @@ class _Coordinator:
     async def execute_stream(self, **kwargs: Any):
         self.execution = dict(kwargs)
         yield {"phase": "COMMIT", "done": True}
+
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        self.execution = dict(kwargs)
+        return {"phase": "COMMIT", "done": True}
 
 
 def _contracts():
@@ -136,3 +153,76 @@ async def test_application_rejects_partial_node_grant_batch() -> None:
             graph=contracts.graph,
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_application_review_continuation_uses_claim_fenced_renewal() -> None:
+    contracts, assignment = _contracts()
+    coordinator = _Coordinator()
+    grants = _NodeGrants()
+    application = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,  # type: ignore[arg-type]
+        node_grant_service=grants,
+    )
+    node_id = contracts.graph.nodes[0].node_id
+    claim = {
+        "review_id": "task-review-gr05c",
+        "review_status": "CONSUMED",
+        "graph_id": contracts.graph.graph_id,
+        "graph_revision": contracts.graph.revision,
+        "node_id": node_id,
+    }
+
+    terminal = await application.execute_review_continuation(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        assignment=assignment,
+        graph=contracts.graph,
+        continuation_claim=claim,
+    )
+
+    assert terminal == {"phase": "COMMIT", "done": True}
+    assert grants.calls == [{
+        "parent_grant_ref": contracts.command.governor_grant_ref,
+        "task_graph": contracts.graph,
+        "work_order": contracts.work_order,
+        "request_id": contracts.command.request_id,
+        "session_id": contracts.command.session_id,
+        "principal_id": contracts.command.principal_id,
+        "continuation_claim": claim,
+    }]
+    assert coordinator.execution is not None
+    assert coordinator.execution["node_grant_refs"] == {
+        node_id: f"review-node-grant://{node_id}"
+    }
+
+
+@pytest.mark.asyncio
+async def test_application_denied_review_reconciles_without_worker_grant() -> None:
+    contracts, assignment = _contracts()
+    coordinator = _Coordinator()
+    grants = _NodeGrants()
+    application = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,  # type: ignore[arg-type]
+        node_grant_service=grants,
+    )
+
+    await application.execute_review_continuation(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        assignment=assignment,
+        graph=contracts.graph,
+        continuation_claim={
+            "review_id": "task-review-gr05c-denied",
+            "review_status": "REJECTED",
+            "graph_id": contracts.graph.graph_id,
+            "graph_revision": contracts.graph.revision,
+            "node_id": contracts.graph.nodes[0].node_id,
+        },
+    )
+
+    assert grants.calls == []
+    assert coordinator.execution is not None
+    assert "node_grant_refs" not in coordinator.execution

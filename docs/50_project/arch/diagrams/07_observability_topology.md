@@ -86,7 +86,7 @@ sequenceDiagram
 flowchart LR
     GRAPH["TaskGraph / Nodes"]
     ATTEMPT["Attempts / Leases / Budget"]
-    REVIEW["ReviewStore / continuation token"]
+    REVIEW["ReviewStore / one-time token\n0096 continuation coordination"]
     EFFECT["Acceptance effects"]
     Q["Task runtime query service"]
     API["/obs/task-runtime/*"]
@@ -99,7 +99,7 @@ flowchart LR
     Q --> API --> PAGE
 ```
 
-UI 应明确显示 `automatic_resume=false` 等真实能力边界。消费 Review token 和自动重新调度 TaskGraph 是两件事；当前 continuation 仍是手动语义。
+UI 应按范围显示真实能力边界：task-bound Review 在一次性 token 被消费、拒绝或到期后会由 0096 worker 自动续跑/收口；非 Task subject 不会被自动调度。ReviewStore 仍是 decision/token authority，0096 coordination 只负责 claim、takeover 和重入，不得在 UI 中被显示成第二个 Review status。Review HTTP 决策要求独立 `review.operator / review:decide` principal；Operator credential/UI 与真实 canary仍未部署完成。
 
 ## 生命周期
 

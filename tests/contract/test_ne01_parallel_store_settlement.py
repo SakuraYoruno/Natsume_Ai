@@ -18,6 +18,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.parallel_settlement import (
     CanonicalParallelSettlementDecision,
+    ParallelSettlementContractError,
     normalize_parallel_settlement_decision,
 )
 from host_brain.contracts.agent_runtime.task_graph import (
@@ -358,7 +359,7 @@ def _stable_attempt(
 def _decision_outcome(
     *,
     node_id: str,
-    attempt_id: str,
+    attempt_id: str | None,
     status: str,
     reason_code: str | None,
     evidence_refs: tuple[str, ...] | None = None,
@@ -381,6 +382,126 @@ def _decision_outcome(
             )
         ),
     }
+
+
+def test_waiting_approval_contract_requires_null_attempt_and_other_outcomes_require_one() -> None:
+    base = {
+        "schema_version": "Natsume.task_runtime.parallel_settlement.v2",
+        "decision_kind": "REVIEW",
+        "selected_node_id": "left",
+        "graph_id": "graph-pre-review-contract",
+        "graph_revision": 1,
+        "graph_status_before": "ACTIVE",
+        "graph_status_version_before": 1,
+        "graph_target_status": "BLOCKED",
+        "budget_id": BUDGET_ID,
+        "budget_status_before": "ACTIVE",
+        "budget_status_version_before": 1,
+        "budget_target_status": None,
+        "node_states": {
+            "left": {"status": "WAITING_APPROVAL", "status_version": 1},
+        },
+        "outcomes": [
+            _decision_outcome(
+                node_id="left",
+                attempt_id=None,
+                status="WAITING_APPROVAL",
+                reason_code="GOVERNED_REVIEW_REQUIRED",
+                evidence_refs=("review://pre-review", "task-checkpoint://pre-review"),
+            )
+        ],
+        "graph_outbox_id": "outbox::pre-review-contract",
+        "budget_outbox_id": None,
+    }
+
+    normalized = normalize_parallel_settlement_decision(base)
+    assert normalized.payload["outcomes"][0]["attempt_id"] is None
+
+    forged_attempt = json.loads(json.dumps(base))
+    forged_attempt["outcomes"][0]["attempt_id"] = "attempt::not-created"
+    with pytest.raises(ParallelSettlementContractError, match="must not bind attempt_id"):
+        normalize_parallel_settlement_decision(forged_attempt)
+
+    post_without_attempt = json.loads(json.dumps(base))
+    post_without_attempt["node_states"]["left"]["status"] = "WAITING_ACCEPTANCE_REVIEW"
+    post_without_attempt["outcomes"][0]["status"] = "WAITING_ACCEPTANCE_REVIEW"
+    with pytest.raises(ParallelSettlementContractError, match="attempt_id is required"):
+        normalize_parallel_settlement_decision(post_without_attempt)
+
+
+def test_waiting_approval_settlement_preserves_review_evidence_without_attempt(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-pre-review-no-attempt"
+    store = _store(tmp_path, graph_id)
+    _transition_node(store, graph_id, "left", TaskNodeStatus.WAITING_APPROVAL)
+    states = _node_states(store, graph_id)
+    graph_outbox = _event(
+        "TASK_GRAPH",
+        graph_id,
+        2,
+        "TASK_GRAPH_BLOCKED",
+        identity=f"{graph_id}:blocked",
+    )
+    decision, graph_outbox, budget_outbox = _settlement_decision(
+        graph_id=graph_id,
+        node_states=states,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+        decision_kind="REVIEW",
+        selected_node_id="left",
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        outcomes=(
+            _decision_outcome(
+                node_id="left",
+                attempt_id=None,
+                status=TaskNodeStatus.WAITING_APPROVAL.value,
+                reason_code="GOVERNED_REVIEW_REQUIRED",
+                evidence_refs=(
+                    "review://pre-review-no-attempt",
+                    "task-checkpoint://pre-review-no-attempt",
+                ),
+            ),
+        ),
+    )
+    assert budget_outbox is None
+
+    committed = store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=1,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+    )
+
+    assert committed["graph"]["status"] == TaskGraphStatus.BLOCKED.value
+    assert committed["budget"]["status"] == BudgetReservationStatus.ACTIVE.value
+    assert committed["decision"]["payload"]["outcomes"][0]["attempt_id"] is None
+    assert store.read_scheduler_snapshot(graph_id, 1)["attempts"] == []
+
+    replayed = store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=1,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+    )
+    assert replayed["replayed"] is True
 
 
 def _budget_settlement_fixture(

@@ -24,7 +24,7 @@ class GovernedExecutionReceipt:
     graph_id: str
     graph_revision: int
     node_id: str
-    attempt_id: str
+    attempt_id: str | None
     reservation_id: str
     receipt_ref: str | None
     payload_digest: str | None
@@ -62,7 +62,7 @@ class GovernedExecutionReceipt:
 def build_execution_receipt(
     admitted: AdmittedExecution,
     *,
-    attempt_id: str,
+    attempt_id: str | None,
     status: str,
     verification_status: str,
     accepted: bool,
@@ -73,6 +73,10 @@ def build_execution_receipt(
     evidence_refs: Sequence[str] = (),
     projection: Mapping[str, Any] | None = None,
 ) -> GovernedExecutionReceipt:
+    status_value = str(status)
+    if status_value.strip().upper() == "WAITING_APPROVAL":
+        if attempt_id is not None:
+            raise ValueError("WAITING_APPROVAL receipt must not bind a TaskAttempt")
     return GovernedExecutionReceipt(
         command_id=admitted.command_id,
         work_order_id=admitted.work_order_id,
@@ -86,7 +90,7 @@ def build_execution_receipt(
         reservation_id=admitted.reservation_id,
         receipt_ref=receipt_ref,
         payload_digest=payload_digest,
-        status=str(status),
+        status=status_value,
         verification_status=str(verification_status),
         accepted=bool(accepted),
         replayed=admitted.replayed if replayed is None else bool(replayed),

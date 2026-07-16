@@ -8,7 +8,7 @@ consumes another execution slot.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, Mapping
 import uuid
 
 from host_brain.contracts.agent_runtime.budget_policy import (
@@ -37,6 +37,10 @@ from host_brain.persistence.task_store_types import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.review_continuation_store import (
+    ReviewContinuationStoreError,
+    validate_review_continuation_attempt_claim_in_transaction,
+)
 
 
 class TaskReadyClaimStoreMixin:
@@ -58,6 +62,7 @@ class TaskReadyClaimStoreMixin:
         operation_fingerprint: str | None,
         attempt_created_outbox: OutboxMessage,
         attempt_leased_outbox: OutboxMessage,
+        review_continuation_authority: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically create the next attempt and lease one bounded READY node.
 
@@ -86,11 +91,11 @@ class TaskReadyClaimStoreMixin:
                 "claim requires attempt/owner/budget, positive lease, "
                 "non-negative attempt count, and paired operation identity",
             )
-        ts_ms = self._now()
-        expires_ts_ms = ts_ms + int(lease_ttl_ms)
         lease_id = f"lease::{uuid.uuid4().hex}"
         heartbeat_id = f"heartbeat::{uuid.uuid4().hex}"
         with self._transaction() as conn:
+            ts_ms = self._now()
+            expires_ts_ms = ts_ms + int(lease_ttl_ms)
             self._assert_graph_not_cancelling(
                 conn,
                 graph_id=graph_id,
@@ -131,6 +136,17 @@ class TaskReadyClaimStoreMixin:
                     "READY claim budget has no positive concurrency limit",
                 )
             node = self._require_node(conn, graph_id, graph_revision, node_id)
+            try:
+                validate_review_continuation_attempt_claim_in_transaction(
+                    conn,
+                    authority=review_continuation_authority,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    node_id=str(node_id),
+                    now_ts_ms=ts_ms,
+                )
+            except ReviewContinuationStoreError as exc:
+                raise TaskStoreError(exc.reason_code, exc.detail) from exc
             existing_attempt = conn.execute(
                 "SELECT * FROM task_runtime_attempt WHERE attempt_id = ?",
                 (attempt_ref,),

@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 import sqlite3
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -781,6 +781,12 @@ class HostCommandRepository:
                 ).fetchone()
                 is not None
             )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_review_decision_result(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
         elif surface == "scheduler" and actual_result:
             terminal_result_matches = (
                 conn.execute(
@@ -794,6 +800,12 @@ class HostCommandRepository:
                 ).fetchone()
                 is not None
             )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_review_decision_result(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
         claim_body_sha256 = _normalize_external_sha256(
             row["body_sha256"],
             field_name="secure_ingress_idempotency_claim.body_sha256",
@@ -1158,6 +1170,66 @@ def _required_text(value: Any, *, field_name: str, max_length: int) -> str:
             f"{field_name} must contain 1..{int(max_length)} characters",
         )
     return text
+
+
+def _matches_review_decision_result(
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+) -> bool:
+    """Resolve an ingress terminal ref to one exact durable Review decision."""
+
+    try:
+        parsed = urlsplit(str(result_ref or "").strip())
+        if (
+            parsed.scheme != "review-decision"
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+        ):
+            return False
+        review_id = unquote(parsed.netloc)
+        if not review_id or quote(review_id, safe="") != parsed.netloc:
+            return False
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) != 2 or parts[0] not in {"rejected", "expired"}:
+            return False
+        status = parts[0].upper()
+        if not parts[1].isdigit() or str(int(parts[1])) != parts[1]:
+            return False
+        review_status_version = int(parts[1])
+        if review_status_version < 1:
+            return False
+        row = conn.execute(
+            """
+            SELECT review_id, status, status_version, subject_ref,
+                   task_graph_id, task_node_id
+            FROM agent_runtime_review
+            WHERE review_id = ?
+            """,
+            (review_id,),
+        ).fetchone()
+        if (
+            row is None
+            or str(row["status"]) != status
+            or int(row["status_version"]) != review_status_version
+        ):
+            return False
+        from host_brain.persistence.review_continuation_store import (  # noqa: PLC0415
+            parse_task_review_subject,
+        )
+
+        binding = parse_task_review_subject(str(row["subject_ref"] or ""))
+        return bool(
+            binding is not None
+            and binding.graph_id == str(command.get("graph_id") or "")
+            and binding.graph_revision == int(command.get("graph_revision") or 0)
+            and str(row["task_graph_id"] or "") == binding.graph_id
+            and str(row["task_node_id"] or "") == binding.node_id
+        )
+    except (ImportError, sqlite3.DatabaseError, TypeError, ValueError):
+        return False
 
 
 def _optional_text(value: Any, *, field_name: str, max_length: int) -> str | None:

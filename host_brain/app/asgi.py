@@ -99,6 +99,7 @@ from host_brain.composition.task_runtime import (
     TaskRuntimeContainerCloseError,
     build_process_task_runtime_container,
 )
+from host_brain.task_runtime.review_command_service import TaskReviewCommandService
 from host_brain.scheduler.task_registry import (
     SchedulerTaskConfig,
     TaskPriority,
@@ -531,6 +532,7 @@ def create_app() -> FastAPI:
     governed_host_runtime: GovernedHostRuntime | None = None
     governed_internal_runtime: GovernedInternalRuntime | None = None
     internal_agent_command_service: InternalAgentCommandService | None = None
+    task_review_command_service: TaskReviewCommandService | None = None
     internal_agent_ingress: InternalAgentIngress | None = None
     scheduler_container: ProcessSchedulerContainer | None = None
     canon_container: ProcessCanonContainer | None = None
@@ -645,6 +647,7 @@ def create_app() -> FastAPI:
         nonlocal memory_container
         nonlocal task_runtime_container, governed_host_runtime
         nonlocal governed_internal_runtime, internal_agent_command_service
+        nonlocal task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
         nonlocal canon_container
         nonlocal life_command_authority, life_dispatchers
@@ -997,7 +1000,18 @@ def create_app() -> FastAPI:
                         "host": governed_runtime,
                         "internal_agent": internal_runtime,
                         "scheduler": scheduler.runtime,
-                    }
+                    },
+                    review_store=task_runtime.review_continuation_store,
+                    review_decision_store=task_runtime.review_store,
+                    command_repository=task_runtime.command_repository,
+                    claim_result_store=command_ingress.store,
+                    review_continuation_worker_id=(
+                        f"{task_runtime.recovery_id}::review-continuation"
+                    ),
+                )
+                review_commands = TaskReviewCommandService(
+                    review_store=task_runtime.review_store,
+                    wake_continuation=runtime_group.wake_review_continuation,
                 )
                 task_runtime.bind_runtime(runtime_group)
                 await task_runtime.activate_runtime()
@@ -1010,6 +1024,7 @@ def create_app() -> FastAPI:
                     intent_engine=get_intent_engine(),
                     claim_result_store=command_ingress.store,
                 )
+                task_review_command_service = review_commands
                 command_ingress_container = command_ingress
                 memory_container = memory
                 internal_agent_ingress = internal_ingress
@@ -1019,6 +1034,7 @@ def create_app() -> FastAPI:
                 application.state.governed_internal_runtime = internal_runtime
                 application.state.governed_scheduler_runtime = scheduler.runtime
                 application.state.scheduler_container = scheduler
+                application.state.task_review_command_service = review_commands
                 application.state.command_ingress_container = command_ingress
                 application.state.memory_service_container = memory
                 yield
@@ -1026,6 +1042,7 @@ def create_app() -> FastAPI:
                 scheduler_container = None
                 internal_agent_ingress = None
                 internal_agent_command_service = None
+                task_review_command_service = None
                 governed_internal_runtime = None
                 governed_host_runtime = None
                 task_runtime_container = None
@@ -1036,6 +1053,7 @@ def create_app() -> FastAPI:
                 application.state.governed_internal_runtime = None
                 application.state.governed_scheduler_runtime = None
                 application.state.scheduler_container = None
+                application.state.task_review_command_service = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
                 try:
@@ -1136,6 +1154,7 @@ def create_app() -> FastAPI:
     application.state.governed_internal_runtime = None
     application.state.governed_scheduler_runtime = None
     application.state.scheduler_container = None
+    application.state.task_review_command_service = None
     application.state.canon_container = None
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports

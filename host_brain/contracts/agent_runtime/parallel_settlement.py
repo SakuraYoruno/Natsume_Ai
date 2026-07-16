@@ -45,7 +45,7 @@ _OUTCOME_FIELDS = frozenset(
     }
 )
 _FAILURE_OUTCOMES = frozenset({"FAILED", "VERIFICATION_FAILED", "CANCELLED"})
-_REVIEW_OUTCOMES = frozenset({"WAITING_ACCEPTANCE_REVIEW"})
+_REVIEW_OUTCOMES = frozenset({"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"})
 _ALLOWED_OUTCOMES = frozenset(
     {
         "ACCEPTED",
@@ -171,13 +171,22 @@ def _normalize_outcomes(
                 for item in raw_refs
             }
         )
+        raw_attempt_id = raw.get("attempt_id")
+        if status == "WAITING_APPROVAL":
+            if raw_attempt_id is not None:
+                raise ParallelSettlementContractError(
+                    f"WAITING_APPROVAL outcome must not bind attempt_id: {node_id}"
+                )
+            attempt_id = None
+        else:
+            attempt_id = _text(
+                raw_attempt_id,
+                field_name=f"outcome.{node_id}.attempt_id",
+            )
         normalized.append(
             {
                 "node_id": node_id,
-                "attempt_id": _text(
-                    raw.get("attempt_id"),
-                    field_name=f"outcome.{node_id}.attempt_id",
-                ),
+                "attempt_id": attempt_id,
                 "status": status,
                 "accepted": accepted,
                 "reason_code": reason_code,

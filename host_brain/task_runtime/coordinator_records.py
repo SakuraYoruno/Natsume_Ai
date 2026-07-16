@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _ParallelNodeOutcome:
     node_id: str
-    attempt_id: str
+    attempt_id: str | None
     status: str
     accepted: bool
     reason_code: str | None
@@ -44,18 +44,29 @@ class _ParallelNodeOutcome:
                 f"parallel TaskNode {node_id} has no execution receipt",
             )
         receipt_node_id = _text(receipt.get("node_id"))
-        attempt_id = _text(receipt.get("attempt_id"))
         status = _text(receipt.get("status")).upper()
+        raw_attempt_id = receipt.get("attempt_id")
+        attempt_id = _text(raw_attempt_id) or None
         accepted = receipt.get("accepted")
         if (
             receipt_node_id != node_id
-            or not attempt_id
             or not status
             or not isinstance(accepted, bool)
         ):
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 f"parallel TaskNode {node_id} returned an invalid terminal identity",
+            )
+        if status == "WAITING_APPROVAL":
+            if raw_attempt_id is not None:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"parallel TaskNode {node_id} pre-execution review bound a TaskAttempt",
+                )
+        elif attempt_id is None:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"parallel TaskNode {node_id} terminal identity has no TaskAttempt",
             )
         if accepted != (status == "ACCEPTED"):
             raise GovernedRuntimeError(

@@ -3,7 +3,7 @@
 
 # 图 01：当前运行拓扑
 
-版本：v2.5
+版本：v2.6
 核对日期：2026-07-16
 
 ## 拓扑
@@ -82,6 +82,6 @@ Gateway 通常在 Edge lifecycle 中启动，不应简单按“固定独立进�
 
 ## 不能从本图推出的结论
 
-- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 two-phase cancellation、0093 delivery、0094 continuation 与 0095 stable-ID revisioned Outbox/payload/source-fenced Event/Review/Operator 已有证据。0094 未解决业务 reconciliation，0092 仍是取消真相；0095 精确迁移 governed 历史且不可解析 producer 阻断。生产 verifier/HTTP/UI/canary 仍缺，atomic/bounded/cancellation 均 OFF；Budget 高竞争未闭环。
+- 图上有连线不等于全部 NE-01 已完成。Durable DAG 是 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。0096 已接通 task-bound Review 自动续跑、PRE null Attempt 和 claim/Task-lease hand-off；它未解决 0092 operation/effect cancellation reconciliation。Cancellation 生产 verifier/HTTP/UI/canary 仍缺，atomic/bounded/cancellation 均 OFF；Review 真实 canary、Budget 高竞争也未闭环。
 - 可选服务启动成功不等于 Recall、Bond 或 rate limit 已生产启用。
 - Edge/Gateway 存在不等于真实平台账号、硬件或密钥已验收。

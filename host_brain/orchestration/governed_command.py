@@ -120,6 +120,94 @@ class GovernedCommandApplication:
         async for event in self._coordinator.execute_stream(**execution_kwargs):
             yield event
 
+    async def execute_review_continuation(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        assignment: ExecutorAssignment,
+        graph: Any,
+        continuation_claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resume one durable Review checkpoint without reopening admission.
+
+        The Review continuation claim is coordination, not business authority.
+        ``ReviewStore`` must still prove the exact consumed/denied Review and
+        waiting TaskNode.  A consumed Review may mint a short-lived,
+        claim-fenced node-grant renewal so a human pause longer than the
+        original Governor TTL does not make the durable graph impossible to
+        resume.  Denied/expired Reviews need no worker grant: the coordinator
+        only reconciles their already-durable terminal decision.
+        """
+
+        claim = dict(continuation_claim or {})
+        admitted, persisted_command, persisted_work_order, persisted_graph = (
+            await self._admit(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        )
+        if (
+            str(claim.get("graph_id") or "").strip() != admitted.graph_id
+            or int(claim.get("graph_revision") or 0) != admitted.graph_revision
+            or str(claim.get("node_id") or "").strip()
+            not in {binding.node_id for binding in admitted.nodes}
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "Review continuation claim differs from the durable Graph admission",
+            )
+
+        execution_kwargs: dict[str, Any] = {
+            "admitted": admitted,
+            "command": persisted_command,
+            "work_order": persisted_work_order,
+        }
+        review_status = str(claim.get("review_status") or "").strip().upper()
+        if self._node_grants is not None and review_status == "CONSUMED":
+            derive = getattr(
+                self._node_grants,
+                "derive_review_continuation",
+                None,
+            )
+            if not callable(derive):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "node grant service cannot renew a durable Review continuation",
+                )
+            renewed = derive(
+                parent_grant_ref=str(persisted_command.governor_grant_ref or "").strip(),
+                task_graph=persisted_graph,
+                work_order=persisted_work_order,
+                request_id=persisted_command.request_id,
+                session_id=persisted_command.session_id,
+                principal_id=persisted_command.principal_id,
+                continuation_claim=claim,
+            )
+            if inspect.isawaitable(renewed):
+                renewed = await renewed
+            raw_refs = getattr(renewed, "grant_refs", None)
+            refs = dict(raw_refs) if isinstance(raw_refs, Mapping) else {}
+            expected_nodes = {binding.node_id for binding in admitted.nodes}
+            if set(refs) != expected_nodes or any(
+                not str(value or "").strip() for value in refs.values()
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_ASSIGNMENT_CONFLICT,
+                    "Review continuation renewal does not cover the admitted TaskGraph",
+                )
+            execution_kwargs["node_grant_refs"] = {
+                str(node_id): str(ref) for node_id, ref in refs.items()
+            }
+        elif review_status not in {"REJECTED", "EXPIRED", "CANCELLED"}:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "Review continuation requires a canonical terminal Review status",
+            )
+        return await self._coordinator.execute(**execution_kwargs)
+
     async def request_graph_cancellation(
         self,
         *,

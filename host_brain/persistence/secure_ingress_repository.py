@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlite3
 import threading
 from typing import Any
+from urllib.parse import quote
 import uuid
 
 from natsume_contracts.identity import CredentialProofKind, PrincipalKind
@@ -678,6 +679,149 @@ class SQLiteSecureIngressStore:
                     """,
                     (result_ref, updated_at, claim_ref),
                 )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def complete_review_decision_claim(
+        self,
+        *,
+        claim_ref: str,
+        result_ref: str,
+        prior_result_ref: str | None,
+        review_id: str,
+        review_status: str,
+        review_status_version: int,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        at_ms: int | None = None,
+    ) -> None:
+        """Complete or strictly repair a historical POST Review claim.
+
+        Releases before 0096 could bind Secure Ingress to the worker receipt
+        while the command was still waiting for acceptance.  Replacement is
+        legal only when the exact HostCommand, terminal Review decision,
+        graph/node lineage and currently stored pre-acceptance receipt all
+        match in one writer transaction.
+        """
+
+        from host_brain.persistence.review_continuation_store import (  # noqa: PLC0415
+            parse_task_review_subject,
+        )
+
+        normalized_status = str(review_status or "").strip().upper()
+        normalized_review_id = str(review_id or "").strip()
+        normalized_graph_id = str(graph_id or "").strip()
+        normalized_node_id = str(node_id or "").strip()
+        try:
+            revision = int(graph_revision)
+            status_version = int(review_status_version)
+        except (TypeError, ValueError) as exc:
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_REVIEW_DECISION_INVALID"
+            ) from exc
+        expected_ref = (
+            f"review-decision://{quote(normalized_review_id, safe='')}/"
+            f"{normalized_status.lower()}/{status_version}"
+        )
+        if (
+            normalized_status not in {"REJECTED", "EXPIRED"}
+            or not normalized_review_id
+            or not normalized_graph_id
+            or not normalized_node_id
+            or revision < 1
+            or status_version < 1
+            or str(result_ref or "").strip() != expected_ref
+        ):
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_REVIEW_DECISION_INVALID"
+            )
+
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                claim = self._conn.execute(
+                    """
+                    SELECT result_ref, claim_status, updated_at_ms
+                    FROM secure_ingress_idempotency_claim
+                    WHERE claim_ref = ?
+                    """,
+                    (claim_ref,),
+                ).fetchone()
+                command = self._conn.execute(
+                    """
+                    SELECT graph_id, graph_revision, surface
+                    FROM host_command_journal
+                    WHERE ingress_claim_ref = ?
+                    """,
+                    (claim_ref,),
+                ).fetchone()
+                review = self._conn.execute(
+                    """
+                    SELECT status, status_version, resume_phase, subject_ref,
+                           task_graph_id, task_node_id
+                    FROM agent_runtime_review
+                    WHERE review_id = ?
+                    """,
+                    (normalized_review_id,),
+                ).fetchone()
+                binding = (
+                    parse_task_review_subject(review["subject_ref"])
+                    if review is not None
+                    else None
+                )
+                if (
+                    claim is None
+                    or str(claim["claim_status"]) != "COMMITTED"
+                    or command is None
+                    or str(command["surface"]) not in {"internal", "scheduler"}
+                    or str(command["graph_id"]) != normalized_graph_id
+                    or int(command["graph_revision"]) != revision
+                    or review is None
+                    or str(review["status"]) != normalized_status
+                    or int(review["status_version"]) != status_version
+                    or str(review["task_graph_id"] or "") != normalized_graph_id
+                    or str(review["task_node_id"] or "") != normalized_node_id
+                    or binding is None
+                    or binding.graph_id != normalized_graph_id
+                    or binding.graph_revision != revision
+                    or binding.node_id != normalized_node_id
+                ):
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_REVIEW_DECISION_BINDING_CONFLICT"
+                    )
+                current = (
+                    None
+                    if claim["result_ref"] is None
+                    else str(claim["result_ref"])
+                )
+                previous = str(prior_result_ref or "").strip() or None
+                if current == expected_ref:
+                    self._conn.commit()
+                    return
+                if current is not None and (
+                    str(review["resume_phase"]) != "POST_EXECUTION_ACCEPTANCE"
+                    or previous is None
+                    or current != previous
+                ):
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_RESULT_CONFLICT"
+                    )
+                updated_at = int(claim["updated_at_ms"]) if at_ms is None else int(at_ms)
+                cursor = self._conn.execute(
+                    """
+                    UPDATE secure_ingress_idempotency_claim
+                    SET result_ref = ?, updated_at_ms = ?
+                    WHERE claim_ref = ? AND result_ref IS ?
+                    """,
+                    (expected_ref, updated_at, claim_ref, current),
+                )
+                if cursor.rowcount != 1:
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_RESULT_CONFLICT"
+                    )
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()

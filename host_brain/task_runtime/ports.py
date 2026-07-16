@@ -218,6 +218,7 @@ class TaskStorePort(Protocol):
         operation_fingerprint: str | None,
         attempt_created_outbox: Any,
         attempt_leased_outbox: Any,
+        review_continuation_authority: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]: ...
 
     def schedule_retry(

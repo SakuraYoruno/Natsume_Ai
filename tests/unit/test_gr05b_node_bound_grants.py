@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+from pathlib import Path
+import sqlite3
+import threading
 from typing import Any
 
 import pytest
@@ -25,6 +29,7 @@ from host_brain.orchestration.governor_grant import (
 from host_brain.orchestration.node_grants import (
     NODE_GRANT_BINDING_MISSING,
     NODE_GRANT_EXPIRED,
+    NODE_GRANT_PARENT_INVALID,
     NODE_GRANT_REPLAY_DRIFT,
     NODE_GRANT_ROUTE_DRIFT,
     NODE_GRANT_VERIFICATION_FAILED,
@@ -51,6 +56,22 @@ class _CountingTokenService(TokenService):
         if str(kwargs.get("intent_id") or "").startswith("node-grant-intent::"):
             self.child_issue_calls += 1
             self.child_subjects.append(str(kwargs.get("skill_name") or ""))
+        return super().issue_approval_token(**kwargs)
+
+
+class _BarrierChildTokenService(_CountingTokenService):
+    def __init__(self, barrier: threading.Barrier) -> None:
+        super().__init__()
+        self._barrier = barrier
+        self._first_child = True
+
+    def issue_approval_token(self, **kwargs: Any) -> str:
+        if (
+            self._first_child
+            and str(kwargs.get("intent_id") or "").startswith("node-grant-intent::")
+        ):
+            self._first_child = False
+            self._barrier.wait(timeout=10)
         return super().issue_approval_token(**kwargs)
 
 
@@ -317,6 +338,119 @@ def test_gr05b_route_drift_fails_whole_graph_before_token_or_ledger_side_effect(
         ledger.close()
 
 
+def test_gr05b_sqlite_batch_failure_rolls_back_every_child_grant_and_retries_cleanly() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    try:
+        parent_ref = _parent(ledger, tokens)
+        graph, order = _graph_and_order(parent_ref)
+        service = _service(ledger, tokens)
+        ledger._conn.execute(  # noqa: SLF001 - deliberate SQLite atomicity fault injection
+            """
+            CREATE TRIGGER abort_second_node_grant
+            BEFORE INSERT ON governor_log
+            WHEN NEW.stage = 'S_TASK_GRAPH_NODE_GRANT'
+             AND (
+                 SELECT COUNT(*) FROM governor_log
+                 WHERE stage = 'S_TASK_GRAPH_NODE_GRANT'
+             ) = 1
+            BEGIN
+                SELECT RAISE(ABORT, 'injected second node grant failure');
+            END
+            """
+        )
+
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="injected second node grant failure",
+        ):
+            _derive(service, parent_ref, graph, order)
+
+        assert [
+            row
+            for row in ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
+        ] == []
+
+        ledger._conn.execute("DROP TRIGGER abort_second_node_grant")  # noqa: SLF001
+        retried = _derive(service, parent_ref, graph, order)
+
+        assert retried.replayed is False
+        assert len(retried.grants) == 2
+        assert tokens.child_issue_calls == 4
+        child_rows = [
+            row
+            for row in ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
+        ]
+        assert len(child_rows) == 2
+        assert {row["intent_id"] for row in child_rows} == {
+            grant.intent_id for grant in retried.grants
+        }
+    finally:
+        ledger.close()
+
+
+def test_gr05b_two_processes_converge_one_atomic_node_grant_batch(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "concurrent-node-grants.sqlite3"
+    first_ledger = SQLiteLedger(db_path, check_same_thread=False)
+    second_ledger = SQLiteLedger(db_path, check_same_thread=False)
+    try:
+        parent_ref = _parent(first_ledger, TokenService())
+        graph, order = _graph_and_order(parent_ref)
+        barrier = threading.Barrier(2)
+        first_service = NodeBoundGrantService(
+            ledger=first_ledger,
+            token_service=_BarrierChildTokenService(barrier),
+            clock=lambda: NOW_MS,
+            child_ttl_ms=60_000,
+        )
+        second_service = NodeBoundGrantService(
+            ledger=second_ledger,
+            token_service=_BarrierChildTokenService(barrier),
+            clock=lambda: NOW_MS,
+            child_ttl_ms=60_000,
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(
+                _derive,
+                first_service,
+                parent_ref,
+                graph,
+                deepcopy(order),
+            )
+            second_future = pool.submit(
+                _derive,
+                second_service,
+                parent_ref,
+                graph,
+                deepcopy(order),
+            )
+            first = first_future.result(timeout=15)
+            second = second_future.result(timeout=15)
+
+        assert sorted((first.replayed, second.replayed)) == [False, True]
+        assert first.grant_refs == second.grant_refs
+        child_rows = [
+            row
+            for row in first_ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
+        ]
+        assert len(child_rows) == len(graph.nodes)
+        node_ids = [
+            row["snapshot_refs"]["node_grant"]["node_id"]
+            for row in child_rows
+        ]
+        assert sorted(node_ids) == sorted(node.node_id for node in graph.nodes)
+        assert all(node_ids.count(node.node_id) == 1 for node in graph.nodes)
+    finally:
+        first_ledger.close()
+        second_ledger.close()
+
+
 @pytest.mark.parametrize("route", ["skill", "delegate", "chat"])
 def test_gr05b_all_three_routes_issue_and_verify_exact_secret_free_authority(
     route: str,
@@ -439,5 +573,230 @@ def test_gr05b_partial_durable_replay_fails_closed_without_reissuing() -> None:
             row for row in ledger.trace_request(REQUEST_ID)["governor_log"]
             if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
         ]) == 1
+    finally:
+        ledger.close()
+
+
+class _ReviewContinuationStore:
+    def __init__(self, authority: dict[str, Any]) -> None:
+        self.authority = deepcopy(authority)
+        self.live = True
+
+    def validate_review_continuation_claim(
+        self,
+        claim: dict[str, Any],
+    ) -> dict[str, Any]:
+        raise AssertionError("secret-bearing claim validator must not cross runtime boundary")
+
+    def validate_review_continuation_authority(
+        self,
+        authority: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.live or dict(authority) != self.authority:
+            raise RuntimeError("Review continuation authority moved")
+        return deepcopy(self.authority)
+
+    def validate_review_continuation_execution_authority(
+        self,
+        authority: dict[str, Any],
+        **_execution: Any,
+    ) -> dict[str, Any]:
+        return self.validate_review_continuation_authority(authority)
+
+
+class _HeartbeatedReviewContinuationStore:
+    def __init__(
+        self,
+        authority: dict[str, Any],
+        *,
+        durable_claim_expires_ts_ms: int,
+    ) -> None:
+        self.authority = deepcopy(authority)
+        self.durable_claim_expires_ts_ms = int(durable_claim_expires_ts_ms)
+        self.canonical_owner = str(authority["claim_owner"])
+        self.canonical_fence = int(authority["claim_fencing_token"])
+        self.canonical_token_digest = str(authority["claim_token_sha256"])
+
+    def validate_review_continuation_authority(
+        self,
+        authority: dict[str, Any],
+    ) -> dict[str, Any]:
+        candidate = dict(authority)
+        if (
+            candidate != self.authority
+            or str(candidate.get("claim_owner")) != self.canonical_owner
+            or int(candidate.get("claim_fencing_token") or 0)
+            != self.canonical_fence
+            or str(candidate.get("claim_token_sha256"))
+            != self.canonical_token_digest
+            or int(candidate.get("claim_expires_ts_ms") or 0)
+            > self.durable_claim_expires_ts_ms
+        ):
+            raise RuntimeError("Review continuation authority moved")
+        # The secret-free projection intentionally retains its original,
+        # shorter expiry.  The canonical store has already proved that the
+        # same owner/token/fence remains live under the heartbeat extension.
+        return deepcopy(candidate)
+
+
+def test_review_renewal_accepts_heartbeat_validated_projection_after_initial_expiry() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    resumed_at = NOW_MS + 10_000
+    try:
+        parent_ref = _parent(ledger, tokens)
+        graph, order = _graph_and_order(
+            parent_ref,
+            routes=(("skill", "code-check"),),
+        )
+        initial_authority = {
+            "schema_version": "Natsume.task.review_continuation_authority.v1",
+            "review_id": "task-review-heartbeated-projection",
+            "review_status": "CONSUMED",
+            "review_status_version": 1,
+            "graph_id": graph.graph_id,
+            "graph_revision": graph.revision,
+            "node_id": graph.nodes[0].node_id,
+            "subject_version": 1,
+            "resume_phase": "PRE_EXECUTION",
+            "claim_owner": "review-worker-heartbeat",
+            "claim_token_sha256": "sha256:" + "c" * 64,
+            "claim_fencing_token": 11,
+            "claim_expires_ts_ms": resumed_at - 1,
+            "status_version": 1,
+        }
+        reviews = _HeartbeatedReviewContinuationStore(
+            initial_authority,
+            durable_claim_expires_ts_ms=resumed_at + 30_000,
+        )
+        assert (
+            initial_authority["claim_expires_ts_ms"]
+            < resumed_at
+            < reviews.durable_claim_expires_ts_ms
+        )
+        service = NodeBoundGrantService(
+            ledger=ledger,
+            token_service=tokens,
+            review_store=reviews,
+            clock=lambda: resumed_at,
+            child_ttl_ms=60_000,
+        )
+
+        batch = service.derive_review_continuation(
+            parent_grant_ref=parent_ref,
+            task_graph=graph,
+            work_order=order,
+            request_id=REQUEST_ID,
+            session_id=SESSION_ID,
+            principal_id=PRINCIPAL_ID,
+            continuation_claim=initial_authority,
+        )
+
+        assert batch.replayed is False
+        assert len(batch.grants) == 1
+        assert (
+            batch.grants[0].expires_at_ms
+            == resumed_at + order.budget_policy.limits.time_ms + 60_000
+        )
+
+        reviews.canonical_fence += 1
+        with pytest.raises(NodeGrantDerivationError) as taken_over:
+            service.derive_review_continuation(
+                parent_grant_ref=parent_ref,
+                task_graph=graph,
+                work_order=order,
+                request_id=REQUEST_ID,
+                session_id=SESSION_ID,
+                principal_id=PRINCIPAL_ID,
+                continuation_claim=initial_authority,
+            )
+        assert taken_over.value.reason_code == NODE_GRANT_PARENT_INVALID
+    finally:
+        ledger.close()
+
+
+def test_gr05b_consumed_review_renews_expired_parent_only_for_live_claim() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    resumed_at = NOW_MS + 100_001
+    try:
+        parent_ref = _parent(ledger, tokens)
+        graph, order = _graph_and_order(
+            parent_ref,
+            routes=(("delegate", "internal-agent"),),
+        )
+        authority = {
+            "schema_version": "Natsume.task.review_continuation_authority.v1",
+            "review_id": "task-review-gr05b",
+            "review_status": "CONSUMED",
+            "review_status_version": 1,
+            "graph_id": graph.graph_id,
+            "graph_revision": graph.revision,
+            "node_id": graph.nodes[0].node_id,
+            "subject_version": 1,
+            "resume_phase": "PRE_EXECUTION",
+            "claim_owner": "review-worker-gr05b",
+            "claim_token_sha256": "sha256:" + "b" * 64,
+            "claim_fencing_token": 3,
+            "claim_expires_ts_ms": resumed_at + 30_000,
+        }
+        reviews = _ReviewContinuationStore(authority)
+        service = NodeBoundGrantService(
+            ledger=ledger,
+            token_service=tokens,
+            review_store=reviews,
+            clock=lambda: resumed_at,
+            child_ttl_ms=60_000,
+        )
+        batch = service.derive_review_continuation(
+            parent_grant_ref=parent_ref,
+            task_graph=graph,
+            work_order=order,
+            request_id=REQUEST_ID,
+            session_id=SESSION_ID,
+            principal_id=PRINCIPAL_ID,
+            continuation_claim=authority,
+        )
+        grant = batch.grants[0]
+
+        assert grant.expires_at_ms == resumed_at + 120_000
+        assert batch.replayed is False
+        verified = DurableNodeGrantVerifier(
+            ledger=ledger,
+            review_store=reviews,
+            clock=lambda: resumed_at,
+        ).verify(
+            **_verification_kwargs(parent_ref, graph, grant),
+            attempt_id="attempt-review-gr05b",
+            lease_id="lease-review-gr05b",
+            lease_owner_id="owner-review-gr05b",
+            fencing_token=1,
+        )
+        assert verified.grant_ref == grant.grant_ref
+        renewal_rows = [
+            row
+            for row in ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("reason_code")
+            == "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
+        ]
+        assert len(renewal_rows) == 1
+        assert (
+            renewal_rows[0]["snapshot_refs"]["review_continuation_authority"]
+            == authority
+        )
+
+        reviews.live = False
+        with pytest.raises(NodeGrantVerificationError):
+            DurableNodeGrantVerifier(
+                ledger=ledger,
+                review_store=reviews,
+                clock=lambda: resumed_at,
+            ).verify(
+                **_verification_kwargs(parent_ref, graph, grant),
+                attempt_id="attempt-review-gr05b",
+                lease_id="lease-review-gr05b",
+                lease_owner_id="owner-review-gr05b",
+                fencing_token=1,
+            )
     finally:
         ledger.close()

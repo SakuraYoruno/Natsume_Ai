@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +15,8 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
 from host_brain.memory.life_memory.store import LifeMemoryStore
+from host_brain.persistence.review_repository import ReviewStore
+from host_brain.task_runtime.review_command_service import TaskReviewCommandService
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,8 +39,26 @@ def _clear_route_settings_caches():
     get_internal_agent_settings.cache_clear()
 
 
-def _client() -> TestClient:
+def _client(
+    *,
+    task_review_command_service: TaskReviewCommandService | None = None,
+    review_principal_id: str = "codex-route",
+) -> TestClient:
     app = FastAPI()
+    app.state.task_review_command_service = task_review_command_service
+
+    @app.middleware("http")
+    async def _bind_test_authority(request, call_next):
+        request.state.internal_agent_authority = SimpleNamespace(
+            admissible=True,
+            request_id="request-codex-route-test",
+            principal_id=review_principal_id,
+            claim_ref="secure-ingress-claim://codex-route-test",
+            audit_ref="secure-ingress-audit://codex-route-test",
+            body_sha256="sha256:" + "a" * 64,
+        )
+        return await call_next(request)
+
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=False)
 
@@ -134,12 +155,14 @@ def test_codex_internal_runtime_drain_report_uses_durable_authority() -> None:
     }
 
 
-def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None:
+def test_codex_internal_review_routes_resume_once(tmp_path) -> None:
     db_path = tmp_path / "review-routes.sqlite3"
     with sqlite3.connect(str(db_path)) as conn:
         conn.executescript(REVIEW_STORE_MIGRATION.read_text(encoding="utf-8"))
-    monkeypatch.setenv("HOST_AGENT_REVIEW_DB_PATH", str(db_path))
-    client = _client()
+    review_commands = TaskReviewCommandService(
+        review_store=ReviewStore(db_path),
+    )
+    client = _client(task_review_command_service=review_commands)
     review = {
         "schema_version": "Natsume.agent.review_item.v1",
         "review_id": "review-route-1",
@@ -164,7 +187,7 @@ def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None
     approve_response = client.post(
         "/internal/codex/reviews/review-route-1/approve",
         json={
-            "actor_id": "owner",
+            "actor_id": "codex-route",
             "subject_ref": "work-order://route/1",
             "subject_version": 1,
             "resume_phase": "POST_EXECUTION_ACCEPTANCE",
@@ -202,6 +225,119 @@ def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None
     )
     assert duplicate_response.status_code == 409
     assert duplicate_response.json()["detail"]["reason_code"] == "REVIEW_RESUME_ALREADY_CONSUMED"
+
+
+def _review_route_client(
+    tmp_path: Path,
+    *,
+    principal_id: str = "operator.review.test",
+) -> tuple[TestClient, ReviewStore]:
+    db_path = tmp_path / "review-route-authority.sqlite3"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(REVIEW_STORE_MIGRATION.read_text(encoding="utf-8"))
+    store = ReviewStore(db_path)
+    return (
+        _client(
+            task_review_command_service=TaskReviewCommandService(review_store=store),
+            review_principal_id=principal_id,
+        ),
+        store,
+    )
+
+
+def _review_route_payload(
+    *,
+    review_id: str,
+    requester: str = "operator.review.test",
+    subject_ref: str = "work-order://review-route/1",
+) -> dict[str, object]:
+    return {
+        "schema_version": "Natsume.agent.review_item.v1",
+        "review_id": review_id,
+        "review_type": "POST_EXECUTION_ACCEPTANCE",
+        "subject_ref": subject_ref,
+        "subject_version": 1,
+        "requester": requester,
+        "reason": "authenticated operator decision regression",
+        "risk_level": 3,
+        "side_effects": ["write_files"],
+        "evidence_refs": [f"evidence://review-route/{review_id}"],
+        "status": "PENDING",
+        "expires_at": 9_999_999_999_999,
+        "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+        "checkpoint_id": f"checkpoint://review-route/{review_id}",
+        "resume_count": 0,
+    }
+
+
+def test_review_decision_actor_must_match_authenticated_principal(tmp_path: Path) -> None:
+    client, store = _review_route_client(tmp_path)
+    review_id = "review-route-actor-binding"
+    create_response = client.post(
+        "/internal/codex/reviews",
+        json={"review": _review_route_payload(review_id=review_id)},
+    )
+    assert create_response.status_code == 200
+
+    approve_response = client.post(
+        f"/internal/codex/reviews/{review_id}/approve",
+        json={"actor_id": "forged.approver"},
+    )
+    reject_response = client.post(
+        f"/internal/codex/reviews/{review_id}/reject",
+        json={"reviewer_id": "forged.rejector"},
+    )
+
+    assert approve_response.status_code == 403
+    assert approve_response.json()["detail"] == "REVIEW_ACTOR_IDENTITY_MISMATCH"
+    assert reject_response.status_code == 403
+    assert reject_response.json()["detail"] == "REVIEW_ACTOR_IDENTITY_MISMATCH"
+    durable = store.get_review(review_id)
+    assert durable["review"]["status"] == "PENDING"
+    assert durable["review"]["decision_actor"] is None
+
+
+def test_review_http_create_rejects_task_bound_subject(tmp_path: Path) -> None:
+    client, store = _review_route_client(tmp_path)
+    review = _review_route_payload(
+        review_id="review-route-task-bound",
+        subject_ref="task-node://graph-route/1/node-route?root=work-route&attempt=not-started",
+    )
+    review["review_type"] = "PRE_EXECUTION_APPROVAL"
+    review["resume_phase"] = "PRE_EXECUTION"
+
+    response = client.post(
+        "/internal/codex/reviews",
+        json={
+            "review": review,
+            "task_graph_id": "graph-route",
+            "task_node_id": "node-route",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "TASK_BOUND_REVIEW_CREATE_INTERNAL_ONLY"
+    assert store.list_reviews() == []
+
+
+def test_review_http_create_binds_requester_to_authenticated_principal(
+    tmp_path: Path,
+) -> None:
+    client, store = _review_route_client(tmp_path)
+
+    response = client.post(
+        "/internal/codex/reviews",
+        json={
+            "review": _review_route_payload(
+                review_id="review-route-requester-binding",
+                requester="forged.requester",
+            )
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "REVIEW_REQUESTER_IDENTITY_MISMATCH"
+    assert store.list_reviews() == []
 
 
 def _runtime_route_event(index: int) -> RuntimeEvent:

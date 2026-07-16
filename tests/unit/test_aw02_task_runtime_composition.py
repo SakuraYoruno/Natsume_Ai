@@ -165,6 +165,11 @@ def _build_fake_container(
         events.append("review-store:build")
         return _Closeable("review-store", events)
 
+    def build_review_continuation_store(db_path: str) -> _Closeable:
+        assert db_path == str(path.resolve())
+        events.append("review-continuation-store:build")
+        return _Closeable("review-continuation-store", events)
+
     def build_worker_projection_store(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
         events.append("worker-projection-store:build")
@@ -201,6 +206,7 @@ def _build_fake_container(
         migration_runner_builder=build_migration,
         task_store_builder=build_store,
         review_store_builder=build_review_store,
+        review_continuation_store_builder=build_review_continuation_store,
         worker_projection_store_builder=build_worker_projection_store,
         command_repository_builder=build_repository,
         agent_result_repository_builder=build_agent_result_repository,
@@ -226,6 +232,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:cancellation-continuation-ready",
         f"task-store:recover:{container.recovery_id}",
         "review-store:build",
+        "review-continuation-store:build",
         "worker-projection-store:build",
         "repository:build",
         "agent-result:build",
@@ -365,6 +372,10 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         events.append("worker-projection-store:build")
         return _Closeable("worker-projection-store", events)
 
+    def build_review_continuation_store(_path: str) -> _Closeable:
+        events.append("review-continuation-store:build")
+        return _Closeable("review-continuation-store", events)
+
     with pytest.raises(TaskRuntimeContainerConstructionError) as caught:
         build_process_task_runtime_container(
             ledger=_Ledger(path),
@@ -372,6 +383,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
             review_store_builder=build_review_store,
+            review_continuation_store_builder=build_review_continuation_store,
             worker_projection_store_builder=build_worker_projection_store,
             command_repository_builder=fail_repository,
         )
@@ -388,9 +400,11 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert events[4].startswith("task-store:recover:task-runtime-startup::")
     assert events[5:] == [
         "review-store:build",
+        "review-continuation-store:build",
         "worker-projection-store:build",
         "repository:build",
         "worker-projection-store:close",
+        "review-continuation-store:close",
         "review-store:close",
         "task-store:close",
         "migration:close",
@@ -440,6 +454,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
         "agent-result:close",
         "repository:close",
         "worker-projection-store:close",
+        "review-continuation-store:close",
         "review-store:close",
         "task-store:close",
         "migration:close",
@@ -447,7 +462,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
     assert container.closed
     assert not container.activated
     asyncio.run(container.aclose())
-    assert len(events) == 14
+    assert len(events) == 15
 
 
 def test_worker_start_failure_rolls_back_and_detaches_activated_coordinator(

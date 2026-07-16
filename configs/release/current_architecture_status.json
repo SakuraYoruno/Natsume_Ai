@@ -3,7 +3,9 @@
   "as_of_date": "2026-07-16",
   "source_baseline": {
     "dev_commit": "a6d7ae383",
-    "repository_cleanup_commit": "f0cd1dfd7"
+    "repository_cleanup_commit": "f0cd1dfd7",
+    "role": "ORIGINAL_AUDIT_BASELINE",
+    "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
@@ -11,6 +13,14 @@
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
+  "production_enablement": {
+    "atomic_graph_success": "OFF",
+    "bounded_fanout": "OFF",
+    "durable_cancellation": "OFF",
+    "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
+    "budget": "PARTIAL",
+    "production_canary": "NOT_RUN"
+  },
   "capabilities": {
     "host_canonical_routes": {
       "status": "WIRED",
@@ -38,7 +48,7 @@
       "scope": ["authenticated internal Agent WorkOrder"],
       "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + positive BudgetPolicy + delegate:agent_runtime TaskNode + verified child grant + Review + Verification + Acceptance + Receipt + replay",
       "compatibility_boundary": "AgentWorkOrder is accepted only at ingress and projected back to the existing executor only after canonical admission and child-grant verification.",
-      "known_limit": "Long human-review delays beyond child-grant TTL still depend on the shared grant renewal/derivation design.",
+      "review_continuation": "Task-bound Review decisions automatically re-enter the original surface through migration 0096 coordination. Credentials cover budget time plus child TTL up to 24 hours, but READY and first worker entry remain live-claim-fenced; in-flight execution then belongs to the exact Task Attempt/Lease.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
@@ -120,6 +130,17 @@
         "PlanningRecovery failure evidence uses the one matching durable terminal Graph Outbox payload_ref, preserving pre-0095 legacy refs instead of synthesizing a nonexistent revisioned ref",
         "PlanningRecovery synthesizes a revisioned terminal Graph payload_ref only when an older or alternative Store implementation omits the optional graph_outboxes extension; production DurableTaskStore supplies it when explicitly requested, and present but malformed, missing, or ambiguous durable Outbox inventory fails closed",
         "Operator reads the exact requested revision, ReviewStore filters canonical task-node subject_ref by graph revision, and complete taskbatch marker scans cover multi-revision graph histories",
+        "migration 0096 persists pure Review-continuation coordination for task-bound terminal Review decisions without copying Review status, token, TaskNode, or Attempt business truth",
+        "ReviewStore atomically queues CONSUMED, REJECTED, and EXPIRED task-bound Review decisions in the same transaction as the canonical Review mutation, while startup reconciliation repairs only missing coordination",
+        "Review continuation claims bind owner, unpredictable token, expiry, monotonically increasing fence, version, attempt count, and retry deadline; heartbeat, defer, complete, and expired takeover reject stale authority",
+        "GovernedRuntimeGroup routes a continuation by immutable HostCommand surface back to Host, Internal, or Scheduler and completes only after the reviewed Node leaves its exact waiting checkpoint",
+        "WAITING_APPROVAL is a legal parallel-settlement outcome with attempt_id null and no synthetic Attempt; POST review remains bound to the original SUCCEEDED Attempt and does not rerun the worker",
+        "Review continuation authority is a fixed-field secret-free projection; raw claim tokens never cross a surface and unknown fields fail closed",
+        "Review continuation credentials cover budget time plus child TTL with a 24-hour ceiling; READY claim and first worker entry revalidate live claim, exact Attempt/Lease owner, and fence before Task authority takes over in-flight execution",
+        "ReviewStore create validates canonical subject, outer graph/node, exact waiting Node/version and PRE/POST Attempt binding in one transaction; expiration and reconciliation isolate poison rows",
+        "Internal and Scheduler denial use exact review-decision refs; historical POST pre-acceptance results can be replaced only by an exact HostCommand/Graph/Node/Review/version/old-receipt CAS",
+        "Review HTTP decisions require the server-owned review.operator/review:decide policy, authenticated actor identity, and prohibit task-bound HTTP creation",
+        "migration 0097 plus a writer-transaction batch CAS make deterministic node-grant batches atomic and unique across processes; historical duplicates fail migration",
         "RuntimeOutboxPublisher drains one row at a time through durable claim -> idempotent runtime-event append -> fenced completion; append failure performs fenced release with a durable retry deadline and error",
         "ProcessTaskRuntimeContainer derives the Outbox publisher owner from its boot/construction-scoped recovery id, so restart does not reuse the old publisher owner",
         "outer cancellation joins fan-out children and their heartbeats; integration evidence shows zero OPERATION_COMMITTED and no task leak",
@@ -161,10 +182,10 @@
         "real production resolver sources that classify proven side-effect-free transient preparation failures",
         "Budget finalization inside the pre-reservation terminal failure transaction or an explicit compensation contract",
         "post-reservation immediate reconciliation and mid-attempt online recovery takeover",
-        "automatic Review continuation",
         "automatic repair of historical half-committed BLOCKED graphs with failure Nodes or FAILED graphs with ACTIVE Budgets",
-        "unified optional-Attempt observation for WAITING_APPROVAL, which still uses the dedicated pre-review path",
-        "execution persistence and orchestration modularization has completed eighteen cuts. Cut eighteen adds the 1172-line DurableDagSchedulingRuntime and 38-line pure dag_scheduling_records.py, moving execute_stream (formerly 988 lines), reentered outcomes, supports, and run_claimed_node from frozen HEAD 65219 with normalized/exact AST hashes frozen. The runtime receives only the same Store, shared Outbox/Budget/Lifecycle/NodeExecution/Projection/0090/0091/Cancellation/Review services, flags, reader, and progress buffer; it has no Coordinator callback, new lock, or second persistence authority. Its call matrix is Store 9, Budget 9, Lifecycle 18, NodeProjection 12, NodeExecution 6, Settlement 4, Success 1, Review 4, Cancellation 1, and Outbox 1 build/6 publish/0 best-effort. All owners still total 27 builds, 31 publishes, 58 combined Outbox calls, and 5 best-effort publishes. coordinator.py is now 257 lines and contains only composition, public cancel/supports/execute facades, and registry tracking; the mixed-file gate remains green. DurableDagSchedulingRuntime is a temporary outer orchestrator that still combines review, terminal-state, and fanout coordination. Migration 0093 closes Task Runtime Outbox cross-process delivery. Migration 0094 separately adds a composition-owned pending-cancellation scanner, durable coordination claim/heartbeat/defer/expired takeover, exact HostCommand admission reconstruction, and re-entry into the existing GraphCancellationRuntime. Migration 0095 closes revisioned Graph Outbox identity, multi-revision taskbatch marker scans, per-revision delivery ordering, Runtime Event graph_id@revision projection, and exact-revision Operator reads. The 0094 row is coordination metadata only; migration 0092 intent and decision remain the sole business truth, and unresolved operation/effect/review reconciliation is durably deferred. Production authority verifier, HTTP/UI route, business reconciliation completion, and canary remain missing. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
+        "Review continuation poison rows are isolated but have no durable DLQ or alert; a 500-candidate scan cap can delay healthy rows behind an extreme poison prefix",
+        "Review wake is process-local; cross-process low-latency depends on bounded polling, leases, and takeover",
+        "execution persistence and orchestration modularization has completed eighteen structural cuts plus migrations 0096 and 0097. DurableDagSchedulingRuntime remains a temporary outer orchestrator. Migration 0093 closes Task Runtime Outbox cross-process delivery, 0094 adds pending-cancellation coordination, 0095 closes revisioned Graph Outbox identity, 0096 closes task-bound Review automatic continuation and exact Task-authority hand-off, and 0097 closes cross-process node-grant batch uniqueness. The 0094 and 0096 rows are coordination metadata only; migration 0092 intent/decision and ReviewStore/TaskStore remain their respective business authorities. Production cancellation verifier and route, cancellation business reconciliation, historical half-state repair, Budget contention, Operator credential/UI deployment, and real canaries remain missing. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
       ],
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. It atomically closes Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes through the same DurableTaskStore bundle, retries only that identical bundle once after an ordinary response exception, and never falls back to sequential transitions. Any existing operation reservation rejects this path, CancelledError remains unswallowed, and Budget finalization remains outside the bundle.",
@@ -172,8 +193,9 @@
       "bounded_fanout_boundary": "PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF. TaskGraph.completion_policy is durable and optional: legacy remains the default, while ATOMIC_GRAPH_SUCCESS_V1 requires an explicit sink result_node_id. atomic_graph_success_enabled and bounded_fanout_enabled are independent, default false, and disabled in Host, Scheduler, and Internal production composition. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Migration 0091 atomically commits whole-Graph success and frozen result authority. B4/0090 failure, Budget, review, and crash-re-entry semantics remain active; their runtime read/validation and settlement orchestration now live in ParallelSettlementProjection and ParallelSettlementRuntime, while DurableTaskStore remains the only 0090 mutation and transaction authority. Migration 0092 adds verified two-phase durable cancellation, but production cancellation authority is not composed. Atomic, bounded, and cancellation production enablement is forbidden until their respective canaries pass.",
       "cancellation_boundary": "B5C shadow is implemented but production is OFF. The internal Application method requires an exact Graph-revision authority verifier and has no HTTP/UI exposure; production composition injects no verifier. Phase one durably installs an intent and fences Graph, Node, Attempt, Lease, Review/token, operation, and unauthorized effect authority before local child cancellation; publisher failure cannot suppress local cancel/join. Existing intents replay only when request_id, request_identity, source, and reason_code all match. Review create/approve/resume is fenced for the exact cancelled revision. Phase two waits for active and uncertain facts to reconcile before atomically committing Graph CANCELLED, Budget disposition, Outboxes, and a canonical decision, and terminal reads revalidate operation proof structure, digest, key, and signature. Accepted NODE effects retain delivery authority, while unauthorized NODE and incomplete-Graph GRAPH effects are fenced. 0091 success and 0092 cancellation are first-writer-wins with exact replay. Migration 0094 can coordinate cross-process re-entry and expired takeover, but it only defers when operation/effect/review facts remain unresolved. Production authority wiring, HTTP/UI exposure, complete business reconciliation, and canary remain missing.",
       "cancellation_continuation_boundary": "Migration 0094 is coordination only. ProcessTaskRuntimeContainer owns a boot-scoped GraphCancellationContinuationWorker and one process-shared LocalGraphExecutionRegistry injected into Host, Internal, Scheduler, and worker cancellation runtimes; the registry proves only local quiescence and is not durable authority. The worker scans pending 0092 intents, claims with owner/token/expiry/fence/version authority, heartbeats while re-entering the existing GraphCancellationRuntime, durably defers stable errors or unresolved reconciliation, and permits expired takeover. Claim, heartbeat, defer, and complete sample time after BEGIN IMMEDIATE acquires the writer transaction. It reconstructs the exact command, work order, assignment, Graph, and replayed admission from HostCommandRepository for the claimed Graph revision. If local_pending is not explicitly supplied, the Runtime performs cancel_and_join; nonempty local pending blocks advance/finalize and yields durable defer. Coordination completes only after the canonical 0092 intent is FINALIZED and its decision exists. Worker-start failure attempts reverse worker stop/join and coordinator close, but unbind happens only after full rollback succeeds; otherwise the bound handle remains for aclose retry, and GovernedRuntimeGroup likewise retains failed-close children. Shutdown uses bounded grace then cancellation; if cancellation is suppressed it fails closed and keeps Task/Command stores open for retry. The 0094 table never copies cancellation business status, never creates reconciliation proof, and never replaces the 0092 intent/decision authority.",
+      "review_continuation_boundary": "Migration 0096 is coordination only. ReviewStore atomically enqueues terminal task-bound Review decisions and remains the sole status/token/checkpoint authority. Create-time binding, committed expiry, poison-row isolation and per-candidate claim transactions are enforced. A composition-owned worker claims with owner/token/expiry/fence/version authority, routes by immutable HostCommand surface, and completes only after the exact Node leaves its waiting checkpoint. PRE uses attempt_id null; POST reuses the SUCCEEDED Attempt without rerunning the worker. Secret-free fixed-field authority is checked inside READY Attempt/Lease creation and again at first worker entry with exact owner/fence. The credential covers budget time plus child TTL up to 24 hours, but cannot replace the live hand-off. After first worker verification the Task lease owns an already-started blocking call; losing the Review heartbeat cannot revoke external side effects and cannot authorize stale completion. Review decisions require review.operator/review:decide; denial refs and legacy POST claim repair are exact. Real production canary and Operator deployment remain NOT_RUN.",
       "outbox_delivery_boundary": "Migration 0093 closes the canonical Task Runtime Outbox cross-process delivery authority. Migration 0095 adds exact TaskGraph revision identity while preserving the old governed outbox_id and idempotency_key, so response-loss replay is not broken. Graph rows bind an existing positive revision; non-Graph rows keep revision null. Backfill uses decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or deterministic natsume_sha256_hex recomputation of the revision-bound command's legacy governed Outbox ID/key for ACTIVE and other non-attempt transitions; an unresolved custom producer aborts the whole migration. New Graph payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts legacy payload refs, while new insert/update triggers reject them. Readiness and receipt replay freeze graph_revision physical shape, revision/payload triggers, delivery index, the unique partial Runtime Event source_ref index, and persisted bindings. Claims persist owner, token, expiry, attempt count, and a monotonically increasing fencing token; expired claims can be taken over with a new token/fence, and stale owners fail closed. One aggregate_type + aggregate_id + graph_revision stream is delivered strictly in version/creation/id order, while different Graph revisions progress independently. New Runtime Events use graph_id@revision; immutable pre-0095 journal rows are not rewritten and exact-revision queries resolve them through the source Outbox. The unique partial TASK_STORE_OUTBOX source_ref fence makes one Outbox project to one journal row; retry after legacy append but before Outbox confirmation accepts only an exactly reconstructable legacy event and never duplicates projection. Operator reads one exact revision, ReviewStore filters canonical task-node subject_ref by revision, and taskbatch marker scans cover multi-revision histories. RuntimeOutboxPublisher processes one claim at a time through idempotent append and fenced completion; append failures release the live claim with durable backoff and last_error. Composition binds the publisher owner to the current boot/construction recovery id and starts a closeable background delivery worker after startup publication. The worker waits for the earliest aggregate-head available/claim-expiry time with a bounded polling fallback, so an unexpired abandoned claim is taken over after expiry without requiring a new command. Publisher close linearizes with foreground publication and waits for an entered publish critical section before stores close. DRAINED is legal if and only if canonical total_pending is zero; blocked, claimed, or backed-off rows yield DEFERRED. list_pending_outbox remains full PENDING inventory, while delivery eligibility belongs only to the aggregate-head claim/backlog APIs. Readiness is a cached mode on each Store instance after construction or explicit assertion; hot-path settlement does not rescan schema/full-table state, while explicit diagnostic force_revalidate remains available. Migration 0094 implements separate cancellation-continuation coordination and does not reuse Outbox claims or authority.",
-      "startup_recovery_boundary": "Startup is ordered migration and 0093/0094/0095 readiness -> task_store.recover_startup -> publisher construction -> recovery outbox publication -> Outbox worker -> runtime activation and cancellation continuation worker. Recovery exceptions fail closed before route activation. ASGI derives construction-scoped execution and worker owners from the configured logical owner and recovery id. Worker-start failure attempts reverse activation; only a complete rollback unbinds the coordinator, while rollback failure retains the handle for aclose retry and failed-close runtime-group children remain registered. Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, rejects bind and activate, and allows only aclose retry. Coordinator admission close, drain, or aclose failure leaves all Stores open. Outbox drain and infrastructure close start only after both coordinator and cancellation worker are quiescent. The cancellation worker can scan and take over expired coordination claims across processes, but local non-quiescence or unresolved business reconciliation is durably deferred rather than treated as complete.",
+      "startup_recovery_boundary": "Startup is ordered migration and 0093/0094/0095/0096/0097 readiness -> task_store.recover_startup -> publisher construction -> recovery outbox publication -> Outbox worker -> surface runtime activation -> cancellation and Review continuation workers. Recovery exceptions fail closed before route activation. ASGI derives construction-scoped execution and worker owners from the configured logical owner and recovery id. Worker-start failure attempts reverse activation; only a complete rollback unbinds the coordinator, while rollback failure retains the handle for aclose retry and failed-close runtime-group children remain registered. Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, rejects bind and activate, and allows only aclose retry. Coordinator admission close, drain, or aclose failure leaves all Stores open. Outbox drain and infrastructure close start only after the coordinator and both continuation workers are quiescent. Cancellation coordination durably defers unresolved business facts; Review continuation does not create cancellation evidence.",
       "evidence_refs": [
         "host_brain/audit/migrations/0089_task_runtime_dag_scheduling.sql",
         "host_brain/audit/migrations/0090_task_runtime_parallel_settlement_decision.sql",
@@ -182,6 +204,8 @@
         "host_brain/audit/migrations/0093_task_runtime_outbox_claim.sql",
         "host_brain/audit/migrations/0094_task_runtime_graph_cancellation_continuation.sql",
         "host_brain/audit/migrations/0095_task_runtime_revisioned_graph_outbox.sql",
+        "host_brain/audit/migrations/0096_task_runtime_review_continuation.sql",
+        "host_brain/audit/migrations/0097_node_grant_batch_uniqueness.sql",
         "host_brain/contracts/agent_runtime/parallel_settlement.py",
         "host_brain/contracts/agent_runtime/parallel_success.py",
         "host_brain/contracts/agent_runtime/graph_cancellation.py",
@@ -194,6 +218,7 @@
         "host_brain/persistence/task_graph_cancellation_finalization.py",
         "host_brain/persistence/task_graph_cancellation_request.py",
         "host_brain/persistence/task_graph_cancellation_continuation_store.py",
+        "host_brain/persistence/review_continuation_store.py",
         "host_brain/persistence/host_command_repository.py",
         "host_brain/persistence/task_parallel_success_store.py",
         "host_brain/persistence/task_parallel_settlement_store.py",
@@ -208,6 +233,10 @@
         "host_brain/task_runtime/coordinator.py",
         "host_brain/task_runtime/coordinator_records.py",
         "host_brain/task_runtime/coordinator_receipts.py",
+        "host_brain/task_runtime/review_command_service.py",
+        "host_brain/secure_ingress/surfaces.py",
+        "host_brain/persistence/secure_ingress_repository.py",
+        "host_brain/task_runtime/review_continuation_worker.py",
         "host_brain/task_runtime/parallel_settlement_projection.py",
         "host_brain/task_runtime/parallel_settlement_runtime.py",
         "host_brain/task_runtime/node_lifecycle_runtime.py",
@@ -302,9 +331,25 @@
       "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "program-wide coverage"]
     },
     "review_resume": {
-      "status": "PARTIAL",
-      "continuation": "MANUAL",
-      "automatic_reschedule": false
+      "status": "WIRED",
+      "continuation": "AUTOMATIC_TASK_BOUND",
+      "automatic_reschedule": true,
+      "production_canary": "NOT_RUN",
+      "decision_ingress": "review.operator/review:decide; internal:agent:execute is insufficient",
+      "scope": "Task-bound PRE/POST Review on Host, Internal, and Scheduler; non-Task subjects remain decision-only.",
+      "authority": "ReviewStore owns decision/token/checkpoint; migration 0096 owns coordination only.",
+      "evidence_refs": [
+        "host_brain/audit/migrations/0096_task_runtime_review_continuation.sql",
+        "host_brain/audit/migrations/0097_node_grant_batch_uniqueness.sql",
+        "host_brain/persistence/review_continuation_store.py",
+        "host_brain/task_runtime/review_continuation_worker.py",
+        "host_brain/task_runtime/review_command_service.py",
+        "host_brain/secure_ingress/surfaces.py",
+        "host_brain/persistence/secure_ingress_repository.py",
+        "tests/integration/test_ne01_review_automatic_continuation.py",
+        "tests/unit/test_ne01_review_ingress_lifecycle_regressions.py",
+        "tests/security/test_internal_scheduler_ingress_authority.py"
+      ]
     },
     "conversation_effects": {
       "status": "PARTIAL",

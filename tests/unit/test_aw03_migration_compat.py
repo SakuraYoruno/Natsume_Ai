@@ -342,11 +342,11 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 95
-    assert upgraded.summary["applied_count"] == 12
+    assert upgraded.summary["current_version"] == 97
+    assert upgraded.summary["applied_count"] == 14
     assert (
         upgraded.records[-1].migration_id
-        == "0095_task_runtime_revisioned_graph_outbox"
+        == "0097_node_grant_batch_uniqueness"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -405,13 +405,15 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    assert [record.migration_id for record in repaired.records[-6:]] == [
+    assert [record.migration_id for record in repaired.records[-8:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
         "0093_task_runtime_outbox_claim",
         "0094_task_runtime_graph_cancellation_continuation",
         "0095_task_runtime_revisioned_graph_outbox",
+        "0096_task_runtime_review_continuation",
+        "0097_node_grant_batch_uniqueness",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -466,9 +468,9 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     replayed = runner.apply_migrations(request_id="0094-receipt-replay", ts_ms=24)
 
     assert replayed.success is True, replayed.as_dict()
-    assert replayed.summary["current_version"] == 95
+    assert replayed.summary["current_version"] == 97
     assert replayed.records[-1].migration_id == (
-        "0095_task_runtime_revisioned_graph_outbox"
+        "0097_node_grant_batch_uniqueness"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -504,9 +506,9 @@ def test_0095_fresh_schema_freezes_revision_column_guards_and_delivery_index(
     )
 
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 95
+    assert result.summary["current_version"] == 97
     assert result.records[-1].migration_id == (
-        "0095_task_runtime_revisioned_graph_outbox"
+        "0097_node_grant_batch_uniqueness"
     )
     with sqlite3.connect(db_path) as conn:
         graph_revision = {
@@ -719,7 +721,7 @@ def test_0095_upgrade_backfills_only_exact_authority_then_unique_graph_fallback(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 95
+    assert upgraded.summary["current_version"] == 97
     with sqlite3.connect(db_path) as conn:
         revisions = dict(
             conn.execute(
@@ -1147,15 +1149,17 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 95
-    assert upgraded.summary["applied_count"] == 6
-    assert [record.migration_id for record in upgraded.records[-6:]] == [
+    assert upgraded.summary["current_version"] == 97
+    assert upgraded.summary["applied_count"] == 8
+    assert [record.migration_id for record in upgraded.records[-8:]] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
         "0093_task_runtime_outbox_claim",
         "0094_task_runtime_graph_cancellation_continuation",
         "0095_task_runtime_revisioned_graph_outbox",
+        "0096_task_runtime_review_continuation",
+        "0097_node_grant_batch_uniqueness",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -1224,11 +1228,11 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] == 95
-    assert upgraded.summary["applied_count"] == 5
+    assert upgraded.summary["current_version"] == 97
+    assert upgraded.summary["applied_count"] == 7
     assert (
         upgraded.records[-1].migration_id
-        == "0095_task_runtime_revisioned_graph_outbox"
+        == "0097_node_grant_batch_uniqueness"
     )
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -1511,3 +1515,101 @@ def test_platform_registry_draft_repair_rejects_incomplete_physical_schema(
         assert conn.execute(
             "SELECT 1 FROM schema_migrations WHERE migration_id = 75"
         ).fetchone() is None
+
+
+def test_0097_node_grant_uniqueness_fails_closed_on_historical_duplicates(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "0097-node-grant-duplicates.sqlite3"
+    head_96 = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 96),
+    ).apply_migrations(request_id="0097-head-96", ts_ms=50)
+    assert head_96.success is True, head_96.as_dict()
+    assert head_96.summary["current_version"] == 96
+
+    with sqlite3.connect(db_path) as conn:
+        for ts_ms in (51, 52):
+            conn.execute(
+                """
+                INSERT INTO governor_log(
+                    request_id, intent_id, decision, reason_code,
+                    rule_trace, tokens, snapshot_refs, stage, ts_ms
+                ) VALUES (?, ?, 'APPROVE', 'TEST', '[]', '{}', '{}', ?, ?)
+                """,
+                (
+                    "request-0097-duplicate",
+                    "intent-0097-duplicate",
+                    "S_TASK_GRAPH_NODE_GRANT",
+                    ts_ms,
+                ),
+            )
+        conn.commit()
+
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0097-reject-duplicates",
+        ts_ms=53,
+    )
+
+    assert rejected.success is False
+    assert rejected.reason_code == "MIGRATION_EXEC_FAILED"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT MAX(migration_id) FROM schema_migrations"
+        ).fetchone() == (96,)
+        assert conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'uq_governor_node_grant_request_intent'
+            """
+        ).fetchone() is None
+
+
+def test_0097_fresh_schema_fences_node_grant_identity_and_duplicates(tmp_path) -> None:
+    db_path = tmp_path / "0097-node-grant-fresh.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0097-fresh",
+        ts_ms=60,
+    )
+    assert result.success is True, result.as_dict()
+    assert result.summary["current_version"] == 97
+
+    with sqlite3.connect(db_path) as conn:
+        objects = {
+            (str(row[0]), str(row[1]))
+            for row in conn.execute(
+                """
+                SELECT type, name FROM sqlite_master
+                WHERE name IN (
+                    'uq_governor_node_grant_request_intent',
+                    'trg_governor_node_grant_identity_insert',
+                    'trg_governor_node_grant_identity_update'
+                )
+                """
+            ).fetchall()
+        }
+        assert objects == {
+            ("index", "uq_governor_node_grant_request_intent"),
+            ("trigger", "trg_governor_node_grant_identity_insert"),
+            ("trigger", "trg_governor_node_grant_identity_update"),
+        }
+        conn.execute(
+            """
+            INSERT INTO governor_log(
+                request_id, intent_id, decision, reason_code,
+                rule_trace, tokens, snapshot_refs, stage, ts_ms
+            ) VALUES ('request-0097', 'intent-0097', 'APPROVE', 'TEST',
+                      '[]', '{}', '{}', 'S_TASK_GRAPH_NODE_GRANT', 61)
+            """
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO governor_log(
+                    request_id, intent_id, decision, reason_code,
+                    rule_trace, tokens, snapshot_refs, stage, ts_ms
+                ) VALUES ('request-0097', 'intent-0097', 'APPROVE', 'TEST',
+                          '[]', '{}', '{}', 'S_TASK_GRAPH_NODE_GRANT', 62)
+                """
+            )

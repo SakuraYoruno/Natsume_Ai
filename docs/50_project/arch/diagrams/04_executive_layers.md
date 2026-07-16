@@ -121,4 +121,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 verified cancellation、0093 delivery、0094 continuation 与 0095 stable-ID revisioned Outbox/payload/source-fenced Event/Review/Operator 已有证据。0094 从 exact admission 重入既有 Runtime，0092 仍是取消业务 authority；0095 精确迁移 CREATED/ACTIVE 等 governed 历史，旧 payload/event 仅兼容 replay。生产 verifier/HTTP/UI/canary 与完整业务 reconciliation 仍缺；atomic/bounded/cancellation 均 OFF。不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 verified cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。0096 已让 task-bound Review 自动回到原 surface，PRE 无伪 Attempt、POST 不重跑 worker；credential 覆盖 budget window，READY/首次执行受 live claim 约束，随后由 Task lease 管理。它不替代 0092 取消业务 reconciliation。Cancellation 生产 verifier/HTTP/UI/canary、Review 真实 canary与完整业务 reconciliation 仍缺；atomic/bounded/cancellation 均 OFF。不能宣称 Lane B 或完整架构完成。
