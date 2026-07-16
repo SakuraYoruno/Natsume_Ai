@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from threading import Event
 from typing import Any
 import uuid
 
 import pytest
 
+import host_brain.persistence.task_parallel_settlement_store as settlement_store_module
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
@@ -1057,6 +1060,168 @@ def test_parallel_decision_readers_fail_closed_when_attempt_lineage_drifts(
         store.get_latest_parallel_settlement_decision(graph_id, 1)
     assert by_ref.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
     assert latest.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+def test_parallel_budget_decision_rejects_second_terminal_version_outbox(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-budget-duplicate-terminal-outbox"
+    (
+        store,
+        _,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    duplicate = _event(
+        "BUDGET_RESERVATION",
+        BUDGET_ID,
+        2,
+        "BUDGET_TERMINAL_DUPLICATE",
+        identity=f"{graph_id}:duplicate-terminal-outbox",
+    )
+    with store._transaction() as conn:  # noqa: SLF001 - corruption fixture
+        store._insert_outbox(  # noqa: SLF001 - corruption fixture
+            conn,
+            duplicate,
+            ts_ms=NOW,
+            expected_aggregate=("BUDGET_RESERVATION", BUDGET_ID, 2),
+            expected_event_type="BUDGET_TERMINAL_DUPLICATE",
+            expected_attempt_id=None,
+        )
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+def test_parallel_budget_decision_rejects_terminal_reservation_version_drift(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-budget-terminal-version-drift"
+    (
+        store,
+        _,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_budget_reservation SET status_version = 9
+            WHERE budget_id = ?
+            """,
+            (BUDGET_ID,),
+        )
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+def test_parallel_decision_reader_uses_one_sqlite_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_id = "graph-parallel-decision-read-snapshot"
+    (
+        store,
+        attempt_id,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    decision_read = Event()
+    writer_updated = Event()
+    original_record = settlement_store_module._parallel_settlement_decision_record
+    observed = False
+
+    def record_with_interleave(row: Any) -> dict[str, Any]:
+        nonlocal observed
+        record = original_record(row)
+        if not observed:
+            observed = True
+            decision_read.set()
+            assert writer_updated.wait(timeout=2.0)
+        return record
+
+    monkeypatch.setattr(
+        settlement_store_module,
+        "_parallel_settlement_decision_record",
+        record_with_interleave,
+    )
+
+    def tamper_attempt() -> None:
+        assert decision_read.wait(timeout=2.0)
+        with sqlite3.connect(store.db_path, timeout=2.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 2000")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE task_runtime_attempt SET status = 'CANCELLED' "
+                "WHERE attempt_id = ?",
+                (attempt_id,),
+            )
+            writer_updated.set()
+            conn.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(tamper_attempt)
+        first = store.get_parallel_settlement_decision(decision.decision_ref)
+        future.result(timeout=3.0)
+    assert first["decision_ref"] == decision.decision_ref
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
 
 
 @pytest.mark.parametrize(

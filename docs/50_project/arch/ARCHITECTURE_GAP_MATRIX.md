@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v1.7
+版本：v1.8
 核对日期：2026-07-16
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -33,10 +33,12 @@
 | Internal Agent governed | `WIRED` | Internal production cutover integration | ingress v2 立即编译 V3；Budget、child grant、PRE/POST Review、Verification、Acceptance、Receipt、replay 已贯通；长 Review 的 grant renewal 随 continuation 统一处理 | NE-01 已完成切片 |
 | 全 route universal runtime | `PARTIAL` | Cortex governed/read split + Scheduler/Internal production integrations | Host 四执行路由、Scheduler、Internal 已 governed；`task_progress/recent_turn` 已转只读投影；完整 Operator/Gateway surface matrix 仍需最终验收 | NE-01 |
 | Executive authority 退役 | `WIRED` | Cortex ports、retired runtime guard、registry absence contract | 生产入口、legacy SkillDag 执行和进程内 registry 已删除 | NE-01 已完成切片 |
-| 多节点 Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | Coordinator、TaskStore、0090-0098、Secure Ingress verifier、Operator Gateway/BFF/UI、Operation/Effect reconciliation service/composition/OBS/public-key injection | Cancellation、Operation 签名对账与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。0098 以 append-only sidecar 冻结历史 Effect inventory；PENDING proof 可进入新 decision evidence，FINALIZED correction 仅作 trusted overlay且不改写旧 decision/fence/evidence。Budget 高竞争、部署密钥/凭据、完整 key lifecycle、目标部署库存 remediation 与真实 canary 仍缺 | NE-01 B5C |
+| 多节点 Durable DAG | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | Coordinator、TaskStore、0090-0098、Budget contention、Operation checkpoint/finalizer tests | Budget unique winner、single-node post-budget takeover 与 ACCEPTED→Effect restart已证明；general/batch/pre-budget recovery、历史半状态、现实 resolver、部署 key/credential、目标部署 remediation 与 canary仍缺 | NE-01 B5C |
 | Cancellation Effect 对账 | `WIRED_DEFAULT_OFF / CANARY_NOT_RUN` | 0092 effect fence；0098 case/proof inventory；Effect reconciliation contract/service/store；Operator command + candidates/cases/challenge；integration/unit/contract tests | `task_effect.reconcile` 的 Ed25519 proof exact 绑定 case/intent/effect/fence/Attempt/resolution/actor/Outbox/revision；`NO_SIDE_EFFECT → CANCELLED`，`SIDE_EFFECT_CONFIRMED + receipt → COMMITTED_EVIDENCE`。PENDING late writer 被同事务 fence；FINALIZED correction 只恢复 trusted read。生产 gate 只阻断实际持久化 legacy inventory；仓库无 SQLite 资产，不能证明外部部署已清理，且部署凭据/key lifecycle/canary 未完成 | NE-01 B5C deployment |
-| Budget 全策略执行 | `PARTIAL` | `task_runtime/budget_runtime.py` + Host/Scheduler/Internal integrations | core ingress 已覆盖；concurrency 未计量，DEGRADE/REVIEW 分支与剩余 Domain/Operator 路径未完整 | NE-01 |
-| Review 自动 continuation | `WIRED_TASK_BOUND / CANARY_NOT_RUN` | `review_runtime.py`、ReviewStore、`review_continuation_store.py`、`review_continuation_worker.py`、`review_command_service.py`、0096、surface/ingress/takeover tests | resume/reject/expire 与 0096 coordination 原子排队；进程 worker 以 lease/fence 跨重启接管，按 immutable HostCommand surface 回到 Host/Internal/Scheduler 原 runtime，PRE 不制造 Attempt，POST 不重跑 worker。credential 覆盖 budget time window 加 child TTL（≤24h），READY 与首次 worker 校验绑定 live claim 和 exact Attempt/Lease/fence；之后由 Task lease 管已开始执行，不伪称 asyncio 能撤销 blocking 副作用。`review:decide` 独立于 Agent execute，denial ref 与历史 POST result repair 均 exact。真实生产 canary、Operator credential/UI 和一般 recoverable Attempt 仍缺 | NE-01 已完成切片 |
+| Budget 全策略执行 | `CONTENTION_PROVEN / PROGRAM_PARTIAL` | `budget_runtime.py`、focused Store、8/16/32-thread、cross-process、single-snapshot decision drift、concurrency=8 retry test | unique winner/`ALREADY_EXCEEDED` 及 0090 terminal-authority 重验已收口；CAS attempts 至少为 `concurrency + 1`（8 conflicts→9th success）。concurrency 未计量，DEGRADE/REVIEW 与剩余路径未完整 | NE-01 |
+| Operation 在线 continuation | `SINGLE_NODE_POST_BUDGET_CHECKPOINT_PROVEN / GENERAL_RECOVERY_INCOMPLETE` | `task_operation_checkpoint_store.py`、`operation_recovery_runtime.py`、`operation_checkpoint_continuation.py`、online takeover tests | exact COMMITTED Outbox/Attempt/历史 Lease/canonical WorkerProjection/accepted BudgetUsage 后可接管且不重跑 worker；COMMIT-before-usage、pre-budget、batch/multi-node、未知副作用与一般 Attempt仍不自动恢复 | NE-01 |
+| ACCEPTED→Effect restart | `PROVEN_NARROW_FINALIZATION` | `accepted_graph_finalization.py`、`test_ne01_accepted_effect_finalization_recovery.py` | exact checkpoint下原子补写且幂等；不代表跨系统 Effect dispatch 已全局事务化 | NE-01 |
+| Review 自动 continuation | `WIRED_TASK_BOUND / CANARY_NOT_RUN` | `review_runtime.py`、ReviewStore、0096、surface/ingress/takeover tests | task-bound PRE/POST 已接；single-node post-budget Operation takeover是独立窄链。真实 canary、Operator credential/UI 与 general/batch/pre-budget recovery仍缺 | NE-01 已完成切片 |
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
 | 单一任务真相 | `WIRED` | Durable Task projection + registry absence contract | 进程内 registry 与 accessor 已删除；read route 不创建任务 | NE-01 已完成切片 |
 | Persona 演化单一 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 运行时拒绝、`T-PERSONA-FENCE-01` 全仓扫描、无副作用候选回归 | legacy writer 已归零；proposal、shadow、Review、版本激活与 rollback 替代链尚未实现 | NE-01 围栏已完成；NE-06 全量替换 |
@@ -55,7 +57,7 @@ Cancellation 生产权限接线不会改变该定级。Gateway 认证后的 stru
 
 0095 的 CREATED 回填以 immutable HostCommand evidence 为 authority；ACTIVE 等非 attempt transition 以 deterministic legacy governed Outbox ID/key 重算为 authority，无法解析的自定义 producer 整事务阻断。升级保持原 ID/key，新增 revisioned payload；旧 payload 仅 replay 兼容。readiness/receipt gate 冻结 revision 列、payload trigger、delivery index 与 Runtime Event source unique partial index。旧 journal 不改写，一 Outbox 只允许一 Event，append-success/complete-loss legacy 重投只能 exact replay；ReviewStore/Operator exact revision。这关闭 identity/read-path 缺口，但不改变生产 cancellation、Budget 与 reconciliation 的剩余定级；Review continuation 由后续 0096 切片单独关闭。
 
-0096 新增的 `task_runtime_review_continuation` 只保存扫描/claim/heartbeat/defer/takeover 所需协调元数据；Review status、一次性 token、subject version、phase 与 checkpoint 仍只由 0055 ReviewStore 拥有，TaskNode/Attempt 仍只由 TaskStore 拥有。`CONSUMED/REJECTED/EXPIRED` 的 task-bound Review 才能入队，worker 每次按 exact Graph revision 与 immutable HostCommand surface 回到原 Host/Internal/Scheduler runtime；完成前重新验证 reviewed Node 已离开对应 waiting 状态。PRE `WAITING_APPROVAL` 是合法的无 Attempt outcome，公开 receipt 与 0090 decision 必须为 `attempt_id=null`，POST 仍强制绑定真实 Attempt。create-time binding、到期提交、poison isolation、takeover 与 denial replay 均已闭环；固定字段 secret-free authority 在 READY 事务和首次 worker entry 精确校验。0097 使所有节点 grant 单事务且跨进程唯一。该切片关闭 task-bound Review 自动续跑缺口，不改变 cancellation production OFF、Budget 高竞争和完整架构 `INCOMPLETE` 的结论。
+0096 task-bound Review continuation 与 single-node post-budget Operation continuation 是两条不同的窄链。后者只凭 exact COMMITTED checkpoint与既有 accepted BudgetUsage接管，不补造 usage、不重跑 worker。两者均不改变 cancellation production OFF，也不能把 general/batch/pre-budget recovery写成完成；完整架构仍为 `INCOMPLETE`。
 
 PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用同一读事务内真实 terminal payload ref；普通 scheduler/Operator 无新增扫描。pre-0095 ref 原样进入 failure evidence；只有旧版或替代 Store 未提供可选扩展字段时才合成 fallback，生产 DurableTaskStore 提供 inventory 后，缺行、畸形或歧义均 fail closed。`created_ts=0` 的 timestamp 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 Event candidate，因为两条历史 append 路径都可能用时钟替代零值，但其它字段必须 exact。
 
@@ -65,7 +67,7 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 |---|---|---|---|---|
 | 显式 Composition Root | `PARTIAL` | `ProcessTaskRuntimeContainer` | 任务容器良好，但整体仍有模块全局 registry | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
-| 执行巨石拆分 | `PARTIAL_GATE_RED` | [`dag_scheduling_runtime.py`](../../../host_brain/task_runtime/dag_scheduling_runtime.py)、Effect reconciliation focused Store/query/verifier modules、`task_graph_cancellation_effect_overlay_store.py`、`task_repository.py`、`coordinator.py` 与 `_static_gate_mixed_files` | 十八刀与本次 Effect 拆分均未引入第二 Store authority或 policy 白名单；Effect compat/common/read-validation/mutation/overlay/query/verifier 模块均 <1,500，`task_repository.py` 当前 4,388 行。但全仓 Gate 实测仍有 3 个既存未分类违规：`governed_task_adapter.py` 1,539、`review_continuation_store.py` 1,673、`scheduler/governed_runtime.py` 1,535 行，因此不能写 green | NE-01 Lane D 未决 |
+| 执行巨石拆分 | `PARTIAL_GATE_RED` | `dag_scheduling_runtime.py`、focused Budget/Operation/Effect Store modules、`coordinator.py` | `task_repository.py` 当前 4,145 行；新 Budget/Operation/finalizer modules 均 <1,500且无第二 Store authority。全仓仍有 3 个既存未分类 >1,500 行违规，因此不能写 green | NE-01 Lane D 未决 |
 | Host/Obs/Worker scope 隔离 | `PARTIAL` | 独立 ASGI 与部分 typed ports | lifecycle 与 provider 仍跨全局对象图共享 | NE-01 |
 | Workspace ownership | `PARTIAL_D0_PATH_FENCE` | `agent_runtime/workspace_paths.py`、resolver/tool/verification tests | scoped 路径安全已统一；仍缺 per-task durable owner、`runtime_repo` 退役、隔离 worktree、OS/tenant 边界与 handle-level TOCTOU 加固 | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |
@@ -107,6 +109,9 @@ Host chat-skill-delegate-plan runtime        WIRED
 Scheduler governed runtime                   WIRED
 Internal governed runtime                    WIRED
 Universal execution scope                    PARTIAL
+Budget contention authority                  UNIQUE_WINNER_PROVEN / POLICY PARTIAL
+Operation recovery                           SINGLE_NODE_POST_BUDGET_PROVEN / GENERAL INCOMPLETE
+Accepted Effect restart finalization         PROVEN_NARROW
 Persona evolution authority                  CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
 Generic planning kernel                      AVAILABLE
 Generic intelligent planning                 INCOMPLETE

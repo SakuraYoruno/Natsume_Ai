@@ -18,10 +18,11 @@ from typing import Any
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
 
-from .acceptance_effects import compile_graph_acceptance_effects
+from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
 from .coordinator_receipts import (
+    _digest_from_receipt_ref,
     _worker_receipt_ref,
     approved_commit_event,
     build_execution_receipt,
@@ -74,8 +75,11 @@ from .node_execution_records import (
     build_review_context,
 )
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
+from .operation_checkpoint_continuation import CommittedCheckpointContinuation
+from .operation_recovery_runtime import DurableOperationRecoveryRuntime
 from .ports import (
     AcceptancePort,
+    ExecutionProjectionReaderPort,
     GovernedWorkerResolverPort,
     TaskStorePort,
     VerificationPort,
@@ -93,12 +97,14 @@ class DurableNodeExecutionRuntime:
 
     __slots__ = (
         "_acceptance",
-        "_acceptance_effects_enabled",
         "_budgets",
+        "_checkpoint_continuation",
+        "_graph_finalizer",
         "_lease_ttl_ms",
         "_node_lifecycle",
         "_node_grant_verifier",
         "_operation_ttl_ms",
+        "_operation_recovery",
         "_owner_id",
         "_projection",
         "_reviews",
@@ -121,10 +127,11 @@ class DurableNodeExecutionRuntime:
         acceptance: AcceptancePort,
         review_runtime: TaskNodeReviewRuntime | None,
         projection: NodeExecutionProjection,
+        projection_reader: ExecutionProjectionReaderPort | None,
+        graph_finalizer: AcceptedGraphFinalizationRuntime,
         owner_id: str,
         lease_ttl_ms: int,
         operation_ttl_ms: int,
-        acceptance_effects_enabled: bool,
     ) -> None:
         self._store = task_store
         self._runtime_outbox = runtime_outbox
@@ -136,10 +143,28 @@ class DurableNodeExecutionRuntime:
         self._acceptance = acceptance
         self._reviews = review_runtime
         self._projection = projection
+        self._graph_finalizer = graph_finalizer
+        self._operation_recovery = DurableOperationRecoveryRuntime(
+            task_store=task_store,
+            projection_reader=projection_reader,
+            runtime_outbox=runtime_outbox,
+            owner_id=owner_id,
+            lease_ttl_ms=lease_ttl_ms,
+        )
+        self._checkpoint_continuation = CommittedCheckpointContinuation(
+            task_store=task_store,
+            runtime_outbox=runtime_outbox,
+            budget_runtime=budget_runtime,
+            node_lifecycle=node_lifecycle,
+            verifier=verifier,
+            acceptance=acceptance,
+            review_runtime=review_runtime,
+            owner_id=owner_id,
+            graph_finalizer=graph_finalizer,
+        )
         self._owner_id = owner_id
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
-        self._acceptance_effects_enabled = bool(acceptance_effects_enabled)
 
     async def execute_stream(
         self,
@@ -174,12 +199,6 @@ class DurableNodeExecutionRuntime:
 
         graph_status = _status(graph)
         node_status = _status(node)
-        if graph_status not in {"CREATED", "ACTIVE"} or node_status != "READY":
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                f"admission must expose CREATED/ACTIVE graph and READY node, got {graph_status}/{node_status}",
-            )
-
         attempts = await self._projection.attempts_for_node(admitted)
         attempt_numbers = [int(item.get("attempt_no") or 0) for item in attempts]
         if attempt_numbers != list(range(1, len(attempt_numbers) + 1)):
@@ -189,9 +208,119 @@ class DurableNodeExecutionRuntime:
             )
         existing_reservation = await self._projection.try_operation(admitted.reservation_id)
         if existing_reservation is not None:
+            if not attempts:
+                raise GovernedRuntimeError(
+                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    "existing operation reservation has no durable Attempt",
+                )
+            latest_attempt = attempts[-1]
+            self._operation_recovery.assert_existing_lineage(
+                admitted=admitted,
+                reservation=existing_reservation,
+                latest_attempt=latest_attempt,
+            )
+            existing_reservation = (
+                await self._operation_recovery.reconcile_reservation_state(
+                    admitted=admitted,
+                    reservation=existing_reservation,
+                    latest_attempt=latest_attempt,
+                )
+            )
+            reservation_status = _status(existing_reservation)
+            if reservation_status != "COMMITTED":
+                active_lease = await _maybe_await(
+                    self._store.get_active_lease(
+                        _required_record_text(latest_attempt, "attempt_id")
+                    )
+                )
+                recovery_projection = {
+                    **self._operation_recovery.unresolved_projection(
+                        existing_reservation
+                    ),
+                    "online_takeover_state": (
+                        "WAITING_FOR_LEASE_EXPIRY"
+                        if reservation_status == "RESERVED"
+                        and active_lease is not None
+                        else "SIGNED_RECONCILIATION_REQUIRED"
+                    ),
+                    "budget": budget.execution_payload(),
+                }
+                receipt = build_execution_receipt(
+                    admitted,
+                    attempt_id=_required_record_text(latest_attempt, "attempt_id"),
+                    status="RECOVERY_REQUIRED",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    projection=recovery_projection,
+                )
+                yield terminal_event(receipt)
+                return
+            if graph_status != "ACTIVE" or node_status not in {
+                "LEASED",
+                "RUNNING",
+                "EXECUTED",
+                "VERIFYING",
+                "VERIFIED",
+            }:
+                raise GovernedRuntimeError(
+                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    "committed checkpoint durable Graph/Node state is not continuable",
+                )
+            try:
+                checkpoint = await self._operation_recovery.takeover_committed(
+                    admitted=admitted,
+                    command=command,
+                    reservation=existing_reservation,
+                    latest_attempt=latest_attempt,
+                    node_grant_ref=node_grant_ref,
+                    budget_id=budget.budget_id,
+                )
+            except GovernedRuntimeError as exc:
+                receipt = build_execution_receipt(
+                    admitted,
+                    attempt_id=_required_record_text(
+                        latest_attempt,
+                        "attempt_id",
+                    ),
+                    status="RECOVERY_REQUIRED",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    projection={
+                        "online_takeover_state": (
+                            "BATCH_RECOVERY_PENDING"
+                            if len(admitted.nodes) != 1
+                            else "CHECKPOINT_INCOMPLETE"
+                        ),
+                        "checkpoint_detail": _exception_reason(
+                            exc,
+                            GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                        ),
+                        "worker_replayed": False,
+                        "budget": budget.execution_payload(),
+                    },
+                )
+                yield terminal_event(receipt)
+                return
+            async for event in self._checkpoint_continuation.resume(
+                admitted=admitted,
+                command=command,
+                work_order=work_order,
+                budget=budget,
+                graph=graph,
+                node=node,
+                checkpoint=checkpoint,
+                node_grant_ref=node_grant_ref,
+                defer_shared_terminal=defer_shared_terminal,
+            ):
+                yield event
+            return
+
+        if graph_status not in {"CREATED", "ACTIVE"} or node_status != "READY":
             raise GovernedRuntimeError(
-                GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                "an existing operation reservation has no complete durable terminal projection",
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                f"admission must expose CREATED/ACTIVE graph and READY node, got {graph_status}/{node_status}",
             )
 
         if graph_status == "CREATED":
@@ -945,18 +1074,21 @@ class DurableNodeExecutionRuntime:
                 GOVERNED_OPERATION_RECOVERY_REQUIRED,
                 "operation reservation was detached from its execution heartbeat",
             )
-        payload_digest = _payload_digest(worker_commit)
-        digest_ref = f"sha256://execution/{payload_digest.split(':', 1)[1]}"
+        transient_payload_digest = _payload_digest(worker_commit)
         receipt_ref = _worker_receipt_ref(worker_commit) or (
             "taskreceipt://"
             f"{_ref_token(admitted.graph_id)}/{admitted.graph_revision}/"
             f"{_ref_token(admitted.node_id)}/{_ref_token(attempt_id)}/"
-            f"{payload_digest.split(':', 1)[1]}"
+            f"{transient_payload_digest.split(':', 1)[1]}"
         )
+        payload_digest = (
+            _digest_from_receipt_ref(receipt_ref) or transient_payload_digest
+        )
+        digest_ref = f"sha256://execution/{payload_digest.split(':', 1)[1]}"
         evidence_refs = (receipt_ref, digest_ref)
         try:
-            reservation = await _maybe_await(
-                self._store.commit_operation(
+            reservation = await self._operation_recovery.commit_or_reconcile(
+                commit=lambda: self._store.commit_operation(
                     admitted.reservation_id,
                     attempt_id=attempt_id,
                     lease_id=lease_id,
@@ -973,7 +1105,17 @@ class DurableNodeExecutionRuntime:
                         attempt_id=attempt_id,
                         evidence_refs=evidence_refs,
                     ),
-                )
+                ),
+                reservation_id=admitted.reservation_id,
+                business_scope=admitted.business_scope,
+                operation_fingerprint=admitted.operation_fingerprint,
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                owner_id=self._owner_id,
+                fencing_token=fencing_token,
+                expected_version=reservation_version,
+                receipt_ref=receipt_ref,
+                checkpoint_digest_ref=digest_ref,
             )
         except BaseException as exc:
             await self._runtime_outbox.publish_pending(best_effort=True)
@@ -1211,42 +1353,36 @@ class DurableNodeExecutionRuntime:
                 self._store.get_graph(admitted.graph_id, admitted.graph_revision)
             )
             if _status(graph) == "ACTIVE":
-                if self._acceptance_effects_enabled:
-                    try:
-                        effect_intents = compile_graph_acceptance_effects(
-                            command=command,
-                            work_order=work_order,
-                            node_id=admitted.node_id,
-                            attempt_id=attempt_id,
-                            worker_commit=worker_commit,
-                        )
-                        graph = await self._node_lifecycle.transition_graph_with_acceptance_effects(
-                            admitted,
-                            graph,
-                            effect_intents=effect_intents,
-                        )
-                    except BaseException as exc:
-                        graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
-                        await self._runtime_outbox.publish_pending()
-                        receipt = build_execution_receipt(
-                            admitted,
-                            attempt_id=attempt_id,
-                            receipt_ref=receipt_ref,
-                            payload_digest=payload_digest,
-                            status="ACCEPTANCE_EFFECT_FAILED",
-                            verification_status="PASS",
-                            accepted=False,
-                            reason_code=_exception_reason(
-                                exc,
-                                "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID",
-                            ),
-                            evidence_refs=acceptance_refs,
-                            projection=worker_commit,
-                        )
-                        yield terminal_event(receipt)
-                        return
-                else:
-                    graph = await self._node_lifecycle.transition_graph(admitted, graph, "COMPLETED")
+                try:
+                    graph = await self._graph_finalizer.complete(
+                        admitted=admitted,
+                        command=command,
+                        work_order=work_order,
+                        graph=graph,
+                        node_grant_ref=node_grant_ref,
+                        worker_commit=worker_commit,
+                        attempt_id=attempt_id,
+                    )
+                except BaseException as exc:
+                    graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
+                    await self._runtime_outbox.publish_pending()
+                    receipt = build_execution_receipt(
+                        admitted,
+                        attempt_id=attempt_id,
+                        receipt_ref=receipt_ref,
+                        payload_digest=payload_digest,
+                        status="ACCEPTANCE_EFFECT_FAILED",
+                        verification_status="PASS",
+                        accepted=False,
+                        reason_code=_exception_reason(
+                            exc,
+                            "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID",
+                        ),
+                        evidence_refs=acceptance_refs,
+                        projection=worker_commit,
+                    )
+                    yield terminal_event(receipt)
+                    return
         await self._runtime_outbox.publish_pending()
         receipt = build_execution_receipt(
             admitted,

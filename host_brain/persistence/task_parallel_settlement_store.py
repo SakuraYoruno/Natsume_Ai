@@ -79,6 +79,7 @@ class TaskParallelSettlementStoreMixin:
             )
         conn = self._connect()
         try:
+            conn.execute("BEGIN")
             row = conn.execute(
                 """
                 SELECT * FROM task_runtime_parallel_settlement_decision
@@ -103,6 +104,8 @@ class TaskParallelSettlementStoreMixin:
             )
             return record
         finally:
+            if conn.in_transaction:
+                conn.rollback()
             conn.close()
 
     def get_latest_parallel_settlement_decision(
@@ -121,6 +124,7 @@ class TaskParallelSettlementStoreMixin:
             )
         conn = self._connect()
         try:
+            conn.execute("BEGIN")
             declared_ref = _find_invalid_declared_parallel_settlement_decision_ref(
                 conn,
                 graph_id=graph_ref,
@@ -155,6 +159,8 @@ class TaskParallelSettlementStoreMixin:
             )
             return record
         finally:
+            if conn.in_transaction:
+                conn.rollback()
             conn.close()
 
     def settle_parallel_graph_budget(

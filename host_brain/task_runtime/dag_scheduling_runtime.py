@@ -15,6 +15,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 
 from .admission import AdmittedExecution, AdmittedTaskNode
+from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
 from .coordinator_receipts import (
     _digest_from_receipt_ref,
@@ -83,6 +84,7 @@ class DurableDagSchedulingRuntime:
         "_bounded_fanout_enabled",
         "_atomic_graph_success_enabled",
         "_acceptance_effects_enabled",
+        "_accepted_graph_finalization",
         "_projection_reader",
         "_fanout_event_buffer_size",
     )
@@ -103,6 +105,7 @@ class DurableDagSchedulingRuntime:
         bounded_fanout_enabled: bool,
         atomic_graph_success_enabled: bool,
         acceptance_effects_enabled: bool,
+        accepted_graph_finalization: AcceptedGraphFinalizationRuntime,
         projection_reader: ExecutionProjectionReaderPort | None,
         fanout_event_buffer_size: int,
     ) -> None:
@@ -119,6 +122,7 @@ class DurableDagSchedulingRuntime:
         self._bounded_fanout_enabled = bool(bounded_fanout_enabled)
         self._atomic_graph_success_enabled = bool(atomic_graph_success_enabled)
         self._acceptance_effects_enabled = bool(acceptance_effects_enabled)
+        self._accepted_graph_finalization = accepted_graph_finalization
         self._projection_reader = projection_reader
         self._fanout_event_buffer_size = int(fanout_event_buffer_size)
 
@@ -643,7 +647,15 @@ class DurableDagSchedulingRuntime:
                         "accepted TaskGraph lacks a consumed budget",
                     )
                 if graph_status == "ACTIVE":
-                    graph = await self._node_lifecycle.transition_graph(final_admission, graph, "COMPLETED")
+                    graph = await self._accepted_graph_finalization.complete(
+                        admitted=final_admission,
+                        command=command,
+                        work_order=work_order,
+                        graph=graph,
+                        node_grant_ref=grant_refs.get(final_admission.node_id),
+                        worker_commit=None,
+                        attempt_id=None,
+                    )
                     graph_status = _status(graph)
                 if graph_status != "COMPLETED":
                     raise GovernedRuntimeError(
@@ -749,6 +761,35 @@ class DurableDagSchedulingRuntime:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     f"TaskGraph is not schedulable: {graph_status}",
                 )
+
+            recovery_binding = None
+            for binding in admitted.nodes:
+                if statuses[binding.node_id] not in {
+                    "LEASED",
+                    "RUNNING",
+                    "EXECUTED",
+                    "VERIFYING",
+                    "VERIFIED",
+                }:
+                    continue
+                candidate = admitted.for_node(binding.node_id)
+                reservation = await self._node_execution_projection.try_operation(
+                    candidate.reservation_id
+                )
+                if reservation is not None:
+                    recovery_binding = binding
+                    break
+            if recovery_binding is not None:
+                recovery_admission = admitted.for_node(recovery_binding.node_id)
+                async for event in self._node_execution.execute_stream(
+                    admitted=recovery_admission,
+                    command=command,
+                    work_order=work_order,
+                    budget=budget,
+                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
+                ):
+                    yield event
+                return
 
             scheduler_snapshot = await _maybe_await(
                 self._store.read_scheduler_snapshot(

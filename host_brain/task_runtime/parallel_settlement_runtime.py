@@ -12,6 +12,7 @@ from host_brain.contracts.agent_runtime.parallel_settlement import (
     ParallelSettlementContractError,
     normalize_parallel_settlement_decision,
 )
+from host_brain.persistence.task_store_types import TASK_STORE_BUDGET_EXCEEDED
 
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
@@ -324,7 +325,7 @@ class ParallelSettlementRuntime:
                     "parallel Budget decision has no durable usage ledger",
                 )
             for outcome in budget_blocked_outcomes:
-                candidates: list[tuple[tuple[int, int, str], Mapping[str, Any]]] = []
+                candidates: list[Mapping[str, Any]] = []
                 for raw_usage in raw_usages:
                     if not isinstance(raw_usage, Mapping):
                         continue
@@ -334,26 +335,20 @@ class ParallelSettlementRuntime:
                         or _text(raw_usage.get("node_id")) != outcome.node_id
                         or _text(raw_usage.get("attempt_id")) != outcome.attempt_id
                         or raw_usage.get("accepted") is not False
+                        or _text(raw_usage.get("reason_code"))
+                        != TASK_STORE_BUDGET_EXCEEDED
                         or not isinstance(exceeded_dimensions, list)
                         or not exceeded_dimensions
                     ):
                         continue
-                    candidates.append(
-                        (
-                            (
-                                int(raw_usage.get("reservation_version_after") or 0),
-                                int(raw_usage.get("created_ts_ms") or 0),
-                                _text(raw_usage.get("usage_id")),
-                            ),
-                            raw_usage,
-                        )
-                    )
-                if not candidates:
+                    candidates.append(raw_usage)
+                if len(candidates) != 1:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
-                        "parallel Budget decision lacks rejected durable usage lineage",
+                        "parallel Budget decision requires exactly one canonical "
+                        "winning usage lineage",
                     )
-                _, selected_usage = min(candidates, key=lambda item: item[0])
+                selected_usage = candidates[0]
                 rejected_budget_usage_refs[(outcome.node_id, outcome.attempt_id)] = (
                     _required_record_text(selected_usage, "usage_id")
                 )

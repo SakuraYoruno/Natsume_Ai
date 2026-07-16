@@ -44,6 +44,9 @@ from host_brain.persistence.task_atomic_failure_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_checkpoint_store import (
+    TaskOperationCheckpointStoreMixin,
+)
 from host_brain.persistence.task_effect_reconciliation_store import (
     TaskEffectReconciliationStoreMixin,
     build_effect_reconciliation_attestation_binding,
@@ -56,6 +59,9 @@ from host_brain.persistence.task_effect_reconciliation_read_store import (
 )
 from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
     TaskGraphCancellationEffectOverlayMixin,
+)
+from host_brain.persistence.task_budget_usage_store import (
+    TaskBudgetUsageStoreMixin,
 )
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
@@ -125,9 +131,11 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
+        TaskOperationCheckpointStoreMixin,
         TaskOperationReconciliationStoreMixin,
         TaskEffectReconciliationStoreMixin,
         TaskGraphCancellationEffectOverlayMixin,
+        TaskBudgetUsageStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,
     )

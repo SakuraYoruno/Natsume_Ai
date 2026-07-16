@@ -81,6 +81,7 @@ from host_brain.persistence.task_store_types import (
     OutboxMessage,
     RecoveryReport,
     TASK_STORE_BUDGET_EXCEEDED,
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_CANCELLATION_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
@@ -165,6 +166,9 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_checkpoint_store import (
+    TaskOperationCheckpointStoreMixin,
+)
 from host_brain.persistence.task_effect_reconciliation_store import (
     TaskEffectReconciliationStoreMixin,
 )
@@ -188,6 +192,9 @@ from host_brain.persistence.task_ready_claim_store import (
 )
 from host_brain.persistence.task_outbox_delivery_store import (
     TaskOutboxDeliveryStoreMixin,
+)
+from host_brain.persistence.task_budget_usage_store import (
+    TaskBudgetUsageStoreMixin,
 )
 
 
@@ -407,9 +414,11 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
+    TaskOperationCheckpointStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
+    TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
 ):
@@ -3411,259 +3420,6 @@ class DurableTaskStore(
                 exceeded_dimensions=exceeded_dimensions,
             )
 
-    def consume_budget_once(
-        self,
-        budget_id: str,
-        *,
-        usage_id: str,
-        charge_kind: str,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        attempt_id: str,
-        delta: BudgetAmount,
-        expected_version: int,
-        outbox: OutboxMessage,
-    ) -> BudgetConsumptionResult:
-        """Atomically journal and apply one stable budget usage charge.
-
-        An exact ``(budget_id, usage_id)`` replay returns the original outcome
-        without changing the reservation or inserting another outbox row.  Any
-        reuse with different binding material fails closed.
-        """
-
-        budget_ref = str(budget_id or "").strip()
-        usage_ref = str(usage_id or "").strip()
-        kind = str(charge_kind or "").strip().upper()
-        graph_ref = str(graph_id or "").strip()
-        node_ref = str(node_id or "").strip()
-        attempt_ref = str(attempt_id or "").strip()
-        if (
-            not budget_ref
-            or not _DURABLE_REFERENCE_PATTERN.fullmatch(usage_ref)
-            or not kind
-            or len(kind) > 64
-            or not graph_ref
-            or not node_ref
-            or not attempt_ref
-            or isinstance(graph_revision, bool)
-            or not isinstance(graph_revision, int)
-            or graph_revision < 1
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "budget usage requires a durable usage_id and complete graph/attempt binding",
-            )
-        if not isinstance(delta, BudgetAmount):
-            raise TaskStoreError(TASK_STORE_INVALID, "delta must be a BudgetAmount")
-        normalized_delta = BudgetAmount.from_mapping(delta.to_dict())
-        delta_json = _dumps(normalized_delta.to_dict())
-        delta_digest = "sha256:" + hashlib.sha256(delta_json.encode("utf-8")).hexdigest()
-        ts_ms = self._now()
-
-        with self._transaction() as conn:
-            self._assert_graph_not_cancelling(
-                conn,
-                graph_id=graph_ref,
-                graph_revision=graph_revision,
-            )
-            existing = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (budget_ref, usage_ref),
-            ).fetchone()
-            if existing is not None:
-                drift = (
-                    str(existing["charge_kind"]) != kind
-                    or str(existing["graph_id"]) != graph_ref
-                    or int(existing["graph_revision"]) != graph_revision
-                    or str(existing["node_id"]) != node_ref
-                    or str(existing["attempt_id"]) != attempt_ref
-                    or str(existing["delta_digest"]) != delta_digest
-                    or str(existing["delta_json"]) != delta_json
-                )
-                if drift:
-                    raise TaskStoreError(
-                        TASK_STORE_OUTBOX_CONFLICT,
-                        f"budget usage replay drift: {usage_ref}",
-                    )
-                reservation = self._budget_record(self._require_budget(conn, budget_ref))
-                dimensions = tuple(
-                    str(item)
-                    for item in _loads_list(
-                        existing["exceeded_dimensions_json"],
-                        field_name="budget_usage.exceeded_dimensions_json",
-                    )
-                )
-                usage = _budget_usage_record(existing)
-                return BudgetConsumptionResult(
-                    accepted=bool(existing["accepted"]),
-                    reason_code=(str(existing["reason_code"]) if existing["reason_code"] else None),
-                    reservation=reservation,
-                    exceeded_dimensions=dimensions,
-                    usage_id=usage_ref,
-                    replayed=True,
-                    usage=usage,
-                )
-
-            row = self._require_budget(conn, budget_ref)
-            self._require_version(row, expected_version, subject=f"BudgetReservation {budget_ref}")
-            if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    f"budget {budget_ref} must be ACTIVE before consumption",
-                )
-            if (
-                str(row["graph_id"] or "") != graph_ref
-                or int(row["graph_revision"] or 0) != graph_revision
-                or row["node_id"] is not None
-                or row["attempt_id"] is not None
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "shared budget reservation graph binding drifted",
-                )
-            attempt = self._require_attempt(conn, attempt_ref)
-            if (
-                str(attempt["graph_id"]) != graph_ref
-                or int(attempt["graph_revision"]) != graph_revision
-                or str(attempt["node_id"]) != node_ref
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "budget usage attempt is outside the reservation graph revision",
-                )
-
-            consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
-            reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
-            attempted = _add_amounts(consumed, normalized_delta)
-            exceeded_dimensions = tuple(
-                key
-                for key, value in attempted.to_dict().items()
-                if value > reserved.to_dict()[key]
-            )
-            accepted = not exceeded_dimensions
-            target_status = (
-                BudgetReservationStatus.ACTIVE.value
-                if accepted
-                else BudgetReservationStatus.EXCEEDED.value
-            )
-            next_consumed = attempted if accepted else consumed
-            next_version = int(expected_version) + 1
-            cursor = conn.execute(
-                """
-                UPDATE task_runtime_budget_reservation
-                SET consumed_json = ?, attempted_consumed_json = ?,
-                    exceeded_dimensions_json = ?, status = ?,
-                    status_version = status_version + 1, updated_ts_ms = ?
-                WHERE budget_id = ? AND status_version = ? AND status = 'ACTIVE'
-                """,
-                (
-                    _dumps(next_consumed.to_dict()),
-                    _dumps(attempted.to_dict()),
-                    _dumps(list(exceeded_dimensions)),
-                    target_status,
-                    ts_ms,
-                    budget_ref,
-                    int(expected_version),
-                ),
-            )
-            self._require_cas(cursor, subject=f"BudgetReservation {budget_ref}")
-            reason_code = TASK_STORE_BUDGET_EXCEEDED if exceeded_dimensions else None
-            conn.execute(
-                """
-                INSERT INTO task_runtime_budget_usage(
-                    budget_id, usage_id, graph_id, graph_revision, node_id,
-                    attempt_id, charge_kind, delta_json, delta_digest, accepted,
-                    reason_code, exceeded_dimensions_json,
-                    reservation_version_before, reservation_version_after,
-                    outbox_id, created_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    budget_ref,
-                    usage_ref,
-                    graph_ref,
-                    graph_revision,
-                    node_ref,
-                    attempt_ref,
-                    kind,
-                    delta_json,
-                    delta_digest,
-                    1 if accepted else 0,
-                    reason_code,
-                    _dumps(list(exceeded_dimensions)),
-                    int(expected_version),
-                    next_version,
-                    outbox.outbox_id,
-                    ts_ms,
-                ),
-            )
-            self._insert_outbox(
-                conn,
-                outbox,
-                ts_ms=ts_ms,
-                expected_aggregate=("BUDGET_RESERVATION", budget_ref, next_version),
-                expected_event_type=("BUDGET_CONSUMED" if accepted else "BUDGET_EXCEEDED"),
-                expected_attempt_id=attempt_ref,
-            )
-            updated = self._budget_record(self._require_budget(conn, budget_ref))
-            usage_row = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (budget_ref, usage_ref),
-            ).fetchone()
-            return BudgetConsumptionResult(
-                accepted=accepted,
-                reason_code=reason_code,
-                reservation=updated,
-                exceeded_dimensions=exceeded_dimensions,
-                usage_id=usage_ref,
-                replayed=False,
-                usage=_budget_usage_record(usage_row),
-            )
-
-    def get_budget_usage(self, budget_id: str, usage_id: str) -> dict[str, Any]:
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (str(budget_id), str(usage_id)),
-            ).fetchone()
-            if row is None:
-                raise TaskStoreError(
-                    TASK_STORE_NOT_FOUND,
-                    f"BudgetUsage not found: {usage_id}",
-                )
-            return _budget_usage_record(row)
-        finally:
-            conn.close()
-
-    def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
-        conn = self._connect()
-        try:
-            record = self._budget_record(self._require_budget(conn, budget_id))
-        finally:
-            conn.close()
-        reserved = BudgetAmount.from_mapping(record["reserved"])
-        consumed = BudgetAmount.from_mapping(record["consumed"])
-        remaining = {
-            key: max(0, reserved.to_dict()[key] - consumed.to_dict()[key])
-            for key in reserved.to_dict()
-        }
-        return {
-            **record,
-            "remaining": remaining,
-            "balanced": not consumed.exceeds(reserved),
-            "denied_usage_preserved": bool(record["exceeded_dimensions"]),
-        }
 
     # -- Acceptance-bound effect intents ------------------------------------------
 
@@ -4365,6 +4121,7 @@ __all__ = [
     "RecoveryReport",
     "ReconciliationProofVerifier",
     "TASK_RUNTIME_TABLES",
+    "TASK_STORE_BUDGET_ALREADY_EXCEEDED",
     "TASK_STORE_BUDGET_EXCEEDED",
     "TASK_STORE_CANCELLATION_CONFLICT",
     "TASK_STORE_CAS_CONFLICT",

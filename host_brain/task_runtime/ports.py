@@ -48,6 +48,18 @@ class TaskStorePort(Protocol):
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
 
+    def reconcile_operation_reservation_state(
+        self,
+        reservation_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_committed_operation_checkpoint(
+        self,
+        reservation_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_budget_usage(self, budget_id: str, usage_id: str) -> Mapping[str, Any]: ...
+
     def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
 
     def get_graph_cancellation_for_graph(

@@ -32,6 +32,8 @@ from host_brain.persistence.host_command_repository import (
 )
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEDULER_CAPACITY,
@@ -1361,11 +1363,12 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     crashed_snapshot = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
     assert crashed_store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
     assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
-    rejected_usages = [
+    winning_usages = [
         row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
+        and row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
     ]
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    assert len(winning_usages) == 1
+    rejected_usage = winning_usages[0]
     rejected_usage_id = rejected_usage["usage_id"]
     rejected_node_id = rejected_usage["node_id"]
     rejected_attempt_id = rejected_usage["attempt_id"]
@@ -1373,6 +1376,56 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     assert crashed_store.get_node("graph-gr03a", 1, rejected_node_id)[
         "status"
     ] == "FAILED"
+
+    # Add a passive sibling after the winning commit but before settlement.
+    # It intentionally shares the winner's version/timestamp and sorts before
+    # the winner by usage_id, proving selection is based on terminal authority
+    # rather than the old lexical tie-breaker.
+    passive_usage_ids = (
+        "budget-usage://000-passive-sibling",
+        "budget-usage://001-passive-sibling",
+    )
+    left_attempt = next(
+        row for row in crashed_snapshot["attempts"] if row["node_id"] == "left"
+    )
+    exceeded_budget = crashed_snapshot["budgets"][0]
+    for index, passive_usage_id in enumerate(passive_usage_ids):
+        passive = crashed_store.consume_budget_once(
+            exceeded_budget["budget_id"],
+            usage_id=passive_usage_id,
+            charge_kind="WORKER_USAGE",
+            graph_id="graph-gr03a",
+            graph_revision=1,
+            node_id="left",
+            attempt_id=left_attempt["attempt_id"],
+            delta=BudgetAmount(token_count=20 + index),
+            expected_version=exceeded_budget["status_version"],
+            outbox=_runtime_outbox(
+                "BUDGET_RESERVATION",
+                exceeded_budget["budget_id"],
+                exceeded_budget["status_version"] + 1,
+                "BUDGET_EXCEEDED",
+                attempt_id=left_attempt["attempt_id"],
+                evidence_refs=(passive_usage_id,),
+            ),
+        )
+        assert passive.reason_code == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    with_passive = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
+    rejected_usages = [
+        row for row in with_passive["budget_usage"] if row["accepted"] is False
+    ]
+    assert len(rejected_usages) == 3
+    assert sum(
+        row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+        for row in rejected_usages
+    ) == 2
+    assert {
+        (row["reason_code"], row["reservation_version_after"], row["created_ts_ms"])
+        for row in rejected_usages
+    } == {
+        (TASK_STORE_BUDGET_EXCEEDED, exceeded_budget["status_version"], NOW),
+        (TASK_STORE_BUDGET_ALREADY_EXCEEDED, exceeded_budget["status_version"], NOW),
+    }
 
     reentry_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
@@ -1421,6 +1474,7 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     assert selected_outcome["status"] == "BUDGET_BLOCKED"
     assert selected_outcome["accepted"] is False
     assert rejected_usage_id in selected_outcome["evidence_refs"]
+    assert not set(passive_usage_ids).intersection(selected_outcome["evidence_refs"])
 
     replay_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
@@ -1449,6 +1503,7 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
         "decision_ref": decision_ref,
     }
     assert rejected_usage_id in replay_receipt["evidence_refs"]
+    assert not set(passive_usage_ids).intersection(replay_receipt["evidence_refs"])
     assert decision_ref in replay_receipt["evidence_refs"]
     assert sorted(calls) == ["left", "right"]
 
@@ -1565,10 +1620,30 @@ async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_orde
     rejected_usages = [
         row for row in snapshot["budget_usage"] if row["accepted"] is False
     ]
-    assert len(snapshot["budget_usage"]) == 1
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    winning_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    ]
+    passive_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    ]
+    assert len(snapshot["budget_usage"]) == 2
+    assert len(winning_usages) == 1
+    assert len(passive_usages) == 1
+    rejected_usage = winning_usages[0]
+    passive_usage = passive_usages[0]
     assert rejected_usage["node_id"] == "right"
+    assert passive_usage["node_id"] == "left"
+    assert passive_usage["outbox_id"] == rejected_usage["outbox_id"]
+    assert passive_usage["reservation_version_before"] == rejected_usage[
+        "reservation_version_after"
+    ]
+    assert passive_usage["reservation_version_after"] == rejected_usage[
+        "reservation_version_after"
+    ]
     right_attempt_id = rejected_usage["attempt_id"]
     rejected_usage_id = rejected_usage["usage_id"]
 
@@ -1714,10 +1789,30 @@ async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentr
     rejected_usages = [
         row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
     ]
-    assert len(crashed_snapshot["budget_usage"]) == 1
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    winning_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    ]
+    passive_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    ]
+    assert len(crashed_snapshot["budget_usage"]) == 2
+    assert len(winning_usages) == 1
+    assert len(passive_usages) == 1
+    rejected_usage = winning_usages[0]
+    passive_usage = passive_usages[0]
     assert rejected_usage["node_id"] == "right"
+    assert passive_usage["node_id"] == "left"
+    assert passive_usage["outbox_id"] == rejected_usage["outbox_id"]
+    assert passive_usage["reservation_version_before"] == rejected_usage[
+        "reservation_version_after"
+    ]
+    assert passive_usage["reservation_version_after"] == rejected_usage[
+        "reservation_version_after"
+    ]
     assert crashed_snapshot["graph_record"]["status"] == "ACTIVE"
     assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
 

@@ -21,7 +21,12 @@ from host_brain.persistence.task_record_codec import (
     _outbox_record,
     _validated_budget_record,
 )
+from host_brain.persistence.task_budget_usage_store import (
+    _assert_terminal_budget_authority,
+)
 from host_brain.persistence.task_store_types import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
     TASK_STORE_DURABLE_DATA_INVALID,
     TaskStoreError,
 )
@@ -448,25 +453,66 @@ def _assert_parallel_budget_usage_lineage(
         """
         SELECT * FROM task_runtime_budget_usage
         WHERE budget_id = ? AND graph_id = ? AND graph_revision = ?
-          AND node_id = ? AND attempt_id = ? AND accepted = 0
+          AND accepted = 0
         ORDER BY reservation_version_after, created_ts_ms, usage_id
         """,
         (
             str(payload.get("budget_id") or ""),
             str(payload.get("graph_id") or ""),
             int(payload.get("graph_revision") or 0),
-            selected_node_id,
-            str(selected.get("attempt_id") or ""),
         ),
     ).fetchall()
-    if not any(
-        str(usage["usage_id"]) in evidence_refs
-        and bool(usage["exceeded_dimensions"])
-        for usage in (_budget_usage_record(row) for row in usage_rows)
+    usages = tuple(_budget_usage_record(row) for row in usage_rows)
+    winners = tuple(
+        usage
+        for usage in usages
+        if usage["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    )
+    siblings = tuple(
+        usage
+        for usage in usages
+        if usage["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    )
+    if len(winners) != 1 or len(winners) + len(siblings) != len(usages):
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision lacks one unique terminal usage authority",
+        )
+    winner = winners[0]
+    if (
+        str(winner["node_id"]) != selected_node_id
+        or str(winner["attempt_id"]) != str(selected.get("attempt_id") or "")
+        or str(winner["usage_id"]) not in evidence_refs
+        or not bool(winner["exceeded_dimensions"])
+        or int(winner["reservation_version_after"])
+        != int(payload.get("budget_status_version_before") or -1)
+        or any(str(sibling["usage_id"]) in evidence_refs for sibling in siblings)
     ):
         raise TaskStoreError(
             reason_code,
-            "parallel Budget decision lacks its rejected durable usage lineage",
+            "parallel Budget decision selected a passive sibling instead of the winner",
+        )
+    budget_row = conn.execute(
+        "SELECT * FROM task_runtime_budget_reservation WHERE budget_id = ?",
+        (str(payload.get("budget_id") or ""),),
+    ).fetchone()
+    if budget_row is None:
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision is missing its terminal reservation",
+        )
+    try:
+        authority, _ = _assert_terminal_budget_authority(
+            conn,
+            budget_row=budget_row,
+            terminal_version=int(winner["reservation_version_after"]),
+        )
+    except TaskStoreError as exc:
+        raise TaskStoreError(reason_code, exc.detail) from exc
+    if str(authority["usage_id"]) != str(winner["usage_id"]):
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision winner differs from terminal authority",
         )
 
 

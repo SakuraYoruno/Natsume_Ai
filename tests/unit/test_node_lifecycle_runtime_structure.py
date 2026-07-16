@@ -7,6 +7,7 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import accepted_graph_finalization
 from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_lifecycle_runtime
@@ -28,7 +29,7 @@ _MIGRATED_METHODS = (
 )
 
 _COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 17,
+    "transition_graph": 16,
     "transition_node": 12,
     "transition_graph_with_acceptance_effects": 1,
     "cancel_waiting_review_node": 1,
@@ -40,9 +41,8 @@ _COORDINATOR_CALL_MATRIX = {
 }
 
 _NODE_EXECUTION_CALL_MATRIX = {
-    "transition_graph": 5,
+    "transition_graph": 4,
     "transition_node": 7,
-    "transition_graph_with_acceptance_effects": 1,
     "transition_attempt": 2,
     "finalize_node_budget": 8,
     "reject_budget_charge": 3,
@@ -51,9 +51,14 @@ _NODE_EXECUTION_CALL_MATRIX = {
 }
 
 _DAG_SCHEDULING_CALL_MATRIX = {
-    "transition_graph": 12,
+    "transition_graph": 11,
     "transition_node": 5,
     "cancel_waiting_review_node": 1,
+}
+
+_ACCEPTED_GRAPH_FINALIZATION_CALL_MATRIX = {
+    "transition_graph": 1,
+    "transition_graph_with_acceptance_effects": 1,
 }
 
 _MIGRATED_AST_DIGESTS = {
@@ -303,6 +308,13 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
     dag_calls = _self_dependency_calls(dag_owner, "_node_lifecycle")
     dag_matrix = Counter(call.func.attr for call in dag_calls)
     assert dag_matrix == Counter(_DAG_SCHEDULING_CALL_MATRIX)
+    dag_finalizer_calls = _self_dependency_calls(
+        dag_owner,
+        "_accepted_graph_finalization",
+    )
+    assert Counter(call.func.attr for call in dag_finalizer_calls) == Counter(
+        {"complete": 1}
+    )
 
     node_execution_owner = _class(
         node_execution_runtime,
@@ -316,10 +328,25 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
         call.func.attr for call in node_execution_calls
     )
     assert node_execution_matrix == Counter(_NODE_EXECUTION_CALL_MATRIX)
-    assert dag_matrix + node_execution_matrix == Counter(
+    node_finalizer_calls = _self_dependency_calls(
+        node_execution_owner,
+        "_graph_finalizer",
+    )
+    assert Counter(call.func.attr for call in node_finalizer_calls) == Counter(
+        {"complete": 1}
+    )
+
+    finalizer_owner = _class(
+        accepted_graph_finalization,
+        "AcceptedGraphFinalizationRuntime",
+    )
+    finalizer_calls = _self_dependency_calls(finalizer_owner, "_node_lifecycle")
+    finalizer_matrix = Counter(call.func.attr for call in finalizer_calls)
+    assert finalizer_matrix == Counter(_ACCEPTED_GRAPH_FINALIZATION_CALL_MATRIX)
+    assert dag_matrix + node_execution_matrix + finalizer_matrix == Counter(
         _COORDINATOR_CALL_MATRIX
     )
-    assert len(dag_calls) + len(node_execution_calls) == 51
+    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 50
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:

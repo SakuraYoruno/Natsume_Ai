@@ -17,6 +17,7 @@ from typing import Any
 from natsume_contracts.task.v1 import HostCommand
 
 from .admission import AdmittedExecution, AdmittedTaskNode
+from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .budget_runtime import DurableBudgetRuntime
 from .coordinator_receipts import GovernedExecutionReceipt
 from .coordinator_records import _text
@@ -124,6 +125,12 @@ class GovernedTaskCoordinator:
             task_store=task_store,
             projection_reader=projection_reader,
         )
+        self._accepted_graph_finalization = AcceptedGraphFinalizationRuntime(
+            task_store=task_store,
+            node_lifecycle=self._node_lifecycle,
+            projection_reader=projection_reader,
+            acceptance_effects_enabled=self._acceptance_effects_enabled,
+        )
         self._node_execution = DurableNodeExecutionRuntime(
             task_store=task_store,
             runtime_outbox=self._runtime_outbox,
@@ -135,10 +142,11 @@ class GovernedTaskCoordinator:
             acceptance=self._acceptance,
             review_runtime=self._reviews,
             projection=self._node_execution_projection,
+            projection_reader=projection_reader,
+            graph_finalizer=self._accepted_graph_finalization,
             owner_id=self._owner_id,
             lease_ttl_ms=self._lease_ttl_ms,
             operation_ttl_ms=self._operation_ttl_ms,
-            acceptance_effects_enabled=self._acceptance_effects_enabled,
         )
         self._parallel_success = ParallelSuccessRuntime(
             task_store=task_store,
@@ -166,6 +174,7 @@ class GovernedTaskCoordinator:
             bounded_fanout_enabled=self._bounded_fanout_enabled,
             atomic_graph_success_enabled=self._atomic_graph_success_enabled,
             acceptance_effects_enabled=self._acceptance_effects_enabled,
+            accepted_graph_finalization=self._accepted_graph_finalization,
             projection_reader=self._projection_reader,
             fanout_event_buffer_size=self._fanout_event_buffer_size,
         )

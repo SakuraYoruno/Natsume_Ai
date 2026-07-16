@@ -20,7 +20,7 @@
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
-    "budget": "PARTIAL",
+    "budget": "PARTIAL_CONTENTION_PROVEN",
     "production_canary": "NOT_RUN"
   },
   "capabilities": {
@@ -106,7 +106,7 @@
         "deployed reconciliation public keys and credentials",
         "full reconciliation attestation key lifecycle including active, retired, and revoked states",
         "audit and remediation evidence for any legacy Effect inventory in external deployment databases",
-        "Budget contention hardening for production concurrency",
+        "general, multi-node, pre-budget, and non-canonical-projection recovery beyond the proven single-node post-budget checkpoint",
         "real Effect reconciliation and cancellation canaries"
       ],
       "evidence_refs": [
@@ -173,6 +173,10 @@
         "periodic Lease then Operation Reservation renewal with versioned Outboxes",
         "exact Lease and Operation Reservation renewal replay after committed response loss",
         "Coordinator checkpoints every worker stream event and final result and returns RECOVERY_REQUIRED without COMMIT on heartbeat failure",
+        "8/16/32-thread and cross-process Budget contention has exactly one BUDGET_EXCEEDED winner and Outbox; refreshed siblings persist ALREADY_EXCEEDED at the same terminal version and reference the winner authority",
+        "Budget charge CAS attempts scale to at least the admitted BudgetPolicy concurrency plus one instead of the former fixed four-attempt ceiling",
+        "single-node canonical WorkerProjection post-budget continuation validates one COMMITTED Operation Outbox, exact Attempt and historical Lease, receipt digest, and one already accepted worker BudgetUsage before same-Attempt higher-fence takeover without worker replay",
+        "legacy all-ACCEPTED restart uses the shared graph finalizer to rebuild Effects from the exact committed SUCCEEDED checkpoint and atomically complete Graph plus Effect intents without worker replay",
         "fail-closed startup ordering from migration through task_store.recover_startup and recovery-outbox publication before runtime activation",
         "construction-scoped execution owner derived from the configured logical owner and ProcessTaskRuntimeContainer recovery identity",
         "default-off bounded fan-out shadow path for scheduler-selected multi-node batches that still have unaccepted successors; production composition does not enable it",
@@ -275,21 +279,20 @@
         "production canary and enablement for atomic success and terminal-leaf fan-out",
         "production enablement of the default-off cancellation Operator route after deployed credential validation and a real canary",
         "production enablement of the default-off signed Operation and Effect reconciliation paths after deployed-key, external-inventory, and real-canary validation; migration 0094 coordinates scanning, replay, defer, and expired takeover but does not manufacture evidence or business completion",
-        "Budget charge CAS retry behavior sized for concurrency greater than four and an explicit ALREADY_EXCEEDED sibling disposition",
         "single transaction for promotion plus claim",
         "real production resolver sources that classify proven side-effect-free transient preparation failures",
         "Budget finalization inside the pre-reservation terminal failure transaction or an explicit compensation contract",
-        "post-reservation immediate reconciliation and mid-attempt online recovery takeover",
+        "general multi-node batch, pre-budget, Scheduler/Internal public-projection, and unknown-side-effect recovery beyond the proven single-node canonical post-budget checkpoint",
         "automatic repair of historical half-committed BLOCKED graphs with failure Nodes or FAILED graphs with ACTIVE Budgets",
         "Review continuation poison rows are isolated but have no durable DLQ or alert; a 500-candidate scan cap can delay healthy rows behind an extreme poison prefix",
         "Review wake is process-local; cross-process low-latency depends on bounded polling, leases, and takeover",
-        "execution persistence and orchestration modularization has completed eighteen structural cuts plus migrations 0096, 0097, and 0098. DurableDagSchedulingRuntime remains a temporary outer orchestrator. Migration 0093 closes Task Runtime Outbox cross-process delivery, 0094 adds pending-cancellation coordination, 0095 closes revisioned Graph Outbox identity, 0096 closes task-bound Review automatic continuation and exact Task-authority hand-off, 0097 closes cross-process node-grant batch uniqueness, and 0098 adds append-only signed Effect reconciliation plus historical inventory/quarantine. The 0094 and 0096 rows are coordination metadata only; migration 0092 intent/decision, ReviewStore/TaskStore, and immutable 0087 Effect rows remain their respective business authorities. Cancellation authority, controlled Operator entry, BFF/UI, and signed Operation/Effect reconciliation are wired behind default-off flags. Budget contention, full attestation-key lifecycle, deployed credentials, external-database inventory remediation, and real canaries remain unproven. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
+        "execution persistence and orchestration remain modularized behind focused Store/runtime boundaries, but DurableDagSchedulingRuntime is still a temporary outer orchestrator. Migrations 0093 through 0098 retain their Outbox, cancellation, revision, Review, grant, and signed Effect authorities. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers, and one single-node canonical post-budget checkpoint plus ACCEPTED-to-Effect restart window is proven. General and multi-node recovery, pre-budget crashes, Scheduler/Internal public projections, historical half-state repair, full attestation-key lifecycle, deployed credentials, external-database inventory remediation, and real canaries remain unproven. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
       ],
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. It atomically closes Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes through the same DurableTaskStore bundle, retries only that identical bundle once after an ordinary response exception, and never falls back to sequential transitions. Any existing operation reservation rejects this path, CancelledError remains unswallowed, and Budget finalization remains outside the bundle.",
-      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. Any heartbeat failure yields RECOVERY_REQUIRED and forbids COMMIT, but does not provide online takeover, immediate reconciliation, or continuation.",
+      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. RESERVED expiry is tightened online to RECOVERY_REQUIRED in one Store transaction. Automatic takeover is proven only for one single-node canonical WorkerProjection checkpoint after COMMIT and after an accepted worker BudgetUsage already exists: the Store validates the sole COMMITTED Outbox, exact Attempt, historical Lease, receipt digest, and evidence before a same-Attempt higher-fence lease is acquired without replaying the worker. Missing BudgetUsage, public projections, multi-node graphs, pre-budget crashes, and unknown external side effects remain fail-closed and incomplete.",
       "bounded_fanout_boundary": "PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF. TaskGraph.completion_policy is durable and optional: legacy remains the default, while ATOMIC_GRAPH_SUCCESS_V1 requires an explicit sink result_node_id. atomic_graph_success_enabled and bounded_fanout_enabled are independent, default false, and disabled in Host, Scheduler, and Internal production composition. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Migration 0091 atomically commits whole-Graph success and frozen result authority. B4/0090 failure, Budget, review, and crash-re-entry semantics remain active; their runtime read/validation and settlement orchestration now live in ParallelSettlementProjection and ParallelSettlementRuntime, while DurableTaskStore remains the only 0090 mutation and transaction authority. Migration 0092 adds verified two-phase durable cancellation; its Secure Ingress authority and controlled Operator entry are composed behind a default-off flag. Atomic, bounded, and cancellation production enablement is forbidden until their respective canaries pass.",
-      "cancellation_boundary": "B5C durable cancellation plus its production authority and controlled Operator entry are wired, but production remains OFF. A server-owned structured authority is re-resolved from the committed Secure Ingress claim and audit; the exact canonical body digest, request, principal, tenant, action, scopes, path, method, graph revision, reason, and OPERATOR source must match, while claim_result_ref must still be absent so a settled authority cannot become a reusable bearer. One verifier is injected into Host, Internal, and Scheduler, while GovernedRuntimeGroup routes by immutable HostCommand surface. The Operator Gateway/BFF/UI submit an exact graph revision. After downstream failure, no durable intent proves non-execution, an exact matching intent proves the command may have executed, and an unreadable or malformed intent state remains conservatively uncertain. A cancellation-specific translation into the closed OBS port error contract may carry this certainty; arbitrary dependency exceptions remain execution-uncertain even if they expose similarly named fields. Enabling requires Secure Ingress ENFORCE plus an available enabled Operator Gateway or startup fails closed. Phase one durably installs an intent and fences Graph, Node, Attempt, Lease, Review/token, operation, and unauthorized effect authority before local child cancellation; publisher failure cannot suppress local cancel/join. Existing intents replay only when request_id, request_identity, source, and reason_code all match. Review create/approve/resume is fenced for the exact cancelled revision. Phase two waits for active and uncertain facts to reconcile before atomically committing Graph CANCELLED, Budget disposition, Outboxes, and a canonical decision, and terminal reads revalidate every applicable Operation and Effect proof structure, digest, key, signature, subject binding, and graph revision. Accepted NODE effects retain delivery authority, while unauthorized NODE and incomplete-Graph GRAPH effects are fenced. Only an exact virgin PENDING Effect tuple may be classified CANCELLED; a fenceable retry PENDING is unreachable through current canonical claim/cancellation authority and is treated as legacy or durable corruption, remaining RECONCILIATION_REQUIRED. Historical retry-PENDING plus CANCELLED fences require explicit repair or quarantine and are never silently rewritten during FINALIZED replay. 0091 success and 0092 cancellation are first-writer-wins with exact replay. Migration 0094 coordinates cross-process re-entry and expired takeover. Signed Operation and Effect reconciliation are WIRED_DEFAULT_OFF / CANARY_NOT_RUN. Migration 0098 supplies append-only historical Effect inventory, repair proofs, finalized-decision correction overlays, and a production-readiness gate without rewriting 0087/0092 authority. Budget contention hardening, deployed Operator and attestation credentials, full key lifecycle, external-database inventory remediation, and real canaries remain outstanding.",
+      "cancellation_boundary": "B5C durable two-phase cancellation, exact-revision Operator authority, first-writer-wins 0091/0092 terminal decisions, and signed Operation/Effect reconciliation are wired, but production remains OFF. Secure Ingress authority, graph/revision, request identity, side-effect fences, Review state, Outboxes, and proof bindings remain fail-closed; ambiguous FAILED/CLAIMED effects still require reconciliation and historical inventory is never silently rewritten. Canonical Store Budget contention is now proven, but deployed Operator/attestation credentials, full key lifecycle, external-database inventory remediation, general recovery, and real canaries remain outstanding.",
       "cancellation_continuation_boundary": "Migration 0094 is coordination only. ProcessTaskRuntimeContainer owns a boot-scoped GraphCancellationContinuationWorker and one process-shared LocalGraphExecutionRegistry injected into Host, Internal, Scheduler, and worker cancellation runtimes; the registry proves only local quiescence and is not durable authority. The worker scans pending 0092 intents, claims with owner/token/expiry/fence/version authority, heartbeats while re-entering the existing GraphCancellationRuntime, durably defers stable errors or unresolved reconciliation, and permits expired takeover. Claim, heartbeat, defer, and complete sample time after BEGIN IMMEDIATE acquires the writer transaction. It reconstructs the exact command, work order, assignment, Graph, and replayed admission from HostCommandRepository for the claimed Graph revision. If local_pending is not explicitly supplied, the Runtime performs cancel_and_join; nonempty local pending blocks advance/finalize and yields durable defer. Coordination completes only after the canonical 0092 intent is FINALIZED and its decision exists. Worker-start failure attempts reverse worker stop/join and coordinator close, but unbind happens only after full rollback succeeds; otherwise the bound handle remains for aclose retry, and GovernedRuntimeGroup likewise retains failed-close children. Shutdown uses bounded grace then cancellation; if cancellation is suppressed it fails closed and keeps Task/Command stores open for retry. The 0094 table never copies cancellation business status, never creates reconciliation proof, and never replaces the 0092 intent/decision authority.",
       "review_continuation_boundary": "Migration 0096 is coordination only. ReviewStore atomically enqueues terminal task-bound Review decisions and remains the sole status/token/checkpoint authority. Create-time binding, committed expiry, poison-row isolation and per-candidate claim transactions are enforced. A composition-owned worker claims with owner/token/expiry/fence/version authority, routes by immutable HostCommand surface, and completes only after the exact Node leaves its waiting checkpoint. PRE uses attempt_id null; POST reuses the SUCCEEDED Attempt without rerunning the worker. Secret-free fixed-field authority is checked inside READY Attempt/Lease creation and again at first worker entry with exact owner/fence. The credential covers budget time plus child TTL up to 24 hours, but cannot replace the live hand-off. After first worker verification the Task lease owns an already-started blocking call; losing the Review heartbeat cannot revoke external side effects and cannot authorize stale completion. Review decisions require review.operator/review:decide; denial refs and legacy POST claim repair are exact. Real production canary and Operator deployment remain NOT_RUN.",
       "outbox_delivery_boundary": "Migration 0093 closes the canonical Task Runtime Outbox cross-process delivery authority. Migration 0095 adds exact TaskGraph revision identity while preserving the old governed outbox_id and idempotency_key, so response-loss replay is not broken. TASK_GRAPH rows bind an existing positive revision; migration 0098 additionally permits GRAPH_CANCELLATION_EFFECT_RECONCILIATION to bind the positive revision of its immutable case, while every other aggregate keeps revision null. Backfill uses decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or deterministic natsume_sha256_hex recomputation of the revision-bound command's legacy governed Outbox ID/key for ACTIVE and other non-attempt transitions; an unresolved custom producer aborts the whole migration. New Graph payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts legacy payload refs, while new insert/update triggers reject them. Readiness and receipt replay freeze graph_revision physical shape, revision/payload triggers, delivery index, the unique partial Runtime Event source_ref index, and persisted bindings. Migration 0098 replaces the revision triggers with a narrow two-type allowlist and requires each Effect proof Outbox revision and payload ref to match its immutable reconciliation case. Claims persist owner, token, expiry, attempt count, and a monotonically increasing fencing token; expired claims can be taken over with a new token/fence, and stale owners fail closed. One aggregate_type + aggregate_id + graph_revision stream is delivered strictly in version/creation/id order, while different Graph revisions progress independently. New Runtime Events use graph_id@revision; immutable pre-0095 journal rows are not rewritten and exact-revision queries resolve them through the source Outbox. The unique partial TASK_STORE_OUTBOX source_ref fence makes one Outbox project to one journal row; retry after legacy append but before Outbox confirmation accepts only an exactly reconstructable legacy event and never duplicates projection. Operator reads one exact revision, ReviewStore filters canonical task-node subject_ref by revision, and taskbatch marker scans cover multi-revision histories. RuntimeOutboxPublisher processes one claim at a time through idempotent append and fenced completion; append failures release the live claim with durable backoff and last_error. Composition binds the publisher owner to the current boot/construction recovery id and starts a closeable background delivery worker after startup publication. The worker waits for the earliest aggregate-head available/claim-expiry time with a bounded polling fallback, so an unexpired abandoned claim is taken over after expiry without requiring a new command. Publisher close linearizes with foreground publication and waits for an entered publish critical section before stores close. DRAINED is legal if and only if canonical total_pending is zero; blocked, claimed, or backed-off rows yield DEFERRED. list_pending_outbox remains full PENDING inventory, while delivery eligibility belongs only to the aggregate-head claim/backlog APIs. Readiness is a cached mode on each Store instance after construction or explicit assertion; hot-path settlement does not rescan schema/full-table state, while explicit diagnostic force_revalidate remains available. Migration 0094 implements separate cancellation-continuation coordination and does not reuse Outbox claims or authority; migration 0098 adds only append-only signed Effect evidence and its revision-bound Outbox.",
@@ -310,6 +313,8 @@
         "host_brain/contracts/agent_runtime/graph_cancellation.py",
         "host_brain/contracts/agent_runtime/effect_reconciliation.py",
         "host_brain/persistence/task_repository.py",
+        "host_brain/persistence/task_budget_usage_store.py",
+        "host_brain/persistence/task_operation_checkpoint_store.py",
         "host_brain/persistence/task_dag_state_store.py",
         "host_brain/persistence/task_ready_claim_store.py",
         "host_brain/persistence/task_acceptance_effect_delivery.py",
@@ -344,6 +349,12 @@
         "host_brain/task_runtime/node_execution_runtime.py",
         "host_brain/task_runtime/node_execution_projection.py",
         "host_brain/task_runtime/node_execution_records.py",
+        "host_brain/task_runtime/accepted_graph_finalization.py",
+        "host_brain/task_runtime/operation_recovery_runtime.py",
+        "host_brain/task_runtime/operation_checkpoint_continuation.py",
+        "host_brain/task_runtime/operation_checkpoint_validation.py",
+        "host_brain/task_runtime/operation_commit_reconciliation.py",
+        "host_brain/task_runtime/operation_takeover_lease.py",
         "host_brain/task_runtime/parallel_success_runtime.py",
         "host_brain/task_runtime/parallel_success_records.py",
         "host_brain/task_runtime/graph_cancellation_records.py",
@@ -396,7 +407,13 @@
         "tests/unit/test_gr04_planning_recovery.py",
         "tests/integration/test_gr04_planning_replan_sqlite.py",
         "tests/integration/test_gr03a_governed_durable_dag.py",
-        "tests/integration/test_ne01_b5_parallel_success.py"
+        "tests/integration/test_ne01_b5_parallel_success.py",
+        "tests/integration/test_ne01_budget_contention_store.py",
+        "tests/integration/test_ne01_operation_online_takeover.py",
+        "tests/integration/test_ne01_accepted_effect_finalization_recovery.py",
+        "tests/contract/test_ne01_operation_checkpoint_store.py",
+        "tests/unit/test_ne01_operation_recovery_runtime.py",
+        "tests/unit/test_parallel_settlement_budget_winner_selection.py"
       ]
     },
     "executive_authority_removal": {
@@ -435,6 +452,15 @@
     "budget_enforcement": {
       "status": "PARTIAL",
       "scope": "HOST_CANONICAL_ROUTES",
+      "contention_status": "PROVEN_8_16_32_THREADS_AND_CROSS_PROCESS",
+      "terminal_semantics": "Exactly one BUDGET_EXCEEDED winner advances the reservation and owns the sole Outbox. Refreshed siblings persist ALREADY_EXCEEDED at the terminal version and reference that winner; they cannot become settlement authority. Parallel Budget decision write/read/replay uses one read snapshot and revalidates the terminal Reservation version, sole winner Outbox, Attempt/Graph lineage, and every passive sibling. Runtime CAS attempts scale to at least admitted concurrency plus one instead of a fixed four-attempt ceiling.",
+      "evidence_refs": [
+        "host_brain/persistence/task_budget_usage_store.py",
+        "host_brain/task_runtime/budget_runtime.py",
+        "tests/integration/test_ne01_budget_contention_store.py",
+        "tests/unit/test_ne01_budget_runtime_contention_retry.py",
+        "tests/unit/test_parallel_settlement_budget_winner_selection.py"
+      ],
       "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "program-wide coverage"]
     },
     "review_resume": {
@@ -461,7 +487,13 @@
     "conversation_effects": {
       "status": "PARTIAL",
       "semantics": "POST_ACCEPTANCE_DURABLE_EVENTUAL",
-      "single_global_transaction": false
+      "single_global_transaction": false,
+      "accepted_restart_recovery": "SINGLE_NODE_EXACT_COMMITTED_CHECKPOINT_PROVEN",
+      "accepted_restart_boundary": "An ACTIVE graph whose node is already ACCEPTED can rebuild the exact SUCCEEDED canonical projection and atomically stage Graph Effects plus COMPLETED without worker replay. Historical COMPLETED half-states and general recovery remain incomplete.",
+      "evidence_refs": [
+        "host_brain/task_runtime/accepted_graph_finalization.py",
+        "tests/integration/test_ne01_accepted_effect_finalization_recovery.py"
+      ]
     },
     "explicit_composition_root": {
       "status": "PARTIAL",
@@ -472,7 +504,7 @@
         "host_brain/persistence/review_continuation_store.py:1673",
         "host_brain/scheduler/governed_runtime.py:1535"
       ],
-      "effect_slice_structure_boundary": "The new Effect reconciliation compatibility composite, common codec, read/validation, mutation, cancellation-overlay, read-only query repository, and neutral proof-verifier modules are each below 1,500 lines; task_repository.py is 4,388 lines and no policy allowlist was added. This proves only that the slice introduced no new large-file violation. The repository-wide mixed-file gate remains red on the three pre-existing unclassified files above.",
+      "effect_slice_structure_boundary": "The focused Effect and Operation-checkpoint modules are below 1,500 lines; task_repository.py is 4,145 lines and no policy allowlist was added. This proves only that the slice introduced no new large-file violation. The repository-wide mixed-file gate remains red on the three pre-existing unclassified files above.",
       "cleanup_progress": {
         "container_fields": 60,
         "mutable_service_references_excluding_locks_and_application_ports": 53,

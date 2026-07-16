@@ -14,8 +14,8 @@ def test_operation_reconciliation_entry_is_owned_by_focused_store_mixin() -> Non
         task_repository.DurableTaskStore.reconcile_graph_cancellation_operation
         is TaskOperationReconciliationStoreMixin.reconcile_graph_cancellation_operation
     )
-    assert task_repository.DurableTaskStore.__bases__[-3:] == (
-        TaskOperationReconciliationStoreMixin,
+    assert TaskOperationReconciliationStoreMixin in task_repository.DurableTaskStore.__bases__
+    assert task_repository.DurableTaskStore.__bases__[-2:] == (
         task_repository.TaskDagStateStoreMixin,
         task_repository.TaskReadyClaimStoreMixin,
     )

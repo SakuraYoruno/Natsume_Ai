@@ -16,7 +16,7 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 
 # Frozen after WAITING_APPROVAL joined the attempt-optional settlement path.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "43d49f9a0415232b8777118896880537811a98af9736c188e44f0aaebfa42f6d"
+    "45229ba9191461fb35f2ea8576823af5abfa8a85d5ec6f69c4258354987e1018"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "a26863cbe141c9bc8ce85633b45e3e2881c994fc99656732c939391320960058"
@@ -44,6 +44,7 @@ _CONSTRUCTOR_PARAMETERS = (
     "bounded_fanout_enabled",
     "atomic_graph_success_enabled",
     "acceptance_effects_enabled",
+    "accepted_graph_finalization",
     "projection_reader",
     "fanout_event_buffer_size",
 )
@@ -61,6 +62,7 @@ _DEPENDENCY_SLOTS = {
     "_bounded_fanout_enabled",
     "_atomic_graph_success_enabled",
     "_acceptance_effects_enabled",
+    "_accepted_graph_finalization",
     "_projection_reader",
     "_fanout_event_buffer_size",
 }
@@ -162,6 +164,7 @@ def test_dag_scheduling_runtime_has_an_explicit_injected_boundary() -> None:
         "ParallelSuccessRuntime",
         "GraphCancellationRuntime",
         "TaskNodeReviewRuntime",
+        "AcceptedGraphFinalizationRuntime",
         "LocalGraphExecutionRegistry",
     }
     assert not any(
@@ -210,17 +213,18 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
         },
         "_budgets": {"ensure_active": 1, "refresh": 2, "finalize": 6},
         "_node_lifecycle": {
-            "transition_graph": 12,
+            "transition_graph": 11,
             "transition_node": 5,
             "cancel_waiting_review_node": 1,
         },
+        "_accepted_graph_finalization": {"complete": 1},
         "_node_execution_projection": {
-            "try_operation": 2,
+            "try_operation": 3,
             "attempts_for_node": 2,
             "matching_parallel_decision": 4,
             "selected_parallel_decision_outcome": 4,
         },
-        "_node_execution": {"execute_stream": 6},
+        "_node_execution": {"execute_stream": 7},
         "_parallel_settlement": {
             "assert_parallel_reentry_idle": 1,
             "resolve_parallel_outcomes": 3,
@@ -270,7 +274,7 @@ def test_records_module_is_one_pure_validation_helper() -> None:
 
 
 def test_coordinator_is_a_small_registry_scoped_facade() -> None:
-    assert len(inspect.getsource(coordinator).splitlines()) == 259
+    assert len(inspect.getsource(coordinator).splitlines()) == 268
     owner = _class(coordinator, "GovernedTaskCoordinator")
     methods = {
         node.name

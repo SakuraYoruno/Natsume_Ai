@@ -91,7 +91,6 @@ def test_parallel_settlement_mixin_borrows_one_owner_transaction() -> None:
     forbidden_attributes = {
         "connect",
         "commit",
-        "rollback",
         "executemany",
         "executescript",
     }
@@ -232,15 +231,70 @@ def test_parallel_settlement_mixin_borrows_one_owner_transaction() -> None:
             assert call.args and isinstance(call.args[0], ast.Name), getter_name
             assert call.args[0].id == "conn", getter_name
 
+        begin_calls = [
+            node
+            for node in ast.walk(getter)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "execute"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "conn"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and str(node.args[0].value).strip().upper() == "BEGIN"
+        ]
+        rollback_calls = [
+            node
+            for node in ast.walk(getter)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "rollback"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "conn"
+        ]
+        assert len(begin_calls) == 1, getter_name
+        assert len(rollback_calls) == 1, getter_name
+        try_blocks = [node for node in getter.body if isinstance(node, ast.Try)]
+        assert len(try_blocks) == 1, getter_name
+        assert any(
+            rollback_calls[0] is nested
+            for statement in try_blocks[0].finalbody
+            for nested in ast.walk(statement)
+        ), getter_name
+
+    for method in (
+        node for node in mixin.body if isinstance(node, ast.FunctionDef)
+    ):
+        if method.name in getters:
+            continue
+        assert not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and (
+                node.func.attr in {"commit", "rollback"}
+                or (
+                    node.func.attr == "execute"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and str(node.args[0].value).strip().upper() == "BEGIN"
+                )
+            )
+            for node in ast.walk(method)
+        ), method.name
+
     sql_literals = (
         str(node.value).upper()
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     )
-    assert not any(
-        sql.strip().startswith("BEGIN ") or sql.strip() in {"COMMIT", "ROLLBACK"}
+    manual_control_sql = [
+        sql.strip()
         for sql in sql_literals
-    )
+        if sql.strip().startswith("BEGIN")
+        or sql.strip() in {"COMMIT", "ROLLBACK"}
+    ]
+    assert manual_control_sql.count("BEGIN") == 2
+    assert not {"COMMIT", "ROLLBACK"} & set(manual_control_sql)
 
 
 def test_parallel_state_helpers_are_pure_repository_agnostic_functions() -> None:
