@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.2
+版本：v2.3
 
 核对日期：2026-07-18
 
@@ -41,7 +41,7 @@ flowchart TD
     Cortex --> Route{"route"}
     Route -->|chat| Chat["Frozen Chat node"]
     Route -->|skill| Skill["Frozen Skill node"]
-    Route -->|delegate| Delegate["Frozen Delegate node"]
+    Route -->|delegate| Delegate["Frozen Delegate node\nouter authority only"]
     Route -->|plan| Plan["已批准 steps 的拓扑合法化"]
 
     Chat --> Compile["HostCommand + WorkOrderV3 + TaskGraph"]
@@ -119,13 +119,13 @@ flowchart TD
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Delegate,Compile,Admission,Schema,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
-    class Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine partial;
+    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,Schema,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
+    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine partial;
 ```
 
 上图的核心结论是：
 
-- Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。
+- Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行；这只证明 outer admission。Delegate 内部 dispatcher 尚未消费 TaskNode grant/Attempt，故四路的通用执行闭环仍不完整。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
 - Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Budget 高竞争唯一 winner、single-node post-budget checkpoint continuation、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation 已有证据；general/multi-node/pre-budget recovery、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle 和真实 canary仍缺，atomic/bounded/cancellation 均保持 OFF。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
@@ -160,6 +160,8 @@ Gateway 不直接调用 Host worker。它先完成签名验证、规范化与 du
 
 Gateway 的 intake ack 只表示“已持久接收”。Gateway 只在 Host 返回可验证的 Host input receipt 后才把 inbox 标记为完成。该回执要绑定 source、body digest 和 idempotency digest，不仅检查 HTTP 200。
 
+受认证 Host Input/Gateway 在 Governor 前冻结 Secure Ingress principal，并在 direct `chat/skill/delegate` 与 approved-plan admission 中保留同一 `surface / principal / claim_ref / audit_ref / body SHA-256`。Plan 在首次 HostCommand/TaskGraph admission 前以 base request/session/principal 只读预检 parent Governor binding，direct route 也先预检，child grant 派生再复验。只有成对 ref 与 Gateway source 同时存在时 surface 为 `GATEWAY`；其他认证输入为 `HOST_INPUT`，无 ingress 才是 `CHAT`。半绑定 ref、畸形摘要或 parent binding 漂移会失败关闭。该边界止于 admission，未授予 Delegate 内部 dispatcher node grant/Attempt，也未让 Plan 生成候选方案。
+
 Host 内的 Canon/Tool/Bond HTTP 与对应 OBS command adapter 现在从同一个 app-local frozen `HostRoutePorts` 解析依赖；router factory 在 app 构造时闭包绑定，运行期不再通过 module setter 或 `process_services` fallback 改写三类 provider。因此同解释器多 Host app 的请求不会因后构造 app 而串到另一对象图。该数据流边界仅覆盖三类 route；其余 OBS/Scheduler/Review/Life/Tribe locator 尚未迁移。
 
 ### 3.3 入口状态表
@@ -167,7 +169,7 @@ Host 内的 Canon/Tool/Bond HTTP 与对应 OBS command adapter 现在从同一�
 | 来源 | 当前入口 | 进入 canonical TaskGraph | 状态 | 边界 |
 |---|---|---:|---|---|
 | Host Chat/API | Cortex | 是 | `WIRED` | 仅四条 canonical route |
-| Gateway | durable inbox → Host Input | 是 | `WIRED` | 可能提交时间不明的请求进 uncertain DLQ，不盲目重试 |
+| Gateway | durable inbox → Host Input | 是 | `WIRED_OUTER_ADMISSION` | principal、claim/audit、body digest 与 surface 贯通 Governor/HostCommand；可能提交时间不明的请求进 uncertain DLQ，不盲目重试 |
 | Scheduler | governed scheduler adapter | 是 | `WIRED` | Clock/Manual occurrence，完整 child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent | internal task adapter | 是 | `WIRED` | 边界 v2 清除 caller authority 后编译 V3；`delegate:agent_runtime` child grant 验证后才调用 executor |
 | Read projection | `task_progress` / `recent_turn` | 否 | `WIRED_READ_ONLY` | 读取 durable projection，不拥有任务状态 |
@@ -181,7 +183,7 @@ Host 内的 Canon/Tool/Bond HTTP 与对应 OBS command adapter 现在从同一�
 |---|---|---|---|---|
 | `chat` | prompt、conversation context、reply channel | 调用 Surface Reply，输出冻结 worker projection | `WIRED` | conversation 与 delivery 是 Acceptance 后最终一致 |
 | `skill` | target skill、arguments、capability scope | 验证 node-bound grant，执行 frozen governed skill，校验 durable skill receipt | `WIRED` | 只证明冻结 skill vertical slice，不等于所有 legacy skill 路径已删除 |
-| `delegate` | 精确 `target_id`、上下文和超时 | 经 frozen delegate port 调用指定 sub-agent | `WIRED` | worker 不得从 context 重新选 route 或 target |
+| `delegate` | 精确 `target_id`、上下文和超时 | 经 frozen delegate port 调用指定 sub-agent | `PARTIAL` | outer graph 受治理，但内部 dispatcher 尚未消费 node grant/Attempt；worker 不得从 context 重新选 route 或 target |
 | `plan` | Governor 已批准 `planned_steps/steps` | 拓扑合法化 → selected path → immutable multi-node graph | `PARTIAL` | 不生成竞争计划，不做真实 successor search，不完成动态 replan |
 
 ### 4.1 Chat

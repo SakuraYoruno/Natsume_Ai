@@ -227,6 +227,32 @@ def _derive(service: NodeBoundGrantService, parent_ref: str, graph: TaskGraph, o
     )
 
 
+def test_parent_binding_preflight_rejects_principal_drift_without_child_grants() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    try:
+        parent_ref = _parent(ledger, tokens)
+        service = _service(ledger, tokens)
+
+        with pytest.raises(NodeGrantDerivationError) as rejected:
+            service.validate_parent_binding(
+                parent_grant_ref=parent_ref,
+                request_id=REQUEST_ID,
+                session_id=SESSION_ID,
+                principal_id="principal-gr05b-drift",
+            )
+
+        assert rejected.value.reason_code == NODE_GRANT_PARENT_INVALID
+        assert [
+            row
+            for row in ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
+        ] == []
+        assert tokens.child_issue_calls == 0
+    finally:
+        ledger.close()
+
+
 def _verification_kwargs(parent_ref: str, graph: TaskGraph, grant: Any) -> dict[str, Any]:
     return {
         "grant_ref": grant.grant_ref,

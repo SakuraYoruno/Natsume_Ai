@@ -3,7 +3,7 @@
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
   "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT",
-  "route_control_scope": "Route PASS means the canonical admitted path consumes the control. It does not prove program-wide Budget coverage, production feature enablement, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "route_control_scope": "Route PASS means the actual worker path consumes the control, not merely that an outer admitted graph has it. It does not prove program-wide Budget coverage, production feature enablement, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
@@ -65,7 +65,7 @@
       }
     },
     "delegate": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
@@ -78,17 +78,17 @@
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
         "durable_attempt_lease": "PASS",
-        "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
-        "review_resume": "PASS",
-        "verification": "PASS",
+        "node_bound_grant": "MISSING",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PARTIAL",
+        "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PARTIAL"
       }
     },
     "plan": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
       "evidence_refs": [
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
@@ -101,19 +101,20 @@
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
         "durable_attempt_lease": "PASS",
-        "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
-        "review_resume": "PASS",
-        "verification": "PASS",
+        "node_bound_grant": "PARTIAL",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PARTIAL",
+        "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PARTIAL"
       }
     }
   },
   "architecture_controls": {
     "generic_three_layer_planning_search": {
-      "status": "PASS",
+      "status": "PARTIAL",
+      "host_boundary": "The domain-neutral kernel exists, but Host only validates and orders Governor-approved planned_steps; it does not generate competing candidates, perform production rollout selection, or prove a second-domain benefit.",
       "evidence_refs": [
         "host_brain/planning_search/service.py",
         "host_brain/pentest/agent/virtual_planning_world.py",

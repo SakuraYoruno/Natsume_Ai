@@ -11,7 +11,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
-| Host `chat/skill/delegate/plan` | `WIRED` | 四类 canonical route 已进入 Governed Runtime |
+| Host `chat/skill/delegate/plan` | `OUTER_ROUTE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE` | 四类 canonical route 已进入 Governed Runtime。受认证 Host Input/Gateway 会把 principal、成对 claim/audit ref、body SHA-256 与派生 surface 冻结到 Governor 和 HostCommand；但 Delegate 内部 dispatcher 仍未消费 node-bound grant/Attempt，Host Plan 仍只执行已批准的步骤 |
 | Durable Task Runtime | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW` | `PRODUCTION_OFF`。0102 的 canonical Node Acceptance 已统一为一个应用 Store UoW：exact NODE Effect 集、immutable result artifact、`ACCEPTED` 和带 exact Attempt 的 Node Outbox 同成同败；丢响应只能精确重放，Effect 投递还要重验同 graph/revision/node/Attempt 的有效 artifact。新 admission 拒绝空 `output_contract`，启动门禁会隔离活动 legacy 空合同/缺 artifact，以及缺 exact artifact 的可投递 terminal legacy Effect。应用 Store 的低层 `transition_node(ACCEPTED)` 已封口，但 Acceptance 前 standalone pre-stage 与低层 `create_graph` 仍是兼容面，直接 SQL 也尚无跨表物理 trigger，因此状态仍是 `PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT`。0092～0099 的取消、continuation、对账与窄恢复合同继续有效；general/multi-node/pre-operation recovery、生产 canary、atomic/bounded/cancellation 启用仍未完成 |
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
@@ -109,6 +109,8 @@ request
   → durable effect intents
   → effect receipts and read-only projections
 ```
+
+对受认证的 Host Input/Gateway，`cortex_dispatch` 会在 Governor 决策前把 Secure Ingress principal 写入 intent；`GovernedHostRuntime` 随后为 direct `chat/skill/delegate` 与 approved-plan 统一冻结 `surface / principal_id / ingress_claim_ref / ingress_audit_ref / input_sha256`。Plan 在首次 HostCommand/TaskGraph 落库前以 base request、session 与 command principal 只读预检 parent Governor binding，direct route 也在 admission 前预检；child grant 派生会再次检查，避免竞态扩权。只有同时具备成对 ingress ref 且 `input_source=GATEWAY` 的请求才记录为 `GATEWAY`；其他认证输入记录为 `HOST_INPUT`，无 ingress 才是 `CHAT`。半绑定 ref、畸形摘要或 parent binding 漂移会失败关闭。这只收口 ingress→admission，不能证明 Delegate 内部执行已获得 node grant/Attempt，也不代表 Host 已具备候选计划搜索。
 
 当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；Executive 的生产入口、SkillDag 执行和内存任务 registry 已删除。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。0096 后，Task-bound Review 的批准后一次性 resume、拒绝和到期会在原 Review 事务中排入 continuation；composition-owned worker 按 immutable HostCommand surface 回到原 Host/Internal/Scheduler runtime，POST continuation 不重跑 worker，PRE continuation 不制造伪 Attempt。
 

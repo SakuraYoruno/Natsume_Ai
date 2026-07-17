@@ -45,6 +45,9 @@ class _UnusedCommandApplication:
     def __init__(self) -> None:
         self.calls = 0
 
+    def preflight_parent_governor_binding(self, **_kwargs):  # noqa: ANN003
+        return None
+
     async def execute_stream(self, **_kwargs):  # noqa: ANN003
         self.calls += 1
         if False:
@@ -54,6 +57,9 @@ class _UnusedCommandApplication:
 class _CapturingCommandApplication:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+
+    def preflight_parent_governor_binding(self, **_kwargs):  # noqa: ANN003
+        return None
 
     async def execute_stream(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))

@@ -65,6 +65,12 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> dict[str, Any]:
+        await self.preflight_parent_governor_binding(
+            parent_grant_ref=command.governor_grant_ref,
+            request_id=command.request_id,
+            session_id=command.session_id,
+            principal_id=command.principal_id,
+        )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
@@ -98,6 +104,12 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> AsyncIterator[dict[str, Any]]:
+        await self.preflight_parent_governor_binding(
+            parent_grant_ref=command.governor_grant_ref,
+            request_id=command.request_id,
+            session_id=command.session_id,
+            principal_id=command.principal_id,
+        )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
@@ -504,6 +516,55 @@ class GovernedCommandApplication:
                 "node grant batch does not exactly cover the admitted TaskGraph",
             )
         return {str(node_id): str(ref) for node_id, ref in refs.items()}
+
+    async def preflight_parent_governor_binding(
+        self,
+        *,
+        parent_grant_ref: str,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+    ) -> None:
+        """Reject an impossible parent grant before immutable admission.
+
+        ``NodeBoundGrantService`` resolves this read-only check from the
+        durable Governor ledger. It is deliberately repeated by grant
+        derivation after admission so an expiry or takeover race cannot expand
+        authority. A configured grant service without this capability is an
+        invalid authority boundary, never a compatibility fallback.
+        """
+
+        if self._node_grants is None:
+            return
+        parent_ref = str(parent_grant_ref or "").strip()
+        if not parent_ref:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "governed TaskGraph has no parent Governor grant",
+            )
+        validate_parent = getattr(
+            self._node_grants,
+            "validate_parent_binding",
+            None,
+        )
+        if not callable(validate_parent):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "node grant service lacks parent Governor binding preflight",
+            )
+        validated = validate_parent(
+            parent_grant_ref=parent_ref,
+            request_id=request_id,
+            session_id=session_id,
+            principal_id=principal_id,
+        )
+        if inspect.isawaitable(validated):
+            validated = await validated
+        if validated is False:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "node grant service rejected the parent Governor grant",
+            )
 
     @staticmethod
     def _require_ready_graph(graph: Any) -> None:

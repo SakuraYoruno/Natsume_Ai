@@ -847,6 +847,7 @@ class GovernedHostRuntime:
             )
             if route == "plan":
                 async for event in self._execute_plan_stream(
+                    request_body=request_body,
                     request_id=request_id,
                     session_id=session_id,
                     ts_ms=ts_ms,
@@ -876,11 +877,19 @@ class GovernedHostRuntime:
                 )
             else:
                 authority = dict(command_authority or {})
+                surface = _resolve_host_command_surface(
+                    request_body=request_body,
+                    authority=authority,
+                )
+                ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
                 contracts = build_direct_host_route_contracts(
-                    surface=HostCommandSurface.CHAT,
+                    surface=surface,
                     request_id=request_id,
                     session_id=session_id,
-                    principal_id=person_id,
+                    principal_id=_resolve_host_command_principal(
+                        person_id=person_id,
+                        authority=authority,
+                    ),
                     ts_ms=ts_ms,
                     intent_draft=intent_draft,
                     governor_result=governor_result,
@@ -888,8 +897,12 @@ class GovernedHostRuntime:
                     person_id=person_id,
                     emotion_context=emotion_context,
                     render_target_lang=render_target_lang,
-                    ingress_claim_ref=str(authority.get("ingress_claim_ref") or "").strip() or None,
-                    ingress_audit_ref=str(authority.get("ingress_audit_ref") or "").strip() or None,
+                    input_sha256=_resolve_host_input_sha256(
+                        sanitized_message=sanitized_message,
+                        authority=authority,
+                    ),
+                    ingress_claim_ref=ingress_claim_ref,
+                    ingress_audit_ref=ingress_audit_ref,
                     frozen_context=frozen_context,
                 )
                 candidate_command = contracts.command
@@ -1004,6 +1017,7 @@ class GovernedHostRuntime:
     async def _execute_plan_stream(
         self,
         *,
+        request_body: Any,
         request_id: str,
         session_id: str,
         ts_ms: int,
@@ -1014,7 +1028,11 @@ class GovernedHostRuntime:
         command_authority: Mapping[str, Any] | None,
         frozen_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        input_sha256 = _sha256_text(sanitized_message)
+        ingress = dict(command_authority or {})
+        input_sha256 = _resolve_host_input_sha256(
+            sanitized_message=sanitized_message,
+            authority=ingress,
+        )
         input_ref = f"input://sha256/{input_sha256.removeprefix('sha256:')}"
         adapter = build_plan_intent_search(
             intent_draft,
@@ -1023,18 +1041,24 @@ class GovernedHostRuntime:
             input_refs=(input_ref,),
             frozen_context=frozen_context,
         )
-        ingress = dict(command_authority or {})
+        ingress_claim_ref, ingress_audit_ref = _ingress_references(ingress)
         authority = PlanningExecutionAuthority(
-            surface=HostCommandSurface.CHAT,
+            surface=_resolve_host_command_surface(
+                request_body=request_body,
+                authority=ingress,
+            ),
             base_command_request_id=request_id,
             session_id=session_id,
-            principal_id=person_id,
+            principal_id=_resolve_host_command_principal(
+                person_id=person_id,
+                authority=ingress,
+            ),
             input_ref=input_ref,
             input_sha256=input_sha256,
             governor_grant_ref=governor_grant_ref(request_id, governor_result),
             target_id="planning_search",
-            ingress_claim_ref=str(ingress.get("ingress_claim_ref") or "").strip() or None,
-            ingress_audit_ref=str(ingress.get("ingress_audit_ref") or "").strip() or None,
+            ingress_claim_ref=ingress_claim_ref,
+            ingress_audit_ref=ingress_audit_ref,
         )
         service = GovernedPlanningExecutionService(
             search=adapter,  # type: ignore[arg-type]
@@ -1305,6 +1329,98 @@ def _build_frozen_context(
     return safe
 
 
+def _ingress_references(
+    authority: Mapping[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    """Normalize the only two durable references exported by Secure Ingress.
+
+    The Host runtime accepts both the legacy generic names used by the input
+    adapter and the explicit names used by other surfaces, but never permits a
+    half-bound ingress identity.  Keeping this normalization here makes every
+    direct route and a compiled plan freeze the same authority tuple.
+    """
+
+    source = dict(authority or {})
+    claim_ref = str(
+        source.get("ingress_claim_ref") or source.get("claim_ref") or ""
+    ).strip() or None
+    audit_ref = str(
+        source.get("ingress_audit_ref") or source.get("audit_ref") or ""
+    ).strip() or None
+    if bool(claim_ref) != bool(audit_ref):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Secure Ingress claim and audit references must be supplied together",
+        )
+    return claim_ref, audit_ref
+
+
+def _resolve_host_command_surface(
+    *,
+    request_body: Any,
+    authority: Mapping[str, Any] | None,
+) -> HostCommandSurface:
+    """Derive the durable Host surface from the authenticated ingress path.
+
+    Caller-provided ``input_source`` alone is not an authority.  A Gateway
+    surface is recorded only when it carries the exact Secure Ingress claim and
+    audit refs; otherwise a normal Chat request remains Chat.
+    """
+
+    claim_ref, _audit_ref = _ingress_references(authority)
+    if not claim_ref:
+        return HostCommandSurface.CHAT
+    if isinstance(request_body, Mapping):
+        raw_source = request_body.get("input_source") or request_body.get("source")
+    else:
+        raw_source = getattr(request_body, "input_source", None)
+    source = str(raw_source or "").strip().upper()
+    return (
+        HostCommandSurface.GATEWAY
+        if source == "GATEWAY"
+        else HostCommandSurface.HOST_INPUT
+    )
+
+
+def _resolve_host_command_principal(
+    *,
+    person_id: str,
+    authority: Mapping[str, Any] | None,
+) -> str:
+    """Use the authenticated ingress principal when one owns the command."""
+
+    claim_ref, _audit_ref = _ingress_references(authority)
+    if claim_ref:
+        return _required_identifier(
+            dict(authority or {}).get("principal_id"),
+            field_name="principal_id",
+        )
+    return _identifier_or_digest(person_id or "anonymous", prefix="principal")
+
+
+def _resolve_host_input_sha256(
+    *,
+    sanitized_message: str,
+    authority: Mapping[str, Any] | None,
+) -> str:
+    """Prefer the authenticated body digest and reject malformed substitutions."""
+
+    raw = str(
+        dict(authority or {}).get("input_sha256")
+        or dict(authority or {}).get("body_sha256")
+        or ""
+    ).strip().lower()
+    if not raw:
+        return _sha256_text(sanitized_message)
+    digest = raw.removeprefix("sha256:")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Secure Ingress body digest must be a sha256 hex digest",
+        )
+    return f"sha256:{digest}"
+
+
 def _build_contracts(
     *,
     request_body: Any,
@@ -1321,8 +1437,11 @@ def _build_contracts(
     frozen_context: Mapping[str, Any] | None = None,
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     authority = dict(command_authority or {})
-    has_ingress = bool(authority.get("ingress_claim_ref") or authority.get("claim_ref"))
-    surface = HostCommandSurface.HOST_INPUT if has_ingress else HostCommandSurface.CHAT
+    ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
+    surface = _resolve_host_command_surface(
+        request_body=request_body,
+        authority=authority,
+    )
     request_ref = _required_identifier(request_id, field_name="request_id")
     session_ref = _identifier_or_digest(session_id, prefix="session")
     target = str(intent_draft.get("target_id") or intent_draft.get("skill_id") or "").strip()
@@ -1333,29 +1452,15 @@ def _build_contracts(
     graph_id = f"graph-host-{suffix}"
     node_id = f"node-host-{suffix}"
 
-    input_sha256 = str(authority.get("input_sha256") or authority.get("body_sha256") or "").strip()
-    if not input_sha256:
-        input_sha256 = _sha256_text(str(sanitized_message or ""))
-    elif not input_sha256.startswith("sha256:"):
-        input_sha256 = f"sha256:{input_sha256.lower()}"
-    input_ref = f"input://sha256/{input_sha256.split(':', 1)[1]}"
-    principal_raw = str(authority.get("principal_id") or "").strip()
-    principal_id = (
-        _required_identifier(principal_raw, field_name="principal_id")
-        if has_ingress
-        else _identifier_or_digest(person_id or principal_raw or "anonymous", prefix="principal")
+    input_sha256 = _resolve_host_input_sha256(
+        sanitized_message=str(sanitized_message or ""),
+        authority=authority,
     )
-    ingress_claim_ref = str(
-        authority.get("ingress_claim_ref") or authority.get("claim_ref") or ""
-    ).strip() or None
-    ingress_audit_ref = str(
-        authority.get("ingress_audit_ref") or authority.get("audit_ref") or ""
-    ).strip() or None
-    if bool(ingress_claim_ref) != bool(ingress_audit_ref):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "Secure Ingress claim and audit references must be supplied together",
-        )
+    input_ref = f"input://sha256/{input_sha256.split(':', 1)[1]}"
+    principal_id = _resolve_host_command_principal(
+        person_id=person_id,
+        authority=authority,
+    )
     grant_ref = governor_grant_ref(request_ref, governor_result)
     safe_intent = _safe_durable_value(dict(intent_draft or {}), path="intent_draft")
     if not isinstance(safe_intent, dict):

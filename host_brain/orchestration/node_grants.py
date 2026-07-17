@@ -246,6 +246,42 @@ class NodeBoundGrantService:
                 principal_id=principal_id,
             )
 
+    def validate_parent_binding(
+        self,
+        *,
+        parent_grant_ref: str,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+    ) -> Mapping[str, Any]:
+        """Fail closed before command admission when parent identity drifts.
+
+        This is intentionally read-only: child grants are still issued only
+        after durable command admission, but an impossible request/session/
+        principal/expiry tuple must never leave an admitted graph behind.
+        ``derive`` repeats the same check to preserve the live authority fence
+        across the admission-to-issuance race.
+        """
+
+        with self._lock:
+            request = _required_text(request_id, "request_id")
+            session = _required_text(session_id, "session_id")
+            principal = _required_text(principal_id, "principal_id")
+            parent_ref = _required_text(parent_grant_ref, "parent_grant_ref")
+            now_ms = int(self._clock())
+            if now_ms <= 0:
+                raise NodeGrantDerivationError(
+                    NODE_GRANT_INPUT_INVALID,
+                    "clock must return a positive millisecond value",
+                )
+            return self._resolve_parent(
+                parent_ref=parent_ref,
+                request_id=request,
+                session_id=session,
+                principal_id=principal,
+                now_ms=now_ms,
+            )
+
     def derive_review_continuation(
         self,
         *,

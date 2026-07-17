@@ -142,6 +142,10 @@ class _Admission:
 class _Application:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.preflight_calls: list[dict[str, Any]] = []
+
+    def preflight_parent_governor_binding(self, **kwargs: Any) -> None:
+        self.preflight_calls.append(dict(kwargs))
 
     async def execute_stream(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
@@ -185,6 +189,43 @@ async def test_selected_path_is_compiled_admitted_and_executed_without_second_pl
     assert admission.calls[0]["command_request_id"] == "request-plan"
     assert application.calls[0]["graph"].to_dict() == prepared.compiled.task_graph.to_dict()
     assert events == [{"phase": "COMMIT", "done": True, "graph_revision": 1}]
+
+
+@pytest.mark.asyncio
+async def test_planning_preflights_parent_authority_before_first_admission() -> None:
+    search = _Search(_result("search-parent-preflight", "inspect"))
+    admission = _Admission()
+
+    class _RejectingApplication(_Application):
+        def preflight_parent_governor_binding(self, **kwargs: Any) -> None:
+            self.preflight_calls.append(dict(kwargs))
+            raise RuntimeError("parent principal drift")
+
+    application = _RejectingApplication()
+    authority = _authority()
+    service = GovernedPlanningExecutionService(
+        search=search,  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=application,
+    )
+
+    with pytest.raises(RuntimeError, match="parent principal drift"):
+        await service.prepare_initial(
+            SearchRequest("search-parent-preflight", initial_state={}),
+            authority=authority,
+            created_at=100,
+        )
+
+    assert admission.calls == []
+    assert application.preflight_calls == [
+        {
+            "parent_grant_ref": authority.governor_grant_ref,
+            "request_id": authority.base_command_request_id,
+            "session_id": authority.session_id,
+            "principal_id": authority.principal_id,
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 import sqlite3
 import time
@@ -20,7 +21,10 @@ from host_brain.composition.task_runtime import build_process_task_runtime_conta
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
+from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
+from natsume_contracts.task import HostCommandSurface
 
 
 def _intent(
@@ -63,14 +67,22 @@ def _intent(
     return value
 
 
-async def _execute(runtime, *, intent: dict, governor: dict) -> list[dict]:  # noqa: ANN001
-    request_body = SimpleNamespace()
-    if intent["route"] == "chat":
-        request_body = SimpleNamespace(
-            input_source="GATEWAY",
-            reply_channel="qq",
-            reply_target="qq_dm_gr05_universal",
-        )
+async def _execute(
+    runtime,
+    *,
+    intent: dict,
+    governor: dict,
+    request_body: object | None = None,
+    command_authority: dict | None = None,
+) -> list[dict]:  # noqa: ANN001
+    if request_body is None:
+        request_body = SimpleNamespace()
+        if intent["route"] == "chat":
+            request_body = SimpleNamespace(
+                input_source="GATEWAY",
+                reply_channel="qq",
+                reply_target="qq_dm_gr05_universal",
+            )
     return [
         event
         async for event in runtime.execute_stream(
@@ -84,8 +96,70 @@ async def _execute(runtime, *, intent: dict, governor: dict) -> list[dict]:  # n
             sanitized_message=intent["task"],
             emotion_context={"emotion_tag": "NEUTRAL"},
             render_target_lang="zh",
+            command_authority=command_authority,
         )
     ]
+
+
+def _gateway_ingress_authority(
+    db_path,
+    *,
+    request_id: str,
+    suffix: str,
+) -> tuple[SQLiteSecureIngressStore, dict[str, str]]:
+    body_sha256 = hashlib.sha256(
+        f"gr05-universal-gateway:{suffix}".encode("utf-8")
+    ).hexdigest()
+    store = SQLiteSecureIngressStore(db_path, rate_limit=100)
+    claim = store.try_claim(
+        principal_id="service.edge.gateway",
+        surface="gateway.webhook",
+        action="host:input",
+        required_scopes=("host:input",),
+        idempotency_key=f"gr05-universal:{suffix}:idempotency",
+        nonce=f"gr05-universal:{suffix}:nonce",
+        body_sha256=body_sha256,
+        request_id=request_id,
+        at_ms=1_800_000_000_000,
+        expires_at_ms=1_800_000_060_000,
+    )
+    assert claim.status is ClaimStatus.NEW
+    assert claim.claim_ref is not None
+    audit_ref = store.commit_with_audit(
+        claim_ref=claim.claim_ref,
+        event=IngressAuditEvent(
+            request_id=request_id,
+            correlation_id=f"gr05-universal:{suffix}:correlation",
+            surface="gateway.webhook",
+            action="host:input",
+            method="POST",
+            normalized_path="/v1/host/input",
+            principal_id="service.edge.gateway",
+            tenant_id="gr05-universal",
+            key_id="gr05-universal-key",
+            credential_kind="hmac-sha256",
+            credential_ref_digest="sha256:" + "1" * 64,
+            requested_scopes=("host:input",),
+            required_scopes=("host:input",),
+            body_sha256=body_sha256,
+            idempotency_digest="sha256:" + "2" * 64,
+            nonce_digest="sha256:" + "3" * 64,
+            transport_key_digest="sha256:" + "4" * 64,
+            decision="ALLOW",
+            reason_code="SECURE_INGRESS_ALLOWED",
+            stage="COMPLETE",
+            claim_ref=claim.claim_ref,
+            rate_snapshot={"backend": "sqlite", "current_count": 1},
+            side_effects_executed=False,
+            ts_ms=1_800_000_000_000,
+        ),
+    )
+    return store, {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": str(claim.claim_ref),
+        "audit_ref": str(audit_ref),
+        "body_sha256": body_sha256,
+    }
 
 
 @pytest.mark.asyncio
@@ -163,6 +237,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
     container = None
     runtime = None
     life = None
+    ingress_store = None
+    mismatch_ingress_store = None
     try:
         container = build_process_task_runtime_container(
             ledger=ledger,
@@ -262,9 +338,22 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 },
             ],
         )
+        ingress_store, plan_authority = _gateway_ingress_authority(
+            db_path,
+            request_id=plan["request_id"],
+            suffix="plan",
+        )
 
         results: dict[str, list[dict]] = {}
+        governors: dict[str, dict] = {}
         for value in (chat, delegate, plan):
+            # The real Host Input pipeline freezes the authenticated Secure
+            # Ingress principal into the intent *before* Governor admission.
+            # Keep this direct-runtime test on that same side of the boundary:
+            # person_id remains the conversational projection, while the
+            # durable Governor grant is bound to the command principal.
+            if value["route"] == "plan":
+                value["principal_id"] = plan_authority["principal_id"]
             governor = engine.evaluate_intent(
                 raw_intent=value,
                 request_id=value["request_id"],
@@ -273,15 +362,91 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             )
             assert governor["decision"] == "APPROVE", governor
             assert runtime.supports(value) is True
+            governors[value["route"]] = governor
+            execution_kwargs: dict[str, object] = {}
+            if value["route"] == "plan":
+                execution_kwargs = {
+                    "request_body": SimpleNamespace(input_source="GATEWAY"),
+                    "command_authority": plan_authority,
+                }
             results[value["route"]] = await _execute(
                 runtime,
                 intent=value,
                 governor=governor,
+                **execution_kwargs,
             )
+
+        plan_replay = await _execute(
+            runtime,
+            intent=plan,
+            governor=governors["plan"],
+            request_body=SimpleNamespace(input_source="GATEWAY"),
+            command_authority=plan_authority,
+        )
+
+        # A direct caller that skips Cortex keeps the conversational principal
+        # in its Governor grant while presenting an authenticated service
+        # principal to planning admission. The planning preflight must reject
+        # that drift before HostCommand/TaskGraph persistence.
+        mismatched_plan = _intent(
+            request_id="request-gr05-plan-principal-drift",
+            session_id="session-gr05-universal",
+            seq=4,
+            route="plan",
+            target_id="planning_search",
+            task="reject mismatched planning principal before admission",
+            planned_steps=[
+                {
+                    "candidate_id": "curate",
+                    "step_index": 1,
+                    "route": "skill",
+                    "target_id": "agent_memory_curator",
+                    "task_description": "must not be admitted",
+                    "dependencies": [],
+                    "allow_parallel": True,
+                    "args": {
+                        "task": "must not be admitted",
+                        "artifacts_root": str(tmp_path / "mismatch-plan-skill-runs"),
+                    },
+                }
+            ],
+        )
+        mismatch_ingress_store, mismatch_authority = _gateway_ingress_authority(
+            db_path,
+            request_id=mismatched_plan["request_id"],
+            suffix="plan-principal-drift",
+        )
+        mismatch_governor = engine.evaluate_intent(
+            raw_intent=mismatched_plan,
+            request_id=mismatched_plan["request_id"],
+            current_ms=mismatched_plan["ts_ms"],
+            governance_snapshot={"trust_level": 100, "energy_level": 100},
+        )
+        assert mismatch_governor["decision"] == "APPROVE", mismatch_governor
+        with sqlite3.connect(db_path) as conn:
+            command_count_before_drift = conn.execute(
+                "SELECT COUNT(*) FROM host_command_journal"
+            ).fetchone()[0]
+        with pytest.raises(Exception, match="NODE_GRANT_PARENT_INVALID"):
+            await _execute(
+                runtime,
+                intent=mismatched_plan,
+                governor=mismatch_governor,
+                request_body=SimpleNamespace(input_source="GATEWAY"),
+                command_authority=mismatch_authority,
+            )
+        with sqlite3.connect(db_path) as conn:
+            command_count_after_drift = conn.execute(
+                "SELECT COUNT(*) FROM host_command_journal"
+            ).fetchone()[0]
+        assert command_count_after_drift == command_count_before_drift
 
         assert results["chat"][-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert results["delegate"][-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert results["plan"][-1]["execution_receipt"]["status"] == "ACCEPTED"
+        assert plan_replay[-1]["execution_receipt"]["command_id"] == (
+            results["plan"][-1]["execution_receipt"]["command_id"]
+        )
         assert len(chat_calls) == 2
         assert len(delegate_calls) == 2
         assert skill_calls == ["agent_memory_curator"]
@@ -316,13 +481,19 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             ).fetchall()
             plan_graph = conn.execute(
                 """
-                SELECT graph_id, graph_revision
+                SELECT graph_id, graph_revision, surface, principal_id,
+                       ingress_claim_ref, ingress_audit_ref, input_sha256
                 FROM host_command_journal
                 WHERE request_id = ?
                 """,
                 (plan["request_id"],),
             ).fetchone()
         assert sorted(row[0] for row in routes) == ["chat", "delegate", "plan"]
+        assert plan_graph[2] == HostCommandSurface.GATEWAY.value
+        assert plan_graph[3] == plan_authority["principal_id"]
+        assert plan_graph[4] == plan_authority["claim_ref"]
+        assert plan_graph[5] == plan_authority["audit_ref"]
+        assert plan_graph[6] == "sha256:" + plan_authority["body_sha256"]
         assert attempts == 5
         # Chat/delegate already froze worker projections; the plan's skill
         # node now does so as well, giving every accepted route the same B5
@@ -352,6 +523,10 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             "ACCEPTED",
         ]
     finally:
+        if mismatch_ingress_store is not None:
+            mismatch_ingress_store.close()
+        if ingress_store is not None:
+            ingress_store.close()
         if runtime is not None:
             await runtime.aclose()
         if container is not None:

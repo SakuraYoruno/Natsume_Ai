@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+import host_brain.app.governed_task_adapter as governed_task_adapter
 from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_AUTHORITY_INVALID,
     GOVERNED_HOST_RUNTIME_INACTIVE,
     GovernedHostAdapterError,
     GovernedHostRuntime,
 )
+from natsume_contracts.task import HostCommandSurface
 
 
 class _EmptyCommandRepository:
@@ -201,6 +204,167 @@ async def test_chat_and_delegate_exact_replay_use_route_aware_authority_validati
     assert exc_info.value.reason_code == GOVERNED_HOST_AUTHORITY_INVALID
     assert application.calls == 2
     await runtime.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "target_id", "input_source", "expected_surface"),
+    (
+        ("chat", "surface_reply", "GATEWAY", HostCommandSurface.GATEWAY),
+        ("delegate", "intent_agent", "ASR", HostCommandSurface.HOST_INPUT),
+    ),
+)
+async def test_secure_ingress_direct_routes_preserve_surface_principal_and_digest(
+    route: str,
+    target_id: str,
+    input_source: str,
+    expected_surface: HostCommandSurface,
+) -> None:
+    repository = _ReplayCommandRepository()
+    runtime = GovernedHostRuntime(
+        application=_CapturingApplication(repository),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=repository,
+        supported_routes=frozenset({"chat", "delegate"}),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": f"intent-secure-{route}",
+        "session_id": f"session-secure-{route}",
+        "seq": 1,
+        "nonce": f"nonce-secure-{route}",
+        "route": route,
+        "target_id": target_id,
+        "task": f"secure governed {route}",
+        "args": {},
+    }
+    governor = {
+        "request_id": f"request-secure-{route}",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "risk_level": 1,
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+    authority = {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": f"secure-ingress-claim://aw02/{route}",
+        "audit_ref": f"secure-ingress-audit://aw02/{route}",
+        "body_sha256": "a" * 64,
+    }
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body=SimpleNamespace(input_source=input_source),
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id="person-secure-route",
+                sanitized_message=intent["task"],
+                command_authority=authority,
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        command = repository.record["command"]
+        assert command.surface is expected_surface
+        assert command.principal_id == authority["principal_id"]
+        assert command.ingress_claim_ref == authority["claim_ref"]
+        assert command.ingress_audit_ref == authority["audit_ref"]
+        assert command.input_sha256 == "sha256:" + authority["body_sha256"]
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[object] = []
+
+    class _PlanService:
+        def __init__(self, **_kwargs) -> None:  # noqa: ANN003
+            pass
+
+        async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
+            captured.extend((authority, created_at))
+            return object()
+
+        async def execute_stream(self, _prepared):  # noqa: ANN001
+            yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
+
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "build_plan_intent_search",
+        lambda *_args, **_kwargs: SimpleNamespace(request=object()),
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningExecutionService",
+        _PlanService,
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningAdmissionService",
+        lambda **_kwargs: object(),
+    )
+    runtime = GovernedHostRuntime(
+        application=_BlockingApplication(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_EmptyCommandRepository(),
+        planning_enabled=True,
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": "intent-secure-plan",
+        "session_id": "session-secure-plan",
+        "seq": 1,
+        "nonce": "nonce-secure-plan",
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "secure governed plan",
+        "planned_steps": [{"candidate_id": "step-1"}],
+    }
+    governor = {
+        "request_id": "request-secure-plan",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+    authority = {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": "secure-ingress-claim://aw02/plan",
+        "audit_ref": "secure-ingress-audit://aw02/plan",
+        "body_sha256": "b" * 64,
+    }
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body=SimpleNamespace(input_source="GATEWAY"),
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id="person-secure-plan",
+                sanitized_message=intent["task"],
+                command_authority=authority,
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        plan_authority = captured[0]
+        assert plan_authority.surface is HostCommandSurface.GATEWAY
+        assert plan_authority.principal_id == authority["principal_id"]
+        assert plan_authority.ingress_claim_ref == authority["claim_ref"]
+        assert plan_authority.ingress_audit_ref == authority["audit_ref"]
+        assert plan_authority.input_sha256 == "sha256:" + authority["body_sha256"]
+        assert plan_authority.input_ref.endswith(authority["body_sha256"])
+    finally:
+        await runtime.aclose()
 
 
 async def _collect(stream):

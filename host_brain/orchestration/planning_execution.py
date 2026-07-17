@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
@@ -130,6 +131,12 @@ class GovernedPlanningExecutionService:
     ) -> None:
         if not callable(getattr(command_application, "execute_stream", None)):
             raise ValueError("command_application.execute_stream is required")
+        if not callable(
+            getattr(command_application, "preflight_parent_governor_binding", None)
+        ):
+            raise ValueError(
+                "command_application.preflight_parent_governor_binding is required"
+            )
         self._search = search
         self._compiler = compiler
         self._admission = admission
@@ -252,6 +259,18 @@ class GovernedPlanningExecutionService:
         authority: PlanningExecutionAuthority,
     ) -> PreparedPlanningExecution:
         graph = compiled.task_graph
+        # Planning admission owns the first HostCommand/TaskGraph write. Its
+        # parent authority must be checked here, not only in execute_stream.
+        # Replans bind the original Governor request rather than their
+        # revision-suffixed command request identity.
+        preflight = self._application.preflight_parent_governor_binding(
+            parent_grant_ref=authority.governor_grant_ref,
+            request_id=authority.base_command_request_id,
+            session_id=authority.session_id,
+            principal_id=authority.principal_id,
+        )
+        if inspect.isawaitable(preflight):
+            await preflight
         receipt = await self._admission.admit(
             compiled,
             surface=authority.surface,

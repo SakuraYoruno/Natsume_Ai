@@ -29,13 +29,17 @@
   },
   "capabilities": {
     "host_canonical_routes": {
-      "status": "WIRED",
+      "status": "OUTER_ROUTE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE",
       "scope": ["chat", "skill", "delegate", "plan"],
+      "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
+      "end_to_end_boundary": "Delegate inner dispatcher is not node-grant/Attempt-bound. Host candidate-plan generation is MISSING; approved-plan topology execution is not generic planning search.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
+        "host_brain/input_runtime/cortex_dispatch.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
+        "tests/integration/test_gr05_universal_host_runtime.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
       ]
     },

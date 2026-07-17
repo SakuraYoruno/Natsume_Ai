@@ -134,6 +134,9 @@ class _TamperedProjectionReader:
 
 
 class _NodeGrantService:
+    def validate_parent_binding(self, **_kwargs: Any) -> bool:
+        return True
+
     def derive(
         self,
         *,

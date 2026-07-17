@@ -12,7 +12,18 @@ from natsume_contracts.task.v1 import ExecutorAssignment, TaskExecutor
 
 
 class _Repository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
     def admit(self, command: Any, work_order: Any, assignment: Any, graph: Any) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "command": command,
+                "work_order": work_order,
+                "assignment": assignment,
+                "graph": graph,
+            }
+        )
         return {
             "command": command,
             "work_order": work_order,
@@ -33,6 +44,9 @@ class _Batch:
 class _NodeGrants:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+
+    def validate_parent_binding(self, **_kwargs: Any) -> bool:
+        return True
 
     def derive(self, **kwargs: Any) -> _Batch:
         self.calls.append(dict(kwargs))
@@ -153,6 +167,48 @@ async def test_application_rejects_partial_node_grant_batch() -> None:
             graph=contracts.graph,
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_application_rejects_parent_binding_before_durable_admission() -> None:
+    contracts, assignment = _contracts()
+    repository = _Repository()
+
+    class _RejectingParent(_NodeGrants):
+        def __init__(self) -> None:
+            super().__init__()
+            self.preflight_calls: list[dict[str, Any]] = []
+
+        def validate_parent_binding(self, **kwargs: Any) -> bool:
+            self.preflight_calls.append(dict(kwargs))
+            return False
+
+    grants = _RejectingParent()
+    application = GovernedCommandApplication(
+        command_repository=repository,
+        coordinator=_Coordinator(),  # type: ignore[arg-type]
+        node_grant_service=grants,
+    )
+
+    with pytest.raises(Exception, match="rejected the parent Governor grant"):
+        async for _ in application.execute_stream(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            assignment=assignment,
+            graph=contracts.graph,
+        ):
+            pass
+
+    assert repository.calls == []
+    assert grants.calls == []
+    assert grants.preflight_calls == [
+        {
+            "parent_grant_ref": contracts.command.governor_grant_ref,
+            "request_id": contracts.command.request_id,
+            "session_id": contracts.command.session_id,
+            "principal_id": contracts.command.principal_id,
+        }
+    ]
 
 
 @pytest.mark.asyncio

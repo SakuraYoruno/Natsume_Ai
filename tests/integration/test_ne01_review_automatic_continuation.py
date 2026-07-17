@@ -95,6 +95,9 @@ class _NodeGrantService:
     def __init__(self) -> None:
         self.continuation_claims: list[dict[str, Any]] = []
 
+    def validate_parent_binding(self, **_kwargs: Any) -> bool:
+        return True
+
     def derive(
         self,
         *,
