@@ -7,6 +7,8 @@ import { LifeSection } from './digitalLifeSectionShared.jsx'
 export default function DigitalLifeCapabilitySection({ model }) {
   const {
     capabilityGapData,
+    capabilityGapAvailable,
+    capabilityGapReasonCode,
     forgeQualitySummary,
     avgForgeHealth,
     forgeCriticalCount,
@@ -21,11 +23,18 @@ export default function DigitalLifeCapabilitySection({ model }) {
       actionTo="/observability/insights/global"
       actionLabel="Open Global Insights"
     >
+      {!capabilityGapAvailable ? (
+        <div className="mb-4">
+          <NoticeBanner variant="warning" title="Capability Forge projection unavailable">
+            {capabilityGapReasonCode || 'OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE'}
+          </NoticeBanner>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="Gap Detected" value={capabilityGapData?.detected_total ?? '--'} hint={`failed ${capabilityGapData?.failed_total ?? 0}`} tone="text-indigo-600" />
-        <MetricCard label="Forge Candidates" value={(capabilityGapData?.forge_candidates ?? []).length} hint={`runtime caps ${capabilityGapData?.active_runtime_capabilities ?? 0}`} tone="text-blue-600" />
-        <MetricCard label="Avg Health" value={(forgeQualitySummary?.tracked_proposals ?? 0) > 0 ? avgForgeHealth.toFixed(1) : '--'} hint={`tracked ${forgeQualitySummary?.tracked_proposals ?? 0}`} tone={avgForgeHealth >= 70 ? 'text-green-600' : 'text-orange-500'} />
-        <MetricCard label="Risk Proposals" value={forgeCriticalCount} hint={`unhealthy ${forgeUnhealthyCount}`} tone={forgeCriticalCount > 0 ? 'text-red-600' : forgeUnhealthyCount > 0 ? 'text-orange-500' : 'text-green-600'} />
+        <MetricCard label="Gap Detected" value={capabilityGapAvailable ? (capabilityGapData?.detected_total ?? '--') : '--'} hint={capabilityGapAvailable ? `failed ${capabilityGapData?.failed_total ?? 0}` : 'source unavailable'} tone={capabilityGapAvailable ? 'text-indigo-600' : 'text-gray-500'} />
+        <MetricCard label="Forge Candidates" value={capabilityGapAvailable ? (capabilityGapData?.forge_candidates ?? []).length : '--'} hint={capabilityGapAvailable ? `runtime caps ${capabilityGapData?.active_runtime_capabilities ?? 0}` : 'source unavailable'} tone={capabilityGapAvailable ? 'text-blue-600' : 'text-gray-500'} />
+        <MetricCard label="Avg Health" value={capabilityGapAvailable && (forgeQualitySummary?.tracked_proposals ?? 0) > 0 ? avgForgeHealth.toFixed(1) : '--'} hint={capabilityGapAvailable ? `tracked ${forgeQualitySummary?.tracked_proposals ?? 0}` : 'source unavailable'} tone={!capabilityGapAvailable ? 'text-gray-500' : avgForgeHealth >= 70 ? 'text-green-600' : 'text-orange-500'} />
+        <MetricCard label="Risk Proposals" value={capabilityGapAvailable ? forgeCriticalCount : '--'} hint={capabilityGapAvailable ? `unhealthy ${forgeUnhealthyCount}` : 'source unavailable'} tone={!capabilityGapAvailable ? 'text-gray-500' : forgeCriticalCount > 0 ? 'text-red-600' : forgeUnhealthyCount > 0 ? 'text-orange-500' : 'text-green-600'} />
       </div>
 
       {forgeCriticalCount > 0 ? (
@@ -60,7 +69,7 @@ export default function DigitalLifeCapabilitySection({ model }) {
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="暂无能力缺口热点" hint="缺口事件积累后会展示高压原因与失败比例。" className="p-4" />
+            <EmptyStateCard title={capabilityGapAvailable ? '暂无能力缺口热点' : '能力缺口投影不可用'} hint={capabilityGapAvailable ? '缺口事件积累后会展示高压原因与失败比例。' : '当前不展示零指标；待 Capability Forge 投影恢复后重试。'} className="p-4" />
           )}
         </div>
 
@@ -91,7 +100,7 @@ export default function DigitalLifeCapabilitySection({ model }) {
               })}
             </div>
           ) : (
-            <EmptyStateCard title="暂无 Forge 运行质量记录" hint="提案执行后会展示健康度、失败率与调优动作。" className="p-4" />
+            <EmptyStateCard title={capabilityGapAvailable ? '暂无 Forge 运行质量记录' : 'Forge 质量投影不可用'} hint={capabilityGapAvailable ? '提案执行后会展示健康度、失败率与调优动作。' : '当前不展示健康零值；待投影恢复后重试。'} className="p-4" />
           )}
         </div>
       </div>

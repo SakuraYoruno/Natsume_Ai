@@ -169,7 +169,16 @@ def refresh_insights_summary_projection() -> dict[str, int]:
     )
 
     window = int(INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES)
-    payload = _build_insights_summary_snapshot_sync(window)
+    from host_brain.app.observability_runtime.projection_ledger_view import (
+        ProjectionLedgerView,
+    )
+
+    store = _store()
+    payload = _build_insights_summary_snapshot_sync(
+        window,
+        projection_view=ProjectionLedgerView(store),
+        projection_store=store,
+    )
     cursor = _next_cursor(INSIGHTS_SUMMARY_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         INSIGHTS_SUMMARY_KIND,
@@ -192,10 +201,16 @@ def refresh_digital_life_overview_projection() -> dict[str, int]:
     )
 
     window = int(DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES)
+    from host_brain.app.observability_runtime.projection_ledger_view import (
+        ProjectionLedgerView,
+    )
+
+    store = _store()
     payload = asyncio.run(
         _build_digital_life_overview_snapshot_async(
             window,
-            projection_store=_store(),
+            projection_view=ProjectionLedgerView(store),
+            projection_store=store,
         )
     )
     cursor = _next_cursor(DIGITAL_LIFE_OVERVIEW_KIND, int(payload.get("timestamp") or 0))

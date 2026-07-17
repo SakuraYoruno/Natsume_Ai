@@ -381,11 +381,19 @@ class QueryProjectionStore:
         source_hash = digest_json(body)
         state = ProjectionDegradedState(degraded_state)
         public_degraded_detail = _public_degraded_detail(degraded_detail)
-        now = max(0, int(freshness_ts_ms if freshness_ts_ms is not None else self._clock()))
+        operation_now = max(0, int(self._clock()))
+        freshness = max(
+            0,
+            int(freshness_ts_ms if freshness_ts_ms is not None else operation_now),
+        )
         cursor = max(0, int(source_cursor))
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            self._assert_bound_lease_in_connection(conn, now=now)
+            # The leader fence and journal record when this projection write
+            # happened.  ``freshness_ts_ms`` is instead source evidence time;
+            # using an old evidence timestamp for the lease comparison would
+            # let an already-expired writer pass its fence.
+            self._assert_bound_lease_in_connection(conn, now=operation_now)
             current = conn.execute(
                 """
                 SELECT projection_version, source_cursor, source_digest, payload_digest
@@ -422,7 +430,7 @@ class QueryProjectionStore:
                     source_hash,
                     canonical_json(body),
                     source_reference,
-                    now,
+                    operation_now,
                 ),
             )
             journal = conn.execute(
@@ -472,10 +480,10 @@ class QueryProjectionStore:
                     source_hash,
                     canonical_json(body),
                     payload_digest,
-                    now,
+                    freshness,
                     state.value,
                     public_degraded_detail,
-                    now,
+                    operation_now,
                 ),
             )
             state_digest = digest_json(
@@ -507,10 +515,10 @@ class QueryProjectionStore:
                     journal_cursor,
                     cursor,
                     state_digest,
-                    now,
+                    freshness,
                     state.value,
                     public_degraded_detail,
-                    now,
+                    operation_now,
                 ),
             )
             conn.commit()

@@ -1786,7 +1786,8 @@ def test_digital_life_overview_view_model_lives_in_life_feature() -> None:
     assert "getDigitalLifePollingInterval(pollingInterval, 60)" in controller
     assert "getDigitalLifePollingInterval(pollingInterval, 15)" in controller
     assert "buildDigitalLifeWiredDomains({" in controller
-    assert "buildDigitalLifeCapabilitySectionModel(capabilityGapData)" in controller
+    assert "buildDigitalLifeCapabilitySectionModel(" in controller
+    assert "capabilityGapProjection" in controller
     assert "buildDigitalLifeSecondarySectionsModel({" in controller
     assert "buildDigitalLifeGatewaySectionModel({" in controller
     assert "buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })" in controller
@@ -4319,6 +4320,32 @@ def test_insights_global_view_model_lives_in_observability_feature() -> None:
     assert "rejection_rate > 20" not in component
     assert "abort_rate > 30" not in component
     assert "failure_rate || 0" not in component
+
+
+def test_capability_forge_unavailable_is_visible_at_every_stats_consumer() -> None:
+    layout = (APP_SHELL / "Layout.jsx").read_text(encoding="utf-8")
+    risk_bar = (
+        OPERATIONS_COMPONENTS / "ForgeRiskActionBar.jsx"
+    ).read_text(encoding="utf-8")
+    insights_section = (
+        OBSERVABILITY_COMPONENTS
+        / "insights"
+        / "global"
+        / "CapabilityGapStatsSection.jsx"
+    ).read_text(encoding="utf-8")
+    alerts_queries = (
+        MONITOR_SRC / "features" / "observability" / "alertsQueries.js"
+    ).read_text(encoding="utf-8")
+    alerts_surface = (
+        OBSERVABILITY_COMPONENTS / "alerts" / "AlertsCenterSurface.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "queryError: capabilityGapError" in layout
+    assert "capabilityGapError={capabilityGapError}" in layout
+    assert "Capability Forge unavailable" in risk_bar
+    assert "Capability Forge projection unavailable" in insights_section
+    assert "capabilityGapError: capabilityGapResult.error" in alerts_queries
+    assert "Capability Forge projection unavailable" in alerts_surface
 
 
 def test_insights_safety_view_model_lives_in_observability_feature() -> None:

@@ -20,25 +20,32 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
 from host_brain.app.obs_routes_core import (
     router,
     _env_int,
-    _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
+)
+from host_brain.app.obs_route_ports import (
+    ObsRoutePorts,
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
 )
 from host_brain.app.observability_runtime.remaining_query_projection import (
     AGENT_LOOP_INDEX_KEY,
     AGENT_LOOP_KIND,
-    read,
+    read_from_store,
     response_meta,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 _PROMPT_BUILDER_STATS_CACHE_TTL_MS = _env_int("OBS_PROMPT_BUILDER_STATS_CACHE_TTL_MS", 5000, minimum=0)
@@ -103,9 +110,14 @@ class UIAssertionStatsResponse(BaseModel):
 
 
 @router.get("/ui-assertion/stats", response_model=UIAssertionStatsResponse)
-def get_ui_assertion_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_ui_assertion_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #50: UIAssertionGuard 统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     try:
@@ -157,9 +169,14 @@ class FailureStatsResponse(BaseModel):
 
 
 @router.get("/failure/stats", response_model=FailureStatsResponse)
-def get_failure_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_failure_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #53: FailureMatrix 失败事件统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(ledger, "failure_log", "error_log", start_ms=since_ms, end_ms=now)
@@ -213,9 +230,14 @@ class PermissionStatsResponse(BaseModel):
 
 
 @router.get("/permission/stats", response_model=PermissionStatsResponse)
-def get_permission_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_permission_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #54: PermissionGuard 权限拒绝统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -302,9 +324,14 @@ class SchedulerHistoryResponse(BaseModel):
 
 
 @router.get("/scheduler/history", response_model=SchedulerHistoryResponse)
-def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_scheduler_history(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #55: TaskScheduler 执行历史趋势。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -415,9 +442,14 @@ class ActionPlanStatsResponse(BaseModel):
 
 
 @router.get("/action-plan/stats", response_model=ActionPlanStatsResponse)
-def get_action_plan_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_action_plan_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #56: ActionPlan 执行成功率/指令类型分布。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -491,9 +523,14 @@ class MemoryGuardStatsResponse(BaseModel):
 
 
 @router.get("/memory-guard/stats", response_model=MemoryGuardStatsResponse)
-def get_memory_guard_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_memory_guard_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #59: MemoryGuard 宪法校验统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -561,9 +598,14 @@ class StateArbiterStatsResponse(BaseModel):
 
 
 @router.get("/state-arbiter/stats", response_model=StateArbiterStatsResponse)
-def get_state_arbiter_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_state_arbiter_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #60: StateArbiter 事实仲裁统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -614,9 +656,14 @@ class ContextCompressorStatsResponse(BaseModel):
 
 
 @router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
-def get_context_compressor_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_context_compressor_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #61: ContextCompressor 压缩效率统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -675,54 +722,140 @@ class PromptBuilderStatsResponse(BaseModel):
     timestamp: int
 
 
-@router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
-def get_prompt_builder_stats(window_minutes: int = Query(60, ge=1, le=10080)):
-    """Ref #65: PromptBuilder 构建统计。"""
-    def _build_response() -> PromptBuilderStatsResponse:
-        ledger = get_projection_ledger_view()
-        now = _now_ms()
-        since_ms = now - window_minutes * 60 * 1000
-        rows = _fetch_first_available_rows(
-            ledger,
-            "prompt_builder_log",
-            "audit_log",
-            "error_log",
-            start_ms=since_ms,
-            end_ms=now,
-        )
-        pb_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in ("PROMPT_BUILT", "PROMPT_INJECTION", "PROMPT_BUILDER", "INJECTION_DETECTED"))]
-        total = len(pb_rows)
-        injection_detected_count = sum(1 for r in pb_rows if "INJECTION_DETECTED" in str(r.get("audit_tag") or "").upper())
-        injection_blocked_count = sum(1 for r in pb_rows if "INJECTION_BLOCKED" in str(r.get("audit_tag") or "").upper())
-        injection_detection_rate = round(injection_detected_count / total * 100, 1) if total > 0 else None
-        degraded_count = sum(1 for r in pb_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
-        high_risk_count = 0
-        critical_risk_count = 0
-        slot_counter: Counter = Counter()
-        msg_lens: list = []
-        for r in pb_rows:
-            try:
-                detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-            except Exception:
-                detail = {}
-            risk_level = str(detail.get("risk_level") or r.get("risk_level") or "").upper()
-            if risk_level == "HIGH":
-                high_risk_count += 1
-            elif risk_level == "CRITICAL":
-                critical_risk_count += 1
-            for slot in list(detail.get("slots_filled") or r.get("slots_filled") or []):
-                slot_counter[str(slot)] += 1
-            msg_len = int(detail.get("user_message_len") or r.get("user_message_len") or 0)
-            if msg_len > 0:
-                msg_lens.append(msg_len)
-        total_slot_fills = sum(slot_counter.values())
-        return PromptBuilderStatsResponse(window_minutes=window_minutes, total_builds=total, injection_detected_count=injection_detected_count, injection_blocked_count=injection_blocked_count, injection_detection_rate=injection_detection_rate, high_risk_count=high_risk_count, critical_risk_count=critical_risk_count, slot_fill_distribution=[{"slot": s, "count": c, "pct": round(c / total_slot_fills * 100, 1) if total_slot_fills > 0 else 0.0} for s, c in slot_counter.most_common(10)], avg_user_message_len=round(sum(msg_lens) / len(msg_lens), 1) if msg_lens else None, degraded_count=degraded_count, timestamp=now)
+def build_prompt_builder_stats_from_view(
+    projection_view: Any,
+    *,
+    window_minutes: int,
+) -> PromptBuilderStatsResponse:
+    """Build prompt statistics from one explicitly supplied read view."""
 
-    return _get_obs_route_cached_response(
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+    rows = _fetch_first_available_rows(
+        projection_view,
+        "prompt_builder_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
+    pb_rows = [
+        row
+        for row in rows
+        if any(
+            tag
+            in str(
+                row.get("audit_tag")
+                or row.get("stage")
+                or row.get("reason_code")
+                or ""
+            ).upper()
+            for tag in (
+                "PROMPT_BUILT",
+                "PROMPT_INJECTION",
+                "PROMPT_BUILDER",
+                "INJECTION_DETECTED",
+            )
+        )
+    ]
+    total = len(pb_rows)
+    injection_detected_count = sum(
+        1
+        for row in pb_rows
+        if "INJECTION_DETECTED" in str(row.get("audit_tag") or "").upper()
+    )
+    injection_blocked_count = sum(
+        1
+        for row in pb_rows
+        if "INJECTION_BLOCKED" in str(row.get("audit_tag") or "").upper()
+    )
+    injection_detection_rate = (
+        round(injection_detected_count / total * 100, 1) if total > 0 else None
+    )
+    degraded_count = sum(
+        1
+        for row in pb_rows
+        if "DEGRADED"
+        in str(row.get("audit_tag") or row.get("stage") or "").upper()
+    )
+    high_risk_count = 0
+    critical_risk_count = 0
+    slot_counter: Counter = Counter()
+    message_lengths: list[int] = []
+    for row in pb_rows:
+        try:
+            detail = (
+                json.loads(row.get("detail") or "{}")
+                if isinstance(row.get("detail"), str)
+                else {}
+            )
+        except Exception:
+            detail = {}
+        risk_level = str(
+            detail.get("risk_level") or row.get("risk_level") or ""
+        ).upper()
+        if risk_level == "HIGH":
+            high_risk_count += 1
+        elif risk_level == "CRITICAL":
+            critical_risk_count += 1
+        for slot in list(
+            detail.get("slots_filled") or row.get("slots_filled") or []
+        ):
+            slot_counter[str(slot)] += 1
+        message_length = int(
+            detail.get("user_message_len") or row.get("user_message_len") or 0
+        )
+        if message_length > 0:
+            message_lengths.append(message_length)
+    total_slot_fills = sum(slot_counter.values())
+    return PromptBuilderStatsResponse(
+        window_minutes=window_minutes,
+        total_builds=total,
+        injection_detected_count=injection_detected_count,
+        injection_blocked_count=injection_blocked_count,
+        injection_detection_rate=injection_detection_rate,
+        high_risk_count=high_risk_count,
+        critical_risk_count=critical_risk_count,
+        slot_fill_distribution=[
+            {
+                "slot": slot,
+                "count": count,
+                "pct": (
+                    round(count / total_slot_fills * 100, 1)
+                    if total_slot_fills > 0
+                    else 0.0
+                ),
+            }
+            for slot, count in slot_counter.most_common(10)
+        ],
+        avg_user_message_len=(
+            round(sum(message_lengths) / len(message_lengths), 1)
+            if message_lengths
+            else None
+        ),
+        degraded_count=degraded_count,
+        timestamp=now,
+    )
+
+
+@router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
+@fail_closed_projection_route
+def get_prompt_builder_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+    route_ports: Annotated[ObsRoutePorts, Depends(require_obs_route_ports)],
+):
+    """Ref #65: PromptBuilder 构建统计。"""
+    return route_ports.response_cache.get_or_build(
         cache_name="prompt_builder_stats",
         cache_key={"window_minutes": int(window_minutes)},
         ttl_ms=_PROMPT_BUILDER_STATS_CACHE_TTL_MS,
-        builder=_build_response,
+        wait_timeout_s=5.0,
+        builder=lambda: build_prompt_builder_stats_from_view(
+            projection_view,
+            window_minutes=window_minutes,
+        ),
     )
 
 
@@ -744,9 +877,14 @@ class EpisodicStoreStatsResponse(BaseModel):
 
 
 @router.get("/episodic-store/stats", response_model=EpisodicStoreStatsResponse)
-def get_episodic_store_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_episodic_store_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #66: EpisodicStore 写入统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_first_available_rows(
@@ -815,9 +953,14 @@ class ChainStatsResponse(BaseModel):
 
 
 @router.get("/chain/stats", response_model=ChainStatsResponse)
-def get_chain_stats(window_minutes: int = Query(60, ge=1, le=10080)):
+@fail_closed_projection_route
+def get_chain_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #82: 请求处理阶段统计（Phase XIV v4 cortex_orchestrator 架构）。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
@@ -908,11 +1051,20 @@ class AgentLoopHistoryResponse(BaseModel):
 
 
 @router.get("/agent-loop/history", response_model=AgentLoopHistoryResponse)
-def get_agent_loop_history(window_minutes: int = Query(1440, ge=1, le=10080), limit: int = Query(10, ge=1, le=50)):
+def get_agent_loop_history(
+    window_minutes: int = Query(1440, ge=1, le=10080),
+    limit: int = Query(10, ge=1, le=50),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
     """Ref #86: 只读 Agent Loop 历史投影。"""
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    payload, meta = read(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
     rows = [
         dict(row)
         for row in list((payload or {}).get("history") or [])
@@ -950,10 +1102,15 @@ class ErrorHeatmapResponse(BaseModel):
 
 
 @router.get("/error-heatmap", response_model=ErrorHeatmapResponse)
-def get_error_heatmap(window_hours: int = Query(24, ge=1, le=168)):
+@fail_closed_projection_route
+def get_error_heatmap(
+    window_hours: int = Query(24, ge=1, le=168),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """Ref #88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。"""
     import datetime as _dt
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_hours * 3600 * 1000
     try:

@@ -68,6 +68,22 @@ def read(
     return dict(document.payload), meta
 
 
+def read_from_store(
+    store: QueryProjectionStore,
+    kind: str,
+    key: str,
+    *,
+    max_age_ms: int = REMAINING_QUERY_MAX_AGE_MS,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read one materialized document through an explicit app-local store."""
+
+    document = store.get(kind, key)
+    meta = projection_meta(kind, key, document, max_age_ms=max_age_ms)
+    if document is None or not meta["available"]:
+        return None, meta
+    return dict(document.payload), meta
+
+
 def response_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
     """Stable flat metadata shared by legacy response DTOs."""
 
@@ -597,6 +613,7 @@ __all__ = [
     "WORLD_SNAPSHOT_KIND",
     "read",
     "read_all",
+    "read_from_store",
     "refresh_remaining_query_projections",
     "response_meta",
 ]

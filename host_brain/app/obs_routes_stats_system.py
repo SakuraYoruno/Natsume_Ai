@@ -10,12 +10,19 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Annotated, Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from host_brain.app.observability_runtime.health_device_projection import (
     DEVICE_MAX_AGE_MS,
     DEVICE_STATUS_KIND,
@@ -25,11 +32,9 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     CHECKPOINT_INDEX_KEY,
     CHECKPOINT_INDEX_KIND,
     CHECKPOINT_KIND,
-    read,
+    read_from_store,
     response_meta,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
-from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -187,11 +192,14 @@ class VtsStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/vts/stats", response_model=VtsStatsResponse)
+@fail_closed_projection_route
 def get_vts_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -310,12 +318,15 @@ class DistillationStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/distillation/stats", response_model=DistillationStatsResponse)
+@fail_closed_projection_route
 def get_distillation_stats(
     window_minutes: int = Query(1440, ge=1, le=43200, description="统计窗口（分钟，默认 24h）"),
     limit: int = Query(10, ge=1, le=50, description="最近循环条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -405,12 +416,15 @@ class WeChatStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/wechat/stats", response_model=WeChatStatsResponse)
+@fail_closed_projection_route
 def get_wechat_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近事件条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #37: WeChat 通道统计 — 通道健康状态、频率限制统计、最近 channel_io_log 事件。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -550,11 +564,14 @@ class RetentionStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/retention/stats", response_model=RetentionStatsResponse)
+@fail_closed_projection_route
 def get_retention_stats(
     limit: int = Query(5, ge=1, le=20, description="最近执行记录条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #34: AuditRetention 保留策略执行统计。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
 
     # 从 error_log 中查询 S_AUDIT_RETENTION 阶段的记录
@@ -636,13 +653,16 @@ class QaStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/qa/stats", response_model=QaStatsResponse)
+@fail_closed_projection_route
 def get_qa_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近违规条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #40: QA 违规统计 — 违规码分布、降级率、重写成功率、时序趋势、最近违规列表。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -758,12 +778,15 @@ class LlmCallStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/llm/call-stats", response_model=LlmCallStatsResponse)
+@fail_closed_projection_route
 def get_llm_call_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #41: LLM 调用成本统计 — 按 model_id 分组的 token 消耗/平均延迟/调用次数。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -890,10 +913,16 @@ class CheckpointDetailResponse(BaseModel):
 def get_checkpoints(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
     include_expired: bool = Query(False, description="是否包含已超时的 checkpoint"),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
 ):
     """Ref #42: 从 durable checkpoint index projection 读取列表。"""
     now = _now_ms()
-    payload, meta = read(CHECKPOINT_INDEX_KIND, CHECKPOINT_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        CHECKPOINT_INDEX_KIND,
+        CHECKPOINT_INDEX_KEY,
+    )
     items: list[CheckpointItem] = []
     for r in list((payload or {}).get("items") or []):
         if not isinstance(r, Mapping):
@@ -920,10 +949,17 @@ def get_checkpoints(
 
 
 @router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
-def get_checkpoint_detail(checkpoint_id: str):
+def get_checkpoint_detail(
+    checkpoint_id: str,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
     """Ref #42: 单个 checkpoint 公共元数据；正文 payload 永不投影。"""
     now = _now_ms()
-    payload, meta = read(CHECKPOINT_KIND, checkpoint_id)
+    payload, meta = read_from_store(
+        projection_store,
+        CHECKPOINT_KIND,
+        checkpoint_id,
+    )
     if payload is None:
         raise HTTPException(
             status_code=404,
@@ -968,11 +1004,14 @@ class RateLimitBackendStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/rate-limit/backend-stats", response_model=RateLimitBackendStatsResponse)
+@fail_closed_projection_route
 def get_rate_limit_backend_stats(
     top_k: int = Query(20, ge=1, le=100, description="返回 Top-K 活跃 key"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
 
     # 尝试从 rate_limit_store_log 读取最新状态快照
@@ -1054,11 +1093,14 @@ class VaultStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/vault/stats", response_model=VaultStatsResponse)
+@fail_closed_projection_route
 def get_vault_stats(
     limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
 
     rows = []
@@ -1132,11 +1174,14 @@ class LlmRouteStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/llm/route-stats", response_model=LlmRouteStatsResponse)
+@fail_closed_projection_route
 def get_llm_route_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 

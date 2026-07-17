@@ -185,14 +185,29 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
     def forbidden(*_args, **_kwargs):
         raise AssertionError("GET touched a source")
 
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: EmptyStore())
+    empty_store = EmptyStore()
+    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: empty_store)
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
     monkeypatch.setattr(web_ui, "get_ledger", forbidden)
 
-    stats = agent_routes.get_agent_loop_stats(window_minutes=60, limit=10)
-    resident = agent_routes.get_memory_resident_context()
-    history = skill_routes.get_agent_loop_history(window_minutes=60, limit=10)
-    checkpoints = system_routes.get_checkpoints(limit=20, include_expired=False)
+    stats = agent_routes.get_agent_loop_stats(
+        window_minutes=60,
+        limit=10,
+        projection_store=empty_store,
+    )
+    resident = agent_routes.get_memory_resident_context(
+        projection_store=empty_store,
+    )
+    history = skill_routes.get_agent_loop_history(
+        window_minutes=60,
+        limit=10,
+        projection_store=empty_store,
+    )
+    checkpoints = system_routes.get_checkpoints(
+        limit=20,
+        include_expired=False,
+        projection_store=empty_store,
+    )
     now = datetime.now()
     timeline = web_ui.get_timeline_aggregation(
         start_time=now - timedelta(hours=1),
@@ -223,9 +238,8 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
 
 
 def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
-    tmp_path, monkeypatch
+    tmp_path,
 ) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_stats_agent as agent_routes
     from host_brain.app.observability_runtime import remaining_query_projection as projection
 
@@ -252,9 +266,11 @@ def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
         source_cursor=77,
         freshness_ts_ms=1,
     )
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: store)
-
-    response = agent_routes.get_agent_loop_stats(window_minutes=60, limit=10)
+    response = agent_routes.get_agent_loop_stats(
+        window_minutes=60,
+        limit=10,
+        projection_store=store,
+    )
 
     assert response.recent_loops == []
     assert response.projection_version == document.projection_version

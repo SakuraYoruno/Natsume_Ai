@@ -9,7 +9,10 @@ from unittest.mock import Mock
 import pytest
 
 from host_brain.app.obs_routes_trace import get_trace
-from host_brain.app.obs_route_ports import ObsRoutePorts
+from host_brain.app.obs_route_ports import (
+    ObsRoutePorts,
+    require_obs_projection_ledger_view,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.observability_runtime.projection_runtime import ProjectionOperatorReadModelService
 from host_brain.observability.projection_store import (
@@ -42,6 +45,20 @@ def _obs_request(store: QueryProjectionStore) -> SimpleNamespace:
     return ObsRequest(
         app=SimpleNamespace(state=SimpleNamespace(obs_route_ports=ports)),
     )
+
+
+def test_projection_ledger_view_is_built_from_each_obs_app_store(tmp_path):
+    first = _store(tmp_path / "first")
+    second = _store(tmp_path / "second")
+
+    first_view = require_obs_projection_ledger_view(_obs_request(first))
+    second_view = require_obs_projection_ledger_view(_obs_request(second))
+
+    assert first_view is not second_view
+    assert first_view._store is first
+    assert second_view._store is second
+    assert first_view.fail_closed is True
+    assert second_view.fail_closed is True
 
 
 def test_generic_kind_key_store_tracks_version_cursor_freshness_and_degraded_state(tmp_path):
@@ -132,6 +149,60 @@ def test_two_store_instances_compete_on_durable_lease_and_stale_fence_cannot_wri
     with second_store.bind_leader_lease(second_lease):
         accepted = second_store.upsert("trace", "req", {"value": "fresh"}, source_cursor=2)
     assert accepted.payload == {"value": "fresh"}
+
+
+def test_evidence_freshness_does_not_replace_operation_clock_for_lease_or_journal(
+    tmp_path,
+) -> None:
+    now = [1_000]
+    store = _store(tmp_path, clock=lambda: now[0])
+    lease = store.acquire_leader_lease("evidence-reader", lease_ms=10)
+    assert lease is not None
+
+    now[0] = 1_005
+    with store.bind_leader_lease(lease):
+        document = store.upsert(
+            "security_immune",
+            "current",
+            {"evidence": "old-but-within-source-policy"},
+            source_cursor=7,
+            freshness_ts_ms=123,
+        )
+
+    assert document.freshness_ts_ms == 123
+    with store._connect() as conn:  # noqa: SLF001 - physical clock contract
+        journal = conn.execute(
+            """
+            SELECT observed_ts_ms
+            FROM operator_query_projection_journal
+            WHERE projection_kind = 'security_immune' AND document_key = 'current'
+            """
+        ).fetchone()
+        persisted = conn.execute(
+            """
+            SELECT freshness_ts_ms, updated_ts_ms
+            FROM operator_query_projection_document
+            WHERE projection_kind = 'security_immune' AND document_key = 'current'
+            """
+        ).fetchone()
+    assert journal is not None and int(journal[0]) == 1_005
+    assert persisted is not None
+    assert (int(persisted[0]), int(persisted[1])) == (123, 1_005)
+
+    # If freshness were still reused as the lease clock, this old timestamp
+    # would make the expired lease appear live and the write would succeed.
+    now[0] = 1_011
+    with store.bind_leader_lease(lease):
+        with pytest.raises(QueryProjectionError) as fenced:
+            store.upsert(
+                "security_immune",
+                "next",
+                {"evidence": "must-not-write"},
+                source_cursor=8,
+                freshness_ts_ms=1,
+            )
+    assert fenced.value.reason_code == PROJECTION_LEASE_FENCED
+    assert store.get("security_immune", "next") is None
 
 
 def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_path):

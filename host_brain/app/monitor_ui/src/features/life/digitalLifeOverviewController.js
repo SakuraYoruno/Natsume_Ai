@@ -34,6 +34,7 @@ export function useDigitalLifeOverviewController() {
     vtsData,
     servicesData,
     capabilityGapData,
+    capabilityGapProjection,
     humanoidLoopData,
     humanoidLoopTrendData,
     humanoidLoopAlertsData,
@@ -278,7 +279,10 @@ export function useDigitalLifeOverviewController() {
     windowMinutes,
     wiredDomains,
   })
-  const capabilitySectionModel = buildDigitalLifeCapabilitySectionModel(capabilityGapData)
+  const capabilitySectionModel = buildDigitalLifeCapabilitySectionModel(
+    capabilityGapData,
+    capabilityGapProjection
+  )
   const gatewaySectionModel = buildDigitalLifeGatewaySectionModel({
     gatewayLoopLoadState,
     humanoidLoopAlertsData,
@@ -317,6 +321,7 @@ export function useDigitalLifeOverviewController() {
     runtimeSnapshot,
     promptStats,
     capabilityGapData,
+    capabilityGapProjection,
     modeMeta,
     lifeBodyModel,
     hasRuntimeSnapshot,

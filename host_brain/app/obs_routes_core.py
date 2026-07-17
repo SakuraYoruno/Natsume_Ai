@@ -20,12 +20,16 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
     require_obs_query_projection_store,
     require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -65,7 +69,6 @@ from host_brain.app.observability_runtime.process_state_projection import (
     RESOURCE_MANAGER_MAX_AGE_MS,
     read_process_projection,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
@@ -1145,6 +1148,19 @@ def _build_trace_summary(
         except Exception:
             total_latency_ms = None
 
+    # model_attempt_log records STARTED and terminal lifecycle rows.  Count
+    # logical invocations, not journal transitions; legacy rows without an
+    # attempt id remain individually countable for retired trace-only callers.
+    model_attempt_ids = {
+        str(row.get("attempt_id") or "").strip()
+        for row in llm_rows
+        if str(row.get("attempt_id") or "").strip()
+    }
+    unkeyed_llm_calls = sum(
+        1 for row in llm_rows if not str(row.get("attempt_id") or "").strip()
+    )
+    llm_call_count = len(model_attempt_ids) + unkeyed_llm_calls
+
     return {
         "request_id": request_id,
         "session_id": _first_present(
@@ -1170,7 +1186,7 @@ def _build_trace_summary(
         "governor_passed": audit_snapshot.get("governor_passed"),
         "final_response_chars": audit_snapshot.get("final_response_chars"),
         "airlock_blocked": any(bool(row.get("blocked")) for row in airlock_rows),
-        "llm_calls": len(llm_rows),
+        "llm_calls": llm_call_count,
         "total_latency_ms": total_latency_ms,
         "audit_snapshot": audit_snapshot or None,
     }
@@ -3177,12 +3193,14 @@ def get_graph_schema():
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
 @router.get("/metrics/timeseries", response_model=MetricsTimeseriesResponse)
+@fail_closed_projection_route
 def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """WARN-BE-003: 调用 MetricsTimeseriesService.query() 而非内联聚合逻辑。"""
-    projection_view = get_projection_ledger_view()
     svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000
@@ -3235,9 +3253,11 @@ def get_metrics_timeseries(
 # ---------------------------------------------------------------------------
 def get_llm_nodes(
     window_minutes: int = Query(60, ge=1, le=1440),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:

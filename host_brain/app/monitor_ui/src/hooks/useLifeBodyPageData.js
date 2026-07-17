@@ -46,6 +46,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const servicesData = data.servicesData || null
   const subsystemsData = data.subsystemsData || null
   const capabilityGapData = data.capabilityGapData || null
+  const capabilityGapProjection = data.capabilityGapProjection || {}
   const humanoidLoopData = data.humanoidLoopData || null
   const humanoidLoopTrendData = data.humanoidLoopTrendData || null
   const humanoidLoopAlertsData = data.humanoidLoopAlertsData || null
@@ -259,6 +260,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     servicesData,
     subsystemsData,
     capabilityGapData,
+    capabilityGapProjection,
     humanoidLoopData,
     humanoidLoopTrendData,
     humanoidLoopAlertsData,

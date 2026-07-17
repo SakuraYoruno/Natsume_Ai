@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Optional
+from typing import Annotated, Any, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from host_brain.observability.api_models import MetricsTimeseriesResponse, TimeseriesPoint
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -29,14 +32,16 @@ def _now_ms() -> int:
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
 @router.get("/metrics/timeseries", response_model=MetricsTimeseriesResponse)
+@fail_closed_projection_route
 def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """多维度时序数据（请求量/拒绝/延迟）。"""
     from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 
-    projection_view = get_projection_ledger_view()
     svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000

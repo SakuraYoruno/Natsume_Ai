@@ -224,6 +224,7 @@ def build_default_obs_application_ports(
                     ledger=ledger,
                     store=store,
                     canonical_db_path=db_path,
+                    life_snapshot_reader=life_snapshot,
                 )
             ),
         )

@@ -20,10 +20,13 @@ from host_brain.app.observability_runtime.live_source_projection import (
     GATEWAY_STATS_SOURCE_KIND,
     read_operator_live_projection,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
     require_obs_query_projection_store,
     require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -41,11 +44,12 @@ from .obs_routes_core import router, _now_ms, _safe_json
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/failure-events")
+@fail_closed_projection_route
 def get_failure_events(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
-    ledger: Any = Depends(get_projection_ledger_view),
+    ledger: Any = Depends(require_obs_projection_ledger_view),
 ):
     """
     Ref #115: 失败事件统计端点。

@@ -59,6 +59,7 @@ export function useDigitalLifeOverviewQuery({
     servicesData: query.data?.servicesData ?? null,
     subsystemsData: query.data?.subsystemsData ?? null,
     capabilityGapData: query.data?.capabilityGapData ?? null,
+    capabilityGapProjection: query.data?.capabilityGapProjection ?? {},
     humanoidLoopData: query.data?.humanoidLoopData ?? null,
     humanoidLoopTrendData: query.data?.humanoidLoopTrendData ?? null,
     humanoidLoopAlertsData: query.data?.humanoidLoopAlertsData ?? null,

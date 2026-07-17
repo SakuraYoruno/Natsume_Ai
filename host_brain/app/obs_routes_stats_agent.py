@@ -8,21 +8,27 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Annotated, Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from host_brain.app.observability_runtime.remaining_query_projection import (
     AGENT_LOOP_INDEX_KEY,
     AGENT_LOOP_KIND,
     RESIDENT_CONTEXT_INDEX_KEY,
     RESIDENT_CONTEXT_KIND,
-    read,
+    read_from_store,
     response_meta,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -84,11 +90,53 @@ class AgentLoopStatsResponse(BaseModel):
 def get_agent_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
     limit: int = Query(10, ge=1, le=50),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
 ):
     """P3: Agent Loop 详细统计 — 目标达成率、平均轮次、最近执行列表。"""
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
+    return _build_agent_loop_stats_response(
+        payload,
+        meta,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+
+
+def build_agent_loop_stats_from_store(
+    projection_store: Any,
+    *,
+    window_minutes: int,
+    limit: int,
+) -> AgentLoopStatsResponse:
+    """Build Agent Loop statistics from an explicit query projection store."""
+
+    payload, meta = read_from_store(
+        projection_store,
+        AGENT_LOOP_KIND,
+        AGENT_LOOP_INDEX_KEY,
+    )
+    return _build_agent_loop_stats_response(
+        payload,
+        meta,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+
+
+def _build_agent_loop_stats_response(
+    payload: Mapping[str, Any] | None,
+    meta: Mapping[str, Any],
+    *,
+    window_minutes: int,
+    limit: int,
+) -> AgentLoopStatsResponse:
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    payload, meta = read(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)
     loops = [
         dict(item)
         for item in list((payload or {}).get("loops") or [])
@@ -142,8 +190,11 @@ class MemoryStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/memory/stats", response_model=MemoryStatsResponse)
+@fail_closed_projection_route
 def get_memory_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #26: Memory 子系统详细统计。
 
@@ -153,7 +204,7 @@ def get_memory_stats(
     - ContextCompressor：压缩率（压缩前/后 token 数比值）
     - LongTermDistiller：蒸馏次数、蒸馏成功率
     """
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -328,10 +379,16 @@ class ResidentMemoryContextResponse(BaseModel):
 
 
 @router.get("/memory/resident-context", response_model=ResidentMemoryContextResponse)
-def get_memory_resident_context():
+def get_memory_resident_context(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
     """Ref #126: 只读常驻上下文元数据投影，不扫描 canon 文件。"""
     now = _now_ms()
-    payload, meta = read(RESIDENT_CONTEXT_KIND, RESIDENT_CONTEXT_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        RESIDENT_CONTEXT_KIND,
+        RESIDENT_CONTEXT_INDEX_KEY,
+    )
 
     def item(value: Mapping[str, Any]) -> ResidentCanonFileItem:
         return ResidentCanonFileItem(

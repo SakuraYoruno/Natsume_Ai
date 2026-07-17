@@ -274,6 +274,7 @@ export default function Layout() {
   const activeNav = findActiveNav(location.pathname)
   const {
     statsData: capabilityGapData,
+    queryError: capabilityGapError,
   } = useCapabilityGapStatsQuery({
     windowMinutes: 1440,
     pollingEnabled: pollingEnabled && pageVisible,
@@ -397,6 +398,7 @@ export default function Layout() {
 
           <ForgeRiskActionBar
             capabilityGapData={capabilityGapData}
+            capabilityGapError={capabilityGapError}
             pollingEnabled={pollingEnabled}
             pollingInterval={pollingInterval}
             pollingTick={pollingTick}

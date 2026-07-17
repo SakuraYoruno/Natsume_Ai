@@ -348,25 +348,28 @@ D4 后独立 Obs 同时保留三条必须区分的数据流：
 create_obs_app
   → ObsApplicationPorts
   → 19 registered producer callbacks（registration，不是运行成功证明）
-      → 11 declared non-TYPED_UNAVAILABLE（非运行成功证明）
-          → 11 pure durable/static/app-owned source callbacks
+      → 16 declared non-TYPED_UNAVAILABLE（非运行成功证明）
+          → 16 durable/static/app-owned source callbacks
           → 0 process-local module-cache coupled callbacks
-      → 8 TYPED_UNAVAILABLE
+          → 7 DURABLE_READ_PARTIAL（缺 target 时仍写 typed unavailable）
+      → 3 TYPED_UNAVAILABLE
           → durable SOURCE_UNAVAILABLE
   → app-local ProjectionJobDaemon
   → QueryProjectionStore
-  → /health DEGRADED（missing=0，但 typed-unavailable=8）
+  → /health DEGRADED（missing=0，但 typed-unavailable=3、partial=7）
 
-36 identified production projection endpoints (35 HTTP + 1 WebSocket) / sessions cache
+36 identified production projection endpoints (35 HTTP + 1 WebSocket)
+and identified projection/stats queries / sessions + prompt cache
   → request.app.state.obs_route_ports
-  → app-local QueryProjectionStore / app-local response single-flight
+  → app-local QueryProjectionStore / ProjectionLedgerView / response single-flight
+  → 0 Obs-route consumers of compatibility global query helpers
 
 19 D4-migrated production GET routes
   → read_process_projection(explicit app-local store, ...)
   → no process store discovery
 ```
 
-19个 producer callback 执行路径不调用 `process_services`；11个非 typed-unavailable producer 都只读 durable/static/app-owned source。D4 将原19个间接 GET 改为必需显式 store 参数，Life/Operator 双 app 隔离和 BioOps 8 路由 locator-fail 回归已覆盖。Daemon start/run single-flight，关闭超时保留 retry graph。`obs_routes*.py` 仍有15个直接 `process_services` 词法边界（非 route 数），`capability_stats_projection/projection_ledger_view/remaining_query_projection` 等 helper 仍有其他全局 store，legacy `_default_daemon` 仍在，8个 typed-unavailable source也未注入；因此已识别 route 隔离、完整 source coverage与完整 Query Plane仍不能混为一谈。
+19个 producer callback 执行路径不调用 `process_services`。Security Immune只接受满足最小schema和时效的隐私过滤证据，证据freshness与lease/journal操作时钟分离；摘要在ledger failure/truncation时整体失败关闭，Forge只作为字段级unavailable；operator拒绝空Gateway健康对象，任一target写失败会令job失败；Runtime从durable Life与operator projections构造最小partial snapshot，缺Life槽位/readiness不冒充live，也不调用Agent/模型。Forge、Life Body、Organ三个整job仍 unavailable；sys-mode/history、真实Edge和Host endpoints未闭环。15个直接词法边界、三个非路由兼容helper定义与legacy daemon仍在；不能把部分source recovery写成完整Query Plane。
 
 ```text
 conversation.user_turn

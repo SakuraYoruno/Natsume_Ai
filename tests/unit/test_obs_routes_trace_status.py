@@ -117,6 +117,27 @@ def test_trace_summary_falls_back_to_bond_topic_when_voice_input_is_placeholder(
     assert summary["input_text"] == "贪吃蛇"
 
 
+def test_trace_summary_counts_model_attempt_lifecycle_once() -> None:
+    summary = _build_trace_summary(
+        request_id="req_obs_attempt",
+        intent_rows=[],
+        governor_rows=[],
+        retrieval_rows=[],
+        llm_rows=[
+            {"attempt_id": "attempt-1", "status": "started", "ts_ms": 1000},
+            {"attempt_id": "attempt-1", "status": "succeeded", "ts_ms": 1100},
+            {"attempt_id": "attempt-2", "status": "failed", "ts_ms": 1200},
+        ],
+        airlock_rows=[],
+        bond_rows=[],
+        memory_rows=[],
+        error_rows=[],
+        voice_rows=[],
+    )
+
+    assert summary["llm_calls"] == 2
+
+
 def test_normalize_trace_node_status_maps_governor_approve_to_ok() -> None:
     assert _normalize_trace_node_status("APPROVE", node_type="governor") == "OK"
 

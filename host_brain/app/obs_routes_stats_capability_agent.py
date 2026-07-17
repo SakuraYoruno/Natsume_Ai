@@ -25,9 +25,9 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Annotated, Any, Dict, List, Mapping, Optional
 
-from fastapi import HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.app.obs_routes_core import (
@@ -35,13 +35,60 @@ from host_brain.app.obs_routes_core import (
     _now_ms,
     _safe_json,
 )
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from host_brain.app.observability_runtime.capability_stats_projection import (
     filter_forge_candidates,
-    read_capability_forge_projection,
+    read_capability_forge_projection_from_store,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
+
+
+CAPABILITY_FORGE_PROJECTION_UNAVAILABLE = (
+    "OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE"
+)
+
+
+def _require_capability_forge_projection(
+    projection_store: Any,
+) -> Mapping[str, Any]:
+    """Fail closed when the durable Capability Forge read model is unavailable."""
+
+    try:
+        projected, meta = read_capability_forge_projection_from_store(
+            projection_store
+        )
+    except Exception:
+        projected = None
+        meta = {
+            "available": False,
+            "degraded_state": "SOURCE_UNAVAILABLE",
+            "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
+        }
+    if projected is None or not bool(meta.get("available", True)):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason_code": CAPABILITY_FORGE_PROJECTION_UNAVAILABLE,
+                "degraded_state": str(
+                    meta.get("degraded_state") or "SOURCE_UNAVAILABLE"
+                ),
+                "upstream_reason_code": str(
+                    meta.get("reason_code")
+                    or "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE"
+                ),
+                "projection_version": int(meta.get("projection_version") or 0),
+                "freshness_ts_ms": int(meta.get("freshness_ts_ms") or 0),
+                "retryable": True,
+            },
+        )
+    return projected
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +315,16 @@ def _dedupe_ordered_values(values: List[str], *, limit: int) -> List[str]:
 
 
 @router.get("/immune-gate/stats", response_model=ImmuneGateStatsResponse)
-def get_immune_gate_stats(window_minutes: int = Query(60, ge=1, le=10080), limit: int = Query(20, ge=1, le=200)):
+@fail_closed_projection_route
+def get_immune_gate_stats(
+    window_minutes: int = Query(60, ge=1, le=10080),
+    limit: int = Query(20, ge=1, le=200),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """免疫门统计。"""
     from collections import Counter
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     try:
@@ -300,12 +353,18 @@ def get_immune_gate_stats(window_minutes: int = Query(60, ge=1, le=10080), limit
 
 
 @router.get("/immune-gate/replay/{request_id}", response_model=ImmuneGateReplayResponse)
-def get_immune_gate_replay(request_id: str, limit: int = Query(120, ge=1, le=500)):
+@fail_closed_projection_route
+def get_immune_gate_replay(
+    request_id: str,
+    limit: int = Query(120, ge=1, le=500),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
+):
     """免疫门回放。"""
     request_key = str(request_id or "").strip()
     if not request_key:
         raise HTTPException(status_code=422, detail={"reason_code": "IMMUNE_REPLAY_INVALID_REQUEST_ID", "detail": "request_id is required"})
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     try:
         rows = ledger.fetch_by_request_id("voice_event_log", request_key) if hasattr(ledger, "fetch_by_request_id") else []
     except Exception:
@@ -402,13 +461,18 @@ def _build_retrieval_runtime_route_items(config: Any, *, kind: str) -> List[Retr
     return routes
 
 
-def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
+def _get_retrieval_runtime_sync(
+    request_id,
+    limit,
+    include_legacy,
+    projection_view,
+):
     if request_id is not None:
         request_id = str(request_id).strip() or None
     limit = int(limit if isinstance(limit, int) else getattr(limit, "default", 10))
     include_legacy = bool(include_legacy if isinstance(include_legacy, bool) else getattr(include_legacy, "default", False))
     now = _now_ms()
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     suite = None
     embed_cfg = None
     rows = []
@@ -483,13 +547,22 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
 
 
 @router.get("/retrieval/runtime", response_model=RetrievalRuntimeResponse)
+@fail_closed_projection_route
 async def get_retrieval_runtime(
     request_id: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=100),
     include_legacy: bool = Query(False),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """检索运行时配置与最近实际生效模型/降级情况。"""
-    return await asyncio.to_thread(_get_retrieval_runtime_sync, request_id, limit, include_legacy)
+    return await asyncio.to_thread(
+        _get_retrieval_runtime_sync,
+        request_id,
+        limit,
+        include_legacy,
+        projection_view,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -682,9 +755,70 @@ def _build_capability_gap_runtime_quality(snapshot: Optional[Mapping[str, Any]])
 
 
 @router.get("/capability-gaps/stats", response_model=CapabilityGapStatsResponse)
-def get_capability_gaps_stats(limit_recent: int = Query(20, ge=1, le=200), limit_hotspots: int = Query(8, ge=1, le=50), limit_candidates: int = Query(8, ge=1, le=50), min_candidate_detected: int = Query(3, ge=1, le=100), min_candidate_sessions: int = Query(2, ge=1, le=100), min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0), min_candidate_failed: int = Query(2, ge=0, le=100)):
+def get_capability_gaps_stats(
+    limit_recent: int = Query(20, ge=1, le=200),
+    limit_hotspots: int = Query(8, ge=1, le=50),
+    limit_candidates: int = Query(8, ge=1, le=50),
+    min_candidate_detected: int = Query(3, ge=1, le=100),
+    min_candidate_sessions: int = Query(2, ge=1, le=100),
+    min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0),
+    min_candidate_failed: int = Query(2, ge=0, le=100),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
     """能力缺口统计。"""
-    projected, _meta = read_capability_forge_projection()
+    projected = _require_capability_forge_projection(projection_store)
+    return build_capability_gaps_stats_from_projection(
+        projected,
+        limit_recent=limit_recent,
+        limit_hotspots=limit_hotspots,
+        limit_candidates=limit_candidates,
+        min_candidate_detected=min_candidate_detected,
+        min_candidate_sessions=min_candidate_sessions,
+        min_candidate_failure_rate=min_candidate_failure_rate,
+        min_candidate_failed=min_candidate_failed,
+    )
+
+
+def build_capability_gaps_stats_from_store(
+    projection_store: Any,
+    *,
+    limit_recent: int,
+    limit_hotspots: int,
+    limit_candidates: int,
+    min_candidate_detected: int,
+    min_candidate_sessions: int,
+    min_candidate_failure_rate: float,
+    min_candidate_failed: int,
+) -> CapabilityGapStatsResponse:
+    """Build Capability Gap statistics from an explicit projection store."""
+
+    projected = _require_capability_forge_projection(projection_store)
+    return build_capability_gaps_stats_from_projection(
+        projected,
+        limit_recent=limit_recent,
+        limit_hotspots=limit_hotspots,
+        limit_candidates=limit_candidates,
+        min_candidate_detected=min_candidate_detected,
+        min_candidate_sessions=min_candidate_sessions,
+        min_candidate_failure_rate=min_candidate_failure_rate,
+        min_candidate_failed=min_candidate_failed,
+    )
+
+
+def build_capability_gaps_stats_from_projection(
+    projected: Mapping[str, Any] | None,
+    *,
+    limit_recent: int,
+    limit_hotspots: int,
+    limit_candidates: int,
+    min_candidate_detected: int,
+    min_candidate_sessions: int,
+    min_candidate_failure_rate: float,
+    min_candidate_failed: int,
+) -> CapabilityGapStatsResponse:
+    """Shape a previously validated Capability Forge projection payload."""
+
     envelope = dict(projected or {})
     snapshot = dict(envelope.get("gap") or {})
     candidates, thresholds = filter_forge_candidates(
@@ -703,9 +837,17 @@ def get_capability_gaps_stats(limit_recent: int = Query(20, ge=1, le=200), limit
 
 
 @router.get("/capability-gaps/forge-candidates", response_model=CapabilityGapForgeCandidatesResponse)
-def get_capability_gap_forge_candidates(limit: int = Query(20, ge=1, le=200), min_candidate_detected: int = Query(3, ge=1, le=100), min_candidate_sessions: int = Query(2, ge=1, le=100), min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0), min_candidate_failed: int = Query(2, ge=0, le=100)):
+def get_capability_gap_forge_candidates(
+    limit: int = Query(20, ge=1, le=200),
+    min_candidate_detected: int = Query(3, ge=1, le=100),
+    min_candidate_sessions: int = Query(2, ge=1, le=100),
+    min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0),
+    min_candidate_failed: int = Query(2, ge=0, le=100),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
     """能力缺口 Forge 候选列表。"""
-    projected, _meta = read_capability_forge_projection()
+    projected = _require_capability_forge_projection(projection_store)
     snapshot = dict(dict(projected or {}).get("gap") or {})
     selected, thresholds = filter_forge_candidates(
         list(snapshot.get("forge_candidates") or []),
@@ -746,8 +888,13 @@ def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> Capa
 
 
 @router.get("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalListResponse)
-def list_capability_forge_proposals(status: Optional[str] = Query(None), limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeProposalListResponse:
-    projected, _meta = read_capability_forge_projection()
+def list_capability_forge_proposals(
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgeProposalListResponse:
+    projected = _require_capability_forge_projection(projection_store)
     envelope = dict(projected or {})
     status_filter = str(status or "").strip().upper()
     items = [
@@ -760,8 +907,11 @@ def list_capability_forge_proposals(status: Optional[str] = Query(None), limit: 
 
 
 @router.get("/capability-gaps/forge-proposals/{proposal_id}", response_model=CapabilityForgeProposalResponse)
-def get_capability_forge_proposal(proposal_id: str) -> CapabilityForgeProposalResponse:
-    projected, _meta = read_capability_forge_projection()
+def get_capability_forge_proposal(
+    proposal_id: str,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgeProposalResponse:
+    projected = _require_capability_forge_projection(projection_store)
     envelope = dict(projected or {})
     proposal = next(
         (
@@ -811,21 +961,31 @@ def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> 
 
 
 @router.get("/capability-gaps/forge-runtime/stats", response_model=CapabilityForgeRuntimeStatsResponse)
-def capability_forge_runtime_stats() -> CapabilityForgeRuntimeStatsResponse:
-    projected, _meta = read_capability_forge_projection()
+def capability_forge_runtime_stats(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgeRuntimeStatsResponse:
+    projected = _require_capability_forge_projection(projection_store)
     snapshot = dict(dict(projected or {}).get("runtime_stats") or {})
     return CapabilityForgeRuntimeStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), counters={str(k): int(v or 0) for k, v in dict(snapshot.get("counters") or {}).items()}, apply_rate=float(snapshot.get("apply_rate") or 0.0))
 
 
 @router.get("/capability-gaps/forge-runtime/tuning", response_model=CapabilityForgeRuntimeTuningResponse)
-def capability_forge_runtime_tuning_stats(limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeRuntimeTuningResponse:
-    projected, _meta = read_capability_forge_projection()
+def capability_forge_runtime_tuning_stats(
+    limit: int = Query(20, ge=1, le=200),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgeRuntimeTuningResponse:
+    projected = _require_capability_forge_projection(projection_store)
     snapshot = dict(dict(projected or {}).get("runtime_tuning") or {})
     return CapabilityForgeRuntimeTuningResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary={str(k): int(v or 0) for k, v in dict(snapshot.get("summary") or {}).items()}, items=[dict(item) for item in list(snapshot.get("items") or [])[:limit] if isinstance(item, Mapping)])
 
 
 @router.get("/capability-gaps/forge-runtime/quality", response_model=CapabilityForgeRuntimeQualityResponse)
-def capability_forge_runtime_quality_stats(limit: int = Query(20, ge=1, le=200)) -> CapabilityForgeRuntimeQualityResponse:
-    projected, _meta = read_capability_forge_projection()
+def capability_forge_runtime_quality_stats(
+    limit: int = Query(20, ge=1, le=200),
+    *,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgeRuntimeQualityResponse:
+    projected = _require_capability_forge_projection(projection_store)
     snapshot = dict(dict(projected or {}).get("runtime_quality") or {})
     return CapabilityForgeRuntimeQualityResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), summary=dict(snapshot.get("summary") or {}), items=[dict(item) for item in list(snapshot.get("items") or [])[:limit] if isinstance(item, Mapping)])

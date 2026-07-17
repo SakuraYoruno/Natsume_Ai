@@ -128,9 +128,23 @@ def require_obs_query_projection_store(connection: HTTPConnection) -> Any:
     return require_obs_route_ports(connection).require_query_projection_store()
 
 
+def require_obs_projection_ledger_view(connection: HTTPConnection) -> Any:
+    """Build a read-only ledger facade from this Obs application's store."""
+
+    from host_brain.app.observability_runtime.projection_ledger_view import (
+        ProjectionLedgerView,
+    )
+
+    return ProjectionLedgerView(
+        require_obs_query_projection_store(connection),
+        fail_closed=True,
+    )
+
+
 __all__ = [
     "ObsRoutePorts",
     "ObsRouteResponseCache",
+    "require_obs_projection_ledger_view",
     "require_obs_query_projection_store",
     "require_obs_route_ports",
 ]

@@ -35,6 +35,7 @@ export default function AlertsCenterSurface({
   runtimeSnapshot,
   promptStats,
   capabilityGapData,
+  capabilityGapError,
   serviceAlerts,
   allAlerts,
   reasonBreakdown,
@@ -90,6 +91,12 @@ export default function AlertsCenterSurface({
       {error ? (
         <NoticeBanner variant="error" title="告警数据加载失败">
           {error.message}
+        </NoticeBanner>
+      ) : null}
+
+      {capabilityGapError ? (
+        <NoticeBanner variant="warning" title="Capability Forge projection unavailable">
+          {capabilityGapError}
         </NoticeBanner>
       ) : null}
 

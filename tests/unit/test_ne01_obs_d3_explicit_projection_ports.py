@@ -54,8 +54,8 @@ def test_default_obs_projection_factory_has_registered_19_of_19_coverage(
         assert ports.projection_coverage == "REGISTERED_19_OF_19"
         assert ports.missing_projection_jobs == ()
         assert all(job.source_mode != "CALLER_DEFINED" for job in ports.projection_jobs)
-        assert sum(job.source_mode == TYPED_UNAVAILABLE for job in ports.projection_jobs) == 8
-        assert sum(job.source_mode != TYPED_UNAVAILABLE for job in ports.projection_jobs) == 11
+        assert sum(job.source_mode == TYPED_UNAVAILABLE for job in ports.projection_jobs) == 3
+        assert sum(job.source_mode != TYPED_UNAVAILABLE for job in ports.projection_jobs) == 16
         assert process_container.application_ports is before
     finally:
         assert ports.close_owned_resources is not None
@@ -77,17 +77,24 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 11
+        ) == 16
         assert sum(
             job.source_mode == TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 8
+        ) == 3
 
         route_sources = [
             path.read_text(encoding="utf-8-sig")
             for path in (ROOT / "host_brain" / "app").glob("obs_routes*.py")
         ]
         assert sum(source.count("process_services") for source in route_sources) == 15
+        assert sum(
+            source.count("get_projection_ledger_view") for source in route_sources
+        ) == 0
+        assert sum(
+            source.count("read_capability_forge_projection(")
+            for source in route_sources
+        ) == 0
 
         process_projection_source = (
             ROOT
@@ -109,8 +116,8 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             .read_text(encoding="utf-8")
         )["capabilities"]["explicit_composition_root"]
         assert machine["obs_producer_source_scope_breakdown"] == {
-            "TYPED_UNAVAILABLE": 8,
-            "PURE_DURABLE_STATIC_OR_APP_OWNED": 11,
+            "TYPED_UNAVAILABLE": 3,
+            "PURE_DURABLE_STATIC_OR_APP_OWNED": 16,
             "PROCESS_LOCAL_MODULE_CACHE_COUPLED": 0,
         }
         assert machine["obs_process_local_module_cache_coupled_jobs"] == []
@@ -125,8 +132,9 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
         )
         assert (
             machine["obs_other_global_query_projection_locator_boundary"]
-            == "PRESENT_OUTSIDE_D4_19_GET_SLICE"
+            == "COMPATIBILITY_HELPERS_PRESENT_NO_OBS_ROUTE_CONSUMERS"
         )
+        assert machine["obs_route_global_query_projection_helper_occurrences"] == 0
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()
@@ -255,13 +263,8 @@ def test_host_owned_sources_are_durable_typed_unavailable_documents(
         }
         assert set(unavailable_jobs) == {
             "capability-forge-operator",
-            "digital-life-overview",
-            "insights-summary",
             "life-body",
-            "operator-live-state",
             "organ-tribe",
-            "runtime-snapshot",
-            "security-immune",
         }
         document = ports.query_projection_store.get(
             "capability_forge_operator",
@@ -416,9 +419,33 @@ def test_summary_and_life_body_builders_receive_explicit_projection_port(
     from host_brain.app import obs_routes_summary as summary
     from host_brain.observability.api_models import SessionsResponse
 
+    class ProjectionDocument:
+        schema_version = "Natsume.operator.query_projection.v1"
+        projection_version = 1
+        projection_cursor = 1
+        source_cursor = 1
+        source_digest = "sha256:test"
+        degraded_state = ProjectionDegradedState.HEALTHY
+        degraded_detail = None
+
+        def __init__(self, payload):  # noqa: ANN001
+            self.payload = payload
+            self.freshness_ts_ms = int(time.time() * 1000)
+
     class ProjectionPort:
-        def get(self, *_args):  # noqa: ANN002
+        def get(self, kind, _key):  # noqa: ANN001
+            if kind == "service_health":
+                return ProjectionDocument({"services": [], "timestamp": 1})
+            if kind == "capability_forge_operator":
+                return ProjectionDocument({"gap": {}})
             return None
+
+    class ProjectionView:
+        last_degraded_reason = None
+
+        @staticmethod
+        def fetch_by_time_range(*_args, **_kwargs):  # noqa: ANN002, ANN003
+            return []
 
     projection_store = ProjectionPort()
     observed: list[object] = []
@@ -442,7 +469,7 @@ def test_summary_and_life_body_builders_receive_explicit_projection_port(
         "get_vts_stats",
         "get_memory_stats",
         "get_subsystems_stats",
-        "get_capability_gaps_stats",
+        "build_capability_gaps_stats_from_projection",
         "get_input_humanoid_loop_stats",
         "get_input_humanoid_loop_trend",
         "get_input_humanoid_loop_alerts",
@@ -465,7 +492,8 @@ def test_summary_and_life_body_builders_receive_explicit_projection_port(
 
     payload = asyncio.run(
         summary._build_digital_life_overview_snapshot_async(
-            60,
+            360,
+            projection_view=ProjectionView(),
             projection_store=projection_store,
         )
     )

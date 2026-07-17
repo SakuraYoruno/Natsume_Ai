@@ -46,6 +46,23 @@ def read_capability_forge_projection() -> tuple[dict[str, Any] | None, dict[str,
     return dict(document.payload), meta
 
 
+def read_capability_forge_projection_from_store(
+    store: Any,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read Capability Forge state through an explicitly composed store."""
+
+    document = store.get(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY)
+    meta = projection_meta(
+        CAPABILITY_FORGE_OPERATOR_KIND,
+        CAPABILITY_FORGE_OPERATOR_KEY,
+        document,
+        max_age_ms=CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS,
+    )
+    if document is None or not meta["available"]:
+        return None, meta
+    return dict(document.payload), meta
+
+
 def filter_forge_candidates(
     candidates: list[Any],
     *,
@@ -142,5 +159,6 @@ __all__ = [
     "CAPABILITY_FORGE_OPERATOR_KIND",
     "filter_forge_candidates",
     "read_capability_forge_projection",
+    "read_capability_forge_projection_from_store",
     "refresh_capability_forge_projection",
 ]

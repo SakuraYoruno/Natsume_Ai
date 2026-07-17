@@ -15,7 +15,7 @@ export function useAlertsCenterQuery({
   pollingInterval = 30,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [errorRes, healthRes, capabilityGapRes] = await Promise.all([
+    const [errorRes, healthRes, capabilityGapResult] = await Promise.all([
       fetchErrors({ window_minutes: windowMinutes, limit: 100 }),
       fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
       fetchCapabilityGapStats({
@@ -26,13 +26,19 @@ export function useAlertsCenterQuery({
         min_candidate_sessions: 2,
         min_candidate_failure_rate: 0.35,
         min_candidate_failed: 2,
-      }).catch(() => null),
+      })
+        .then((data) => ({ data, error: null }))
+        .catch((error) => ({
+          data: null,
+          error: error?.payload?.detail?.reason_code || error?.message || 'OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE',
+        })),
     ])
 
     return {
       errorRes,
       healthRes,
-      capabilityGapData: capabilityGapRes,
+      capabilityGapData: capabilityGapResult.data,
+      capabilityGapError: capabilityGapResult.error,
     }
   }, [windowMinutes])
 
@@ -51,5 +57,6 @@ export function useAlertsCenterQuery({
     errorRes: query.data?.errorRes ?? null,
     healthRes: query.data?.healthRes ?? null,
     capabilityGapData: query.data?.capabilityGapData ?? null,
+    capabilityGapError: query.data?.capabilityGapError ?? null,
   }
 }

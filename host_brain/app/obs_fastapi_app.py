@@ -366,13 +366,25 @@ def create_obs_app(
             for job in container.ports.projection_jobs
             if job.source_mode == TYPED_UNAVAILABLE
         ]
+        partial_jobs = [
+            {
+                "name": job.name,
+                "source_mode": job.source_mode,
+            }
+            for job in container.ports.projection_jobs
+            if str(job.source_mode).upper().endswith("_PARTIAL")
+        ]
         declared_non_typed_unavailable_jobs = [
             job.name
             for job in container.ports.projection_jobs
             if job.source_mode != TYPED_UNAVAILABLE
         ]
         return {
-            "status": "DEGRADED" if missing_jobs or unavailable_jobs else "OK",
+            "status": (
+                "DEGRADED"
+                if missing_jobs or unavailable_jobs or partial_jobs
+                else "OK"
+            ),
             "service": "obs",
             "composition": {
                 "projection_coverage": container.ports.projection_coverage,
@@ -391,8 +403,10 @@ def create_obs_app(
                     declared_non_typed_unavailable_jobs
                 ),
                 "typed_unavailable_job_count": len(unavailable_jobs),
+                "declared_partial_job_count": len(partial_jobs),
                 "missing_jobs": missing_jobs,
                 "unavailable_jobs": unavailable_jobs,
+                "partial_jobs": partial_jobs,
                 "source_modes": {
                     job.name: job.source_mode
                     for job in container.ports.projection_jobs

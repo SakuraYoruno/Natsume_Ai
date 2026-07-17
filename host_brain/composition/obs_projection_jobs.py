@@ -8,6 +8,7 @@ owned by the writer-capable Host runtime are represented by durable, typed
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -40,15 +41,12 @@ from host_brain.app.observability_runtime.health_device_projection import (
     load_device_status_projection_sources,
     load_health_projection_sources,
 )
-from host_brain.app.observability_runtime.live_source_projection import (
-    GATEWAY_STATS_SOURCE_KEY,
-    GATEWAY_STATS_SOURCE_KIND,
-    PROACTIVE_AUTONOMY_DEFAULT_KEY,
-    PROACTIVE_AUTONOMY_KIND,
-    SYS_MODE_HISTORY_KEY,
-    SYS_MODE_HISTORY_KIND,
-    SYS_MODE_STATUS_KEY,
-    SYS_MODE_STATUS_KIND,
+from host_brain.app.observability_runtime.operator_live_sources import (
+    AppOwnedGatewayHealthReader,
+    AppOwnedGatewaySourceReader,
+    OperatorLiveSourcePorts,
+    OperatorSourceUnavailable,
+    build_operator_live_state_callback,
 )
 from host_brain.app.observability_runtime.process_state_projection import (
     BIO_OPS_KIND,
@@ -70,6 +68,9 @@ from host_brain.app.observability_runtime.projection_runtime import (
     TRIBE_EVENTS_INDEX_KEY,
     TRIBE_EVENTS_KIND,
     refresh_task_projections,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    ProjectionLedgerView,
 )
 from host_brain.app.observability_runtime.remaining_query_projection import (
     AGENT_LOOP_INDEX_KEY,
@@ -94,7 +95,23 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     _resident_context_payload,
 )
 from host_brain.app.observability_runtime.session_query import SessionQueryService
+from host_brain.app.observability_runtime.security_immune_snapshot_reader import (
+    DEFAULT_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS,
+    SecurityImmuneSnapshotReader,
+    SecurityImmuneSnapshotSourceError,
+)
+from host_brain.app.observability_runtime.runtime_snapshot_source import (
+    RuntimeSnapshotSourceReader,
+    RuntimeSnapshotSourceUnavailable,
+)
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections
+from host_brain.app.obs_routes_summary import (
+    DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
+    INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES,
+    AggregateProjectionSourceUnavailable,
+    _build_digital_life_overview_snapshot_async,
+    _build_insights_summary_snapshot_sync,
+)
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
 from host_brain.canon.application import CanonApplicationService
 from host_brain.integrations.runtime_events import RuntimeEventStore
@@ -104,6 +121,7 @@ from host_brain.persistence.canon_repository import CanonRepository
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
+from host_brain.channels.edge_transport import resolve_gateway_base_urls
 
 
 TYPED_UNAVAILABLE = "TYPED_UNAVAILABLE"
@@ -112,6 +130,7 @@ STATIC_READ = "STATIC_READ"
 DURABLE_READ_PARTIAL = "DURABLE_READ_PARTIAL"
 
 HOST_RUNTIME_SOURCE_NOT_INJECTED = "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
+AGGREGATE_PROJECTION_SOURCE_SCOPE = "app-local-aggregate-read-model"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +154,23 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _positive_environment_ms(name: str, default: int) -> int:
+    try:
+        value = int(str(os.environ.get(name) or default).strip())
+    except (TypeError, ValueError, OverflowError):
+        return max(1, int(default))
+    return value if value > 0 else max(1, int(default))
+
+
+def _aggregate_projection_source_scope(source: str) -> str:
+    normalized = str(source or "").strip().lower()
+    if normalized.startswith("ledger:"):
+        return "canonical-ledger-projection"
+    if normalized.startswith("query:"):
+        return "app-local-query-projection"
+    return AGGREGATE_PROJECTION_SOURCE_SCOPE
+
+
 def _next_cursor(
     store: QueryProjectionStore,
     kind: str,
@@ -156,19 +192,26 @@ def _upsert(
     payload: Mapping[str, Any],
     *,
     observed: int = 0,
+    source_cursor: int | None = None,
     source_ref: str,
     degraded_state: ProjectionDegradedState = ProjectionDegradedState.HEALTHY,
     degraded_detail: str | None = None,
+    freshness_ts_ms: int | None = None,
 ) -> None:
     store.upsert(
         kind,
         key,
         dict(payload),
-        source_cursor=_next_cursor(store, kind, key, observed),
+        source_cursor=(
+            _next_cursor(store, kind, key, observed)
+            if source_cursor is None
+            else max(0, int(source_cursor))
+        ),
         source_digest=digest_json(payload),
         source_ref=source_ref,
         degraded_state=degraded_state,
         degraded_detail=degraded_detail,
+        freshness_ts_ms=freshness_ts_ms,
     )
 
 
@@ -179,7 +222,11 @@ def _upsert_unavailable(
     target: ProjectionTarget,
     reason_code: str,
     detail: str,
+    source_scope: str = "host-runtime",
 ) -> bool:
+    scope = str(source_scope or "").strip()
+    if not scope:
+        raise ValueError("source_scope is required")
     current = store.get(target.kind, target.key)
     if current is not None:
         state = str(
@@ -191,11 +238,22 @@ def _upsert_unavailable(
             and current_payload.get("available") is False
             and str(current_payload.get("job_name") or "") == job_name
             and str(current_payload.get("reason_code") or "") == reason_code
-            and str(current_payload.get("source_scope") or "") == "host-runtime"
+            and str(current_payload.get("source_scope") or "") == scope
         ):
-            # Polling the same unavailable source is an observation no-op.  A
-            # retry after a committed response loss must not create journal
-            # churn or pretend that the source advanced.
+            # The source fact did not advance, so cursor/version/journal remain
+            # stable.  Refresh only the observation freshness: otherwise an
+            # actively observed SOURCE_UNAVAILABLE document eventually drifts
+            # into the misleading STALE state at read time.
+            store.upsert(
+                target.kind,
+                target.key,
+                current_payload,
+                source_cursor=int(current.source_cursor),
+                source_ref=f"obs-app://{job_name}/source-unavailable",
+                degraded_state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                degraded_detail=detail,
+                freshness_ts_ms=_now_ms(),
+            )
             return False
     now = _now_ms()
     _upsert(
@@ -209,13 +267,14 @@ def _upsert_unavailable(
             "projection_kind": target.kind,
             "projection_key": target.key,
             "reason_code": reason_code,
-            "source_scope": "host-runtime",
+            "source_scope": scope,
             "timestamp": now,
         },
         observed=now,
         source_ref=f"obs-app://{job_name}/source-unavailable",
         degraded_state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
         degraded_detail=detail,
+        freshness_ts_ms=now,
     )
     return True
 
@@ -424,6 +483,215 @@ def _skill_catalog_callback(store: QueryProjectionStore) -> Callable[[], object]
     return refresh
 
 
+def _security_immune_callback(
+    store: QueryProjectionStore,
+    reader: SecurityImmuneSnapshotReader,
+) -> Callable[[], object]:
+    target = ProjectionTarget(SECURITY_IMMUNE_KIND, SECURITY_IMMUNE_KEY)
+
+    def refresh() -> dict[str, int]:
+        try:
+            source = reader.read()
+        except SecurityImmuneSnapshotSourceError as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name="security-immune",
+                target=target,
+                reason_code=exc.reason_code,
+                detail=exc.public_detail,
+                source_scope=exc.source_scope,
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        payload = source.payload
+        cursor = max(0, int(source.source_cursor))
+        current = store.get(target.kind, target.key)
+        if current is not None:
+            current_payload = dict(current.payload)
+            if current_payload == dict(payload):
+                cursor = max(cursor, int(current.source_cursor))
+            elif cursor <= int(current.source_cursor):
+                # Availability transitions need a new monotonic Store cursor,
+                # but never use polling wall time as source evidence.
+                cursor = int(current.source_cursor) + 1
+        _upsert(
+            store,
+            SECURITY_IMMUNE_KIND,
+            SECURITY_IMMUNE_KEY,
+            payload,
+            source_cursor=cursor,
+            source_ref="obs-app://security-immune/evidence-store",
+            freshness_ts_ms=source.freshness_ts_ms,
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
+def _operator_gateway_activity_reader(
+    store: QueryProjectionStore,
+) -> Callable[[int, int], Mapping[str, Any]]:
+    view = ProjectionLedgerView(store)
+
+    def read(start_ms: int, end_ms: int) -> Mapping[str, Any]:
+        channel_rows = view.fetch_by_time_range(
+            "channel_io_log",
+            start_ms=start_ms,
+            end_ms=end_ms,
+            limit=5_000,
+        )
+        channel_reason = view.last_degraded_reason
+        voice_rows = view.fetch_by_time_range(
+            "voice_event_log",
+            start_ms=start_ms,
+            end_ms=end_ms,
+            limit=5_000,
+        )
+        voice_reason = view.last_degraded_reason
+        if channel_reason or voice_reason:
+            raise OperatorSourceUnavailable(
+                "OBS_GATEWAY_ACTIVITY_PROJECTION_UNAVAILABLE",
+                "Canonical gateway activity projection is unavailable",
+                source_scope="canonical-ledger-projection",
+            )
+        return {
+            "channel_rows": channel_rows,
+            "voice_rows": voice_rows,
+        }
+
+    return read
+
+
+def _operator_runtime_config_reader() -> Mapping[str, Any]:
+    try:
+        typing_speed = int(
+            str(os.environ.get("EDGE_HUMANIZE_TYPING_SPEED_CPS") or "12")
+        )
+    except ValueError:
+        typing_speed = 12
+    return {
+        "wechat_bridge_backend": str(
+            os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia"
+        ),
+        "humanize_enabled": str(
+            os.environ.get("EDGE_HUMANIZE_ENABLED") or "false"
+        ).lower()
+        == "true",
+        "humanize_typing_speed_cps": max(1, min(100, typing_speed)),
+    }
+
+
+def _aggregate_summary_callback(
+    store: QueryProjectionStore,
+    *,
+    job_name: str,
+    target: ProjectionTarget,
+    window_minutes: int,
+    async_builder: bool,
+) -> Callable[[], object]:
+    view = ProjectionLedgerView(store)
+
+    def refresh() -> dict[str, int]:
+        try:
+            if async_builder:
+                payload = asyncio.run(
+                    _build_digital_life_overview_snapshot_async(
+                        window_minutes,
+                        projection_view=view,
+                        projection_store=store,
+                    )
+                )
+            else:
+                payload = _build_insights_summary_snapshot_sync(
+                    window_minutes,
+                    projection_view=view,
+                    projection_store=store,
+                )
+        except AggregateProjectionSourceUnavailable as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name=job_name,
+                target=target,
+                reason_code=exc.reason_code,
+                detail="Required aggregate projection source is unavailable",
+                source_scope=_aggregate_projection_source_scope(exc.source),
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        _upsert(
+            store,
+            target.kind,
+            target.key,
+            payload,
+            observed=int(payload.get("timestamp") or 0),
+            source_ref=f"obs-app://{job_name}/durable-aggregate",
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
+def _runtime_snapshot_callback(
+    store: QueryProjectionStore,
+    reader: RuntimeSnapshotSourceReader,
+) -> Callable[[], object]:
+    target = ProjectionTarget(RUNTIME_SNAPSHOT_KIND, RUNTIME_SNAPSHOT_KEY)
+
+    def refresh() -> dict[str, int]:
+        try:
+            payload, cursor = reader()
+        except RuntimeSnapshotSourceUnavailable as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name="runtime-snapshot",
+                target=target,
+                reason_code=exc.reason_code,
+                detail="Canonical runtime snapshot root is unavailable",
+                source_scope=exc.source_scope,
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        _upsert(
+            store,
+            target.kind,
+            target.key,
+            payload,
+            observed=cursor,
+            source_ref="obs-app://runtime-snapshot/durable-read-models",
+            # The root source is available.  Optional slot degradation lives
+            # inside the typed runtime payload; marking the whole projection
+            # STALE would make the GET adapter discard that usable partial
+            # snapshot.
+            degraded_state=ProjectionDegradedState.HEALTHY,
+            degraded_detail=None,
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "partial_document_count": int(bool(payload.get("degraded"))),
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
 def _remaining_queries_callback(
     ledger: Any,
     store: QueryProjectionStore,
@@ -586,6 +854,7 @@ def build_explicit_obs_projection_callbacks(
     ledger: Any,
     store: QueryProjectionStore,
     canonical_db_path: str | Path,
+    life_snapshot_reader: Callable[[str], Mapping[str, Any]],
 ) -> tuple[ExplicitObsProjectionCallback, ...]:
     """Compose all seventeen non-core jobs from app-local ports."""
 
@@ -599,44 +868,36 @@ def build_explicit_obs_projection_callbacks(
         repository=CanonRepository(database),
         world_root=world_root,
     )
+    if not callable(life_snapshot_reader):
+        raise TypeError("life_snapshot_reader must be callable")
+    raw_security_state_dir = Path(
+        str(
+            os.environ.get("SECURITY_IMMUNE_STATE_DIR")
+            or repo_root / "runtime" / "security_immune"
+        )
+    ).expanduser()
+    security_state_dir = (
+        raw_security_state_dir
+        if raw_security_state_dir.is_absolute()
+        else repo_root / raw_security_state_dir
+    ).resolve()
+    security_evidence_max_age_ms = _positive_environment_ms(
+        "OBS_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS",
+        DEFAULT_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS,
+    )
 
     unavailable: dict[str, tuple[tuple[ProjectionTarget, ...], str]] = {
         "capability-forge-operator": (
             (ProjectionTarget(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY),),
             "Capability Forge is a writer-capable Host runtime service",
         ),
-        "digital-life-overview": (
-            (ProjectionTarget(DIGITAL_LIFE_OVERVIEW_KIND, window_key(360)),),
-            "digital-life overview requires explicit Host aggregate read ports",
-        ),
-        "insights-summary": (
-            (ProjectionTarget(INSIGHTS_SUMMARY_KIND, window_key(60)),),
-            "insights summary requires explicit Host aggregate read ports",
-        ),
         "life-body": (
             (ProjectionTarget(LIFE_BODY_KIND, window_key(360)),),
             "life-body aggregation requires explicit Host read ports",
         ),
-        "operator-live-state": (
-            (
-                ProjectionTarget(GATEWAY_STATS_SOURCE_KIND, GATEWAY_STATS_SOURCE_KEY),
-                ProjectionTarget(SYS_MODE_STATUS_KIND, SYS_MODE_STATUS_KEY),
-                ProjectionTarget(SYS_MODE_HISTORY_KIND, SYS_MODE_HISTORY_KEY),
-                ProjectionTarget(PROACTIVE_AUTONOMY_KIND, PROACTIVE_AUTONOMY_DEFAULT_KEY),
-            ),
-            "operator live state requires explicit Host and Edge read ports",
-        ),
         "organ-tribe": (
             (ProjectionTarget(ORGAN_TRIBE_KIND, ORGAN_TRIBE_KEY),),
             "Organ-Tribe state is Host process-owned and no read port is injected",
-        ),
-        "runtime-snapshot": (
-            (ProjectionTarget(RUNTIME_SNAPSHOT_KIND, RUNTIME_SNAPSHOT_KEY),),
-            "runtime snapshot requires explicit Host lifecycle read ports",
-        ),
-        "security-immune": (
-            (ProjectionTarget(SECURITY_IMMUNE_KIND, SECURITY_IMMUNE_KEY),),
-            "Security Immune runtime state is Host process-owned",
         ),
     }
 
@@ -653,11 +914,64 @@ def build_explicit_obs_projection_callbacks(
             DURABLE_READ_PARTIAL,
             5_000,
         ),
+        "digital-life-overview": ExplicitObsProjectionCallback(
+            "digital-life-overview",
+            _aggregate_summary_callback(
+                store,
+                job_name="digital-life-overview",
+                target=ProjectionTarget(
+                    DIGITAL_LIFE_OVERVIEW_KIND,
+                    window_key(DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES),
+                ),
+                window_minutes=DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
+                async_builder=True,
+            ),
+            DURABLE_READ_PARTIAL,
+            60_000,
+        ),
         "health-passive": ExplicitObsProjectionCallback(
             "health-passive",
             _health_callback(ledger, store),
             DURABLE_READ,
             30_000,
+        ),
+        "insights-summary": ExplicitObsProjectionCallback(
+            "insights-summary",
+            _aggregate_summary_callback(
+                store,
+                job_name="insights-summary",
+                target=ProjectionTarget(
+                    INSIGHTS_SUMMARY_KIND,
+                    window_key(INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES),
+                ),
+                window_minutes=INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES,
+                async_builder=False,
+            ),
+            DURABLE_READ_PARTIAL,
+            30_000,
+        ),
+        "operator-live-state": ExplicitObsProjectionCallback(
+            "operator-live-state",
+            build_operator_live_state_callback(
+                store=store,
+                ports=OperatorLiveSourcePorts(
+                    gateway_source_reader=AppOwnedGatewaySourceReader(
+                        health_reader=AppOwnedGatewayHealthReader(
+                            tuple(resolve_gateway_base_urls()),
+                        ),
+                        activity_reader=_operator_gateway_activity_reader(store),
+                        runtime_config_reader=_operator_runtime_config_reader,
+                    ),
+                    life_snapshot_reader=life_snapshot_reader,
+                    # Host-owned mode authority is recovered in the next
+                    # authenticated transport slice.  These two targets remain
+                    # independently typed unavailable until then.
+                    sys_mode_status_reader=None,
+                    sys_mode_history_reader=None,
+                ),
+            ),
+            DURABLE_READ_PARTIAL,
+            10_000,
         ),
         "remaining-operator-queries": ExplicitObsProjectionCallback(
             "remaining-operator-queries",
@@ -671,9 +985,33 @@ def build_explicit_obs_projection_callbacks(
             STATIC_READ,
             30_000,
         ),
+        "runtime-snapshot": ExplicitObsProjectionCallback(
+            "runtime-snapshot",
+            _runtime_snapshot_callback(
+                store,
+                RuntimeSnapshotSourceReader(
+                    store=store,
+                    life_snapshot_reader=life_snapshot_reader,
+                ),
+            ),
+            DURABLE_READ_PARTIAL,
+            15_000,
+        ),
         "sessions": ExplicitObsProjectionCallback(
             "sessions",
             _sessions_callback(ledger, store),
+            DURABLE_READ,
+            30_000,
+        ),
+        "security-immune": ExplicitObsProjectionCallback(
+            "security-immune",
+            _security_immune_callback(
+                store,
+                SecurityImmuneSnapshotReader(
+                    security_state_dir,
+                    max_age_ms=security_evidence_max_age_ms,
+                ),
+            ),
             DURABLE_READ,
             30_000,
         ),
@@ -708,13 +1046,8 @@ def build_explicit_obs_projection_callbacks(
             TYPED_UNAVAILABLE,
             {
                 "capability-forge-operator": 15_000,
-                "digital-life-overview": 60_000,
-                "insights-summary": 30_000,
                 "life-body": 30_000,
-                "operator-live-state": 10_000,
                 "organ-tribe": 10_000,
-                "runtime-snapshot": 15_000,
-                "security-immune": 30_000,
             }[name],
             HOST_RUNTIME_SOURCE_NOT_INJECTED,
         )

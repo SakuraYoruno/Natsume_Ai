@@ -344,9 +344,17 @@ def get_sys_mode(request: Request):
 @router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
 def get_digital_life_runtime_snapshot(
     request: Request,
-    current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
+    current_topic: str = Query(
+        "",
+        max_length=200,
+        deprecated=True,
+        description=(
+            "已弃用；接口只返回后台预制的 durable snapshot，"
+            "该参数不会触发重算或改变持久投影。"
+        ),
+    ),
 ):
-    """获取统一数字生命 runtime snapshot（只读观测面）。"""
+    """获取预制的数字生命 runtime snapshot；忽略已弃用的话题参数。"""
     payload, projection = read_process_projection(
         require_obs_query_projection_store(request),
         RUNTIME_SNAPSHOT_KIND,

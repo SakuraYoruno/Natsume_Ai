@@ -61,8 +61,9 @@ def test_obs_fastapi_app_health_ok(tmp_path):
         ]
         assert payload["composition"]["missing_jobs"] == []
         assert payload["composition"]["registered_count"] == 19
-        assert payload["composition"]["declared_non_typed_unavailable_count"] == 11
-        assert payload["composition"]["typed_unavailable_job_count"] == 8
+        assert payload["composition"]["declared_non_typed_unavailable_count"] == 16
+        assert payload["composition"]["typed_unavailable_job_count"] == 3
+        assert payload["composition"]["declared_partial_job_count"] == 7
         assert "remaining-operator-queries" in payload["composition"][
             "declared_non_typed_unavailable_jobs"
         ]
@@ -75,18 +76,24 @@ def test_obs_fastapi_app_health_ok(tmp_path):
             item["name"] for item in payload["composition"]["unavailable_jobs"]
         } == {
             "capability-forge-operator",
-            "digital-life-overview",
-            "insights-summary",
             "life-body",
-            "operator-live-state",
             "organ-tribe",
-            "runtime-snapshot",
-            "security-immune",
         }
         assert all(
             item["reason_code"] == "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
             for item in payload["composition"]["unavailable_jobs"]
         )
+        assert {
+            item["name"] for item in payload["composition"]["partial_jobs"]
+        } == {
+            "device-status",
+            "digital-life-overview",
+            "insights-summary",
+            "operator-live-state",
+            "remaining-operator-queries",
+            "runtime-snapshot",
+            "trace",
+        }
 
 
 def test_obs_fastapi_app_exposes_obs_and_ui_routes():

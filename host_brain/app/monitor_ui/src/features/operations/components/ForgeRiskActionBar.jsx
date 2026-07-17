@@ -28,6 +28,7 @@ function parseApiError(error) {
 
 export default function ForgeRiskActionBar({
   capabilityGapData = null,
+  capabilityGapError = null,
   pollingEnabled = false,
   pollingInterval = 30,
   pollingTick = 0,
@@ -127,6 +128,17 @@ export default function ForgeRiskActionBar({
       setBusyAction('')
     }
   }, [refetchProposals, selectedProposal])
+
+  if (capabilityGapError) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-orange-200 bg-orange-50/90 px-3 py-2 text-xs text-orange-700 shadow-sm">
+        <span className="font-semibold">Capability Forge unavailable</span>
+        <span className="font-mono text-[11px]">
+          {String(capabilityGapError || 'OBS_CAPABILITY_FORGE_PROJECTION_UNAVAILABLE')}
+        </span>
+      </div>
+    )
+  }
 
   if (!shouldShow) {
     return null
