@@ -40,6 +40,7 @@ _BOUND_LEADER_LEASE: ContextVar[ProjectionLeaderLease | None] = ContextVar(
     "operator_projection_leader_lease",
     default=None,
 )
+_UNCONDITIONAL_CURRENT = object()
 
 
 class QueryProjectionError(RuntimeError):
@@ -153,10 +154,10 @@ class QueryProjectionStore:
         owner = self._required(owner_id, "owner_id")
         name = self._required(lease_name, "lease_name")
         duration = max(1, int(lease_ms))
-        now = max(0, int(self._clock()))
-        expires = now + duration
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            now = max(0, int(self._clock()))
+            expires = now + duration
             row = conn.execute(
                 "SELECT * FROM operator_query_projection_leader WHERE lease_name = ?",
                 (name,),
@@ -211,10 +212,10 @@ class QueryProjectionStore:
         """Renew only the current, unexpired owner/fence tuple."""
 
         duration = max(1, int(lease_ms))
-        now = max(0, int(self._clock()))
-        expires = now + duration
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            now = max(0, int(self._clock()))
+            expires = now + duration
             cursor = conn.execute(
                 """
                 UPDATE operator_query_projection_leader
@@ -259,9 +260,9 @@ class QueryProjectionStore:
     def release_leader_lease(self, lease: ProjectionLeaderLease) -> bool:
         """Expire an exact lease without deleting its monotonic fence row."""
 
-        now = max(0, int(self._clock()))
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            now = max(0, int(self._clock()))
             cursor = conn.execute(
                 """
                 UPDATE operator_query_projection_leader
@@ -357,6 +358,78 @@ class QueryProjectionStore:
             ).fetchall()
         return [document for row in keys if (document := self.get(projection_kind, str(row[0]))) is not None]
 
+    def journal_text_values(
+        self,
+        kind: str,
+        key: str,
+        field: str,
+    ) -> frozenset[str]:
+        """Return one text field across the complete verified journal history."""
+
+        projection_kind = self._required(kind, "kind")
+        document_key = self._required(key, "key")
+        field_name = self._required(field, "field")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT source_payload_json, source_digest
+                FROM operator_query_projection_journal
+                WHERE projection_kind = ? AND document_key = ?
+                ORDER BY cursor ASC
+                """,
+                (projection_kind, document_key),
+            ).fetchall()
+        values: set[str] = set()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["source_payload_json"]))
+            except json.JSONDecodeError as exc:
+                raise QueryProjectionError(
+                    PROJECTION_DATA_INVALID,
+                    "projection journal source_payload_json is invalid",
+                ) from exc
+            if (
+                not isinstance(payload, dict)
+                or digest_json(payload) != str(row["source_digest"])
+            ):
+                raise QueryProjectionError(
+                    PROJECTION_DATA_INVALID,
+                    "projection journal payload digest mismatch",
+                )
+            value = payload.get(field_name)
+            if isinstance(value, str) and value.strip():
+                values.add(value.strip())
+        return frozenset(values)
+
+    def compare_and_upsert(
+        self,
+        kind: str,
+        key: str,
+        payload: Mapping[str, Any],
+        *,
+        expected_current: ProjectionDocument | None,
+        source_cursor: int,
+        source_digest: str | None = None,
+        source_ref: str = "projection-worker",
+        degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
+        degraded_detail: str | None = None,
+        freshness_ts_ms: int | None = None,
+    ) -> ProjectionDocument:
+        """Atomically compare the current document and commit its successor."""
+
+        return self.upsert(
+            kind,
+            key,
+            payload,
+            source_cursor=source_cursor,
+            source_digest=source_digest,
+            source_ref=source_ref,
+            degraded_state=degraded_state,
+            degraded_detail=degraded_detail,
+            freshness_ts_ms=freshness_ts_ms,
+            _expected_current=expected_current,
+        )
+
     def upsert(
         self,
         kind: str,
@@ -369,6 +442,7 @@ class QueryProjectionStore:
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
+        _expected_current: ProjectionDocument | None | object = _UNCONDITIONAL_CURRENT,
     ) -> ProjectionDocument:
         projection_kind = self._required(kind, "kind")
         document_key = self._required(key, "key")
@@ -381,14 +455,18 @@ class QueryProjectionStore:
         source_hash = digest_json(body)
         state = ProjectionDegradedState(degraded_state)
         public_degraded_detail = _public_degraded_detail(degraded_detail)
-        operation_now = max(0, int(self._clock()))
-        freshness = max(
-            0,
-            int(freshness_ts_ms if freshness_ts_ms is not None else operation_now),
-        )
         cursor = max(0, int(source_cursor))
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            operation_now = max(0, int(self._clock()))
+            freshness = max(
+                0,
+                int(
+                    freshness_ts_ms
+                    if freshness_ts_ms is not None
+                    else operation_now
+                ),
+            )
             # The leader fence and journal record when this projection write
             # happened.  ``freshness_ts_ms`` is instead source evidence time;
             # using an old evidence timestamp for the lease comparison would
@@ -396,12 +474,41 @@ class QueryProjectionStore:
             self._assert_bound_lease_in_connection(conn, now=operation_now)
             current = conn.execute(
                 """
-                SELECT projection_version, source_cursor, source_digest, payload_digest
+                SELECT projection_version, journal_cursor, source_cursor,
+                       source_digest, payload_digest
                 FROM operator_query_projection_document
                 WHERE projection_kind = ? AND document_key = ?
                 """,
                 (projection_kind, document_key),
             ).fetchone()
+            if _expected_current is not _UNCONDITIONAL_CURRENT:
+                if _expected_current is None:
+                    matches_expected = current is None
+                elif isinstance(_expected_current, ProjectionDocument):
+                    matches_expected = bool(
+                        current is not None
+                        and _expected_current.kind == projection_kind
+                        and _expected_current.key == document_key
+                        and int(current["projection_version"])
+                        == int(_expected_current.projection_version)
+                        and int(current["journal_cursor"])
+                        == int(_expected_current.projection_cursor)
+                        and int(current["source_cursor"])
+                        == int(_expected_current.source_cursor)
+                        and str(current["source_digest"])
+                        == str(_expected_current.source_digest)
+                        and str(current["payload_digest"])
+                        == str(_expected_current.payload_digest)
+                    )
+                else:
+                    raise TypeError(
+                        "_expected_current must be ProjectionDocument or None"
+                    )
+                if not matches_expected:
+                    raise QueryProjectionError(
+                        PROJECTION_CURSOR_CONFLICT,
+                        "projection current changed before atomic transition",
+                    )
             if current is not None:
                 current_cursor = int(current["source_cursor"])
                 current_digest = str(current["source_digest"])
@@ -539,10 +646,10 @@ class QueryProjectionStore:
         degraded = ProjectionDegradedState(state)
         if degraded is ProjectionDegradedState.HEALTHY:
             raise ValueError("mark_degraded requires a degraded state")
-        now = max(0, int(self._clock()))
         public_detail = _public_degraded_detail(detail)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            now = max(0, int(self._clock()))
             self._assert_bound_lease_in_connection(conn, now=now)
             conn.execute(
                 """
@@ -599,13 +706,13 @@ class QueryProjectionStore:
                 (key, body, max(0, int(source_cursor)), source_hash, digest_json(body))
             )
 
-        now = max(0, int(self._clock()))
         with self._connect() as conn:
             # DELETE + replacement + head switch are one SQLite transaction.
             # Concurrent readers retain the old committed snapshot until this
             # transaction commits; an exception rolls the entire shadow build
             # back and preserves the last-good generation.
             conn.execute("BEGIN IMMEDIATE")
+            now = max(0, int(self._clock()))
             self._assert_bound_lease_in_connection(conn, now=now)
             if _expected_journal_cursor is not None:
                 journal_head = int(

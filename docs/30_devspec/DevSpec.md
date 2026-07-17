@@ -3,8 +3,8 @@
 
 # Natsume AI 稳定工程合同
 
-版本：v4.6
-日期：2026-07-16
+版本：v4.8
+日期：2026-07-17
 文档类型：`STABLE_ENGINEERING_CONTRACT / NO_EXECUTION_STATUS`
 
 本文把 PRD 转为长期稳定的工程约束，不记录实现完成度或阶段状态。
@@ -44,9 +44,12 @@ Composition
 - 禁止模块级可变 service registry、业务层 `get_*()` locator 和依赖 test reset 的单例。
 - 独立 Obs ASGI 必须由 `create_obs_app(ports|ports_factory)` 构造；ledger query、projection store、metrics、Life reader、projection jobs 和资源关闭器归属单个 `ObsApplicationContainer`。导入模块不得配置 Host application ports，也不得 install/clear Host 的 Life provider。
 - 每个 Obs app 必须拥有独立 daemon、thread、stop event、leader lease 与 resource lifecycle。Daemon start/run 必须 single-flight，stop 必须阻止新 wave 并等待 background/manual in-flight；超时不得关闭 lease/SQLite或清空 app-local container/ports/readers，必须保留 retry handles 并让 shutdown 失败。每个 `ObsApplicationPorts` 实例只能消费一次，重复 lifespan 必须 fail closed；需要重建时，`ports_factory` 必须返回全新实例。关闭一方不得影响另一 app，sessions response cache/single-flight 也必须是 app-owned。
-- Producer registration 与 source availability 必须分开表达。当前默认注册 19 个 callback（2 core + 17），source-mode 声明为 `DURABLE_READ=6 / STATIC_READ=3 / DURABLE_READ_PARTIAL=7 / TYPED_UNAVAILABLE=3`；16/3 不是运行成功/失败率。Security Immune、insights/overview、operator-live 与无副作用 Runtime reader 已有显式 source；缺失、损坏、陈旧、ledger source failure/truncation、空 Gateway 健康对象或未注入 target 必须显式降级，不得以空结果冒充当前事实。任一 operator target 写失败必须令整 job 失败。3 个整 job unavailable 与7个 partial令 `missing_jobs=[]` 时 `/health` 仍为 `DEGRADED`。
+- Producer registration、声明 source-mode 与运行时 availability 必须分开表达。当前默认注册 21 个 callback（2 core + 19），声明为 `DURABLE_READ=6 / STATIC_READ=3 / DURABLE_READ_PARTIAL=7 / AUTHENTICATED_HOST_READ=4 / TYPED_UNAVAILABLE=1`；20/1 与四条认证 job 都不是运行成功/失败率。Capability Forge、Semantic Recall、Governance 与 Organ/Tribe 分别由独立认证 job 物化，sys-mode 由 partial operator job 消费同一 app-owned Host source；缺 token、Host、正证据、完整合同、freshness、ledger source、Gateway 健康对象或 target 必须显式降级，不得以空结果冒充当前事实。任一 operator target 写失败必须令整 job 失败。1 个整 job unavailable、7 个 partial 以及运行时可能失败的认证源令 `missing_jobs=[]` 时 `/health` 仍为 `DEGRADED`。
 - Security evidence 必须满足最小 schema 和身份时间合同；默认最大年龄为 10 分钟，可由 `OBS_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS` 收紧或放宽。`QueryProjectionStore` 的 operation clock 只用于 lease fence、journal 和 `updated_ts_ms`，evidence freshness 只写 `freshness_ts_ms`，两者禁止复用。
-- D4 要求36个已识别生产投影端点及其 projection/stats 查询从当前 app 的 QueryProjectionStore 或由其构造的 `ProjectionLedgerView` 读取；Obs 路由不得调用三个兼容全局 query helper。当前路由 helper 消费者为0，但 helper 定义仍保留给非路由兼容面。这仍不等于完整 Query Plane：Forge、Life Body、Organ 三个 job 仍 typed unavailable；Runtime 只证明 durable Life + operator projections 的最小 partial snapshot，缺 Life 槽位/readiness 必须 partial，`current_topic` 查询参数已弃用且不得改变 durable snapshot；operator sys-mode/history 与真实 Edge 未证明；认证 Host read client 尚未接 Host endpoints。15 个 `process_services` 词法边界和 legacy daemon 仍存在。
+- mode、capability-forge、semantic-recall、governance、runtime 五条 Host 合同必须在每个 Host lifespan 共享一个不可空 `source_instance_id`，并按合同维护正整数、单调递增的 `source_revision`。Obs 必须通过通用 `QueryProjectionStore.compare_and_upsert` 的 SQLite CAS 按合同路径持久化当前 lineage，并从 immutable journal 判断完整历史 epoch：同 epoch 的 revision、`observed_at_ms`、`evidence_ts_ms` 不得回滚，同 revision 不得改变 payload，任一退役 epoch 永久不可重放，不得用固定长度窗口截断防重放历史。该 lineage 是 Obs 持久读模型，不把 Host 进程内对象提升为 durable authority。
+- 合同内只对精确名为 `timestamp` 或以 `*_ts_ms`、`*_at_ms` 结尾的嵌套字段递归执行 Host-observed 时间上界校验，不得笼统宣称拒绝所有“未来字段”。Obs 以本地接收时间复验顶层 observed/evidence：最多允许 5 秒 clock skew，正 evidence 最大年龄 120 秒，写入 `freshness_ts_ms` 时必须取 evidence 与本地接收时间的较小值。
+- Host composition、Host route 边界与 Obs 接收端必须各执行公共序列化并重新解析版本合同；合同本身不是字段白名单。Organ `key_metrics` 必须 deny-by-default，只放行逐 agent 显式字段及数值/布尔标量，禁止把任意 registry `state` 标量带出。Host→Obs transport 只允许五条 allowlist 路径和专用 token，禁代理、禁重定向、限制 1 MiB；一个 monotonic total deadline 必须覆盖 DNS 解析、连接、响应头和分块正文。远端必须 HTTPS，明文 HTTP 仅限 loopback/localhost。
+- D4 的36个已识别生产投影端点及其 projection/stats 查询继续从当前 app 的 QueryProjectionStore 或 `ProjectionLedgerView` 读取；D5 还要求5个 `/api/ui/*` GET，以及 Security 3、Skill 1、Life 1、Semantic 1、Governance 1 共7个实际挂载 GET 显式注入当前 app Store。Obs route 对 `capability_stats_projection`、`domain_state_projection`、`projection_ledger_view`、`remaining_query_projection` 四个兼容全局 helper 的消费者必须为0；定义可暂留给非路由面。Capability Forge、Semantic Recall 公开运行配置、Governance 只读快照与 Organ 必须由四个 authenticated job 分别物化；Semantic/Governance 必须读取各自独立 endpoint/contract/cache/failure domain，不得以 Capability v1 的兼容内嵌 child 作为生产来源。Capability v1 中的兼容 child provider 异常必须仅将该 child 写为有类型的 `SOURCE_UNAVAILABLE`；Forge 自身 authority 有效时，不得因 child 异常使 capability-forge v1 失效。Capability Forge proposal 必须由 ledger 原生按 proposal 分组读取最新事件。Host source provider 只允许在 lifespan 捕获并在关闭时清空；当前底层 process authority 仍共享，因此不能把该局部 scope 写成完整 Host composition。mode history 只代表当前 Host 进程，Organ 只是瞬态 registry/scheduler 证据而非 Life authority；Life Body、真实 Edge、13 个 Obs-route `process_services` 词法边界和 legacy daemon 仍未闭环。
 
 ## 2. Host、Chat 与 Ingress 合同
 

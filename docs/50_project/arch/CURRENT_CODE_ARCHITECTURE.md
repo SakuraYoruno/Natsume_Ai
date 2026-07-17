@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.11
+版本：v5.13
 核对日期：2026-07-17
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -28,7 +28,7 @@
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE / D4_ALL_IDENTIFIED_QUERY_ROUTES_APP_LOCAL_SOURCE_RECOVERY_PENDING` | 36个端点及已识别stats查询 app-local，兼容query helper路由消费者为0；19个 producer为6 durable、3 static、7 partial、3 unavailable。Security、摘要、operator部分target与无Agent Runtime partial source已按失败关闭语义恢复；Forge、Life Body、Organ、operator sys-mode及真实Edge仍未闭环。三个兼容helper定义、15个词法边界、legacy daemon和全局53 refs仍在 |
+| Composition | `INCOMPLETE / D5_AUTHENTICATED_HOST_SOURCES_PARTIAL` | 36个既有端点、5个 `/api/ui/*` GET及补漏的7个实际GET均app-local；21个producer为6 durable、3 static、7 partial、4 authenticated-host-read、1 unavailable。Host五合同已接lifespan source epoch、单调revision、Obs SQLite CAS+完整历史lineage/防回滚、精确时间边界、三层公共序列化与总deadline；Forge/Semantic/Governance/Organ独立物化且Semantic/Governance拥有独立故障域，sys-mode也可经认证来源读取。Host底层authority仍process-global；Life Body、真实Edge、13个词法边界、4个兼容helper、legacy daemon和全局53 refs仍在 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -312,11 +312,15 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 D1 已先关闭路由级最直接的多 app 串扰：`HostRoutePorts` 是每个 FastAPI app 捕获的 frozen provider bundle，Canon/Tool/Bond 均由 `create_*_router(ports)` 构造；原 module setter/global provider 和 Tool fallback 到 `process_services` 已删除。同一 bundle 还经 Security composition 传入 Canon/Tool/Bond 的 OBS command adapter。双/三 Host app 交错请求、构造和关闭均只命中自己的 fake service。这个结论仅覆盖三类路由；OBS 的 Capability Forge、Scheduler/Review runtime lookup、Life/Tribe 与其余 process locator 仍在。
 
-D2 把独立 Obs 的 `create_obs_app()`、`ObsApplicationPorts` 和 `ObsApplicationContainer` 变成显式应用级 scope。D3 在此基础上注册19个 producer callback（2 core + 17），并先迁移17个生产端点。D4 将 BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4，共19个 GET 的 `read_process_projection` 链改为必需显式 store 参数；现有36个已识别生产投影端点（35 HTTP + 1 WebSocket）、已识别stats查询与sessions/prompt response cache均接入当前app的QueryProjectionStore/View或app-owned cache。6个 reconciliation 端点另从 app.state 使用显式 repository authority。
+D2 把独立 Obs 的 `create_obs_app()`、`ObsApplicationPorts` 和 `ObsApplicationContainer` 变成显式应用级 scope。D3 最初注册19个 producer callback（2 core + 17），并先迁移17个生产端点。D4 将 BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4，共19个 GET 的 `read_process_projection` 链改为必需显式 store 参数；36个已识别生产投影端点（35 HTTP + 1 WebSocket）、已识别stats查询与sessions/prompt response cache接入当前app的QueryProjectionStore/View或app-owned cache。D5 又修复此前漏扫的5个 `/api/ui/*` GET，以及Security runtime/assets/incidents、Skill Catalog stats、Life Evolution snapshot、Semantic Recall stats、Governance snapshot共7个实际挂载GET；双Obs app/双SQLite测试证明这些路由不交叉读取。6个 reconciliation 端点另从 app.state 使用显式 repository authority。
 
-Projection daemon 保持 single-flight、关闭 join 与 retry handles。19只表示 registration：source-mode为 `DURABLE_READ=6 / STATIC_READ=3 / DURABLE_READ_PARTIAL=7 / TYPED_UNAVAILABLE=3`，16/3不是运行成功率。3个 unavailable与7个 partial使health为`DEGRADED`。Security reader校验最小schema、隐私字段与默认10分钟证据时效；QueryProjectionStore把evidence freshness与lease/journal operation clock分开。摘要遇ledger source failure/truncation整体失败关闭，Forge只做字段级unavailable；冷迁移库中尚未迁移的Memory/VTS/LLM legacy统计源仍会让相应aggregate不可用。本切片的metrics、humanoid diagnostics与source-correlation已使用canonical `model_attempt_log`且按attempt去重，其他legacy consumer仍待迁移；Sandbox telemetry因缺canonical migration明确为`UNAVAILABLE`，不拿`capability_execution_receipt`冒充。operator拒绝空Gateway响应并在任一target写失败时让job失败；Runtime只在durable Life根存在时生成可消费payload，缺runtime/autonomy/affect/scene/intent或readiness时保持partial。callback仍不得调用`process_services`。
+Projection daemon 保持 single-flight、关闭 join 与 retry handles。D5 把Semantic Recall与Governance拆成独立认证job后共21个producer；source-mode为 `DURABLE_READ=6 / STATIC_READ=3 / DURABLE_READ_PARTIAL=7 / AUTHENTICATED_HOST_READ=4 / TYPED_UNAVAILABLE=1`，20/1与认证声明都不是运行成功率。四个认证job分别物化Capability Forge、Semantic Recall、Governance与Organ/Tribe；Semantic/Governance各自读取独立versioned endpoint/type/cache/evidence和故障域，不再消费Capability v1为兼容保留的内嵌child。Capability v1 的兼容 child provider 异常时，Host 只把对应 child 降级为带 reason code 的`SOURCE_UNAVAILABLE`；只要Forge自身gap/proposal/runtime authority有效，capability-forge endpoint仍返200，不会被child反向拖垮。每个job只写一个kind，1个unavailable、7个partial及认证来源的运行态失败可能性使health为`DEGRADED`。
 
-静态扫描现有 `obs_routes*.py` 的 `process_services` 直接词法边界仍为15个（分布于7文件），它不是 route 数也不是全部 locator。D4 已令 `read_process_projection` 必须接收显式 store，并将 `capability_stats_projection`、`projection_ledger_view`、`remaining_query_projection` 三个兼容 helper 的 Obs 路由消费者降为0；helper定义和非路由兼容边界仍存在，legacy `_default_daemon/register_projection_job` 兼容链也仍存在。因此这只是已识别 route 的隔离，不是完整 Query Plane、source coverage 或 Composition 封板。
+Host为每个lifespan生成一个五合同共享的`source_instance_id`，mode/capability/semantic/governance/runtime各自维护锁内单调`source_revision`。Obs通过通用Query Projection SQLite的`compare_and_upsert`单事务CAS持久当前lineage，并从immutable journal读取完整历史epoch；同epoch的revision、observed、evidence不得回滚，同revision payload不得漂移，任意已退役epoch重放都会拒绝，不受固定窗口限制。合同仅递归校验精确名为`timestamp`或以`*_ts_ms`、`*_at_ms`结尾的嵌套时间不晚于Host observed；Obs再以本地接收时钟允许最多5秒skew、拒绝超过120秒的正证据，并将freshness夹到本地接收时间。Host composition、Host route和Obs receiver各执行公共序列化与合同复验；合同不是字段白名单，Organ `key_metrics`另使用逐agent显式字段及数值/布尔allowlist。Transport固定五条路径、禁代理/重定向、限制1 MiB，并以一个monotonic总deadline覆盖DNS解析、连接、响应头和分块正文。真实loopback已覆盖五来源传输，但不代表部署长期健康。
+
+Host source closure只在ASGI lifespan内预热、捕获并在finally清空；它底层仍读取`get_ledger/get_capability_* / get_semantic_recaller/require_process_tribe_runtime`等process authority，所以不是多Host全对象图隔离。Capability Forge durable proposal由ledger直接执行newest-per-proposal查询。缺token、Host或有效证据时相关文档保持`SOURCE_UNAVAILABLE`；mode history只在当前Host进程内，Organ只是allowlist后的瞬态证据而非Life authority。Life Body仍固定unavailable，真实Edge未证明；摘要遇ledger failure/truncation失败关闭。冷迁移Memory/VTS旧统计源仍缺；`llm_call_log` 已迁移，但 legacy graph-only 来源仍被统计消费；`llm_node_call_log` 缺少 migration，且仍有遗留读写者。callback仍不得调用`process_services`。
+
+静态扫描现有 `obs_routes*.py` 的 `process_services` 直接词法边界为13个，它不是route数也不是全部locator。`read_process_projection`必须接收显式store；`capability_stats_projection`、`domain_state_projection`、`projection_ledger_view`、`remaining_query_projection`四个兼容全局helper的Obs route消费者为0，但helper定义和非路由兼容边界仍存在，legacy `_default_daemon/register_projection_job`兼容链也仍存在。因此这只是已识别route的隔离，不是完整Query Plane、source coverage或Composition封板。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
 

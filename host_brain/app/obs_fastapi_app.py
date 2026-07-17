@@ -47,7 +47,10 @@ from host_brain.composition.obs_application import (
     ObsApplicationPorts,
     build_default_obs_application_ports,
 )
-from host_brain.composition.obs_projection_jobs import TYPED_UNAVAILABLE
+from host_brain.composition.obs_projection_jobs import (
+    AUTHENTICATED_HOST_READ,
+    TYPED_UNAVAILABLE,
+)
 from host_brain.persistence.effect_reconciliation_query_repository import (
     EffectReconciliationQueryRepository,
 )
@@ -374,6 +377,14 @@ def create_obs_app(
             for job in container.ports.projection_jobs
             if str(job.source_mode).upper().endswith("_PARTIAL")
         ]
+        authenticated_host_read_jobs = [
+            {
+                "name": job.name,
+                "source_mode": job.source_mode,
+            }
+            for job in container.ports.projection_jobs
+            if job.source_mode == AUTHENTICATED_HOST_READ
+        ]
         declared_non_typed_unavailable_jobs = [
             job.name
             for job in container.ports.projection_jobs
@@ -404,6 +415,10 @@ def create_obs_app(
                 ),
                 "typed_unavailable_job_count": len(unavailable_jobs),
                 "declared_partial_job_count": len(partial_jobs),
+                "authenticated_host_read_jobs": authenticated_host_read_jobs,
+                "authenticated_host_read_job_count": len(
+                    authenticated_host_read_jobs
+                ),
                 "missing_jobs": missing_jobs,
                 "unavailable_jobs": unavailable_jobs,
                 "partial_jobs": partial_jobs,

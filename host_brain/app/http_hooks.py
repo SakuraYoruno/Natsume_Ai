@@ -131,6 +131,7 @@ def runtime_lifespan(
     logger: Any,
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
     canon_service_provider: Callable[[], Any | None] | None = None,
+    mode_transition_service_sink: Callable[[Any | None], None] | None = None,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
@@ -481,6 +482,8 @@ def runtime_lifespan(
                     set_sys_mode=set_sys_mode,
                     ledger=ledger,
                 )
+                if mode_transition_service_sink is not None:
+                    mode_transition_service_sink(_mode_service)
 
                 _activity_monitor = ActivityMonitor(mode_transition_service=_mode_service)
                 _activity_monitor.start()
@@ -637,6 +640,8 @@ def runtime_lifespan(
         try:
             yield
         finally:
+            if mode_transition_service_sink is not None:
+                mode_transition_service_sink(None)
             await _shutdown_runtime(
                 activity_monitor=_activity_monitor,
                 resource_manager=_resource_manager,

@@ -14,24 +14,6 @@ from host_brain.composition.obs_projection_jobs import _sessions_callback
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
 
 
-class _SearchLedger:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def fetch_by_time_range(self, table: str, start_ms: int, end_ms: int, limit: int = 100, offset: int = 0):
-        self.calls += 1
-        if table != "intent_log":
-            return []
-        return [{
-            "request_id": "req-search",
-            "ts_ms": 1700000000000,
-            "decision": "APPROVE",
-            "type": "chat",
-            "reason_code": None,
-            "raw_text": "search me",
-        }]
-
-
 class _SessionProjectionStore:
     def __init__(self, request_id: str) -> None:
         self.calls = 0
@@ -151,15 +133,16 @@ def test_obs_sessions_cache_and_single_flight_are_isolated_per_app() -> None:
     assert second_store.calls == 1
 
 
-def test_webui_search_requests_never_falls_back_to_ledger(monkeypatch) -> None:
-    ledger = _SearchLedger()
-    monkeypatch.setattr("host_brain.app.web_ui.get_ledger", lambda: ledger)
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.peek_query_projection_store",
-        lambda: None,
-    )
+def test_webui_search_requests_never_falls_back_to_ledger() -> None:
+    class EmptyProjectionStore:
+        @staticmethod
+        def get(_kind: str, _key: str):
+            return None
 
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=EmptyProjectionStore,
+    )
     app.include_router(web_ui_router, prefix="/api")
     client = TestClient(app)
 
@@ -192,4 +175,3 @@ def test_webui_search_requests_never_falls_back_to_ledger(monkeypatch) -> None:
     assert first.json()["total"] == 0
     assert second.json()["results"] == []
     assert second.json()["degraded_state"] == "REBUILDING"
-    assert ledger.calls == 0

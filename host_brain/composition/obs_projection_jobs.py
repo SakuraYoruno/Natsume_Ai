@@ -23,8 +23,12 @@ from host_brain.app.observability_runtime.capability_stats_projection import (
     CAPABILITY_FORGE_OPERATOR_KIND,
 )
 from host_brain.app.observability_runtime.domain_state_projection import (
+    GOVERNANCE_SNAPSHOT_KEY,
+    GOVERNANCE_SNAPSHOT_KIND,
     SECURITY_IMMUNE_KEY,
     SECURITY_IMMUNE_KIND,
+    SEMANTIC_RECALL_STATS_KEY,
+    SEMANTIC_RECALL_STATS_KIND,
     SKILL_PACK_CATALOG_KEY,
     SKILL_PACK_CATALOG_KIND,
     _domain_pack_catalog,
@@ -104,6 +108,10 @@ from host_brain.app.observability_runtime.runtime_snapshot_source import (
     RuntimeSnapshotSourceReader,
     RuntimeSnapshotSourceUnavailable,
 )
+from host_brain.app.observability_runtime.host_read_transport import HostReadTransport
+from host_brain.app.observability_runtime.host_projection_sources import (
+    AuthenticatedHostProjectionSources,
+)
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections
 from host_brain.app.obs_routes_summary import (
     DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
@@ -128,6 +136,7 @@ TYPED_UNAVAILABLE = "TYPED_UNAVAILABLE"
 DURABLE_READ = "DURABLE_READ"
 STATIC_READ = "STATIC_READ"
 DURABLE_READ_PARTIAL = "DURABLE_READ_PARTIAL"
+AUTHENTICATED_HOST_READ = "AUTHENTICATED_HOST_READ"
 
 HOST_RUNTIME_SOURCE_NOT_INJECTED = "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
 AGGREGATE_PROJECTION_SOURCE_SCOPE = "app-local-aggregate-read-model"
@@ -692,6 +701,48 @@ def _runtime_snapshot_callback(
     return refresh
 
 
+def _authenticated_host_projection_callback(
+    store: QueryProjectionStore,
+    *,
+    job_name: str,
+    target: ProjectionTarget,
+    reader: Callable[[], tuple[dict[str, Any], int]],
+) -> Callable[[], object]:
+    def refresh() -> dict[str, int]:
+        try:
+            payload, evidence_ts_ms = reader()
+        except OperatorSourceUnavailable as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name=job_name,
+                target=target,
+                reason_code=exc.reason_code,
+                detail=exc.detail,
+                source_scope=exc.source_scope,
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        _upsert(
+            store,
+            target.kind,
+            target.key,
+            payload,
+            observed=evidence_ts_ms,
+            source_ref=f"obs-app://{job_name}/authenticated-host-read",
+            freshness_ts_ms=evidence_ts_ms,
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
 def _remaining_queries_callback(
     ledger: Any,
     store: QueryProjectionStore,
@@ -855,8 +906,9 @@ def build_explicit_obs_projection_callbacks(
     store: QueryProjectionStore,
     canonical_db_path: str | Path,
     life_snapshot_reader: Callable[[str], Mapping[str, Any]],
+    host_read_transport: HostReadTransport | None = None,
 ) -> tuple[ExplicitObsProjectionCallback, ...]:
-    """Compose all seventeen non-core jobs from app-local ports."""
+    """Compose all nineteen non-core jobs from app-local ports."""
 
     database = Path(canonical_db_path).expanduser().resolve()
     repo_root = Path(__file__).resolve().parents[2]
@@ -885,21 +937,57 @@ def build_explicit_obs_projection_callbacks(
         "OBS_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS",
         DEFAULT_SECURITY_IMMUNE_EVIDENCE_MAX_AGE_MS,
     )
+    host_sources = (
+        AuthenticatedHostProjectionSources(
+            host_read_transport,
+            lineage_store=store,
+        )
+        if host_read_transport is not None
+        else None
+    )
 
     unavailable: dict[str, tuple[tuple[ProjectionTarget, ...], str]] = {
-        "capability-forge-operator": (
-            (ProjectionTarget(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY),),
-            "Capability Forge is a writer-capable Host runtime service",
-        ),
         "life-body": (
             (ProjectionTarget(LIFE_BODY_KIND, window_key(360)),),
             "life-body aggregation requires explicit Host read ports",
         ),
-        "organ-tribe": (
-            (ProjectionTarget(ORGAN_TRIBE_KIND, ORGAN_TRIBE_KEY),),
-            "Organ-Tribe state is Host process-owned and no read port is injected",
-        ),
     }
+    if host_sources is None:
+        unavailable.update(
+            {
+                "capability-forge-operator": (
+                    (
+                        ProjectionTarget(
+                            CAPABILITY_FORGE_OPERATOR_KIND,
+                            CAPABILITY_FORGE_OPERATOR_KEY,
+                        ),
+                    ),
+                    "Capability Forge is a writer-capable Host runtime service",
+                ),
+                "semantic-recall-stats": (
+                    (
+                        ProjectionTarget(
+                            SEMANTIC_RECALL_STATS_KIND,
+                            SEMANTIC_RECALL_STATS_KEY,
+                        ),
+                    ),
+                    "Semantic Recall stats require an authenticated Host read port",
+                ),
+                "governance-snapshot": (
+                    (
+                        ProjectionTarget(
+                            GOVERNANCE_SNAPSHOT_KIND,
+                            GOVERNANCE_SNAPSHOT_KEY,
+                        ),
+                    ),
+                    "Governance state requires an authenticated Host read port",
+                ),
+                "organ-tribe": (
+                    (ProjectionTarget(ORGAN_TRIBE_KIND, ORGAN_TRIBE_KEY),),
+                    "Organ-Tribe state is Host process-owned and no read port is injected",
+                ),
+            }
+        )
 
     callbacks: dict[str, ExplicitObsProjectionCallback] = {
         "bio-ops-metadata": ExplicitObsProjectionCallback(
@@ -963,11 +1051,14 @@ def build_explicit_obs_projection_callbacks(
                         runtime_config_reader=_operator_runtime_config_reader,
                     ),
                     life_snapshot_reader=life_snapshot_reader,
-                    # Host-owned mode authority is recovered in the next
-                    # authenticated transport slice.  These two targets remain
-                    # independently typed unavailable until then.
-                    sys_mode_status_reader=None,
-                    sys_mode_history_reader=None,
+                    # One configured client supplies both Host-owned mode
+                    # values from the same app-owned cached contract read.
+                    sys_mode_status_reader=(
+                        host_sources.mode_status if host_sources is not None else None
+                    ),
+                    sys_mode_history_reader=(
+                        host_sources.mode_history if host_sources is not None else None
+                    ),
                 ),
             ),
             DURABLE_READ_PARTIAL,
@@ -1034,6 +1125,60 @@ def build_explicit_obs_projection_callbacks(
             15_000,
         ),
     }
+    if host_sources is not None:
+        callbacks["capability-forge-operator"] = ExplicitObsProjectionCallback(
+            "capability-forge-operator",
+            _authenticated_host_projection_callback(
+                store,
+                job_name="capability-forge-operator",
+                target=ProjectionTarget(
+                    CAPABILITY_FORGE_OPERATOR_KIND,
+                    CAPABILITY_FORGE_OPERATOR_KEY,
+                ),
+                reader=host_sources.capability_forge,
+            ),
+            AUTHENTICATED_HOST_READ,
+            15_000,
+        )
+        callbacks["semantic-recall-stats"] = ExplicitObsProjectionCallback(
+            "semantic-recall-stats",
+            _authenticated_host_projection_callback(
+                store,
+                job_name="semantic-recall-stats",
+                target=ProjectionTarget(
+                    SEMANTIC_RECALL_STATS_KIND,
+                    SEMANTIC_RECALL_STATS_KEY,
+                ),
+                reader=host_sources.semantic_recall,
+            ),
+            AUTHENTICATED_HOST_READ,
+            60_000,
+        )
+        callbacks["governance-snapshot"] = ExplicitObsProjectionCallback(
+            "governance-snapshot",
+            _authenticated_host_projection_callback(
+                store,
+                job_name="governance-snapshot",
+                target=ProjectionTarget(
+                    GOVERNANCE_SNAPSHOT_KIND,
+                    GOVERNANCE_SNAPSHOT_KEY,
+                ),
+                reader=host_sources.governance,
+            ),
+            AUTHENTICATED_HOST_READ,
+            30_000,
+        )
+        callbacks["organ-tribe"] = ExplicitObsProjectionCallback(
+            "organ-tribe",
+            _authenticated_host_projection_callback(
+                store,
+                job_name="organ-tribe",
+                target=ProjectionTarget(ORGAN_TRIBE_KIND, ORGAN_TRIBE_KEY),
+                reader=host_sources.organ_tribe,
+            ),
+            AUTHENTICATED_HOST_READ,
+            10_000,
+        )
     for name, (targets, detail) in unavailable.items():
         callbacks[name] = ExplicitObsProjectionCallback(
             name,
@@ -1046,8 +1191,10 @@ def build_explicit_obs_projection_callbacks(
             TYPED_UNAVAILABLE,
             {
                 "capability-forge-operator": 15_000,
+                "governance-snapshot": 30_000,
                 "life-body": 30_000,
                 "organ-tribe": 10_000,
+                "semantic-recall-stats": 60_000,
             }[name],
             HOST_RUNTIME_SOURCE_NOT_INJECTED,
         )
@@ -1057,6 +1204,7 @@ def build_explicit_obs_projection_callbacks(
         "capability-forge-operator",
         "device-status",
         "digital-life-overview",
+        "governance-snapshot",
         "health-passive",
         "insights-summary",
         "life-body",
@@ -1066,6 +1214,7 @@ def build_explicit_obs_projection_callbacks(
         "resource-manager",
         "runtime-snapshot",
         "security-immune",
+        "semantic-recall-stats",
         "sessions",
         "skill-pack-catalog",
         "task-runtime",
@@ -1077,6 +1226,7 @@ def build_explicit_obs_projection_callbacks(
 
 
 __all__ = [
+    "AUTHENTICATED_HOST_READ",
     "DURABLE_READ",
     "DURABLE_READ_PARTIAL",
     "ExplicitObsProjectionCallback",

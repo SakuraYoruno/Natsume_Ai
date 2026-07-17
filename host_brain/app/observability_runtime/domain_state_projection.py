@@ -1,8 +1,9 @@
 """Durable Life, Security Immune and Skill/Domain-Pack query projections.
 
 The loaders in this module are background-worker entry points.  HTTP handlers
-must only call :func:`read_domain_projection`; they must never call a loader,
-initialize a domain singleton, or inspect a supply-chain directory.
+must only call :func:`read_domain_projection_from_store` with their app-local
+store; they must never call a loader, initialize a domain singleton, or inspect
+a supply-chain directory.
 """
 
 from __future__ import annotations
@@ -25,6 +26,12 @@ from host_brain.observability.projection_store import QueryProjectionStore, dige
 LIFE_EVOLUTION_KIND = "life_evolution"
 LIFE_DEFAULT_KEY = "default"
 LIFE_MAX_AGE_MS = 30_000
+GOVERNANCE_SNAPSHOT_KIND = "governance_snapshot"
+GOVERNANCE_SNAPSHOT_KEY = "current"
+GOVERNANCE_SNAPSHOT_MAX_AGE_MS = 60_000
+SEMANTIC_RECALL_STATS_KIND = "semantic_recall_stats"
+SEMANTIC_RECALL_STATS_KEY = "runtime"
+SEMANTIC_RECALL_STATS_MAX_AGE_MS = 120_000
 SECURITY_IMMUNE_KIND = "security_immune"
 SECURITY_IMMUNE_KEY = "runtime"
 SECURITY_IMMUNE_MAX_AGE_MS = 10 * 60_000
@@ -319,28 +326,41 @@ def refresh_skill_pack_catalog_projection() -> dict[str, int]:
     return {"document_count": 1}
 
 
-def read_domain_projection(
+def _unavailable_projection_meta(
+    *,
+    kind: str,
+    key: str,
+    exc: BaseException,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "Natsume.operator.query_projection.v1",
+        "kind": kind,
+        "key": key,
+        "available": False,
+        "projection_version": 0,
+        "projection_cursor": 0,
+        "source_cursor": 0,
+        "freshness_ts_ms": 0,
+        "age_ms": 0,
+        "degraded_state": "SOURCE_UNAVAILABLE",
+        "degraded_detail": type(exc).__name__,
+        "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
+    }
+
+
+def read_domain_projection_from_store(
+    store: QueryProjectionStore,
     *,
     kind: str,
     key: str,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read one document through an explicitly supplied application store."""
+
     try:
-        document = _store().get(kind, key)
+        document = store.get(kind, key)
     except Exception as exc:
-        return None, {
-            "schema_version": "Natsume.operator.query_projection.v1",
-            "kind": kind,
-            "key": key,
-            "available": False,
-            "projection_version": 0,
-            "projection_cursor": 0,
-            "source_cursor": 0,
-            "freshness_ts_ms": 0,
-            "degraded_state": "SOURCE_UNAVAILABLE",
-            "degraded_detail": type(exc).__name__,
-            "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
-        }
+        return None, _unavailable_projection_meta(kind=kind, key=key, exc=exc)
     meta = projection_meta(kind, key, document, max_age_ms=max_age_ms)
     meta.setdefault("projection_version", 0)
     meta.setdefault("projection_cursor", 0)
@@ -350,6 +370,30 @@ def read_domain_projection(
     if document is None or not meta["available"]:
         return None, meta
     return dict(document.payload), meta
+
+
+def read_domain_projection(
+    *,
+    kind: str,
+    key: str,
+    max_age_ms: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Compatibility reader for non-HTTP callers.
+
+    HTTP handlers must use :func:`read_domain_projection_from_store` so one
+    Obs application can never read another application's projection database.
+    """
+
+    try:
+        store = _store()
+    except Exception as exc:
+        return None, _unavailable_projection_meta(kind=kind, key=key, exc=exc)
+    return read_domain_projection_from_store(
+        store,
+        kind=kind,
+        key=key,
+        max_age_ms=max_age_ms,
+    )
 
 
 def _run_if_due(name: str, interval_seconds: float, callback: Callable[[], dict[str, int]]) -> dict[str, int | bool]:
@@ -380,11 +424,14 @@ register_projection_job("skill-pack-catalog", run_skill_pack_catalog_projection_
 
 
 __all__ = [
+    "GOVERNANCE_SNAPSHOT_KEY", "GOVERNANCE_SNAPSHOT_KIND", "GOVERNANCE_SNAPSHOT_MAX_AGE_MS",
     "LIFE_DEFAULT_KEY", "LIFE_EVOLUTION_KIND", "LIFE_MAX_AGE_MS",
+    "SEMANTIC_RECALL_STATS_KEY", "SEMANTIC_RECALL_STATS_KIND", "SEMANTIC_RECALL_STATS_MAX_AGE_MS",
     "SECURITY_IMMUNE_KEY", "SECURITY_IMMUNE_KIND", "SECURITY_IMMUNE_MAX_AGE_MS",
     "SKILL_PACK_CATALOG_KEY", "SKILL_PACK_CATALOG_KIND", "SKILL_PACK_CATALOG_MAX_AGE_MS",
     "load_life_evolution_projection_source", "load_security_immune_projection_source",
     "load_skill_pack_catalog_projection_source", "read_domain_projection",
+    "read_domain_projection_from_store",
     "refresh_life_evolution_projection", "refresh_security_immune_projection",
     "refresh_skill_pack_catalog_projection",
 ]

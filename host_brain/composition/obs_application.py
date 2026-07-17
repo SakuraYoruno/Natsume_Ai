@@ -33,6 +33,7 @@ from host_brain.composition.obs_projection_jobs import (
     TYPED_UNAVAILABLE,
     build_explicit_obs_projection_callbacks,
 )
+from host_brain.app.observability_runtime.host_read_transport import HostReadTransport
 
 
 OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
@@ -40,6 +41,7 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "capability-forge-operator",
     "device-status",
     "digital-life-overview",
+    "governance-snapshot",
     "health-passive",
     "insights-summary",
     "life-body",
@@ -49,6 +51,7 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "resource-manager",
     "runtime-snapshot",
     "security-immune",
+    "semantic-recall-stats",
     "sessions",
     "skill-pack-catalog",
     "task-runtime",
@@ -225,6 +228,7 @@ def build_default_obs_application_ports(
                     store=store,
                     canonical_db_path=db_path,
                     life_snapshot_reader=life_snapshot,
+                    host_read_transport=HostReadTransport.from_environment(),
                 )
             ),
         )
@@ -235,7 +239,7 @@ def build_default_obs_application_ports(
             life_snapshot_reader=life_snapshot,
             projection_jobs=jobs,
             close_owned_resources=ledger.close,
-            projection_coverage="REGISTERED_19_OF_19",
+            projection_coverage="REGISTERED_21_OF_21",
             missing_projection_jobs=(),
         )
     except BaseException:

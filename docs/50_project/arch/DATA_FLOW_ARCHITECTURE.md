@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v1.8
+版本：v2.0
 
-核对日期：2026-07-16
+核对日期：2026-07-17
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -342,21 +342,22 @@ Obs 读取不借用 Host 进程内 Task container：`obs_fastapi_app` 仅在 `HO
 
 0099 terminal reconciliation 在主 Host 与独立 Obs 都提供 `candidates/cases/challenge` 三条 GET，并要求 `obs:task-runtime:read`；两处都只构造同 canonical SQLite 的 `mode=ro + query_only=ON` reader，禁止 fallback 到完整 `DurableTaskStore`。Cases 只给最小摘要，subject snapshot 不出库。Challenge 从 OperatorQueryGateway request context 取得认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`，在 authority 已绑定 key ID 时拒绝不一致请求；权威 builder 用 case、current subject 与确定性 Graph/Budget Outbox 生成 Store 实际验证的 final canonical bytes和 `command_request`。HTTP → 真实 Ed25519 → Store round-trip 已通过，但外部 key lifecycle/canary 未验证。
 
-D4 后独立 Obs 同时保留三条必须区分的数据流：
+D5 后独立 Obs 同时保留以下必须区分的数据流：
 
 ```text
 create_obs_app
   → ObsApplicationPorts
-  → 19 registered producer callbacks（registration，不是运行成功证明）
-      → 16 declared non-TYPED_UNAVAILABLE（非运行成功证明）
+  → 21 registered producer callbacks（registration，不是运行成功证明）
+      → 20 declared non-TYPED_UNAVAILABLE（非运行成功证明）
           → 16 durable/static/app-owned source callbacks
+          → 4 AUTHENTICATED_HOST_READ（Forge / Semantic / Governance / Organ）
           → 0 process-local module-cache coupled callbacks
           → 7 DURABLE_READ_PARTIAL（缺 target 时仍写 typed unavailable）
-      → 3 TYPED_UNAVAILABLE
+      → 1 TYPED_UNAVAILABLE（Life Body）
           → durable SOURCE_UNAVAILABLE
   → app-local ProjectionJobDaemon
   → QueryProjectionStore
-  → /health DEGRADED（missing=0，但 typed-unavailable=3、partial=7）
+  → /health DEGRADED（missing=0，但 typed-unavailable=1、partial=7；认证源另看运行态）
 
 36 identified production projection endpoints (35 HTTP + 1 WebSocket)
 and identified projection/stats queries / sessions + prompt cache
@@ -367,9 +368,40 @@ and identified projection/stats queries / sessions + prompt cache
 19 D4-migrated production GET routes
   → read_process_projection(explicit app-local store, ...)
   → no process store discovery
+
+5 mounted /api/ui/* GET routes
+  → require_obs_query_projection_store
+  → current app-local QueryProjectionStore
+
+7 remaining mounted GET routes
+  → Security 3 + Skill 1 + Life 1 + Semantic 1 + Governance 1
+  → require_obs_query_projection_store
+  → current app-local QueryProjectionStore
+
+Host /internal/obs-sources/{mode,capability-forge,semantic-recall,governance,runtime}
+  → dedicated HOST_OBS_READ_TOKEN
+  → per-Host-lifespan source_instance_id + per-contract monotonic revision
+  → Host composition public serialization + contract validation
+  → Host route public serialization + contract validation
+  → bounded DNS + no-proxy/no-redirect transport + 1 MiB monotonic total deadline
+  → Obs public serialization + contract validation + local clock bounds
+  → per-path app-local cache + generic QueryProjectionStore durable lineage CAS/journal
+      → same epoch revision/observed/evidence rollback rejected
+      → complete historical epoch inventory rejects every retired epoch replay
+
+capability-forge endpoint → capability-forge-operator job → one document
+semantic-recall endpoint → semantic-recall-stats job → one document
+governance endpoint → governance-snapshot job → one document
+runtime endpoint → organ-tribe job → one document
+
+Capability v1 compatibility child provider failure
+  → only that child becomes typed SOURCE_UNAVAILABLE
+  → capability-forge remains available when its own authority is valid
 ```
 
-19个 producer callback 执行路径不调用 `process_services`。Security Immune只接受满足最小schema和时效的隐私过滤证据，证据freshness与lease/journal操作时钟分离；摘要在ledger failure/truncation时整体失败关闭，Forge只作为字段级unavailable；operator拒绝空Gateway健康对象，任一target写失败会令job失败；Runtime从durable Life与operator projections构造最小partial snapshot，缺Life槽位/readiness不冒充live，也不调用Agent/模型。Forge、Life Body、Organ三个整job仍 unavailable；sys-mode/history、真实Edge和Host endpoints未闭环。15个直接词法边界、三个非路由兼容helper定义与legacy daemon仍在；不能把部分source recovery写成完整Query Plane。
+21个producer callback执行路径不调用`process_services`。Host source endpoint不在GET时构造服务；ASGI lifespan预热并捕获provider、关闭时清空，但其底层Mode/Forge/ledger/Semantic/Governance/Scheduler/Tribe仍来自process authority。合同只递归约束`timestamp`、`*_ts_ms`、`*_at_ms`字段不晚于Host observed，不是“所有future字段”过滤器；Obs允许相对本地接收时钟最多5秒skew，正evidence最大年龄120秒，并把freshness写成`min(source evidence, local receive)`。五路径分别缓存，lineage以SQLite单事务CAS更新当前head并从immutable journal读取完整epoch历史。三层公共序列化与合同复验保护通用payload；Organ `key_metrics`另以逐agent显式数值/布尔allowlist阻断任意state标量。
+
+Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority；Life Body固定unavailable，真实Edge未证明。Memory/VTS冷迁移旧表仍缺；`llm_call_log` 已迁移，但 legacy graph-only 来源仍被统计消费；`llm_node_call_log` 缺少 migration，且仍有遗留读写者。13个直接词法边界、4个非路由兼容helper定义与legacy daemon仍在；不能把部分source recovery写成完整Query Plane。
 
 ```text
 conversation.user_turn

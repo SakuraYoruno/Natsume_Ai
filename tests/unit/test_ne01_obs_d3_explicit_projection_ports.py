@@ -8,14 +8,27 @@ import threading
 import time
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
+import pytest
 
+from host_brain.app.observability_runtime.host_projection_sources import (
+    AuthenticatedHostProjectionSources,
+)
+from host_brain.app.observability_runtime.operator_live_sources import (
+    OperatorSourceUnavailable,
+)
 from host_brain.composition import process_services
 from host_brain.composition.obs_application import (
     LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS,
     ObsApplicationContainer,
     build_default_obs_application_ports,
 )
-from host_brain.composition.obs_projection_jobs import TYPED_UNAVAILABLE
+from host_brain.composition.obs_projection_jobs import (
+    AUTHENTICATED_HOST_READ,
+    DURABLE_READ,
+    DURABLE_READ_PARTIAL,
+    STATIC_READ,
+    TYPED_UNAVAILABLE,
+)
 from host_brain.composition.process_service_container import (
     get_process_service_container,
 )
@@ -37,7 +50,7 @@ def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003
     raise AssertionError("app-local projection callback touched process locator")
 
 
-def test_default_obs_projection_factory_has_registered_19_of_19_coverage(
+def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
     tmp_path: Path,
 ) -> None:
     process_container = get_process_service_container()
@@ -47,15 +60,31 @@ def test_default_obs_projection_factory_has_registered_19_of_19_coverage(
     )
     try:
         names = tuple(job.name for job in ports.projection_jobs)
-        assert len(names) == 19
-        assert len(set(names)) == 19
+        assert len(names) == 21
+        assert len(set(names)) == 21
         assert names[:2] == ("ledger-stats", "life-evolution")
         assert names[2:] == LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS
-        assert ports.projection_coverage == "REGISTERED_19_OF_19"
+        assert ports.projection_coverage == "REGISTERED_21_OF_21"
         assert ports.missing_projection_jobs == ()
         assert all(job.source_mode != "CALLER_DEFINED" for job in ports.projection_jobs)
-        assert sum(job.source_mode == TYPED_UNAVAILABLE for job in ports.projection_jobs) == 3
-        assert sum(job.source_mode != TYPED_UNAVAILABLE for job in ports.projection_jobs) == 16
+        assert sum(
+            job.source_mode == TYPED_UNAVAILABLE
+            for job in ports.projection_jobs
+        ) == 1
+        assert sum(
+            job.source_mode == AUTHENTICATED_HOST_READ
+            for job in ports.projection_jobs
+        ) == 4
+        assert sum(job.source_mode == DURABLE_READ for job in ports.projection_jobs) == 6
+        assert sum(job.source_mode == STATIC_READ for job in ports.projection_jobs) == 3
+        assert sum(
+            job.source_mode == DURABLE_READ_PARTIAL
+            for job in ports.projection_jobs
+        ) == 7
+        assert sum(
+            job.source_mode != TYPED_UNAVAILABLE
+            for job in ports.projection_jobs
+        ) == 20
         assert process_container.application_ports is before
     finally:
         assert ports.close_owned_resources is not None
@@ -72,22 +101,26 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
         # Producer counts remain declared source metadata, while D4 separately
         # proves that the identified HTTP/WebSocket projection routes no
         # longer rediscover their store through read_process_projection.
-        assert ports.projection_coverage == "REGISTERED_19_OF_19"
-        assert len(ports.projection_jobs) == 19
+        assert ports.projection_coverage == "REGISTERED_21_OF_21"
+        assert len(ports.projection_jobs) == 21
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 16
+        ) == 20
         assert sum(
             job.source_mode == TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 3
+        ) == 1
+        assert sum(
+            job.source_mode == AUTHENTICATED_HOST_READ
+            for job in ports.projection_jobs
+        ) == 4
 
         route_sources = [
             path.read_text(encoding="utf-8-sig")
             for path in (ROOT / "host_brain" / "app").glob("obs_routes*.py")
         ]
-        assert sum(source.count("process_services") for source in route_sources) == 15
+        assert sum(source.count("process_services") for source in route_sources) == 13
         assert sum(
             source.count("get_projection_ledger_view") for source in route_sources
         ) == 0
@@ -115,11 +148,6 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             (ROOT / "configs" / "release" / "current_architecture_status.json")
             .read_text(encoding="utf-8")
         )["capabilities"]["explicit_composition_root"]
-        assert machine["obs_producer_source_scope_breakdown"] == {
-            "TYPED_UNAVAILABLE": 3,
-            "PURE_DURABLE_STATIC_OR_APP_OWNED": 16,
-            "PROCESS_LOCAL_MODULE_CACHE_COUPLED": 0,
-        }
         assert machine["obs_process_local_module_cache_coupled_jobs"] == []
         assert machine["obs_app_local_query_projection_endpoint_count"] == 36
         assert machine["obs_app_local_query_projection_http_endpoint_count"] == 35
@@ -135,6 +163,13 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             == "COMPATIBILITY_HELPERS_PRESENT_NO_OBS_ROUTE_CONSUMERS"
         )
         assert machine["obs_route_global_query_projection_helper_occurrences"] == 0
+        assert machine["obs_route_process_service_locator_occurrences"] == 13
+        assert machine["obs_other_global_query_projection_locator_modules"] == [
+            "capability_stats_projection.py",
+            "domain_state_projection.py",
+            "projection_ledger_view.py",
+            "remaining_query_projection.py",
+        ]
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()
@@ -241,9 +276,11 @@ def test_two_obs_apps_producers_never_read_process_local_health_or_receipt_cache
             ports.close_owned_resources()
 
 
-def test_host_owned_sources_are_durable_typed_unavailable_documents(
+def test_host_owned_sources_without_token_are_runtime_unavailable_documents(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.delenv("HOST_OBS_READ_TOKEN", raising=False)
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-unavailable.sqlite3",
     )
@@ -261,23 +298,38 @@ def test_host_owned_sources_are_durable_typed_unavailable_documents(
             for job in ports.projection_jobs
             if job.source_mode == TYPED_UNAVAILABLE
         }
-        assert set(unavailable_jobs) == {
-            "capability-forge-operator",
-            "life-body",
-            "organ-tribe",
+        assert set(unavailable_jobs) == {"life-body"}
+        authenticated_jobs = {
+            job.name: job
+            for job in ports.projection_jobs
+            if job.source_mode == AUTHENTICATED_HOST_READ
         }
-        document = ports.query_projection_store.get(
-            "capability_forge_operator",
-            "current",
-        )
-        assert document is not None
-        assert document.degraded_state is ProjectionDegradedState.SOURCE_UNAVAILABLE
-        assert document.payload["available"] is False
-        assert (
-            document.payload["reason_code"]
-            == "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
-        )
-        assert document.payload["source_scope"] == "host-runtime"
+        assert set(authenticated_jobs) == {
+            "capability-forge-operator",
+            "governance-snapshot",
+            "organ-tribe",
+            "semantic-recall-stats",
+        }
+        documents = []
+        for kind, key, job_name in (
+            ("capability_forge_operator", "current", "capability-forge-operator"),
+            ("semantic_recall_stats", "runtime", "semantic-recall-stats"),
+            ("governance_snapshot", "current", "governance-snapshot"),
+            ("organ_tribe_status", "current", "organ-tribe"),
+        ):
+            source_document = ports.query_projection_store.get(kind, key)
+            assert source_document is not None
+            assert (
+                source_document.degraded_state
+                is ProjectionDegradedState.SOURCE_UNAVAILABLE
+            )
+            assert source_document.payload["available"] is False
+            assert source_document.payload["reason_code"] == "OBS_HOST_READ_CONFIG"
+            assert source_document.payload["source_scope"] == "host-runtime"
+            assert source_document.payload["job_name"] == job_name
+            documents.append(source_document)
+
+        document = documents[0]
         unavailable_meta = projection_meta(
             "capability_forge_operator",
             "current",
@@ -294,7 +346,7 @@ def test_host_owned_sources_are_durable_typed_unavailable_documents(
         # Simulate a committed projection response whose caller never saw the
         # return value.  An exact retry observes the durable state and is a
         # no-op rather than advancing cursor/version every daemon poll.
-        job = unavailable_jobs["capability-forge-operator"]
+        job = authenticated_jobs["capability-forge-operator"]
         version = document.projection_version
         cursor = document.source_cursor
         job.callback()
@@ -307,6 +359,153 @@ def test_host_owned_sources_are_durable_typed_unavailable_documents(
         assert replay.source_cursor == cursor
     finally:
         container.close()
+
+
+def test_semantic_and_governance_authenticated_jobs_materialize_independently(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    now_ms = int(time.time() * 1000)
+    monkeypatch.setenv("HOST_OBS_READ_TOKEN", "d5-independent-projections")
+    monkeypatch.setattr(
+        AuthenticatedHostProjectionSources,
+        "semantic_recall",
+        lambda _self: ({"status": "MOCK_READY", "timestamp": now_ms}, now_ms),
+    )
+    monkeypatch.setattr(
+        AuthenticatedHostProjectionSources,
+        "governance",
+        lambda _self: (
+            {
+                "schema_version": "Natsume.governance.snapshot.v1",
+                "read_only": True,
+                "generated_at_ms": now_ms,
+            },
+            now_ms,
+        ),
+    )
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "obs-d5-independent-success.sqlite3",
+    )
+    try:
+        jobs = {job.name: job for job in ports.projection_jobs}
+        assert jobs["semantic-recall-stats"].callback() == {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+        assert jobs["governance-snapshot"].callback() == {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+        semantic = ports.query_projection_store.get(
+            "semantic_recall_stats",
+            "runtime",
+        )
+        governance = ports.query_projection_store.get(
+            "governance_snapshot",
+            "current",
+        )
+        assert semantic is not None and governance is not None
+        assert semantic.degraded_state is ProjectionDegradedState.HEALTHY
+        assert governance.degraded_state is ProjectionDegradedState.HEALTHY
+        assert semantic.payload["status"] == "MOCK_READY"
+        assert governance.payload["read_only"] is True
+        assert semantic.projection_version == governance.projection_version == 1
+        assert semantic.freshness_ts_ms == governance.freshness_ts_ms == now_ms
+    finally:
+        assert ports.close_owned_resources is not None
+        ports.close_owned_resources()
+
+
+@pytest.mark.parametrize(
+    ("failed_job", "failed_kind", "failed_key", "healthy_kind", "healthy_key"),
+    (
+        (
+            "semantic-recall-stats",
+            "semantic_recall_stats",
+            "runtime",
+            "governance_snapshot",
+            "current",
+        ),
+        (
+            "governance-snapshot",
+            "governance_snapshot",
+            "current",
+            "semantic_recall_stats",
+            "runtime",
+        ),
+    ),
+)
+def test_semantic_and_governance_authenticated_job_failures_are_independent(
+    tmp_path: Path,
+    monkeypatch,
+    failed_job: str,
+    failed_kind: str,
+    failed_key: str,
+    healthy_kind: str,
+    healthy_key: str,
+) -> None:
+    now_ms = int(time.time() * 1000)
+    monkeypatch.setenv("HOST_OBS_READ_TOKEN", "d5-independent-failure")
+
+    def unavailable(_self):  # noqa: ANN001
+        raise OperatorSourceUnavailable(
+            "OBS_HOST_CHILD_SOURCE_TEST_UNAVAILABLE",
+            "independent child source is unavailable",
+            source_scope="host-runtime",
+        )
+
+    semantic_reader = (
+        unavailable
+        if failed_job == "semantic-recall-stats"
+        else lambda _self: ({"status": "MOCK_READY", "timestamp": now_ms}, now_ms)
+    )
+    governance_reader = (
+        unavailable
+        if failed_job == "governance-snapshot"
+        else lambda _self: (
+            {
+                "schema_version": "Natsume.governance.snapshot.v1",
+                "read_only": True,
+                "generated_at_ms": now_ms,
+            },
+            now_ms,
+        )
+    )
+    monkeypatch.setattr(
+        AuthenticatedHostProjectionSources,
+        "semantic_recall",
+        semantic_reader,
+    )
+    monkeypatch.setattr(
+        AuthenticatedHostProjectionSources,
+        "governance",
+        governance_reader,
+    )
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / f"obs-d5-{failed_job}.sqlite3",
+    )
+    try:
+        jobs = {job.name: job for job in ports.projection_jobs}
+        jobs["semantic-recall-stats"].callback()
+        jobs["governance-snapshot"].callback()
+
+        failed = ports.query_projection_store.get(failed_kind, failed_key)
+        healthy = ports.query_projection_store.get(healthy_kind, healthy_key)
+        assert failed is not None and healthy is not None
+        assert failed.degraded_state is ProjectionDegradedState.SOURCE_UNAVAILABLE
+        assert failed.payload["job_name"] == failed_job
+        assert failed.payload["reason_code"] == (
+            "OBS_HOST_CHILD_SOURCE_TEST_UNAVAILABLE"
+        )
+        assert healthy.degraded_state is ProjectionDegradedState.HEALTHY
+        assert healthy.payload.get("available") is not False
+    finally:
+        assert ports.close_owned_resources is not None
+        ports.close_owned_resources()
 
 
 def test_d3_projection_adapter_source_has_no_host_locator_fallback() -> None:
@@ -341,14 +540,21 @@ def test_default_job_set_covers_every_legacy_registration_and_manual_job(
                 and isinstance(first.value, str)
             ):
                 legacy_registered.add(first.value)
-    legacy_registered.update({"operator-live-state", "remaining-operator-queries"})
+    legacy_registered.update(
+        {
+            "governance-snapshot",
+            "operator-live-state",
+            "remaining-operator-queries",
+            "semantic-recall-stats",
+        }
+    )
 
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-static-job-set.sqlite3",
     )
     try:
         assert {job.name for job in ports.projection_jobs} == legacy_registered
-        assert len(legacy_registered) == 19
+        assert len(legacy_registered) == 21
     finally:
         ports.close_owned_resources()
 

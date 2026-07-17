@@ -881,3 +881,132 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
         "security-closed",
         "base-closed",
     ]
+
+
+def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    calls: list[str] = []
+    governance_snapshot: dict[str, object] = {}
+    ledger = SimpleNamespace(canonical_db_path=":memory:")
+    degradation_machine = object()
+
+    class StopAfterGovernanceRead(RuntimeError):
+        pass
+
+    class Scorecards:
+        def list_all(self):
+            calls.append("scorecards-read")
+            return []
+
+    @asynccontextmanager
+    async def base_lifespan():
+        yield
+
+    def fake_app_factory(**kwargs):
+        captured.update(kwargs)
+        return FastAPI()
+
+    def fail_semantic_recaller():
+        calls.append("semantic")
+        raise RuntimeError("semantic source unavailable")
+
+    def get_scorecards():
+        calls.append("scorecards-prewarmed")
+        return Scorecards()
+
+    def get_degradation_machine():
+        calls.append("degradation-prewarmed")
+        return degradation_machine
+
+    def read_degradation(*, machine):
+        assert machine is degradation_machine
+        calls.append("degradation-read")
+        return {
+            "status": "READY",
+            "updated_at_ms": 1_750_000_000_000,
+        }
+
+    def read_governance_then_stop(current_ledger):
+        assert current_ledger is ledger
+        ports = captured["host_obs_read_ports"]
+        snapshot = ports.governance_source_reader()
+        governance_snapshot.update(snapshot.governance)
+        raise StopAfterGovernanceRead
+
+    monkeypatch.setenv("PENTEST_WEB_LAB_MODE", "true")
+    monkeypatch.setenv("PENTEST_ALLOW_EXPLOIT", "1")
+    monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
+    monkeypatch.setattr(
+        asgi,
+        "runtime_lifespan",
+        lambda **_kwargs: base_lifespan(),
+    )
+    monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(asgi, "get_token_service", object)
+    monkeypatch.setattr(
+        asgi,
+        "build_process_security_service_container",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "require_process_tribe_runtime",
+        lambda: SimpleNamespace(
+            state_registry=SimpleNamespace(snapshot=lambda: {}),
+        ),
+    )
+    monkeypatch.setattr(asgi, "get_capability_gap_telemetry", object)
+    monkeypatch.setattr(asgi, "get_capability_forge_service", object)
+    monkeypatch.setattr(asgi, "get_semantic_recaller", fail_semantic_recaller)
+    monkeypatch.setattr(asgi, "get_capability_scorecard_provider", get_scorecards)
+    monkeypatch.setattr(
+        asgi,
+        "get_degradation_state_machine",
+        get_degradation_machine,
+    )
+    monkeypatch.setattr(asgi, "get_degradation_state", read_degradation)
+    monkeypatch.setattr(
+        asgi,
+        "_compose_life_command_authority",
+        read_governance_then_stop,
+    )
+    monkeypatch.setattr(asgi, "_reset_life_command_authority", lambda: None)
+    monkeypatch.setattr(asgi, "set_memory_service_container", lambda _value: None)
+    monkeypatch.setattr(
+        asgi.workspace,
+        "quiesce_agent_workspace_application_scope",
+        lambda *_args: None,
+    )
+
+    application = asgi.create_app()
+    lifespan = captured["lifespan"]
+
+    async def scenario() -> None:
+        with pytest.raises(StopAfterGovernanceRead):
+            async with lifespan(application):
+                pytest.fail("lifespan should stop after reading governance")
+
+    asyncio.run(scenario())
+
+    assert calls == [
+        "semantic",
+        "scorecards-prewarmed",
+        "degradation-prewarmed",
+        "scorecards-read",
+        "degradation-read",
+    ]
+    assert governance_snapshot["capabilities"] == {
+        "status": "AVAILABLE",
+        "count": 0,
+        "items": [],
+        "automatic_upgrade_available": False,
+        "read_only": True,
+    }
+    assert governance_snapshot["degradation"]["status"] == "READY"
+    pentest = governance_snapshot["domain_isolation"]["pentest"]
+    assert pentest["lab_mode"] is True
+    assert pentest["allow_exploit_requested"] is True
+    assert pentest["allow_exploit_effective"] is True
+    assert pentest["high_risk_entrypoints_disabled"] is False

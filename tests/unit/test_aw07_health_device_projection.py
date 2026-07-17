@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 
@@ -155,37 +156,93 @@ def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:
     assert sources["desktop"][0]["event"]["connected"] is True
 
 
-def test_organ_source_reads_existing_process_state_without_getter(monkeypatch) -> None:
+def test_organ_public_snapshot_uses_only_explicit_evidence(monkeypatch) -> None:
     from host_brain.app.observability_runtime.health_device_projection import (
-        load_organ_tribe_projection_source,
+        ORGAN_AGENT_REGISTRY,
+        build_organ_tribe_public_snapshot,
     )
     from host_brain.tribe import tribe_state
 
-    monkeypatch.setattr(tribe_state, "_GLOBAL_REGISTRY", None)
+    class ForbiddenRegistry:
+        def snapshot(self):
+            raise AssertionError("public snapshot builder read the global registry")
 
-    payload, cursor = load_organ_tribe_projection_source(
-        host_state_loader=lambda: {
-            "namespaces": [
-                {
-                    "namespace": "limbic_agent",
-                    "state": {"mood": "steady", "last_updated_ts_ms": 700},
-                    "updated_at_ms": 710,
-                }
-            ],
-            "ts_ms": 800,
+    monkeypatch.setattr(tribe_state, "_GLOBAL_REGISTRY", ForbiddenRegistry())
+    monkeypatch.setitem(
+        sys.modules,
+        "host_brain.tribe.prefrontal_agent",
+        SimpleNamespace(_PREFRONTAL_AGENT=object()),
+    )
+
+    payload, cursor = build_organ_tribe_public_snapshot(
+        registry_snapshots={
+            "limbic_agent": {
+                "state": {
+                    "active": True,
+                    "mood": "steady",
+                    "last_immune_block_reason": "private user home address",
+                    "last_updated_ts_ms": 700,
+                },
+                "updated_at_ms": 710,
+            },
+            # Snapshot presence alone is not live evidence.
+            "prefrontal_agent": {"state": {"focus": "ready"}},
+            # Future evidence is invalid for this observation.
+            "social_brain_agent": {
+                "state": {"rapport": "warm"},
+                "evidence_ts_ms": 1_100,
+                "timestamp": 800,
+            },
         },
-        scheduler_loader=lambda: {
+        scheduler_snapshot={
             "runtime": {"active": True},
             "tasks": [{"task_id": "emotion_decay_tick", "enabled": True}],
             "timestamp": 900,
         },
-        now_ms=1_000,
+        observed_at_ms=1_000,
     )
 
     limbic = next(row for row in payload["agents"] if row["agent_id"] == "limbic_agent")
-    assert payload["total_agents"] == 23
-    assert payload["active_agents"] >= 1
+    prefrontal = next(
+        row for row in payload["agents"] if row["agent_id"] == "prefrontal_agent"
+    )
+    social = next(
+        row for row in payload["agents"] if row["agent_id"] == "social_brain_agent"
+    )
+    assert payload["total_agents"] == len(ORGAN_AGENT_REGISTRY) == 23
+    assert [row["agent_id"] for row in payload["agents"]] == [
+        row[0] for row in ORGAN_AGENT_REGISTRY
+    ]
+    assert payload["active_agents"] == 1
     assert payload["continuous_system_active"] is True
+    assert payload["emotion_decay_tick_enabled"] is True
+    assert payload["source_process"] == "host-runtime"
+    assert payload["observed_at_ms"] == payload["timestamp"] == 1_000
+    assert payload["evidence_ts_ms"] == 900
     assert limbic["status"] == "active"
-    assert limbic["key_metrics"] == {"mood": "steady"}
-    assert cursor == 1_000
+    assert limbic["key_metrics"] == {"active": True}
+    assert "private user home address" not in repr(payload)
+    assert "last_immune_block_reason" not in repr(payload)
+    assert limbic["last_updated_ts_ms"] == 710
+    assert prefrontal["status"] == "loaded"
+    assert prefrontal["last_updated_ts_ms"] is None
+    assert social["status"] == "loaded"
+    assert social["last_updated_ts_ms"] is None
+    assert cursor == 900
+
+
+def test_organ_public_snapshot_does_not_manufacture_evidence_from_observation_time() -> None:
+    from host_brain.app.observability_runtime.health_device_projection import (
+        build_organ_tribe_public_snapshot,
+    )
+
+    payload, cursor = build_organ_tribe_public_snapshot(
+        registry_snapshots={},
+        scheduler_snapshot={"runtime": {"active": False}},
+        observed_at_ms=5_000,
+    )
+
+    assert payload["active_agents"] == 0
+    assert payload["evidence_ts_ms"] == 0
+    assert payload["timestamp"] == 5_000
+    assert cursor == 0

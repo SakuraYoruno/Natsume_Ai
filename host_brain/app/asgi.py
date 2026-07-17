@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
@@ -35,6 +36,10 @@ from host_brain.composition.process_services import (
     get_model_attempt_service,
     get_prompt_registry,
     get_capability_broker,
+    get_capability_forge_service,
+    get_capability_gap_telemetry,
+    get_capability_scorecard_provider,
+    get_semantic_recaller,
     get_life_snapshot_reader,
 )
 from host_brain.app.edge_event_routes import handle_edge_events_route
@@ -44,6 +49,11 @@ from host_brain.app.lifecycle_runtime_composition import (
 )
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.host_obs_source_composition import (
+    HostObsSourceEpoch,
+    HostObsSourceRuntimePorts,
+    build_host_obs_read_ports,
+)
 from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -110,6 +120,11 @@ from host_brain.scheduler.task_registry import (
     SchedulerTaskConfig,
     TaskPriority,
     TriggerMode,
+)
+from host_brain.composition.tribe_runtime import require_process_tribe_runtime
+from host_brain.observability.degradation_state import (
+    get_degradation_state,
+    get_degradation_state_machine,
 )
 
 
@@ -704,6 +719,18 @@ def create_app() -> FastAPI:
     task_review_command_service: TaskReviewCommandService | None = None
     internal_agent_ingress: InternalAgentIngress | None = None
     scheduler_container: ProcessSchedulerContainer | None = None
+    mode_transition_service: Any | None = None
+    host_obs_ledger: Any | None = None
+    host_obs_capability_gap_telemetry: Any | None = None
+    host_obs_capability_forge: Any | None = None
+    host_obs_semantic_recaller: Any | None = None
+    host_obs_capability_scorecards: Any | None = None
+    host_obs_degradation_state_provider: Callable[[], Mapping[str, Any] | None] = (
+        lambda: None
+    )
+    host_obs_pentest_environment: Mapping[str, Any] = {}
+    host_obs_tribe_state_reader: Callable[[], Mapping[str, Any]] | None = None
+    host_obs_source_epoch: HostObsSourceEpoch | None = None
     canon_container: ProcessCanonContainer | None = None
     life_command_authority: (
         tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort] | None
@@ -734,6 +761,16 @@ def create_app() -> FastAPI:
         current = scheduler_container
         return current.command_service if current is not None else None
 
+    def capture_mode_transition_service(service: Any | None) -> None:
+        nonlocal mode_transition_service
+        mode_transition_service = service
+
+    def read_host_obs_tribe_state() -> Mapping[str, Any]:
+        reader = host_obs_tribe_state_reader
+        if reader is None:
+            raise RuntimeError("Host Tribe source is not active")
+        return reader()
+
     def canon_service_provider() -> Any | None:
         current = canon_container
         return current.application if current is not None else None
@@ -744,6 +781,31 @@ def create_app() -> FastAPI:
         tool_catalog_provider=get_tool_catalog,
         bond_engine_provider=resolve_bond_engine,
         bond_writer_provider=get_bond_dynamics_writer,
+    )
+
+    host_obs_read_ports = build_host_obs_read_ports(
+        HostObsSourceRuntimePorts(
+            mode_service_provider=lambda: mode_transition_service,
+            capability_gap_telemetry_provider=(
+                lambda: host_obs_capability_gap_telemetry
+            ),
+            capability_forge_provider=lambda: host_obs_capability_forge,
+            semantic_recaller_provider=lambda: host_obs_semantic_recaller,
+            capability_scorecard_provider=(
+                lambda: host_obs_capability_scorecards
+            ),
+            degradation_state_provider=(
+                lambda: host_obs_degradation_state_provider()
+            ),
+            pentest_environment_provider=(
+                lambda: dict(host_obs_pentest_environment)
+            ),
+            ledger_provider=lambda: host_obs_ledger,
+            scheduler_container_provider=lambda: scheduler_container,
+            tribe_state_reader=read_host_obs_tribe_state,
+            source_epoch_provider=lambda: host_obs_source_epoch,
+            clock_ms=now_ms,
+        )
     )
 
     def life_command_authority_provider(
@@ -827,6 +889,13 @@ def create_app() -> FastAPI:
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
+        nonlocal mode_transition_service
+        nonlocal host_obs_ledger, host_obs_capability_gap_telemetry
+        nonlocal host_obs_capability_forge, host_obs_semantic_recaller
+        nonlocal host_obs_capability_scorecards
+        nonlocal host_obs_degradation_state_provider
+        nonlocal host_obs_pentest_environment, host_obs_tribe_state_reader
+        nonlocal host_obs_source_epoch
         nonlocal canon_container
         nonlocal life_command_authority, life_dispatchers
         nonlocal embodiment_outbox, embodiment_dispatcher
@@ -836,6 +905,7 @@ def create_app() -> FastAPI:
             logger=logger,
             lifecycle_ports=lifecycle_runtime_ports,
             canon_service_provider=canon_service_provider,
+            mode_transition_service_sink=capture_mode_transition_service,
         ):
             security: ProcessSecurityServiceContainer | None = None
             command_ingress: ProcessCommandIngressContainer | None = None
@@ -865,6 +935,63 @@ def create_app() -> FastAPI:
                 # migrations and process-owned stores must be ready before the
                 # ASGI lifespan yields and routes become available.
                 ledger = get_ledger()
+                # Host source readers may observe these services, but never
+                # construct them from a GET request.
+                host_obs_ledger = ledger
+                host_obs_source_epoch = HostObsSourceEpoch.create()
+                host_obs_tribe_state_reader = (
+                    require_process_tribe_runtime().state_registry.snapshot
+                )
+                try:
+                    host_obs_capability_gap_telemetry = (
+                        get_capability_gap_telemetry()
+                    )
+                    host_obs_capability_forge = get_capability_forge_service()
+                except Exception:
+                    logger.warning(
+                        "HOST_OBS_CAPABILITY_SOURCE_PREWARM_FAILED",
+                        exc_info=True,
+                    )
+                try:
+                    host_obs_semantic_recaller = get_semantic_recaller()
+                except Exception:
+                    logger.warning(
+                        "HOST_OBS_SEMANTIC_RECALL_SOURCE_PREWARM_FAILED",
+                        exc_info=True,
+                    )
+                try:
+                    host_obs_capability_scorecards = (
+                        get_capability_scorecard_provider()
+                    )
+                except Exception:
+                    logger.warning(
+                        "HOST_OBS_GOVERNANCE_SCORECARD_SOURCE_PREWARM_FAILED",
+                        exc_info=True,
+                    )
+                try:
+                    degradation_machine = get_degradation_state_machine()
+                    host_obs_degradation_state_provider = (
+                        lambda machine=degradation_machine: get_degradation_state(
+                            machine=machine
+                        )
+                    )
+                except Exception:
+                    logger.warning(
+                        "HOST_OBS_GOVERNANCE_DEGRADATION_SOURCE_PREWARM_FAILED",
+                        exc_info=True,
+                    )
+                truthy = {"1", "true", "yes", "on"}
+                host_obs_pentest_environment = {
+                    "lab_mode": str(
+                        os.environ.get("PENTEST_WEB_LAB_MODE") or ""
+                    ).strip().lower()
+                    in truthy,
+                    "allow_exploit": str(
+                        os.environ.get("PENTEST_ALLOW_EXPLOIT") or ""
+                    ).strip().lower()
+                    in truthy,
+                    "domain_mode": "domain",
+                }
                 life_command_authority = _compose_life_command_authority(ledger)
                 life_dispatchers = _compose_life_dispatchers(ledger)
                 runtime_settings = get_core_settings()
@@ -1343,6 +1470,15 @@ def create_app() -> FastAPI:
                 yield
             finally:
                 scheduler_container = None
+                host_obs_source_epoch = None
+                host_obs_tribe_state_reader = None
+                host_obs_capability_forge = None
+                host_obs_capability_gap_telemetry = None
+                host_obs_semantic_recaller = None
+                host_obs_capability_scorecards = None
+                host_obs_degradation_state_provider = lambda: None
+                host_obs_pentest_environment = {}
+                host_obs_ledger = None
                 internal_agent_ingress = None
                 internal_agent_command_service = None
                 task_review_command_service = None
@@ -1456,6 +1592,7 @@ def create_app() -> FastAPI:
         ),
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
+        host_obs_read_ports=host_obs_read_ports,
         canon_service_provider=canon_service_provider,
         route_ports=route_ports,
         input_runtime_ports=input_runtime_ports,

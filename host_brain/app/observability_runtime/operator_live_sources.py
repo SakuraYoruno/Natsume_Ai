@@ -68,6 +68,20 @@ class OperatorProjectionWriteFailed(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class OperatorSourceSample:
+    """A source payload whose freshness is carried separately from its body."""
+
+    payload: Mapping[str, Any]
+    evidence_ts_ms: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.payload, Mapping):
+            raise TypeError("payload must be a mapping")
+        if int(self.evidence_ts_ms) <= 0:
+            raise ValueError("evidence_ts_ms must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class GatewayHttpResponse:
     status_code: int
     payload: Mapping[str, Any] | None
@@ -432,8 +446,12 @@ class OperatorLiveSourcePorts:
 
     gateway_source_reader: Any | None
     life_snapshot_reader: Any | None
-    sys_mode_status_reader: Callable[[], Mapping[str, Any]] | None = None
-    sys_mode_history_reader: Callable[[], Any] | None = None
+    sys_mode_status_reader: Callable[
+        [], Mapping[str, Any] | OperatorSourceSample
+    ] | None = None
+    sys_mode_history_reader: Callable[
+        [], Mapping[str, Any] | OperatorSourceSample
+    ] | None = None
     person_id: str = "default"
 
     def __post_init__(self) -> None:
@@ -458,7 +476,7 @@ class _Target:
     kind: str
     key: str
     source_scope: str
-    reader: Callable[[], Mapping[str, Any]]
+    reader: Callable[[], Mapping[str, Any] | OperatorSourceSample]
 
 
 @dataclass(slots=True)
@@ -486,7 +504,13 @@ class OperatorLiveStateProjectionRefresher:
         with self._lock:
             for target in self._targets():
                 try:
-                    payload = target.reader()
+                    source_value = target.reader()
+                    sample = (
+                        source_value
+                        if isinstance(source_value, OperatorSourceSample)
+                        else None
+                    )
+                    payload = sample.payload if sample is not None else source_value
                     if not isinstance(payload, Mapping):
                         raise OperatorSourceUnavailable(
                             f"OBS_{target.name.upper().replace('-', '_')}_INVALID_RESPONSE",
@@ -507,7 +531,15 @@ class OperatorLiveStateProjectionRefresher:
                     )
                 else:
                     try:
-                        self._upsert_healthy(target, payload)
+                        self._upsert_healthy(
+                            target,
+                            payload,
+                            freshness_ts_ms=(
+                                sample.evidence_ts_ms
+                                if sample is not None
+                                else None
+                            ),
+                        )
                         outcomes[target.name] = {
                             "status": "HEALTHY",
                             "reason_code": None,
@@ -613,7 +645,9 @@ class OperatorLiveStateProjectionRefresher:
             )
         return call()
 
-    def _read_sys_mode_status(self) -> Mapping[str, Any]:
+    def _read_sys_mode_status(
+        self,
+    ) -> Mapping[str, Any] | OperatorSourceSample:
         reader = self.ports.sys_mode_status_reader
         if reader is None:
             raise OperatorSourceUnavailable(
@@ -621,16 +655,29 @@ class OperatorLiveStateProjectionRefresher:
                 "Host sys-mode status reader was not injected",
                 source_scope="host-runtime",
             )
-        payload = reader()
+        source_value = reader()
+        sample = (
+            source_value
+            if isinstance(source_value, OperatorSourceSample)
+            else None
+        )
+        payload = sample.payload if sample is not None else source_value
         if not isinstance(payload, Mapping):
             raise OperatorSourceUnavailable(
                 "OBS_SYS_MODE_STATUS_INVALID_RESPONSE",
                 "Host sys-mode status reader returned a non-object payload",
                 source_scope="host-runtime",
             )
-        return dict(payload)
+        normalized = dict(payload)
+        return (
+            OperatorSourceSample(normalized, sample.evidence_ts_ms)
+            if sample is not None
+            else normalized
+        )
 
-    def _read_sys_mode_history(self) -> Mapping[str, Any]:
+    def _read_sys_mode_history(
+        self,
+    ) -> Mapping[str, Any] | OperatorSourceSample:
         reader = self.ports.sys_mode_history_reader
         if reader is None:
             raise OperatorSourceUnavailable(
@@ -638,7 +685,13 @@ class OperatorLiveStateProjectionRefresher:
                 "Host sys-mode history reader was not injected",
                 source_scope="host-runtime",
             )
-        raw = reader()
+        source_value = reader()
+        sample = (
+            source_value
+            if isinstance(source_value, OperatorSourceSample)
+            else None
+        )
+        raw = sample.payload if sample is not None else source_value
         if isinstance(raw, Mapping):
             rows = raw.get("items") or []
         elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
@@ -650,11 +703,16 @@ class OperatorLiveStateProjectionRefresher:
                 source_scope="host-runtime",
             )
         items = [dict(item) for item in list(rows)[:100] if isinstance(item, Mapping)]
-        return {
+        payload = {
             "items": items,
             "total": len(items),
             "timestamp": max(0, int(self.clock_ms())),
         }
+        return (
+            OperatorSourceSample(payload, sample.evidence_ts_ms)
+            if sample is not None
+            else payload
+        )
 
     def _read_proactive(self) -> Mapping[str, Any]:
         reader = self.ports.life_snapshot_reader
@@ -706,8 +764,21 @@ class OperatorLiveStateProjectionRefresher:
             else now,
         )
 
-    def _upsert_healthy(self, target: _Target, payload: Mapping[str, Any]) -> None:
+    def _upsert_healthy(
+        self,
+        target: _Target,
+        payload: Mapping[str, Any],
+        *,
+        freshness_ts_ms: int | None = None,
+    ) -> None:
         now = max(0, int(self.clock_ms()))
+        freshness = (
+            now
+            if freshness_ts_ms is None
+            else max(0, min(int(freshness_ts_ms), now))
+        )
+        if freshness <= 0:
+            raise ValueError("source freshness must be positive")
         self.store.upsert(
             target.kind,
             target.key,
@@ -717,7 +788,7 @@ class OperatorLiveStateProjectionRefresher:
             source_ref=f"obs-app://operator-live-state/{target.name}",
             degraded_state=ProjectionDegradedState.HEALTHY,
             degraded_detail=None,
-            freshness_ts_ms=now,
+            freshness_ts_ms=freshness,
         )
 
     def _upsert_unavailable(
@@ -742,6 +813,20 @@ class OperatorLiveStateProjectionRefresher:
                 and current_payload.get("reason_code") == failure.reason_code
                 and current_payload.get("source_scope") == failure.source_scope
             ):
+                now = max(0, int(self.clock_ms()))
+                self.store.upsert(
+                    target.kind,
+                    target.key,
+                    current_payload,
+                    source_cursor=int(getattr(current, "source_cursor", 0) or 0),
+                    source_digest=digest_json(current_payload),
+                    source_ref=(
+                        f"obs-app://operator-live-state/{target.name}/source-unavailable"
+                    ),
+                    degraded_state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                    degraded_detail=failure.detail,
+                    freshness_ts_ms=now,
+                )
                 return False
 
         now = max(0, int(self.clock_ms()))
@@ -810,6 +895,7 @@ __all__ = [
     "OperatorLiveSourcePorts",
     "OperatorLiveStateProjectionRefresher",
     "OperatorProjectionWriteFailed",
+    "OperatorSourceSample",
     "OperatorSourceUnavailable",
     "SYS_MODE_HISTORY_PORT_NOT_INJECTED",
     "SYS_MODE_STATUS_PORT_NOT_INJECTED",

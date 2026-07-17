@@ -105,28 +105,44 @@ class SemanticRecallStatsResponse:
     mock_doc_count: int
     status: str
     timestamp: int
+    projection: Dict[str, Any]
 
 
 @router.get("/semantic-recall/stats")
-def get_semantic_recall_stats():
-    """Ref #103: 语义召回器统计端点。"""
+def get_semantic_recall_stats(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+):
+    """Read the materialized semantic-recall status for this Obs app."""
+    from host_brain.app.observability_runtime.domain_state_projection import (
+        SEMANTIC_RECALL_STATS_KEY,
+        SEMANTIC_RECALL_STATS_KIND,
+        SEMANTIC_RECALL_STATS_MAX_AGE_MS,
+        read_domain_projection_from_store,
+    )
+
     now = _now_ms()
-    try:
-        from host_brain.composition.process_services import get_semantic_recaller
-        recaller = get_semantic_recaller()
-        mock_doc_count = len(getattr(recaller, "_mock_store", []))
-        return SemanticRecallStatsResponse(
-            use_mock=recaller._use_mock, chroma_host=recaller._chroma_host,
-            chroma_port=recaller._chroma_port, top_k=recaller._top_k,
-            similarity_threshold=recaller._threshold, collection_name=recaller._collection_name,
-            mock_doc_count=mock_doc_count, status="OK", timestamp=now,
-        )
-    except Exception as exc:
-        return SemanticRecallStatsResponse(
-            use_mock=True, chroma_host="localhost", chroma_port=8000, top_k=5,
-            similarity_threshold=0.70, collection_name="episodic_memory",
-            mock_doc_count=0, status=f"DEGRADED: {exc}", timestamp=now,
-        )
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
+        kind=SEMANTIC_RECALL_STATS_KIND,
+        key=SEMANTIC_RECALL_STATS_KEY,
+        max_age_ms=SEMANTIC_RECALL_STATS_MAX_AGE_MS,
+    )
+    body = dict(payload or {})
+    status = str(body.get("status") or "").strip()
+    if not status:
+        status = f"DEGRADED: {projection.get('degraded_state') or 'SOURCE_UNAVAILABLE'}"
+    return SemanticRecallStatsResponse(
+        use_mock=bool(body.get("use_mock", True)),
+        chroma_host=str(body.get("chroma_host") or "localhost"),
+        chroma_port=int(body.get("chroma_port") or 8000),
+        top_k=int(body.get("top_k") or 5),
+        similarity_threshold=float(body.get("similarity_threshold") or 0.70),
+        collection_name=str(body.get("collection_name") or "episodic_memory"),
+        mock_doc_count=int(body.get("mock_doc_count") or 0),
+        status=status,
+        timestamp=int(body.get("timestamp") or now),
+        projection=projection,
+    )
 
 
 # ---------------------------------------------------------------------------

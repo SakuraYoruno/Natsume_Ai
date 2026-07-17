@@ -303,14 +303,43 @@ def test_capability_forge_proposal_log_is_migration_owned(tmp_path) -> None:
                 "ts_ms": 1,
             }
         )
+        ledger.log_capability_forge_proposal(
+            {
+                "proposal_id": "forge-proposal-1",
+                "event_type": "APPROVED",
+                "status": "APPROVED",
+                "stage": "SHADOW",
+                "payload": {
+                    "proposal_id": "forge-proposal-1",
+                    "status": "APPROVED",
+                },
+                "ts_ms": 3,
+            }
+        )
+        ledger.log_capability_forge_proposal(
+            {
+                "proposal_id": "forge-proposal-2",
+                "event_type": "CREATED",
+                "status": "PENDING_APPROVAL",
+                "stage": "SHADOW",
+                "payload": {"proposal_id": "forge-proposal-2"},
+                "ts_ms": 2,
+            }
+        )
         rows = ledger.list_capability_forge_proposals(
             proposal_id="forge-proposal-1",
         )
+        latest = ledger.get_latest_capability_forge_proposals(limit=2)
     finally:
         ledger.close()
 
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0]["payload"]["proposal_id"] == "forge-proposal-1"
+    assert [row["proposal_id"] for row in latest] == [
+        "forge-proposal-1",
+        "forge-proposal-2",
+    ]
+    assert latest[0]["payload"]["status"] == "APPROVED"
 
 
 def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(

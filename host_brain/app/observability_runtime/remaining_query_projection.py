@@ -103,12 +103,25 @@ def read_all(
     *,
     max_age_ms: int = REMAINING_QUERY_MAX_AGE_MS,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Read every fresh document of a kind without opening a source store."""
+    """Compatibility wrapper for callers not yet bound to an app-local store."""
 
     from host_brain.composition.process_services import peek_query_projection_store
 
     store = peek_query_projection_store()
-    documents = list(store.list(kind)) if store is not None else []
+    if store is None:
+        return [], projection_meta(kind, "index", None, max_age_ms=max_age_ms)
+    return read_all_from_store(store, kind, max_age_ms=max_age_ms)
+
+
+def read_all_from_store(
+    store: QueryProjectionStore,
+    kind: str,
+    *,
+    max_age_ms: int = REMAINING_QUERY_MAX_AGE_MS,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read every fresh document through an explicit app-local store."""
+
+    documents = list(store.list(kind))
     available: list[tuple[Any, dict[str, Any]]] = []
     for document in documents:
         meta = projection_meta(

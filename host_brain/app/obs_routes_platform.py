@@ -517,16 +517,19 @@ class SkillCatalogStatsResponse(BaseModel):
     projection: Dict[str, Any] = Field(default_factory=dict)
 
 @router.get("/skill-catalog/stats", response_model=SkillCatalogStatsResponse)
-def get_skill_catalog_stats():
+def get_skill_catalog_stats(
+    projection_store: Any = Depends(require_obs_query_projection_store),
+):
     """Read the durable Skill/Domain-Pack catalog; never scan on GET."""
     from host_brain.app.observability_runtime.domain_state_projection import (
         SKILL_PACK_CATALOG_KEY,
         SKILL_PACK_CATALOG_KIND,
         SKILL_PACK_CATALOG_MAX_AGE_MS,
-        read_domain_projection,
+        read_domain_projection_from_store,
     )
 
-    payload, projection = read_domain_projection(
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
         kind=SKILL_PACK_CATALOG_KIND,
         key=SKILL_PACK_CATALOG_KEY,
         max_age_ms=SKILL_PACK_CATALOG_MAX_AGE_MS,

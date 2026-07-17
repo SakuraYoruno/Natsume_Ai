@@ -11,6 +11,10 @@ from host_brain.app.automation.scheduler_routes import router as host_scheduler_
 from host_brain.app.bond_routes import create_bond_router
 from host_brain.app.canon_routes import create_canon_router
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.host_obs_read_routes import (
+    HostObsReadPorts,
+    create_host_obs_read_router,
+)
 from host_brain.app.health_routes import router as health_router
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
@@ -58,6 +62,7 @@ def register_host_routers(
     internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
+    host_obs_read_ports: HostObsReadPorts | None = None,
 ) -> None:
     operator_query_gateway = OperatorQueryGateway.from_environment()
 
@@ -154,6 +159,8 @@ def register_host_routers(
         )
     )
     app.include_router(internal_tribe_router)
+    if host_obs_read_ports is not None:
+        app.include_router(create_host_obs_read_router(host_obs_read_ports))
     app.include_router(
         internal_codex_router,
         dependencies=[

@@ -137,6 +137,26 @@ class SemanticRecaller:
         self._mock_store: List[Dict[str, Any]] = []
         self._chroma_client: Any = None
 
+    def public_runtime_stats(self, *, observed_at_ms: int) -> Dict[str, Any]:
+        """Return bounded operational configuration without recall content."""
+
+        observed = int(observed_at_ms)
+        if observed <= 0:
+            raise ValueError("observed_at_ms must be positive")
+        return {
+            "use_mock": bool(self._use_mock),
+            "chroma_host": str(self._chroma_host or ""),
+            "chroma_port": int(self._chroma_port),
+            "top_k": int(self._top_k),
+            "similarity_threshold": float(self._threshold),
+            "collection_name": str(self._collection_name or ""),
+            "mock_doc_count": len(self._mock_store),
+            "status": (
+                "MOCK_READY" if self._use_mock else "CONFIGURED_UNPROBED"
+            ),
+            "timestamp": observed,
+        }
+
     # ------------------------------------------------------------------
     # 主召回接口
     # ------------------------------------------------------------------

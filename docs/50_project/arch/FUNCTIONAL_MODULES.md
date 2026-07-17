@@ -3,8 +3,8 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v1.9
-核对日期：2026-07-16
+版本：v2.1
+核对日期：2026-07-17
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
@@ -151,11 +151,11 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
-| Observability Query | projection query、trace、metrics、health、degradation、reconciliation read 与 auth | [`observability/operator_query_gateway.py`](../../../host_brain/observability/operator_query_gateway.py)、[`app/obs_route_ports.py`](../../../host_brain/app/obs_route_ports.py)、[`composition/obs_projection_jobs.py`](../../../host_brain/composition/obs_projection_jobs.py) | 只读 projection/store/source reader | domain writer、原始 secret/signature | `D4_QUERY_PLANE_PARTIAL`；36端点与已识别stats查询 app-local，兼容helper路由消费者为0；Security、摘要、operator部分target与Runtime partial已按失败关闭恢复；3个整job、sys-mode、真实Edge、helper定义与15词法边界未完成 |
+| Observability Query | projection query、trace、metrics、health、degradation、reconciliation read 与 auth | [`observability/operator_query_gateway.py`](../../../host_brain/observability/operator_query_gateway.py)、[`app/obs_route_ports.py`](../../../host_brain/app/obs_route_ports.py)、[`app/host_obs_source_composition.py`](../../../host_brain/app/host_obs_source_composition.py)、[`composition/obs_projection_jobs.py`](../../../host_brain/composition/obs_projection_jobs.py) | 只读 projection/store/source reader、版本化Host合同 | domain writer、原始 secret/signature | `D5_QUERY_PLANE_PARTIAL`；36端点、5个Web UI GET及补漏的7个GET app-local。五合同有lifespan epoch/单调revision，Obs以SQLite CAS+immutable journal持久完整lineage并防回滚/重放；5秒skew、120秒证据年龄、精确timestamp递归边界、三层公共序列化、Organ allowlist和transport总deadline已接。Forge/Semantic/Governance/Organ独立认证物化，Semantic/Governance有独立endpoint/cache/failure domain且不读Capability v1兼容child；兼容child异常只降级该字段，不拖垮有效Forge source。Life Body、真实Edge、4个helper定义、13词法边界与legacy daemon未完成 |
 | Operator Command | 受认证的运维命令入口、受治理路由和 outcome journal | [`observability/secure_command_ingress.py`](../../../host_brain/observability/secure_command_ingress.py)、[`observability/command_router.py`](../../../host_brain/observability/command_router.py)、[`observability/command_outcome_journal.py`](../../../host_brain/observability/command_outcome_journal.py) | Secure Ingress、typed command ports | Query handler 直写 domain store | `WIRED / PARTIAL`；应全部进入通用 governed runtime |
 | Persistence | 按聚合提供 SQLite repository、OCC、journal/outbox 和 read projection | [`persistence/`](../../../host_brain/persistence)、[`audit/migration_runner.py`](../../../host_brain/audit/migration_runner.py)、[`audit/sqlite_ledger.py`](../../../host_brain/audit/sqlite_ledger.py) | SQL/driver、稳定 contracts | 业务决策、route 编排、人格策略 | `WIRED / LARGE`；持久化主干稳定，但若干 repository 过大且与 application 双向耦合 |
 | Runtime Eventing | runtime event 投影和投递恢复 | [`eventing/runtime_event_projection.py`](../../../host_brain/eventing/runtime_event_projection.py)、[`persistence/runtime_event_repository.py`](../../../host_brain/persistence/runtime_event_repository.py) | event contract、repository | 替代 domain aggregate | `WIRED / SUPPORTING` |
-| Composition | 构造 Task、Life、Memory、Canon、Scheduler、Tool、Obs 对象图 | [`composition/obs_application.py`](../../../host_brain/composition/obs_application.py)、[`composition/obs_projection_jobs.py`](../../../host_brain/composition/obs_projection_jobs.py)、[`composition/process_service_container.py`](../../../host_brain/composition/process_service_container.py) | adapter和构造器 | 业务方法、模块全局真相 | `INCOMPLETE`；19 producer为6/3/7/3，health DEGRADED。3整job、sys-mode、真实Edge、三个兼容helper定义、15词法边界、legacy daemon与全局53 refs仍在 |
+| Composition | 构造 Task、Life、Memory、Canon、Scheduler、Tool、Obs 对象图 | [`composition/obs_application.py`](../../../host_brain/composition/obs_application.py)、[`composition/obs_projection_jobs.py`](../../../host_brain/composition/obs_projection_jobs.py)、[`app/host_obs_source_composition.py`](../../../host_brain/app/host_obs_source_composition.py)、[`composition/process_service_container.py`](../../../host_brain/composition/process_service_container.py) | adapter和构造器 | 业务方法、模块全局真相 | `INCOMPLETE`；21 producer为6/3/7/4-auth/1-unavailable，health DEGRADED。Host source provider只在lifespan捕获/清空，但底层authority仍process-global；Life Body、真实Edge、4个兼容helper、13词法边界、legacy daemon与全局53 refs仍在 |
 | Shared Contracts | Host/Edge 间 Task、Life、Identity、Operator、Edge/Embodiment 版本化数据协议 | [`natsume_contracts/`](../../../natsume_contracts) | 标准库、纯数据类型 | Host/Edge 具体实现、连接、全局容器 | `WIRED`；该包是真实跨进程边界，不是可删兼容目录 |
 
 ## 5. Monitor UI 功能分区

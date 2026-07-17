@@ -3,8 +3,8 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v2.0
-日期：2026-07-16
+版本：v2.2
+日期：2026-07-17
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；执行事实以本文所在提交的工作树为准
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
@@ -40,7 +40,7 @@
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
 | Pentest L3 | shadow、非 durable 校准、不能生成 capability-unlocking 后继 |
 | Code/Research | 只有 synthetic benchmark，不是生产收益 |
-| Composition | `D4_ALL_IDENTIFIED_QUERY_ROUTES_APP_LOCAL_SOURCE_RECOVERY_PENDING`：19个 producer为6 durable、3 static、7 partial、3 typed-unavailable。Security evidence 最小schema/时效、摘要必需源失败关闭与Forge字段级降级、Gateway校验/写失败传播、无Agent Runtime缺槽partial已接线；40个直接ledger-stats GET与7个Forge GET拒绝unavailable空/零回退，metrics/humanoid diagnostics/source-correlation已切canonical ModelAttempt，其他legacy consumer仍待迁移；Sandbox telemetry仍明确UNAVAILABLE，冷迁移aggregate仍受未迁移Memory/VTS/LLM legacy源阻断。Forge、Life Body、Organ与operator sys-mode/真实Edge仍未闭环，health保持DEGRADED。36个端点及已识别stats查询app-local，兼容helper的路由消费者为0；15个直接词法边界、legacy daemon/全局 locator仍在 |
+| Composition | `D5_AUTHENTICATED_HOST_SOURCES_PARTIAL`：21个 producer为6 durable、3 static、7 partial、4 authenticated-host-read、1 typed-unavailable。mode/capability/runtime/semantic/governance五合同已具lifespan `source_instance_id`和按合同单调revision；Obs以SQLite CAS+完整immutable journal持久lineage，拒绝同epoch回滚和任意退役epoch重放。本地clock skew上限5秒、evidence最大年龄120秒、freshness夹到本地接收时刻。三层公共序列化/复验、Organ显式指标allowlist、禁代理/重定向和覆盖DNS解析/连接/响应/分块的1 MiB总deadline已接。Forge、Semantic、Governance、Organ由4个独立认证job物化；Semantic/Governance走独立endpoint/type/cache/failure domain，不消费Capability v1兼容child。兼容child provider异常只产生该字段的有类型`SOURCE_UNAVAILABLE`，Forge自身authority有效时capability-forge v1仍可用。除5个Web UI GET外，又有Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个GET app-local；词法边界降至13，兼容helper为4个。Host provider只在lifespan捕获/清空，底层process authority仍共享。Life Body、真实Edge、legacy daemon、Memory/VTS冷迁移旧源仍未闭环；`llm_call_log` 已迁移但legacy graph-only来源仍被统计消费，`llm_node_call_log` 缺migration且仍有遗留读写者；health保持DEGRADED |
 | Evolution abilities | 多为 partial/placeholder/missing |
 
 任何 PR 或报告若把上述 `PARTIAL/BROKEN/SHADOW` 写成 `DONE/PASS`，该交付自动失败。
@@ -128,7 +128,7 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
 - Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED`：D0/W0/W1 继续有效；认证 Internal Agent 写 admission 会覆写 caller workspace 为 graph epoch 派生 ID，并在显式配置稳定 HMAC secret 时注入 W2 runtime。首次 source HEAD 被冻结为 durable commit，独立 namespace worktree、实例/PID 租约、独占 scope、heartbeat、顺序 handoff、过期 takeover、可信 cleanup receipt 与 pending cleanup worker 已接线；启动同步最多续清 1 条，剩余 durable backlog 交 worker。首次 HEAD 并发 winner 可严格重放，其他 immutable drift 失败关闭。Provisioning/allocator/cleanup adapter 的 Filesystem/Git callback 已移出 SQLite writer transaction，workspace/source 跨进程锁、共享 deadline 与前后 exact authority 短事务允许 heartbeat 并拒绝后验 fence/expiry 漂移；Agent tool 只在动作间协作取消，Verification 只在整体启动前验活，二者没有逐操作 fence或强杀。默认缺 secret 时 Host 降级在线而写入关闭。它仍缺进程级强杀、promotion/abandon、accepted checkpoint HEAD、Domain Pack/Codex runtime 接线以及 OS/container/tenant/handle 隔离，真实 canary 未运行；
-- Composition D1 的 frozen `HostRoutePorts` 继续隔离 Canon/Tool/Bond。D2/D3 的 app lifecycle 与19个 callback保留，D4 的36个端点及已识别stats查询均接当前 app 的 QueryProjectionStore/View，兼容全局 query helper 的路由消费者为0。source-mode现为6 durable、3 static、7 partial、3 typed-unavailable：Security evidence 有最小schema/时效与双时钟，摘要拒绝ledger failure/truncation并对Forge字段级降级，operator四target写失败传播，Runtime缺Life槽位/readiness时保持partial且不构造Agent/模型。sys-mode两target与真实Edge尚未证明；Forge、Life Body、Organ仍 unavailable。三个兼容helper定义、15个直接词法边界、legacy daemon、全局53个可变引用与Host/Worker对象图仍未删除。
+- Composition D1 的 frozen `HostRoutePorts` 继续隔离 Canon/Tool/Bond。D2/D3 的 app lifecycle 保留；D5 在既有36个端点、已识别stats查询和5个 `/api/ui/*` GET之外，又把Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个实际GET切到当前 app Store，并将Semantic/Governance拆为独立endpoint/contract/job。当前共21个callback，source-mode为6 durable、3 static、7 partial、4 authenticated-host-read、1 typed-unavailable。Host五合同按lifespan共享source instance、按合同单调revision；Obs以SQLite CAS和完整历史journal持久lineage，拒绝同epoch回滚和任意退役epoch重放。本地时间只允许5秒skew、证据最大120秒；精确timestamp字段递归校验，freshness夹到本地接收时间。Host composition/route/Obs三次公共序列化与复验、Organ显式数值/布尔allowlist、1 MiB monotonic总deadline均已接；HTTP解析结果必须为loopback，不可取消的DNS系统调用由全进程4槽有界resolver限制。Forge/Semantic/Governance/Organ与sys-mode运行时可用不等于Host健康，缺token/证据仍durable SOURCE_UNAVAILABLE；Semantic/Governance不再受Forge/ledger endpoint故障连带。Host provider虽由lifespan捕获/清空，底层process authority仍共享。Life Body、真实Edge、4个兼容helper、13个词法边界、legacy daemon、全局53个可变引用与Host/Worker对象图仍未删除。
 
 Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。B4/0090 与 B5A/B5B/0091 语义继续有效；B5C 已有 0092～0099 分范围 durable authority。Budget 高竞争唯一 winner、单节点 post-budget 检查点接管与 0099 窄历史终态 reconciliation 已有证据，但不构成通用恢复。0094 本身不复制 0092 业务状态；Operation、Effect 与 terminal reconciliation 均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。外部生产库存尚未盘点，general/batch/pre-budget recovery、部署密钥/凭据、完整 key lifecycle 与真实 canary尚未完成，atomic、bounded、cancellation均为 `PRODUCTION_OFF`。现实 resolver 分类仍未闭环。Lane D 的 Workspace 只到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CLOSED`，Internal 单路线接线不等于强隔离或全 Agent 接线；Composition 也未完成。因此 Lane B、NE-01 和完整架构都不得封板。
 
@@ -175,7 +175,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - D1 已完成 Canon/Tool/Bond 及其 OBS adapter 的 app-local ports；不得把该局部结果写成整个 OBS 或 ProcessServiceContainer 已去 locator；
-- D4 已迁移19个间接 GET，并将全部已识别 projection/stats 路由的 query helper 消费切为 app-local；Security、显式摘要、operator Gateway/Life 与无Agent Runtime partial source均按失败关闭语义恢复。认证只读 transport 尚未接 Host endpoint，Forge、Life Body、Organ三个整 job以及operator sys-mode两target仍未恢复；三个兼容helper定义、15个直接词法边界和legacy daemon仍在。下一刀接Host endpoints与余下来源；真实进程验收前不得提升状态；
+- D4 已迁移19个间接 GET，并将已识别 projection/stats 路由切为 app-local；D5 又修复5个 Web UI GET 和7个其余实际挂载GET，完成五合同source epoch/revision、Obs SQLite CAS+完整历史lineage、本地5秒skew/120秒证据年龄、精确timestamp递归边界、三层公共序列化、Organ allowlist与transport总deadline。Forge、Semantic、Governance、Organ分别物化，Semantic/Governance使用独立endpoint和故障域。下一刀迁移 Memory/VTS 与 `llm_node_call_log` 冷启动旧统计源、处理依赖顺序、剩余13个词法边界和4个兼容helper并删除legacy daemon；真实进程验收前不得提升为完整 Query Plane；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；
 - 每个 Task/Experiment 绑定 workspace owner、root、isolation mode 与 cleanup receipt；
 - Code shadow 使用隔离 worktree，禁止污染主工作区。

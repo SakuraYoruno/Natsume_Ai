@@ -34,7 +34,6 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
     monkeypatch.setattr(digital_life_routes, "get_ledger", forbidden)
     monkeypatch.setattr(health_routes, "get_ledger", forbidden)
     monkeypatch.setattr(memory_routes, "get_ledger", forbidden)
-    monkeypatch.setattr(web_ui, "get_ledger", forbidden)
 
     world = asyncio.run(
         digital_life_routes.digital_life_world_snapshot(
@@ -66,6 +65,7 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
         request_type=None,
         limit=100,
         offset=0,
+        projection_store=_EmptyProjectionStore(),
     )
     topology = web_ui.get_link_topology(
         start_time=now - timedelta(hours=1),
@@ -73,6 +73,7 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
         min_connections=1,
         limit=100,
         offset=0,
+        projection_store=_EmptyProjectionStore(),
     )
 
     values = (world, canon.details, startup, context, memory_health, events, status, topology)

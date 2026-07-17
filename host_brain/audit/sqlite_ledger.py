@@ -943,19 +943,43 @@ class SQLiteLedger(
         return [self._decode_row("capability_forge_proposal_log", row) for row in rows]
 
     def get_latest_capability_forge_proposals(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        rows = self.list_capability_forge_proposals(limit=max(1, int(limit)) * 20, offset=0)
-        latest: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            proposal_id = str(row.get("proposal_id") or "").strip()
-            if not proposal_id:
-                continue
-            latest[proposal_id] = dict(row)
-        ordered = sorted(
-            latest.values(),
-            key=lambda item: int(item.get("ts_ms") or 0),
-            reverse=True,
-        )
-        return ordered[: max(1, int(limit))]
+        """Return one newest durable event per proposal without a history window."""
+
+        bounded_limit = max(1, min(int(limit), 20000))
+        rows = self._conn.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    proposal.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY proposal_id
+                        ORDER BY ts_ms DESC, id DESC
+                    ) AS proposal_rank
+                FROM capability_forge_proposal_log AS proposal
+            )
+            SELECT
+                id,
+                proposal_id,
+                event_type,
+                status,
+                stage,
+                session_id,
+                candidate_key,
+                reason_code,
+                actor,
+                payload,
+                ts_ms
+            FROM ranked
+            WHERE proposal_rank = 1
+            ORDER BY ts_ms DESC, id DESC
+            LIMIT ?
+            """,
+            (bounded_limit,),
+        ).fetchall()
+        return [
+            self._decode_row("capability_forge_proposal_log", row)
+            for row in rows
+        ]
 
     # -------------------------------------------------------------------
     # Canon 提案查询与更新

@@ -26,6 +26,7 @@ from host_brain.app.observability_runtime.operator_live_sources import (
     OperatorLiveSourcePorts,
     OperatorLiveStateProjectionRefresher,
     OperatorProjectionWriteFailed,
+    OperatorSourceSample,
     OperatorSourceUnavailable,
     SYS_MODE_HISTORY_PORT_NOT_INJECTED,
     SYS_MODE_STATUS_PORT_NOT_INJECTED,
@@ -253,6 +254,38 @@ def test_explicit_live_sources_refresh_without_process_locator(monkeypatch) -> N
     assert proactive.payload["dialogue_closure"] == {"marker": "local"}
 
 
+def test_sys_mode_sample_preserves_source_evidence_as_projection_freshness() -> None:
+    now = 1_700_000_010_000
+    evidence = 1_700_000_000_000
+    store = _ProjectionStore()
+    refresher = OperatorLiveStateProjectionRefresher(
+        store=store,  # type: ignore[arg-type]
+        ports=OperatorLiveSourcePorts(
+            gateway_source_reader=lambda: _gateway_payload("healthy"),
+            life_snapshot_reader=_LifeReader("healthy"),
+            sys_mode_status_reader=lambda: OperatorSourceSample(
+                _status("focus"),
+                evidence,
+            ),
+            sys_mode_history_reader=lambda: OperatorSourceSample(
+                {"items": _history("source-event")},
+                evidence,
+            ),
+        ),
+        clock_ms=lambda: now,
+    )
+
+    result = refresher.refresh()
+
+    assert result["healthy_count"] == 4
+    status = store.get(SYS_MODE_STATUS_KIND, SYS_MODE_STATUS_KEY)
+    history = store.get(SYS_MODE_HISTORY_KIND, SYS_MODE_HISTORY_KEY)
+    assert status is not None and history is not None
+    assert status.freshness_ts_ms == evidence
+    assert history.freshness_ts_ms == evidence
+    assert history.payload["timestamp"] == now
+
+
 def test_missing_sys_mode_ports_are_independent_typed_documents() -> None:
     store = _ProjectionStore()
     refresher = OperatorLiveStateProjectionRefresher(
@@ -364,6 +397,36 @@ def test_one_sys_mode_read_failure_does_not_block_history_or_other_targets() -> 
     status = store.get(SYS_MODE_STATUS_KIND, SYS_MODE_STATUS_KEY)
     assert status is not None
     assert status.payload["reason_code"] == "OBS_SYS_MODE_STATUS_READ_FAILED"
+
+
+def test_reobserved_identical_unavailable_refreshes_freshness_without_new_cursor() -> None:
+    store = _ProjectionStore()
+    clock = [1_700_000_000_000]
+    refresher = OperatorLiveStateProjectionRefresher(
+        store=store,  # type: ignore[arg-type]
+        ports=OperatorLiveSourcePorts(
+            gateway_source_reader=lambda: _gateway_payload("healthy"),
+            life_snapshot_reader=_LifeReader("healthy"),
+            sys_mode_status_reader=None,
+            sys_mode_history_reader=lambda: _history("history-live"),
+        ),
+        clock_ms=lambda: clock[0],
+    )
+
+    first = refresher.refresh()
+    first_document = store.get(SYS_MODE_STATUS_KIND, SYS_MODE_STATUS_KEY)
+    assert first_document is not None
+    first_cursor = first_document.source_cursor
+    assert first["targets"]["sys-mode-status"]["changed"] is True
+
+    clock[0] += 5_000
+    second = refresher.refresh()
+    second_document = store.get(SYS_MODE_STATUS_KIND, SYS_MODE_STATUS_KEY)
+
+    assert second_document is not None
+    assert second["targets"]["sys-mode-status"]["changed"] is False
+    assert second_document.source_cursor == first_cursor
+    assert second_document.freshness_ts_ms == clock[0]
 
 
 def test_missing_canonical_life_snapshot_is_not_materialized_as_healthy() -> None:

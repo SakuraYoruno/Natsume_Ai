@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -203,6 +205,115 @@ def test_evidence_freshness_does_not_replace_operation_clock_for_lease_or_journa
             )
     assert fenced.value.reason_code == PROJECTION_LEASE_FENCED
     assert store.get("security_immune", "next") is None
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ("acquire", "renew", "release", "upsert", "mark_degraded", "rebuild"),
+)
+def test_leader_operations_resample_clock_after_waiting_for_sqlite_write_lock(
+    tmp_path,
+    monkeypatch,
+    operation: str,
+) -> None:
+    now = [1_000]
+    store = _store(tmp_path / operation, clock=lambda: now[0])
+    lease = store.acquire_leader_lease("worker-a", lease_ms=10)
+    assert lease is not None
+    if operation in {"mark_degraded", "rebuild"}:
+        store.upsert(
+            "lease-clock",
+            "current",
+            {"value": "last-good"},
+            source_cursor=1,
+        )
+
+    raw_connect = store._connect  # noqa: SLF001 - deterministic lock harness
+    blocker = raw_connect()
+    blocker.execute("BEGIN IMMEDIATE")
+    begin_attempted = threading.Event()
+
+    class _SignalingConnection:
+        def __init__(self, connection) -> None:
+            self._connection = connection
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._connection.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def execute(self, statement, parameters=()):
+            if str(statement).strip().upper() == "BEGIN IMMEDIATE":
+                begin_attempted.set()
+            return self._connection.execute(statement, parameters)
+
+    monkeypatch.setattr(
+        store,
+        "_connect",
+        lambda: _SignalingConnection(raw_connect()),
+    )
+
+    def _run_operation():
+        if operation == "acquire":
+            return store.acquire_leader_lease("worker-b", lease_ms=10)
+        if operation == "renew":
+            return store.renew_leader_lease(lease, lease_ms=10)
+        if operation == "release":
+            return store.release_leader_lease(lease)
+        try:
+            with store.bind_leader_lease(lease):
+                if operation == "upsert":
+                    return store.upsert(
+                        "lease-clock",
+                        "new",
+                        {"value": "must-not-commit"},
+                        source_cursor=2,
+                        freshness_ts_ms=123,
+                    )
+                if operation == "mark_degraded":
+                    return store.mark_degraded(
+                        "lease-clock",
+                        "current",
+                        state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
+                        detail="must-not-commit",
+                    )
+                return store.rebuild(
+                    "lease-clock",
+                    [("replacement", {"value": "must-not-commit"}, 2, "")],
+                )
+        except QueryProjectionError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run_operation)
+        assert begin_attempted.wait(timeout=5)
+        now[0] = 1_011
+        blocker.rollback()
+        blocker.close()
+        outcome = future.result(timeout=5)
+
+    if operation == "acquire":
+        assert outcome is not None
+        assert outcome.owner_id == "worker-b"
+        assert outcome.fencing_token == lease.fencing_token + 1
+    elif operation == "renew":
+        assert outcome is None
+    elif operation == "release":
+        assert outcome is False
+    else:
+        assert isinstance(outcome, QueryProjectionError)
+        assert outcome.reason_code == PROJECTION_LEASE_FENCED
+        assert store.get("lease-clock", "new") is None
+        current = store.get("lease-clock", "current")
+        if operation in {"mark_degraded", "rebuild"}:
+            assert current is not None
+            assert current.payload == {"value": "last-good"}
+            assert current.degraded_state is ProjectionDegradedState.HEALTHY
 
 
 def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_path):

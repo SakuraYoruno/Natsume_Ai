@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import Body, Depends, HTTPException, Query
 
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.persona.life_evolution_view import build_life_evolution_view
@@ -148,6 +149,7 @@ async def _default_snapshot(
 
 
 async def _get_life_evolution_snapshot(
+    projection_store: Any = Depends(require_obs_query_projection_store),
     person_id: str = Query("default"),
     session_id: str = Query(""),
 ) -> dict[str, Any]:
@@ -156,11 +158,12 @@ async def _get_life_evolution_snapshot(
     from host_brain.app.observability_runtime.domain_state_projection import (
         LIFE_EVOLUTION_KIND,
         LIFE_MAX_AGE_MS,
-        read_domain_projection,
+        read_domain_projection_from_store,
     )
 
     key = str(person_id or "default").strip() or "default"
-    payload, projection = read_domain_projection(
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
         kind=LIFE_EVOLUTION_KIND,
         key=key,
         max_age_ms=LIFE_MAX_AGE_MS,

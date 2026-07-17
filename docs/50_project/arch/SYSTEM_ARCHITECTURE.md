@@ -3,8 +3,8 @@
 
 # Natsume AI 系统架构总览
 
-版本：v1.9
-核对日期：2026-07-16
+版本：v2.1
+核对日期：2026-07-17
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
@@ -271,9 +271,13 @@ host_brain.__main__
 
 D1 route scope 另将 Canon/Tool/Bond 从模块全局 provider 迁到每个 app 的 frozen `HostRoutePorts`。`app_factory`/`router_registry` 用 `create_canon_router/create_tool_router/create_bond_router` 闭包注册，Security→OBS composition 把同一个 ports bundle 传给三类 command adapters；构造或关闭另一个 Host app 不会覆盖已有 app。该切片没有删除 Capability Forge、Scheduler/Review、Life、Tribe 或其余 `process_services` locator。
 
-D2 为独立 Obs 增加 `create_obs_app()` 与 app-local `ObsApplicationPorts/Container`。D3 又增加显式 `obs_projection_jobs.py` 与 `ObsRoutePorts`，注册19个 producer并先迁移17个端点。D4 将 BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4，共19个 GET 的 store discovery 改为必需显式参数；现有36个已识别生产投影端点（35 HTTP + 1 WebSocket）及已识别stats查询均使用当前app的QueryProjectionStore/View，兼容query helper的路由消费者为0，6个 reconciliation端点另使用 app.state authority。40 个直接 ledger-stats GET 通过单次调用 degradation fence 统一 fail closed，即使旧 builder 吞掉读异常也会在路由边界返回 typed 503；7 个 Capability Forge GET 同样拒绝把 durable unavailable 投影成空/零。本切片的 metrics、humanoid diagnostics 与 source-correlation 已从退役 `graph_run_trace/llm_node_call_log` 切到 `model_attempt_log`，同一 attempt 的 STARTED/terminal 不会双计；其他 legacy consumer 仍待迁移。Sandbox 因没有 canonical migrated telemetry 而保留 `UNAVAILABLE` 项，`capability_execution_receipt` 作为另一真实子系统展示，二者不混称。测试 composition 显式注入 ledger/store/ports，并以双 app/双 SQLite 验证隔离，不再读写全局 ProcessServiceContainer。每个 app 独占 daemon/thread/stop/leader lease/cache/resources；关闭超时保留 exact retry graph。ports 实例 one-shot，重复消费 fail closed；需要重复 lifespan 时 factory返回新对象。
+D2 为独立Obs增加`create_obs_app()`与app-local `ObsApplicationPorts/Container`。D3最初注册19个producer并先迁移17个端点。D4将BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4共19个GET的store discovery改为必需显式参数；36个已识别端点（35 HTTP + 1 WebSocket）及stats查询使用当前app Store/View。D5又修正5个`/api/ui/*` GET，以及Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个实际GET，并以双Obs app/双SQLite验证隔离。Semantic/Governance拆为独立认证job后总producer增至21。
 
-当前 `REGISTERED_19_OF_19` 只证明 registration。source-mode为6 durable、3 static、7 partial、3 unavailable；16/3不是成功率。Security最小schema/时效、摘要必需源失败关闭与Forge字段级降级、operator Gateway校验/写失败传播、无Agent Runtime缺槽partial已接线；sys-mode、真实Edge、Forge、Life Body、Organ未闭环。health保持`DEGRADED`。三个非路由兼容helper定义、15个直接词法边界、legacy daemon、Host/Worker composition与全局53 refs仍待迁移，不能封板。
+Host新增mode、capability-forge、semantic-recall、governance、runtime五条不进入OpenAPI的隐藏只读路由及版本合同；Host侧只保留专用token摘要，Obs client持有启动时捕获的配置值。每个Host lifespan创建一个五合同共享的source instance，合同revision各自锁内单调递增。Obs通过通用Query Projection SQLite的`compare_and_upsert`单事务CAS持久当前lineage，并从immutable journal读取完整历史epoch；同epoch revision/observed/evidence回滚、同revision payload漂移和任意退役epoch重放都会失败关闭。合同递归约束`timestamp`、`*_ts_ms`、`*_at_ms`不晚于Host observed；Obs以本地接收时间最多允许5秒skew、正证据最大120秒，freshness不晚于本地接收。Host composition、route、Obs receiver各做公共序列化和合同复验；Organ `key_metrics`另以逐agent显式数值/布尔allowlist约束。Transport固定五路径allowlist、禁代理/重定向、限制1 MiB，并以单一monotonic总deadline覆盖DNS解析、连接、响应头和分块正文；HTTP的解析结果再次限定为loopback，不可取消的系统DNS调用由全进程4槽有界resolver限制。Forge、Semantic、Governance、Organ四个认证job各读独立生产source；Semantic/Governance不消费Capability v1兼容child，故拥有独立cache和failure domain。
+
+Capability v1的兼容child provider异常仅把该字段降级为带reason code的`SOURCE_UNAVAILABLE`；Forge自身authority有效时，capability-forge endpoint仍返200，不会被child反向拖垮。
+
+当前`REGISTERED_21_OF_21`只证明registration。source-mode为6 durable、3 static、7 partial、4 authenticated-host-read、1 unavailable；20/1与认证声明都不是成功率。Host source provider只在ASGI lifespan预热/捕获并在finally清空，但底层ledger、Forge、Semantic、Governance、Tribe等authority仍由process-global服务提供，因此Host/Worker composition未完成。缺token、Host或证据时仍写`SOURCE_UNAVAILABLE`；mode history只在当前进程内，Organ只反映allowlist内瞬态runtime，不是Life authority。真实uvicorn loopback只证明传输机制，不证明部署Host、真实Edge或长期健康。Life Body与真实Edge未闭环，health保持`DEGRADED`。Memory/VTS冷迁移旧源仍缺；`llm_call_log` 已迁移，但 legacy graph-only 来源仍被统计消费；`llm_node_call_log` 缺少 migration，且仍有遗留读写者。4个非路由兼容helper定义、13个直接词法边界、legacy daemon、Host/Worker composition与全局53 refs仍待迁移，不能封板。
 
 Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED`。0101 authority、`WorkspaceRepository` 和配置根 allocator 继续持有 exact graph epoch/root WorkOrder/owner/allow-list；认证 Internal Agent admission 只携带服务端派生的逻辑 ID。显式配置稳定 HMAC secret 后，Host composition 冻结 source commit、创建独立 namespace Git worktree，并注入实例/PID 绑定 lease、独占 heartbeat scope、顺序 handoff/过期 takeover、cleanup receipt 与 pending cleanup worker；启动同步最多续清 1 条，其余 durable backlog 交 worker。Provisioning/allocator/cleanup adapter 的 Filesystem/Git callback 在 workspace→source 固定锁序下共享一个 monotonic deadline；SQLite 只承担前后 exact fence/status/expiry 验证和独立 CAS，长 callback 不占 writer，后验漂移不得成为成功结果。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者没有逐操作 fence或强杀。Workspace worker 必须先于 Task Store 静止；启动或关闭回滚失败会保留两者 handle并上抛 retry-required。缺 secret 时 Host 可降级在线但写入 fail closed。该切片没有 promotion/abandon、accepted checkpoint HEAD、Domain/Skill 接线、OS/container/tenant 或 handle-level TOCTOU 隔离，真实 canary 也未运行。
 

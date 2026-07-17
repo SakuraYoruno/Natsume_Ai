@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import Query
+from fastapi import Depends, Query
 
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.obs_routes_core import router
 from host_brain.app.observability_runtime.domain_state_projection import (
     SECURITY_IMMUNE_KEY,
     SECURITY_IMMUNE_KIND,
     SECURITY_IMMUNE_MAX_AGE_MS,
-    read_domain_projection,
+    read_domain_projection_from_store,
 )
 
 
-def _runtime_state() -> dict[str, Any]:
-    payload, projection = read_domain_projection(
+def _runtime_state(projection_store: Any) -> dict[str, Any]:
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
         kind=SECURITY_IMMUNE_KIND,
         key=SECURITY_IMMUNE_KEY,
         max_age_ms=SECURITY_IMMUNE_MAX_AGE_MS,
@@ -36,13 +38,17 @@ def _runtime_state() -> dict[str, Any]:
 
 
 @router.get("/security/runtime")
-def get_security_immune_runtime() -> dict[str, Any]:
-    return _runtime_state()
+def get_security_immune_runtime(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> dict[str, Any]:
+    return _runtime_state(projection_store)
 
 
 @router.get("/security/assets")
-def get_security_immune_assets() -> dict[str, Any]:
-    state = _runtime_state()
+def get_security_immune_assets(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> dict[str, Any]:
+    state = _runtime_state(projection_store)
     return {
         "schema_version": "Natsume.security_immune.assets.v1",
         "assets": list(state.get("assets") or []),
@@ -54,11 +60,12 @@ def get_security_immune_assets() -> dict[str, Any]:
 
 @router.get("/security/incidents")
 def get_security_immune_incidents(
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
     min_risk: str = Query("low", description="Minimum risk: low, medium, high, critical"),
 ) -> dict[str, Any]:
     order = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
     threshold = order.get(str(min_risk or "low").strip().lower(), 1)
-    state = _runtime_state()
+    state = _runtime_state(projection_store)
     incidents = [
         incident for incident in list(state.get("incidents") or [])
         if order.get(str(incident.get("risk") or "none").lower(), 0) >= threshold

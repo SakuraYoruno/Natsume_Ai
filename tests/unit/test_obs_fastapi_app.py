@@ -6,6 +6,7 @@ import sys
 import threading
 
 from fastapi.testclient import TestClient
+from natsume_contracts.operator.v1 import ProjectionDegradedState
 import pytest
 
 import host_brain.app.obs_fastapi_app as obs_fastapi_app_module
@@ -17,24 +18,36 @@ from host_brain.composition.obs_application import (
     ObsProjectionJob,
     build_default_obs_application_ports,
 )
+from host_brain.composition.obs_projection_jobs import AUTHENTICATED_HOST_READ
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_obs_fastapi_app_health_ok(tmp_path):
+def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOST_OBS_READ_TOKEN", raising=False)
     isolated_app = create_obs_app(
         ports_factory=lambda: build_default_obs_application_ports(
             canonical_db_path=tmp_path / "obs-fastapi-health.sqlite3",
         )
     )
     with TestClient(isolated_app) as client:
+        container = isolated_app.state.obs_application_container
+        results = container.projection_daemon.run_once(
+            store=container.ports.query_projection_store,
+            owner_id="obs-fastapi-health",
+            lease_ms=120_000,
+        )
+        assert results["capability-forge-operator"] == "OK"
+        assert results["governance-snapshot"] == "OK"
+        assert results["organ-tribe"] == "OK"
+        assert results["semantic-recall-stats"] == "OK"
         resp = client.get("/health")
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["status"] == "DEGRADED"
         assert payload["service"] == "obs"
-        assert payload["composition"]["projection_coverage"] == "REGISTERED_19_OF_19"
+        assert payload["composition"]["projection_coverage"] == "REGISTERED_21_OF_21"
         assert payload["composition"]["count_semantics"] == (
             "producer_registration_and_declared_source_mode_not_runtime_success"
         )
@@ -45,6 +58,7 @@ def test_obs_fastapi_app_health_ok(tmp_path):
             "capability-forge-operator",
             "device-status",
             "digital-life-overview",
+            "governance-snapshot",
             "health-passive",
             "insights-summary",
             "life-body",
@@ -54,16 +68,36 @@ def test_obs_fastapi_app_health_ok(tmp_path):
             "resource-manager",
             "runtime-snapshot",
             "security-immune",
+            "semantic-recall-stats",
             "sessions",
             "skill-pack-catalog",
             "task-runtime",
             "trace",
         ]
         assert payload["composition"]["missing_jobs"] == []
-        assert payload["composition"]["registered_count"] == 19
-        assert payload["composition"]["declared_non_typed_unavailable_count"] == 16
-        assert payload["composition"]["typed_unavailable_job_count"] == 3
+        assert payload["composition"]["registered_count"] == 21
+        assert payload["composition"]["declared_non_typed_unavailable_count"] == 20
+        assert payload["composition"]["typed_unavailable_job_count"] == 1
         assert payload["composition"]["declared_partial_job_count"] == 7
+        assert payload["composition"]["authenticated_host_read_job_count"] == 4
+        assert payload["composition"]["authenticated_host_read_jobs"] == [
+            {
+                "name": "capability-forge-operator",
+                "source_mode": AUTHENTICATED_HOST_READ,
+            },
+            {
+                "name": "governance-snapshot",
+                "source_mode": AUTHENTICATED_HOST_READ,
+            },
+            {
+                "name": "organ-tribe",
+                "source_mode": AUTHENTICATED_HOST_READ,
+            },
+            {
+                "name": "semantic-recall-stats",
+                "source_mode": AUTHENTICATED_HOST_READ,
+            },
+        ]
         assert "remaining-operator-queries" in payload["composition"][
             "declared_non_typed_unavailable_jobs"
         ]
@@ -72,16 +106,27 @@ def test_obs_fastapi_app_health_ok(tmp_path):
             == "DURABLE_READ_PARTIAL"
         )
         assert payload["composition"]["source_modes"]["trace"] == "DURABLE_READ_PARTIAL"
+        assert (
+            payload["composition"]["source_modes"]["capability-forge-operator"]
+            == AUTHENTICATED_HOST_READ
+        )
+        assert (
+            payload["composition"]["source_modes"]["governance-snapshot"]
+            == AUTHENTICATED_HOST_READ
+        )
+        assert (
+            payload["composition"]["source_modes"]["organ-tribe"]
+            == AUTHENTICATED_HOST_READ
+        )
+        assert (
+            payload["composition"]["source_modes"]["semantic-recall-stats"]
+            == AUTHENTICATED_HOST_READ
+        )
         assert {
             item["name"] for item in payload["composition"]["unavailable_jobs"]
-        } == {
-            "capability-forge-operator",
-            "life-body",
-            "organ-tribe",
-        }
-        assert all(
-            item["reason_code"] == "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
-            for item in payload["composition"]["unavailable_jobs"]
+        } == {"life-body"}
+        assert payload["composition"]["unavailable_jobs"][0]["reason_code"] == (
+            "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
         )
         assert {
             item["name"] for item in payload["composition"]["partial_jobs"]
@@ -94,6 +139,22 @@ def test_obs_fastapi_app_health_ok(tmp_path):
             "runtime-snapshot",
             "trace",
         }
+        for kind, key, job_name in (
+            ("capability_forge_operator", "current", "capability-forge-operator"),
+            ("governance_snapshot", "current", "governance-snapshot"),
+            ("organ_tribe_status", "current", "organ-tribe"),
+            ("semantic_recall_stats", "runtime", "semantic-recall-stats"),
+        ):
+            document = container.ports.query_projection_store.get(kind, key)
+            assert document is not None
+            assert (
+                document.degraded_state
+                is ProjectionDegradedState.SOURCE_UNAVAILABLE
+            )
+            assert document.payload["available"] is False
+            assert document.payload["reason_code"] == "OBS_HOST_READ_CONFIG"
+            assert document.payload["source_scope"] == "host-runtime"
+            assert document.payload["job_name"] == job_name
 
 
 def test_obs_fastapi_app_exposes_obs_and_ui_routes():
