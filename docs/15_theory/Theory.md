@@ -836,7 +836,7 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 | Canon | [Canon application](../../host_brain/canon/application.py)、[apply service](../../host_brain/memory/canon_apply_service.py) | proposal、apply、rollback、projection |
 | World | [WorldProjectionReadModel](../../host_brain/runtime/world_model.py) | 来源、置信度、TTL、冲突和只读边界 |
 | Governance | [Governor](../../host_brain/governor/decision.py)、[Action Arbiter](../../host_brain/governor/action_arbiter.py) | 决策、reason code、scope 与 restrict-only |
-| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[Code shadow adapter](../../host_brain/planning_search/code_domain.py)、[Code frozen models](../../host_brain/planning_search/code_domain_models.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、冻结证据、预算、不可变图 |
+| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[Code shadow adapter](../../host_brain/planning_search/code_domain.py)、[Code frozen models](../../host_brain/planning_search/code_domain_models.py)、[Code trusted-process private-bare experiment](../../host_brain/planning_search/code_benchmark_sandbox.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、冻结证据、trusted-process private-bare 实验、预算、不可变图 |
 | Execution | [HostCommand](../../natsume_contracts/task/v1.py)、[Task coordinator](../../host_brain/task_runtime/coordinator.py) | lineage、Attempt、Review、Verification、Acceptance |
 | Side effects | [acceptance compiler](../../host_brain/task_runtime/acceptance_effects.py)、[dispatcher](../../host_brain/task_runtime/acceptance_effect_dispatcher.py) | authority-free worker result 如何变成可信 effect |
 

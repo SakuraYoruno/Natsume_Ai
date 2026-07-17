@@ -83,7 +83,7 @@
       "not_completed": [
         "agent_worker write execution still has no task-bound durable WorkspaceRuntime/WorkspaceGrant injection and remains fail-closed before model work",
         "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
-        "Code now has a pure dynamic shadow catalog only; isolated paired benchmark execution, model/tool/workspace authority, receipt-bound comparison and production influence remain unimplemented",
+        "Code now has a pure dynamic catalog plus trusted-in-process private-bare paired-worktree mechanics only; controlled model/tool execution, durable receipt/comparison ledger, OS/container/network isolation and production influence remain unimplemented",
         "generic chat/delegate/runtime cutover remains incomplete"
       ],
       "evidence_refs": [
@@ -573,12 +573,14 @@
       ]
     },
     "planning_search_kernel": {
-      "status": "PARTIAL_D16_DYNAMIC_CODE_SHADOW",
-      "scope": "Pure public PlanningSearch contracts, immutable compile binding, and one Code dynamic catalog only; no production domain cutover or benefit claim.",
+      "status": "PARTIAL_D17_CODE_PRIVATE_BARE_MECHANICS",
+      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, and a trusted-in-process private-bare paired-worktree experiment adapter only; no production domain cutover, isolation claim or benefit claim.",
       "evidence_refs": [
         "host_brain/planning_search/",
         "host_brain/planning_search/code_domain.py",
         "host_brain/planning_search/code_domain_models.py",
+        "host_brain/planning_search/code_benchmark_models.py",
+        "host_brain/planning_search/code_benchmark_sandbox.py",
         "host_brain/orchestration/goal_planning.py",
         "host_brain/orchestration/planning_graph_compiler.py",
         "host_brain/orchestration/planning_execution.py",
@@ -586,17 +588,18 @@
         "tests/unit/test_d14_goal_planning.py",
         "tests/unit/test_d14_domain_benchmark_contracts.py",
         "tests/unit/test_d16_code_planning_domain.py",
-        "tests/unit/test_d16_planning_execution_context.py"
+        "tests/unit/test_d16_planning_execution_context.py",
+        "tests/unit/test_d17_code_benchmark_sandbox.py"
       ]
     },
     "planning_search_goal_foundation": {
-      "status": "PARTIAL_D16_DYNAMIC_CODE_SHADOW_ONLY",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network.",
-      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome contract captures fixed workload, baseline, verifier refs, budget and isolation but structurally forces SHADOW_ONLY and production_influence_enabled=false. No real paired workload receipt has been run.",
+      "status": "PARTIAL_D17_CODE_PRIVATE_BARE_MECHANICS",
+      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner: a clean protected source that owns its .git directory is cloned with --no-local into a disposable private bare repo, then baseline and selected arms receive independent detached worktrees and a lower-case portable repository-relative ACL API; source HEAD/refs/status/worktree/control metadata are rechecked after cleanup.",
+      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome still structurally forces SHADOW_ONLY and production_influence_enabled=false. D17 proves a local private-bare two-arm worktree/verifier mechanics test and redacted arm evidence for trusted repository-owned adapters only. It is not durable receipts, a historical cohort, controlled model/tool execution, hidden-oracle security, test-command sandboxing, network isolation or a benefit result.",
       "not_completed": [
         "Host chat or plan production cutover to GoalPlanningService",
         "Research dynamic successor adapter and real read-only source/verifier shadow",
-        "Code isolated historical-repository paired benchmark, verifier receipt, actual model/tool execution and WorkspaceGrant-bound write path",
+        "Code durable historical benchmark ledger, cleanup receipts, hidden-oracle verifier, controlled model/tool execution budget and WorkspaceGrant-bound write path",
         "Pentest capability/fact-driven successor catalog",
         "receipt-bound baseline-versus-search comparison and promotion gate",
         "any production influence from MCTS"
@@ -613,6 +616,16 @@
         "host_brain/orchestration/planning_recovery.py",
         "tests/unit/test_d16_code_planning_domain.py",
         "tests/unit/test_d16_planning_execution_context.py"
+      ]
+    },
+    "code_historical_benchmark_sandbox": {
+      "status": "PARTIAL_D17_PRIVATE_BARE_WORKTREE_MECHANICS",
+      "implemented": "The experiment-only runner requires a registered clean protected source that owns an unshared non-link .git directory, creates a disposable private bare clone with no remote, sets a private empty hooks path, and creates two detached worktrees at the same frozen commit. Its workload isolation manifest has exactly six fixed fields (mode/source ref/source commit/policy digest/executor trust/network non-enforcement); its lower-case portable repository-relative allow/deny API rejects padded/case-alias/.git/traversal/symlink paths and its governed references reject file and host-path-shaped values. Private roots/artifacts reject links and Windows reparse points; cleanup unlinks/removes only the direct private link itself and never enumerates or recursively deletes its target. Tracked diff bytes and untracked file bytes are hashed, ignored artifacts fail closed, a verifier receipt is required, private artifacts are removed, and source HEAD/refs/status/worktree/control metadata are rechecked. Git child processes discard inherited Git variables, system/global config and interactive prompts, force core.fsmonitor off, allow only file transport and skip standard LFS smudge. Generic DomainBenchmarkReport remains SHADOW_ONLY and production influence stays false.",
+      "boundary": "This is `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY`: a local mechanical worktree guard, not OS/container/tenant/filesystem/network isolation. The source repository, including its local Git configuration and checked-out content, is trusted input. Executor and verifier run in the current Python process, so only repository-owned trusted adapters are permitted; a narrow API does not confine model, skill, plugin or hidden-oracle code. `network_isolation=NOT_ENFORCED` replaces the false `network_enabled=false` claim. Git hardening reduces inherited configuration, fsmonitor, credentials and hooks but is not an OS security boundary. The adapter is not composed into Host, TaskGraph, AgentExecutor, WorkspaceGrant or production routes; it has no durable 0106 ledger, cleanup receipt retry record, hidden-oracle process, real model/tool budget enforcement, historical cohort or uplift conclusion.",
+      "evidence_refs": [
+        "host_brain/planning_search/code_benchmark_models.py",
+        "host_brain/planning_search/code_benchmark_sandbox.py",
+        "tests/unit/test_d17_code_benchmark_sandbox.py"
       ]
     },
     "host_candidate_plan_generation": {
@@ -637,7 +650,7 @@
     },
     "code_production_planning_benefit": {
       "status": "UNPROVEN",
-      "existing_evidence_level": "PURE_DYNAMIC_CATALOG_UNIT_ONLY"
+      "existing_evidence_level": "PRIVATE_BARE_WORKTREE_MECHANICS_UNIT_ONLY"
     },
     "budget_enforcement": {
       "status": "PARTIAL",

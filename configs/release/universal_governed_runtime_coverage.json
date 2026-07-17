@@ -119,17 +119,20 @@
   "architecture_controls": {
     "generic_three_layer_planning_search": {
       "status": "PARTIAL",
-      "host_boundary": "The domain-neutral kernel exists, and D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests; Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
+      "host_boundary": "The domain-neutral kernel exists; D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests, and D17 adds an experiment-only PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY adapter with a lower-case repository-relative file API. D17 accepts only repository-owned trusted in-process executors/verifiers and does not enforce network or filesystem isolation. Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
       "evidence_refs": [
         "host_brain/planning_search/service.py",
         "host_brain/planning_search/code_domain.py",
         "host_brain/planning_search/code_domain_models.py",
+        "host_brain/planning_search/code_benchmark_models.py",
+        "host_brain/planning_search/code_benchmark_sandbox.py",
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
         "host_brain/pentest/agent/virtual_planning_world.py",
         "host_brain/pentest/agent/planning_search_adapter.py",
         "tests/unit/test_d16_code_planning_domain.py",
         "tests/unit/test_d16_planning_execution_context.py",
+        "tests/unit/test_d17_code_benchmark_sandbox.py",
         "docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json"
       ]
     },

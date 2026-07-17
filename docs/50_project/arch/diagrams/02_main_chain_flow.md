@@ -244,7 +244,7 @@ flowchart LR
 
 当前 Host Plan 不会新增步骤、发明工具组合或比较多套方案。搜索内核存在，但这里主要用于选择完整合法的拓扑顺序。
 
-Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。故不能把这条虚线准备能力画成 Host 已具备目标规划。
+Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。D17 也没有接入该实线：它仅在实验 adapter 内从 clean protected source 创建 private bare clone 和 baseline/search detached worktree；仓库自有 trusted in-process arm 才能使用 lower-case repository-relative ACL API，cleanup 后复核 source fingerprint。该 API 无法约束恶意同进程 executor/verifier，`network_isolation=NOT_ENFORCED`；它不是 OS/container/filesystem/network sandbox、没有模型或 durable ledger，故同样不能画成 Host 已具备目标规划。
 
 ## 当前例外与缺口
 

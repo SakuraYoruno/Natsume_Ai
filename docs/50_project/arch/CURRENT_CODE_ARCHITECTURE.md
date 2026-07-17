@@ -21,10 +21,10 @@
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
-| 通用 PlanningSearch | `PARTIAL_D16_DYNAMIC_CODE_SHADOW` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 额外落下 Code 的动态纯 shadow catalog，但尚无任何生产 domain cutover 或收益结论 |
+| 通用 PlanningSearch | `PARTIAL_D17_CODE_PRIVATE_BARE_MECHANICS` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 落下 Code 动态纯 shadow catalog，D17 增加实验专用 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree 机械链；尚无生产 domain cutover 或收益结论 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
-| Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态纯 catalog 单测；没有真实 worktree、真实来源、模型/工具调用、verifier receipt 或成对收益证据 |
+| Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态 pure catalog 和 trusted-process private-bare 双 worktree 单测；没有 durable historical cohort、受控模型/工具、OS/container sandbox、可重放 cleanup receipt 或成对收益结论 |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
 | Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。D16 的 `agent_worker` 只是 simulation-only graph descriptor，不能证明该端口实际调用；写入仍缺 WorkspaceGrant/WorkspaceRuntime，ReAct 也尚未受 `ModelBudgetGuard` 约束 |
@@ -277,6 +277,14 @@ Task Runtime Outbox 已由 0093 建立跨进程 durable claim/CAS，0095 则把 
 
 这不是 Code 执行切流：不会打开 worktree、读取源码、调用模型/工具/测试/provider、admit TaskGraph 或写 workspace；`allowed_path_refs` / `forbidden_path_refs` 只是冻结证据，不是 live ACL。没有历史成对 A/B、独立 verifier receipt、0106 comparison ledger 或 promotion gate，所以仍不能声称 Code 收益或生产 influence。
 
+### 5.1.3 D17 trusted-process private-bare paired-worktree experiment adapter
+
+`host_brain/planning_search/code_benchmark_sandbox.py` 不复用 W2 的主 checkout source：它要求服务器注册一个在净化 Git 环境中也干净、且拥有非链接、非共享 `.git` 目录的普通 Git source；source 的 local Git config 与 checkout content 仍是受信输入。在受保护根目录之外用 `git clone --bare --no-local` 建立一次性 private bare repository，设置私有空 hooks path、移除 remote 后，从同一个 frozen commit 给 baseline 与 selected 分别建立 detached worktree。Git 子进程丢弃继承的 `GIT_*` 配置，禁用 system/global config 与交互提示、强制关闭 `core.fsmonitor`，仅允许 `file` transport，并跳过标准 LFS smudge；这只是降低 Git 继承面，不是网络或进程隔离。
+
+workload isolation 是精确六字段 manifest：`sandbox_mode`、`source_ref`、`source_commit`、`path_policy_digest`、`executor_trust` 与 `network_isolation`；任何额外字段（包括潜在主机路径）或旧 `network_enabled` 都会拒绝。governed ref 同时拒绝 `file://` 和 host-path-shaped 值。两个 arm 的 `CodeBenchmarkWorkspace` 只接受唯一的小写 portable repository-relative `read_text/write_text/exists` 路径拼写：拒绝 padding、大小写 alias、Windows trailing-dot/space、reserved device、`.git`、绝对路径、`..` 与 symlink component。private root/artifact 同样拒绝 symlink 与 Windows reparse point；cleanup 对发现的 direct-child link 只 unlink/rmdir link 本身，绝不枚举或递归删除外部目标。tracked binary diff 与 untracked regular-file content 各自进入 receipt digest，ignored artifact 直接失败。runner 清理 private worktree/bare repo 后再次比对受保护 source 的 HEAD、refs、tracked/untracked/ignored status、worktree inventory 与 Git control metadata。
+
+这份 API 是受信 adapter 的机械防错层，并非权限隔离：executor 与 verifier 都在当前 Python process，能传入的只能是仓库自有、受审计的实现；绝不能把 model、skill/plugin 或 hidden-oracle 代码交给它。D17 的口径固定为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 与 `network_isolation=NOT_ENFORCED`，不是 OS/container/tenant/filesystem/network sandbox。它未接 Host、TaskGraph、AgentExecutor、真实模型、hard budget、hidden-oracle process、0106 durable ledger 或 cleanup retry receipt；因此不能宣称已跑真实历史 cohort、真实模型修复或收益。
+
 ### 5.2 Host Plan
 
 `host_brain/orchestration/plan_intent_search.py` 从 Governor 已批准的 `planned_steps/steps` 构造候选。搜索只能选择完整、合法的拓扑顺序，不能新增节点、改变工具组合或比较不同方案。
@@ -306,7 +314,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ### 5.4 Code / Research
 
-`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract；D16 仅补了 Code 的动态 catalog 和编译单测，不是一个已运行的真实 benchmark。当前证据仍没有真实仓库、真实 Research 来源、真实 model call、真实 verifier 或每 arm 独立 receipt。
+`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract；D16 补了 Code 动态 catalog 和编译单测；D17 用临时测试仓库实际执行 private-bare clone、baseline/selected 独立 detached worktree、受信文件 API、verifier ref 与 cleanup，并在 cleanup 后复核受保护源的 Git control metadata fingerprint，漂移即失败。该 D17 机械链仍没有 durable historical workload/run/outcome/comparison ledger、真实模型/工具/测试命令、隔离的 hidden oracle 或收益结论；Research 仍没有真实来源。
 
 ### 5.4.1 D15 governed Agent 模型端口桥
 

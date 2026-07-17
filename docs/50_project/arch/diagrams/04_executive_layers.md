@@ -68,7 +68,7 @@ flowchart LR
 | Host Plan | Governor 已批准的 `planned_steps/steps` | 只做合法拓扑选择，未生成竞争方案 |
 | Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only；0105 durable calibration 仅显式注入时写入，target 在 fingerprint 前收口，库故障只记 unavailable 事件，outcome 仍是未验证运行记录投影 |
 | Research | 冻结模拟 fixture | 没有真实来源、模型和 verifier 对照 |
-| Code | D16 frozen opaque ref/digest + registered patch catalog | 动态 pure-shadow `inspect→patch→unit/rollback` 已有单测；`virtual_model_ready=false` 时 L3 无 simulation ports；没有真实 worktree、模型/工具/测试、receipt 或成本对照 |
+| Code | D16 frozen opaque ref/digest + registered patch catalog；D17 trusted-process private bare 双 detached worktree | D16 动态 pure-shadow `inspect→patch→unit/rollback` 已有单测；D17 证明受信 adapter 的本地 private-bare clone、portable ACL file API、双 arm cleanup 后 source fingerprint 无漂移；不是恶意执行防护，`network_isolation=NOT_ENFORCED`。仍没有真实模型/工具/测试命令、durable receipt ledger、OS/container sandbox 或成本收益对照 |
 
 ## Scheduler/Internal 分界
 
@@ -113,6 +113,7 @@ stateDiagram-v2
 
 - 公共搜索：`host_brain/planning_search/`
 - Code pure-shadow frozen models / catalog：`host_brain/planning_search/code_domain_models.py`、`host_brain/planning_search/code_domain.py`
+- Code private-bare experiment adapter：`host_brain/planning_search/code_benchmark_models.py`、`host_brain/planning_search/code_benchmark_sandbox.py`
 - Host Plan adapter：`host_brain/orchestration/plan_intent_search.py`
 - Graph compiler：`host_brain/orchestration/planning_graph_compiler.py`
 - Replan/recovery：`host_brain/orchestration/planning_recovery.py`、`failure_replan_intent.py`

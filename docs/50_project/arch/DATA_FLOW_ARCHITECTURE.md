@@ -255,6 +255,26 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
+### 4.7 D17 Code historical trusted-process private-bare experiment flow
+
+```text
+registered clean protected source (unshared non-link .git; local Git config is trusted)
+  + exact six-field isolation manifest + frozen commit + source fingerprint
+  → git clone --bare --no-local (disposable private bare; sanitized Git env,
+     no system/global config, file transport only, standard LFS smudge skipped,
+     private empty hooks path; remote removed)
+  → baseline detached worktree ─┐
+                                ├→ lower-case repository-relative API → trusted in-process verifier → redacted arm evidence
+  → selected detached worktree ─┘
+  → tracked diff + untracked-file content digest; ignored artifacts fail closed
+  → compare private bare refs unchanged
+  → remove both worktrees + private bare
+  → recheck protected source HEAD / refs / status / worktree / Git-control fingerprint
+  → SHADOW_ONLY DomainBenchmarkReport (no production influence)
+```
+
+该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；但 executor/verifier 是当前 Python process 的受信仓库代码，能够绕开 API 的不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。它是真实本地 Git 机械链，但口径仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：Git hardening 不是 container/tenant/OS/filesystem/network 隔离，也没有隐藏 oracle process、execution budget、durable 0106 workload/run/outcome/comparison 或 cleanup retry receipt，故不能用于收益或 promotion 结论。
+
 ## 5. TaskGraph 状态流与回执
 
 ### 5.1 Admission
@@ -722,6 +742,7 @@ All ingress sources
 | Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（均已接通 canonical admission） |
 | Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |
 | Workspace 路径围栏与 W2 Internal worktree | [workspace_paths.py](../../../host_brain/agent_runtime/workspace_paths.py)，[workspace_repository.py](../../../host_brain/persistence/workspace_repository.py)，[workspace_operation_fencing.py](../../../host_brain/persistence/workspace_operation_fencing.py)，[workspace_allocator.py](../../../host_brain/agent_runtime/workspace_allocator.py)，[workspace_runtime.py](../../../host_brain/agent_runtime/workspace_runtime.py)，[workspace_policy.py](../../../host_brain/agent_runtime/workspace_policy.py)，[agent_workspace.py](../../../host_brain/composition/agent_workspace.py) |
+| D17 Code private-bare benchmark experiment | [code_benchmark_models.py](../../../host_brain/planning_search/code_benchmark_models.py)，[code_benchmark_sandbox.py](../../../host_brain/planning_search/code_benchmark_sandbox.py) |
 | Acceptance effects | [acceptance_effects.py](../../../host_brain/task_runtime/acceptance_effects.py)，[acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py)，[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) |
 | Life/Memory post-process | [digital_life/service.py](../../../host_brain/digital_life/service.py)，[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py)，[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) |
 | Gateway inbound/outbound | [delivery_runtime.py](../../../edge_client/gateway/delivery_runtime.py)，[input_reporter.py](../../../edge_client/channels/input_reporter.py)，[ingress.py](../../../host_brain/input_runtime/ingress.py)，[gateway_transport_repository.py](../../../host_brain/persistence/gateway_transport_repository.py)，[outbound.py](../../../edge_client/gateway/outbound.py) |
