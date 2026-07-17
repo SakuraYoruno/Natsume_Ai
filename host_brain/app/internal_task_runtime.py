@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -214,7 +215,30 @@ class _AgentWorker:
                 "internal node grant verifier returned no durable projection",
             )
         legacy_order = work_order.to_agent_work_order()
-        result = await asyncio.to_thread(self._executor.execute, legacy_order)
+        if legacy_order.requires_write:
+            workspace_execution_authority = {
+                "command_id": str(command.command_id or "").strip(),
+                "principal_id": str(command.principal_id or "").strip(),
+                "root_work_order_id": str(
+                    execution_context.get("work_order_id") or ""
+                ).strip(),
+                "graph_id": str(execution_context.get("graph_id") or "").strip(),
+                "graph_revision": execution_context.get("graph_revision"),
+                "node_id": str(execution_context.get("node_id") or "").strip(),
+                "attempt_id": str(execution_context.get("attempt_id") or "").strip(),
+                "lease_id": str(execution_context.get("lease_id") or "").strip(),
+                "lease_owner_id": str(
+                    execution_context.get("lease_owner_id") or ""
+                ).strip(),
+                "fencing_token": execution_context.get("fencing_token"),
+            }
+            result = await asyncio.to_thread(
+                self._executor.execute,
+                legacy_order,
+                workspace_execution_authority=workspace_execution_authority,
+            )
+        else:
+            result = await asyncio.to_thread(self._executor.execute, legacy_order)
         if not isinstance(result, Mapping):
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_AUTHORITY_INVALID,
@@ -960,7 +984,17 @@ def _build_contracts(
         domain=work_order.domain,
         run_mode=work_order.run_mode,
         objective=work_order.objective,
-        workspace=deepcopy(dict(work_order.workspace or {})),
+        workspace=(
+            {
+                "strategy": "durable_workspace",
+                "workspace_id": DurableWorkspaceRuntime.workspace_id_for(
+                    graph_id=graph_id,
+                    graph_revision=1,
+                ),
+            }
+            if work_order.requires_write
+            else deepcopy(dict(work_order.workspace or {}))
+        ),
         input_pack=deepcopy(dict(work_order.input_pack or {})),
         allowed_actions=tuple(work_order.allowed_actions or ()),
         forbidden_actions=tuple(work_order.forbidden_actions or ()),

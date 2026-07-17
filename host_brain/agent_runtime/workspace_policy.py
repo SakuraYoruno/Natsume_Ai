@@ -100,9 +100,10 @@ class WorkspacePolicy:
         ]
         | None = None,
     ) -> None:
-        # Production composition does not inject W1 yet.  Therefore a payload
-        # cannot opt itself into durable authority merely by naming the new
-        # strategy; the default remains fail closed.
+        # W2 injects this authority only on the authenticated Internal Agent
+        # path.  Every other composition—and Internal startup without its
+        # explicit secret—must still fail closed rather than trust a payload
+        # that merely names the durable strategy.
         self._workspace_allocator = workspace_allocator
         self._workspace_lease_provider = workspace_lease_provider
 

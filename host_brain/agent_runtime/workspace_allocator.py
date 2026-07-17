@@ -8,17 +8,25 @@ Recursive deletion is intentionally absent from this adapter.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+import os
 from pathlib import Path
-from typing import Any
+import re
+import subprocess
+import time
+from typing import Any, Callable, Iterator, TypeVar
 
 from host_brain.agent_runtime.workspace_paths import resolve_workspace_path
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_INVALID,
     WorkspaceAuthority,
     WorkspaceMutation,
+    WorkspaceOperationContext,
     WorkspaceRepository,
     WorkspaceRepositoryError,
+    WORKSPACE_OPERATION_TIMEOUT,
 )
 
 
@@ -27,6 +35,13 @@ class ManagedWorkspaceRoot:
     root_ref: str
     path: Path
     isolation_modes: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedGitSource:
+    source_key: str
+    source_ref_prefix: str
+    repository: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +58,23 @@ class DurableWorkspacePath:
     authority: WorkspaceAuthority
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceCleanupResult:
+    workspace_id: str
+    source_ref: str
+    already_absent: bool
+
+
+_SOURCE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$")
+_GIT_OBJECT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_GIT_COMMAND_TIMEOUT_S = 60.0
+_GIT_DEADLINE: ContextVar[float | None] = ContextVar(
+    "natsume_workspace_git_deadline",
+    default=None,
+)
+_T = TypeVar("_T")
+
+
 class WorkspaceAllocator:
     """Allocate logical authority and adapt it through preconfigured roots."""
 
@@ -51,6 +83,7 @@ class WorkspaceAllocator:
         *,
         repository: WorkspaceRepository,
         managed_roots: Mapping[str, str | Path | ManagedWorkspaceRoot],
+        git_sources: Mapping[str, str | Path | ManagedGitSource] | None = None,
     ) -> None:
         if not isinstance(repository, WorkspaceRepository):
             raise WorkspaceRepositoryError(
@@ -112,6 +145,26 @@ class WorkspaceAllocator:
             physical_paths.add(path)
         self.repository = repository
         self._managed_roots = normalized
+        self._git_sources = self._normalize_git_sources(
+            git_sources or {},
+            managed_paths=physical_paths,
+        )
+
+    @property
+    def operation_timeout_s(self) -> float:
+        """Conservative bound for one fenced Git adapter operation.
+
+        The Git/workspace lock sequence shares the 60-second external deadline.
+        A pre-callback authority read and the final authority read can each
+        enter SQLite immediately before that deadline and consume one complete
+        repository busy timeout, so both reserves belong in the close bound.
+        """
+
+        return (
+            _GIT_COMMAND_TIMEOUT_S
+            + (2 * self.repository.operation_timeout_s)
+            + 1.0
+        )
 
     def allocate(self, **values: Any) -> WorkspaceMutation:
         root_ref = str(values.get("managed_root_ref") or "").strip()
@@ -137,18 +190,88 @@ class WorkspaceAllocator:
             lease_owner=lease.lease_owner,
             lease_token=lease.lease_token,
             lease_fencing_token=lease.lease_fencing_token,
-            operation=self._prepare_from_authority,
+            expected_status="ACTIVE",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
+            operation=lambda context: self._run_authority_operation(
+                context,
+                operation="prepare",
+                callback=self._prepare_from_authority,
+            ),
         )
+
+    def snapshot_git_source(self, source_key: str) -> str:
+        """Resolve a configured source to an immutable commit reference."""
+
+        normalized = str(source_key or "").strip()
+        source = self._git_sources.get(normalized)
+        if source is None:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"git source is not preconfigured: {normalized or 'missing'}",
+            )
+        deadline = time.monotonic() + _GIT_COMMAND_TIMEOUT_S
+        with self._git_sequence(source, deadline_monotonic=deadline):
+            commit = self._git_output(
+                source.repository,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+            ).lower()
+        if not _GIT_OBJECT.fullmatch(commit):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured git source returned a non-canonical commit id",
+            )
+        return f"{source.source_ref_prefix}/{commit}"
+
+    def validate_git_source_ref(self, source_key: str, source_ref: str) -> str:
+        """Validate one durable ref against the exact configured Git source."""
+
+        normalized = str(source_key or "").strip()
+        source = self._git_sources.get(normalized)
+        if source is None:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"git source is not preconfigured: {normalized or 'missing'}",
+            )
+        durable_ref = str(source_ref or "").strip()
+        expected_prefix = source.source_ref_prefix + "/"
+        if not durable_ref.startswith(expected_prefix):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "durable git source reference is bound to another configured source",
+            )
+        commit = durable_ref.removeprefix(expected_prefix)
+        if not _GIT_OBJECT.fullmatch(commit):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "durable git source reference has an invalid commit id",
+            )
+        deadline = time.monotonic() + _GIT_COMMAND_TIMEOUT_S
+        with self._git_sequence(source, deadline_monotonic=deadline):
+            if self._git_returncode(
+                source.repository,
+                "cat-file",
+                "-e",
+                f"{commit}^{{commit}}",
+            ) != 0:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "durable git source commit is unavailable",
+                )
+        return durable_ref
 
     def authorize_workspace(self, lease: DurableWorkspaceLease) -> WorkspaceAuthority:
         """Read and decode the exact live authority without filesystem mutation."""
 
-        return self.repository.authorize_lease(
+        authority = self.repository.authorize_lease(
             lease.workspace_id,
             lease_owner=lease.lease_owner,
             lease_token=lease.lease_token,
             lease_fencing_token=lease.lease_fencing_token,
         )
+        self._require_status(authority, expected="ACTIVE", operation="execution")
+        return authority
 
     def write_bytes(
         self,
@@ -165,19 +288,28 @@ class WorkspaceAllocator:
                 "content must be bytes",
             )
 
-        def operation(authority: WorkspaceAuthority) -> Path:
-            workspace = self._prepare_from_authority(authority).path
-            target = resolve_workspace_path(workspace, relative_path)
-            self._assert_allowed(authority, target.relative_to(workspace).as_posix())
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-            return target
+        def operation(context: WorkspaceOperationContext) -> Path:
+            def write(authority: WorkspaceAuthority) -> Path:
+                workspace = self._prepare_from_authority(authority).path
+                target = resolve_workspace_path(workspace, relative_path)
+                self._assert_allowed(authority, target.relative_to(workspace).as_posix())
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+                return target
+
+            return self._run_authority_operation(
+                context,
+                operation="write",
+                callback=write,
+            )
 
         return self.repository.run_fenced(
             lease.workspace_id,
             lease_owner=lease.lease_owner,
             lease_token=lease.lease_token,
             lease_fencing_token=lease.lease_fencing_token,
+            expected_status="ACTIVE",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
             operation=operation,
         )
 
@@ -189,8 +321,97 @@ class WorkspaceAllocator:
             lease_owner=lease.lease_owner,
             lease_token=lease.lease_token,
             lease_fencing_token=lease.lease_fencing_token,
-            operation=self._existing_from_authority,
+            expected_status="CLEANUP_PENDING",
+            max_operation_ms=5_000,
+            operation=lambda context: self._existing_from_authority(context.authority),
         )
+
+    def remove_git_worktree(
+        self,
+        lease: DurableWorkspaceLease,
+    ) -> WorkspaceCleanupResult:
+        """Remove one configured git worktree under a live durable fence.
+
+        This deliberately delegates removal to ``git worktree remove``.  It
+        never recursively deletes a path supplied by SQLite or a WorkOrder.
+        """
+
+        return self.repository.run_fenced(
+            lease.workspace_id,
+            lease_owner=lease.lease_owner,
+            lease_token=lease.lease_token,
+            lease_fencing_token=lease.lease_fencing_token,
+            expected_status="CLEANUP_PENDING",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
+            operation=lambda context: self._run_authority_operation(
+                context,
+                operation="cleanup",
+                callback=self._remove_git_worktree_from_authority,
+            ),
+        )
+
+    def _run_authority_operation(
+        self,
+        context: WorkspaceOperationContext,
+        *,
+        operation: str,
+        callback: Callable[[WorkspaceAuthority], _T],
+    ) -> _T:
+        authority = context.authority
+        self._require_status(
+            authority,
+            expected="CLEANUP_PENDING" if operation == "cleanup" else "ACTIVE",
+            operation=operation,
+        )
+        source = self._configured_git_source(authority)
+        if source is None:
+            context.remaining_s()
+            return callback(authority)
+        with self._git_sequence(
+            source,
+            deadline_monotonic=context.deadline_monotonic,
+        ):
+            context.remaining_s()
+            return callback(authority)
+
+    @contextmanager
+    def _git_sequence(
+        self,
+        source: ManagedGitSource,
+        *,
+        deadline_monotonic: float,
+    ) -> Iterator[None]:
+        """Serialize one configured source and share one total Git deadline."""
+
+        source_key = os.path.normcase(str(source.repository.resolve(strict=True)))
+        with self.repository.operation_lock(
+            namespace="git-source",
+            key=source_key,
+            deadline_monotonic=deadline_monotonic,
+        ):
+            token = _GIT_DEADLINE.set(deadline_monotonic)
+            try:
+                yield
+            finally:
+                _GIT_DEADLINE.reset(token)
+
+    def _configured_git_source(
+        self,
+        authority: WorkspaceAuthority,
+    ) -> ManagedGitSource | None:
+        matches = [
+            source
+            for source in self._git_sources.values()
+            if authority.source_ref.startswith(source.source_ref_prefix + "/")
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "durable source reference is ambiguous",
+            )
+        return matches[0]
 
     def _prepare_from_authority(
         self,
@@ -198,6 +419,15 @@ class WorkspaceAllocator:
     ) -> DurableWorkspacePath:
         configured = self._configured_for(authority)
         target = configured.path / authority.workspace_relpath
+        git_source = self._git_source_for(authority)
+        if git_source is not None:
+            return self._prepare_git_worktree(
+                authority=authority,
+                configured=configured,
+                source=git_source[0],
+                commit=git_source[1],
+                target=target,
+            )
         if target.exists():
             resolved = target.resolve(strict=True)
             if not resolved.is_dir() or resolved.parent != configured.path:
@@ -214,6 +444,170 @@ class WorkspaceAllocator:
                 "managed workspace escapes its configured root",
             )
         return DurableWorkspacePath(path=resolved, authority=authority)
+
+    def _prepare_active_from_authority(
+        self,
+        authority: WorkspaceAuthority,
+    ) -> DurableWorkspacePath:
+        self._require_status(authority, expected="ACTIVE", operation="prepare")
+        return self._prepare_from_authority(authority)
+
+    def _prepare_git_worktree(
+        self,
+        *,
+        authority: WorkspaceAuthority,
+        configured: ManagedWorkspaceRoot,
+        source: ManagedGitSource,
+        commit: str,
+        target: Path,
+    ) -> DurableWorkspacePath:
+        branch = self._workspace_branch(authority.workspace_id)
+        if target.exists():
+            resolved = target.resolve(strict=True)
+            self._verify_git_worktree(
+                source=source,
+                commit=commit,
+                branch=branch,
+                target=resolved,
+                configured_root=configured.path,
+            )
+            return DurableWorkspacePath(path=resolved, authority=authority)
+        if target.parent != configured.path:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "managed git worktree is not a direct configured-root child",
+            )
+        branch_exists = self._git_returncode(
+            source.repository,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        ) == 0
+        if branch_exists:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "new workspace authority cannot adopt a pre-existing branch",
+            )
+        self._git_output(
+            source.repository,
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(target),
+            commit,
+        )
+        resolved = target.resolve(strict=True)
+        self._verify_git_worktree(
+            source=source,
+            commit=commit,
+            branch=branch,
+            target=resolved,
+            configured_root=configured.path,
+        )
+        current_head = self._git_output(
+            resolved,
+            "rev-parse",
+            "--verify",
+            "HEAD^{commit}",
+        ).lower()
+        if current_head != commit:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "new workspace HEAD differs from its frozen source commit",
+            )
+        return DurableWorkspacePath(path=resolved, authority=authority)
+
+    def _remove_git_worktree_from_authority(
+        self,
+        authority: WorkspaceAuthority,
+    ) -> WorkspaceCleanupResult:
+        self._require_status(
+            authority,
+            expected="CLEANUP_PENDING",
+            operation="cleanup",
+        )
+        configured = self._configured_for(authority)
+        resolved_source = self._git_source_for(authority)
+        if resolved_source is None:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "only configured git worktrees have an executable cleanup adapter",
+            )
+        source, commit = resolved_source
+        target = configured.path / authority.workspace_relpath
+        branch = self._workspace_branch(authority.workspace_id)
+        if target.parent != configured.path:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "cleanup target is not a configured-root child",
+            )
+        branch_exists = self._git_returncode(
+            source.repository,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        ) == 0
+        already_absent = not target.exists() and not branch_exists
+        registered = self._registered_worktrees(source)
+        normalized_target = target.resolve(strict=False)
+        if target.exists():
+            resolved = target.resolve(strict=True)
+            self._verify_git_worktree(
+                source=source,
+                commit=commit,
+                branch=branch,
+                target=resolved,
+                configured_root=configured.path,
+            )
+            self._git_output(
+                source.repository,
+                "worktree",
+                "remove",
+                "--force",
+                str(resolved),
+            )
+        elif normalized_target in registered:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "missing worktree still has registered git metadata",
+            )
+        if target.exists() or normalized_target in self._registered_worktrees(source):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "git worktree cleanup did not remove the configured target",
+            )
+        if branch_exists:
+            if self._git_returncode(
+                source.repository,
+                "merge-base",
+                "--is-ancestor",
+                commit,
+                branch,
+            ) != 0:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "workspace branch no longer descends from its frozen source commit",
+                )
+            self._git_output(source.repository, "branch", "-D", branch)
+        if self._git_returncode(
+            source.repository,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}",
+        ) == 0:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "git worktree cleanup left its exact namespace branch behind",
+            )
+        return WorkspaceCleanupResult(
+            workspace_id=authority.workspace_id,
+            source_ref=authority.source_ref,
+            already_absent=already_absent,
+        )
 
     def _existing_from_authority(
         self,
@@ -242,6 +636,231 @@ class WorkspaceAllocator:
             )
         return configured
 
+    def _git_source_for(
+        self,
+        authority: WorkspaceAuthority,
+    ) -> tuple[ManagedGitSource, str] | None:
+        source = self._configured_git_source(authority)
+        if source is None:
+            return None
+        commit = authority.source_ref.removeprefix(source.source_ref_prefix + "/")
+        if not _GIT_OBJECT.fullmatch(commit):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "durable git source reference has an invalid commit id",
+            )
+        if self._git_returncode(
+            source.repository,
+            "cat-file",
+            "-e",
+            f"{commit}^{{commit}}",
+        ) != 0:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "durable git source commit is unavailable",
+            )
+        return source, commit
+
+    @classmethod
+    def _normalize_git_sources(
+        cls,
+        values: Mapping[str, str | Path | ManagedGitSource],
+        *,
+        managed_paths: set[Path],
+    ) -> dict[str, ManagedGitSource]:
+        normalized: dict[str, ManagedGitSource] = {}
+        repositories: set[Path] = set()
+        for key, value in values.items():
+            source_key = str(key or "").strip()
+            if not _SOURCE_KEY.fullmatch(source_key):
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "git source key is invalid",
+                )
+            if isinstance(value, ManagedGitSource):
+                if value.source_key != source_key:
+                    raise WorkspaceRepositoryError(
+                        WORKSPACE_AUTHORITY_INVALID,
+                        "git source mapping key and source_key must match",
+                    )
+                raw_repository = value.repository
+                prefix = str(value.source_ref_prefix or "").strip()
+            else:
+                raw_repository = Path(value)
+                prefix = f"git-worktree://{source_key}"
+            if prefix != f"git-worktree://{source_key}":
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "git source reference prefix is not canonical",
+                )
+            try:
+                repository = Path(raw_repository).expanduser().resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    f"git source repository does not exist: {source_key}",
+                ) from exc
+            if not repository.is_dir() or repository in repositories:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "git source repositories must be distinct directories",
+                )
+            top = cls._git_output(repository, "rev-parse", "--show-toplevel")
+            if Path(top).resolve(strict=True) != repository:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "git source must be the configured repository root",
+                )
+            for managed in managed_paths:
+                if repository == managed or repository in managed.parents or managed in repository.parents:
+                    raise WorkspaceRepositoryError(
+                        WORKSPACE_AUTHORITY_INVALID,
+                        "managed roots and git source repositories cannot overlap",
+                    )
+            normalized[source_key] = ManagedGitSource(
+                source_key=source_key,
+                source_ref_prefix=prefix,
+                repository=repository,
+            )
+            repositories.add(repository)
+        return normalized
+
+    @classmethod
+    def _verify_git_worktree(
+        cls,
+        *,
+        source: ManagedGitSource,
+        commit: str,
+        branch: str,
+        target: Path,
+        configured_root: Path,
+    ) -> None:
+        if not target.is_dir() or target.parent != configured_root:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "git worktree escapes its configured managed root",
+            )
+        top = Path(cls._git_output(target, "rev-parse", "--show-toplevel")).resolve(strict=True)
+        if top != target:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured workspace is not its git worktree root",
+            )
+        common_raw = cls._git_output(target, "rev-parse", "--git-common-dir")
+        common = Path(common_raw)
+        if not common.is_absolute():
+            common = target / common
+        source_common_raw = cls._git_output(source.repository, "rev-parse", "--git-common-dir")
+        source_common = Path(source_common_raw)
+        if not source_common.is_absolute():
+            source_common = source.repository / source_common
+        if common.resolve(strict=True) != source_common.resolve(strict=True):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured workspace belongs to another git repository",
+            )
+        current_branch = cls._git_output(target, "symbolic-ref", "--short", "HEAD")
+        if current_branch != branch:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured workspace is on an unexpected branch",
+            )
+        if cls._git_returncode(target, "merge-base", "--is-ancestor", commit, "HEAD") != 0:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured workspace does not descend from its frozen source commit",
+            )
+        if target not in cls._registered_worktrees(source):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "configured workspace is not registered as a git worktree",
+            )
+
+    @classmethod
+    def _registered_worktrees(cls, source: ManagedGitSource) -> set[Path]:
+        output = cls._git_output(source.repository, "worktree", "list", "--porcelain")
+        registered: set[Path] = set()
+        for line in output.splitlines():
+            if line.startswith("worktree "):
+                registered.add(Path(line.removeprefix("worktree ")).resolve(strict=False))
+        return registered
+
+    @staticmethod
+    def _workspace_branch(workspace_id: str) -> str:
+        return f"natsume-agent/{workspace_id}"
+
+    @staticmethod
+    def _require_status(
+        authority: WorkspaceAuthority,
+        *,
+        expected: str,
+        operation: str,
+    ) -> None:
+        if authority.status != expected:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"workspace {operation} requires {expected} authority",
+            )
+
+    @staticmethod
+    def _git_returncode(repository: Path, *args: str) -> int:
+        timeout_s = WorkspaceAllocator._git_remaining_s()
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_OPERATION_TIMEOUT,
+                "configured Git sequence exhausted its operation deadline",
+            ) from exc
+        return int(completed.returncode)
+
+    @staticmethod
+    def _git_output(repository: Path, *args: str) -> str:
+        timeout_s = WorkspaceAllocator._git_remaining_s()
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_OPERATION_TIMEOUT,
+                "configured Git sequence exhausted its operation deadline",
+            ) from exc
+        if completed.returncode != 0:
+            detail = str(completed.stderr or completed.stdout or "git command failed").strip()
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"configured git operation failed: {detail[:400]}",
+            )
+        return str(completed.stdout or "").strip()
+
+    @staticmethod
+    def _git_remaining_s() -> float:
+        deadline = _GIT_DEADLINE.get()
+        if deadline is None:
+            return _GIT_COMMAND_TIMEOUT_S
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_OPERATION_TIMEOUT,
+                "configured Git sequence exhausted its operation deadline",
+            )
+        return remaining
+
     @staticmethod
     def _assert_allowed(authority: WorkspaceAuthority, candidate: str) -> None:
         if "." in authority.allowed_paths:
@@ -259,6 +878,8 @@ class WorkspaceAllocator:
 __all__ = [
     "DurableWorkspaceLease",
     "DurableWorkspacePath",
+    "ManagedGitSource",
     "ManagedWorkspaceRoot",
+    "WorkspaceCleanupResult",
     "WorkspaceAllocator",
 ]

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 from pathlib import Path
 import shutil
 import sqlite3
 
 import pytest
+
+from host_brain.persistence import workspace_operation_fencing, workspace_repository
 
 from host_brain.agent_runtime.workspace_allocator import (
     DurableWorkspaceLease,
@@ -26,6 +29,19 @@ from host_brain.persistence.workspace_repository import (
     WorkspaceRepository,
     WorkspaceRepositoryError,
 )
+
+
+def test_workspace_repository_and_operation_fencing_remain_focused() -> None:
+    repository_source = inspect.getsource(workspace_repository)
+    fencing_source = inspect.getsource(workspace_operation_fencing)
+
+    assert len(repository_source.splitlines()) < 1_500
+    assert len(fencing_source.splitlines()) < 500
+    assert (
+        WorkspaceRepository.run_fenced
+        is workspace_operation_fencing.WorkspaceOperationFencingMixin.run_fenced
+    )
+    assert "sqlite3.connect" not in fencing_source
 
 
 TOKEN_ONE = "lease-token-one-" + ("a" * 32)

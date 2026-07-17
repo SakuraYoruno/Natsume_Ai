@@ -291,6 +291,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     model_attempt_service = object()
     prompt_registry = object()
     canonical_executor = object()
+    workspace_runtime = object()
     obs_ingress = SimpleNamespace(execute=lambda *_args, **_kwargs: None)
     pentest_composition = object()
     signed_ingress = object()
@@ -348,6 +349,18 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("memory-closed")
 
     memory_container = MemoryContainer()
+
+    class WorkspaceContainer:
+        runtime = workspace_runtime
+        cleanup_continuation_report = ()
+
+        def start(self) -> None:
+            events.append("workspace-started")
+
+        def close(self) -> None:
+            events.append("workspace-closed")
+
+    workspace_container = WorkspaceContainer()
 
     class SchedulerContainer:
         runtime = scheduler_runtime
@@ -485,6 +498,29 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         events.append("memory-built")
         return memory_container
 
+    def fake_compose_workspace(
+        application,
+        task_runtime_arg,
+        runtime_settings_arg,
+        runtime_owner_arg,
+    ):
+        assert task_runtime_arg is task_runtime_container
+        assert runtime_settings_arg.agent_workspace_managed_root == (
+            "D:/runtime/agent-workspaces"
+        )
+        assert runtime_settings_arg.agent_workspace_lease_ms == 120_000
+        assert runtime_settings_arg.agent_workspace_heartbeat_ms == 30_000
+        assert runtime_settings_arg.agent_workspace_cleanup_poll_ms == 5_000
+        assert (
+            runtime_settings_arg.agent_workspace_hmac_secret.get_secret_value()
+            == "w" * 32
+        )
+        assert runtime_owner_arg == "test-canonical-owner::runtime::test-boot"
+        events.append("workspace-built")
+        workspace_container.start()
+        application.state.agent_workspace_container = workspace_container
+        return workspace_container
+
     def fake_runtime_group(runtimes, **kwargs):
         assert runtimes == {
             "host": governed_runtime,
@@ -553,6 +589,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         if kwargs == {
             "model_attempt_service": model_attempt_service,
             "prompt_registry": prompt_registry,
+            "workspace_runtime": workspace_runtime,
         }
         else pytest.fail("wrong canonical agent executor ports"),
     )
@@ -566,6 +603,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             task_operation_reconciliation_operator_enabled=True,
             task_effect_reconciliation_operator_enabled=True,
             task_reconciliation_public_keys=lambda: {"reconciler-v1": b"k" * 32},
+            agent_workspace_managed_root="D:/runtime/agent-workspaces",
+            agent_workspace_lease_ms=120_000,
+            agent_workspace_heartbeat_ms=30_000,
+            agent_workspace_cleanup_poll_ms=5_000,
+            agent_workspace_hmac_secret=SimpleNamespace(
+                get_secret_value=lambda: "w" * 32
+            ),
         ),
     )
     monkeypatch.setattr(asgi, "get_intent_engine", object)
@@ -625,6 +669,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     monkeypatch.setattr(asgi, "build_process_memory_container", fake_build_memory)
     monkeypatch.setattr(
+        asgi.workspace,
+        "compose_agent_workspace_application_scope",
+        fake_compose_workspace,
+    )
+    monkeypatch.setattr(
         asgi,
         "build_governed_internal_runtime",
         fake_build_internal_runtime,
@@ -670,6 +719,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.governed_internal_runtime is internal_runtime
             assert application.state.governed_scheduler_runtime is scheduler_runtime
             assert application.state.memory_service_container is memory_container
+            assert application.state.agent_workspace_container is workspace_container
             assert application.state.canon_container is canon_container
             assert (
                 application.state.task_operation_reconciliation_command_service
@@ -707,6 +757,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.governed_host_runtime is None
         assert application.state.governed_internal_runtime is None
         assert application.state.governed_scheduler_runtime is None
+        assert application.state.agent_workspace_container is None
         assert application.state.task_operation_reconciliation_command_service is None
         assert application.state.task_effect_reconciliation_command_service is None
         assert captured["governed_command_application_provider"]() is None
@@ -722,6 +773,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "command-ingress-built",
         "memory-built",
         "memory-published",
+        "workspace-built",
+        "workspace-started",
         "governed-runtime-built",
         "internal-runtime-built",
         "scheduler-runtime-built",
@@ -730,6 +783,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "scheduler-clock-activated",
         "serving",
         "scheduler-clock-stopped",
+        "workspace-closed",
         "task-runtime-closed",
         "memory-unpublished",
         "memory-closed",

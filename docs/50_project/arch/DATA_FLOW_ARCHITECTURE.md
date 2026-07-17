@@ -560,7 +560,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1 又以 0101 durable authority 把逻辑 workspace 精确绑定到 graph revision/root WorkOrder/owner/configured-root/allow-list，并用服务端租约、expiry 与单调 fence 阻止过期 owner 进入文件回调；数据库不提供物理根，WorkOrder 不携带 raw token。生产 composition 尚未注入 W1，因此当前仍 fail closed；下一步是可信 cleanup continuation、heartbeat 与隔离 worktree/container。文件句柄和 reparse-point 竞态不能用路径规范化或事务起始时的 fence 检查代替。
+11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 写路线再执行 `server-derived workspace_id → exact source commit freeze → instance/PID lease → namespace worktree → heartbeat scope → Agent tools → verification → ACTIVE 留待后续决策`；顺序 node/attempt 通过 fence handoff，过期实例只能 takeover，cleanup 先进入 durable pending再写不可变 receipt，启动同步最多续清 1 条，剩余 backlog 由后台 worker逐行处理。Provisioning/allocator/cleanup adapter 的 filesystem/Git callback 在 workspace/source 跨进程锁内共享一个 lease-bounded deadline，SQLite 只做 callback 前后 exact authority 短读和独立状态 CAS；heartbeat 可并行推进 version，后验 fence/status/expiry 漂移不得返回成功。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者不在逐操作 fence 内，也不能被强杀。默认缺 secret 时在 provider 注入前失败关闭。ACTIVE promotion/abandon 尚无生产触发，文件句柄/reparse-point 与 OS/container/tenant 隔离也未解决。
 
 ## 13. 代码证据索引
 
@@ -575,7 +575,7 @@ All ingress sources
 | Plan search/compiler | [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py)，[planning_execution.py](../../../host_brain/orchestration/planning_execution.py)，[planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py) |
 | Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（均已接通 canonical admission） |
 | Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |
-| Workspace 路径围栏与 W1 authority | [workspace_paths.py](../../../host_brain/agent_runtime/workspace_paths.py)，[workspace_repository.py](../../../host_brain/persistence/workspace_repository.py)，[workspace_allocator.py](../../../host_brain/agent_runtime/workspace_allocator.py)，[workspace_policy.py](../../../host_brain/agent_runtime/workspace_policy.py)，[verification_policy.py](../../../host_brain/agent_runtime/verification_policy.py) |
+| Workspace 路径围栏与 W2 Internal worktree | [workspace_paths.py](../../../host_brain/agent_runtime/workspace_paths.py)，[workspace_repository.py](../../../host_brain/persistence/workspace_repository.py)，[workspace_operation_fencing.py](../../../host_brain/persistence/workspace_operation_fencing.py)，[workspace_allocator.py](../../../host_brain/agent_runtime/workspace_allocator.py)，[workspace_runtime.py](../../../host_brain/agent_runtime/workspace_runtime.py)，[workspace_policy.py](../../../host_brain/agent_runtime/workspace_policy.py)，[agent_workspace.py](../../../host_brain/composition/agent_workspace.py) |
 | Acceptance effects | [acceptance_effects.py](../../../host_brain/task_runtime/acceptance_effects.py)，[acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py)，[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) |
 | Life/Memory post-process | [digital_life/service.py](../../../host_brain/digital_life/service.py)，[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py)，[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) |
 | Gateway inbound/outbound | [delivery_runtime.py](../../../edge_client/gateway/delivery_runtime.py)，[input_reporter.py](../../../edge_client/channels/input_reporter.py)，[ingress.py](../../../host_brain/input_runtime/ingress.py)，[gateway_transport_repository.py](../../../host_brain/persistence/gateway_transport_repository.py)，[outbound.py](../../../edge_client/gateway/outbound.py) |
@@ -598,7 +598,7 @@ Edge as sole physical actuator             WIRED
 All Host external effects via one outbox    NOT YET TRUE
 Memory canonical write path                 WIRED_EVENTUAL
 Persona evolution authority                CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
-Workspace authority                        W1_WIRED_NOT_PRODUCTION_INJECTED / ISOLATION INCOMPLETE
+Workspace authority                        PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT FAIL CLOSED / STRONG ISOLATION MISSING
 Scene context                               PARTIAL_DEFAULT_OFF
 Full Architecture                           INCOMPLETE
 ```

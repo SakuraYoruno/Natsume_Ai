@@ -1,0 +1,982 @@
+"""Production runtime for durable, server-owned Agent workspaces.
+
+Lease secrets exist only in this process.  WorkOrders carry the logical
+workspace id while the durable database stores only a token digest and logical
+configured-root/source references.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
+import base64
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import threading
+from typing import Any
+
+from host_brain.agent_runtime.workspace_allocator import (
+    DurableWorkspaceLease,
+    WorkspaceAllocator,
+)
+from host_brain.agent_runtime.workspace_policy import WorkspaceResolution
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.persistence.workspace_repository import (
+    WORKSPACE_AUTHORITY_CONFLICT,
+    WORKSPACE_AUTHORITY_INVALID,
+    WORKSPACE_AUTHORITY_NOT_FOUND,
+    WORKSPACE_LEASE_CONFLICT,
+    WORKSPACE_STALE_FENCE,
+    WorkspaceAuthority,
+    WorkspaceMutation,
+    WorkspaceRepository,
+    WorkspaceRepositoryError,
+)
+
+
+WORKSPACE_RUNTIME_BINDING_INVALID = "WORKSPACE_RUNTIME_BINDING_INVALID"
+WORKSPACE_HEARTBEAT_LOST = "WORKSPACE_HEARTBEAT_LOST"
+WORKSPACE_CLEANUP_UNAVAILABLE = "WORKSPACE_CLEANUP_UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceCleanupReceipt:
+    workspace_id: str
+    receipt_ref: str
+    digest: str
+    replayed: bool
+
+
+class DurableWorkspaceRuntimeError(RuntimeError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = str(reason_code or WORKSPACE_RUNTIME_BINDING_INVALID)
+        self.detail = str(detail or "durable workspace runtime failed")
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
+    def __init__(
+        self,
+        runtime: "DurableWorkspaceRuntime",
+        resolution: WorkspaceResolution,
+    ) -> None:
+        self._runtime = runtime
+        self._resolution = resolution
+        self._stop = threading.Event()
+        self._failures: list[BaseException] = []
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> None:
+        if self._resolution.source != "durable_workspace":
+            return None
+        try:
+            self._runtime._enter_execution_scope(self._resolution)
+        except DurableWorkspaceRuntimeError:
+            raise
+        except BaseException as exc:  # noqa: BLE001 - normalize the runtime boundary
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_HEARTBEAT_LOST,
+                f"durable workspace lease is not live before execution: {exc}",
+            ) from exc
+        try:
+            self._thread = threading.Thread(
+                target=self._run,
+                name=f"workspace-heartbeat-{self._resolution.workspace_id}",
+                daemon=True,
+            )
+            self._thread.start()
+        except BaseException:
+            self._runtime._leave_execution_scope(
+                self._resolution,
+                handoff_ready=False,
+            )
+            raise
+        return None
+
+    def cancelled(self) -> bool:
+        """Return true as soon as heartbeat authority is lost or scope stops."""
+
+        return self._stop.is_set()
+
+    def assert_can_start_action(self, action: str) -> WorkspaceAuthority:
+        """Fail before a new cooperative action starts after known lease loss."""
+
+        label = str(action or "workspace action").strip() or "workspace action"
+        if self._stop.is_set():
+            failure = self._failures[0] if self._failures else None
+            detail = f"durable workspace cannot start {label} after lease loss"
+            if failure is not None:
+                detail = f"{detail}: {failure}"
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_HEARTBEAT_LOST,
+                detail,
+            ) from failure
+        try:
+            authority = self._runtime.assert_live(self._resolution)
+        except BaseException as exc:  # noqa: BLE001 - normalize the scope boundary
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_HEARTBEAT_LOST,
+                f"durable workspace cannot start {label}: {exc}",
+            ) from exc
+        # The heartbeat thread can fail while the exact durable read is in
+        # flight.  Recheck its cooperative signal before returning authority
+        # to the next action; this does not claim to pre-empt an action later.
+        if self._stop.is_set():
+            failure = self._failures[0] if self._failures else None
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_HEARTBEAT_LOST,
+                f"durable workspace cannot start {label} after lease loss",
+            ) from failure
+        return authority
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        self._stop.set()
+        handoff_ready = False
+        try:
+            if self._thread is not None:
+                self._thread.join(timeout=self._runtime.heartbeat_stop_timeout_s)
+                if self._thread.is_alive():
+                    raise DurableWorkspaceRuntimeError(
+                        WORKSPACE_HEARTBEAT_LOST,
+                        "durable workspace heartbeat did not stop; lease state is indeterminate",
+                    )
+            if self._failures:
+                failure = self._failures[0]
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_HEARTBEAT_LOST,
+                    f"durable workspace heartbeat failed: {failure}",
+                ) from failure
+            try:
+                self._runtime.assert_live(self._resolution)
+            except BaseException as final_exc:  # noqa: BLE001 - normalize the runtime boundary
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_HEARTBEAT_LOST,
+                    f"durable workspace lease is not live after execution: {final_exc}",
+                ) from final_exc
+            # No heartbeat or worker is active now.  Only at this point may a
+            # later node/attempt atomically replace the exact durable lease.
+            handoff_ready = True
+        finally:
+            self._runtime._leave_execution_scope(
+                self._resolution,
+                handoff_ready=handoff_ready,
+            )
+        return False
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._runtime.heartbeat_interval_s):
+            try:
+                self._runtime.heartbeat_once(
+                    self._resolution,
+                    cancelled=self._stop.is_set,
+                )
+            except BaseException as exc:  # noqa: BLE001 - transferred to caller thread
+                if (
+                    self._stop.is_set()
+                    and isinstance(exc, WorkspaceRepositoryError)
+                    and exc.reason_code == WORKSPACE_STALE_FENCE
+                    and exc.detail
+                    == "workspace heartbeat was cancelled before its durable write"
+                ):
+                    # Scope shutdown deliberately cancelled a heartbeat before
+                    # it wrote.  That is a clean stop, not durable lease loss.
+                    return
+                self._failures.append(exc)
+                self._stop.set()
+                return
+
+
+class DurableWorkspaceRuntime:
+    """Allocate, lease, heartbeat and clean configured git worktrees."""
+
+    def __init__(
+        self,
+        *,
+        repository: WorkspaceRepository,
+        allocator: WorkspaceAllocator,
+        runtime_owner_id: str,
+        managed_root_ref: str,
+        git_source_key: str,
+        lease_ms: int = 120_000,
+        heartbeat_interval_ms: int | None = None,
+        token_secret: bytes | None = None,
+    ) -> None:
+        if not isinstance(repository, WorkspaceRepository):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "repository must be a WorkspaceRepository",
+            )
+        if not isinstance(allocator, WorkspaceAllocator) or allocator.repository is not repository:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "allocator must use the injected WorkspaceRepository",
+            )
+        self.repository = repository
+        self.allocator = allocator
+        self.runtime_owner_id = self._required(runtime_owner_id, "runtime_owner_id", 180)
+        self.managed_root_ref = self._required(managed_root_ref, "managed_root_ref", 120)
+        self.git_source_key = self._required(git_source_key, "git_source_key", 120)
+        if isinstance(lease_ms, bool) or int(lease_ms) < 1_000 or int(lease_ms) > 86_400_000:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "lease_ms must be between 1000 and 86400000",
+            )
+        self.lease_ms = int(lease_ms)
+        configured_interval = (
+            int(heartbeat_interval_ms)
+            if heartbeat_interval_ms is not None
+            else max(250, self.lease_ms // 3)
+        )
+        if configured_interval < 100 or configured_interval >= self.lease_ms:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "heartbeat interval must be at least 100ms and shorter than the lease",
+            )
+        self.heartbeat_interval_s = configured_interval / 1000.0
+        self.heartbeat_stop_timeout_s = max(
+            1.0,
+            self.heartbeat_interval_s * 2,
+            repository.operation_timeout_s + 1.0,
+        )
+        # Cleanup is the longest operation owned by the continuation worker.
+        # Outside one bounded allocator removal it can consume, in the worst
+        # stale-cached ACTIVE case: inventory(1), initial read(1), cached lease
+        # validation + takeover(3), begin-cleanup CAS(2), final read(1), and
+        # receipt CAS(2) repository timeout windows.  The worker passes a stop
+        # probe between rows, so shutdown waits for at most this one-row bound.
+        self.operation_timeout_s = (
+            allocator.operation_timeout_s
+            + (10 * repository.operation_timeout_s)
+            + 1.0
+        )
+        secret = token_secret if token_secret is not None else secrets.token_bytes(48)
+        if not isinstance(secret, bytes) or len(secret) < 32:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace token secret must contain at least 32 bytes",
+            )
+        self._token_secret = bytes(secret)
+        self._runtime_pid = os.getpid()
+        self._runtime_instance_id = secrets.token_hex(24)
+        self._leases: dict[str, DurableWorkspaceLease] = {}
+        self._active_scopes: dict[tuple[str, str, int], int] = {}
+        self._handoff_ready: dict[str, DurableWorkspaceLease] = {}
+        self._cleanup_inflight: set[str] = set()
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def workspace_id_for(*, graph_id: str, graph_revision: int) -> str:
+        graph = str(graph_id or "").strip()
+        if not graph or isinstance(graph_revision, bool) or int(graph_revision) < 1:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace id requires a canonical graph epoch",
+            )
+        digest = hashlib.sha256(f"{graph}\n{int(graph_revision)}".encode("utf-8")).hexdigest()[:48]
+        return f"workspace-{digest}"
+
+    def lease_for_order(
+        self,
+        order: AgentWorkOrder,
+        workspace_id: str,
+        *,
+        execution_authority: dict[str, Any] | None = None,
+    ) -> DurableWorkspaceLease:
+        """Server-side WorkspacePolicy provider; never mutates the WorkOrder."""
+
+        self._ensure_process_instance()
+        binding = self._order_binding(
+            order,
+            workspace_id=workspace_id,
+            execution_authority=execution_authority,
+        )
+        # The first allocation freezes HEAD.  Every replay must reuse that
+        # durable source_ref; sampling the moving source repository again
+        # would turn an exact graph replay into a false authority conflict.
+        try:
+            existing = self.repository.get(binding["workspace_id"])
+        except WorkspaceRepositoryError as exc:
+            if exc.reason_code != WORKSPACE_AUTHORITY_NOT_FOUND:
+                raise
+            source_ref = self.allocator.snapshot_git_source(self.git_source_key)
+        else:
+            source_ref = existing.source_ref
+        mutation = self._allocate_graph_workspace(
+            binding=binding,
+            source_ref=source_ref,
+        )
+        authority = mutation.authority
+        lease_owner = binding["lease_owner"]
+        token = self._lease_token(
+            workspace_id=workspace_id,
+            lease_owner=lease_owner,
+            graph_id=binding["graph_id"],
+            graph_revision=binding["graph_revision"],
+        )
+        # Serialize scope admission with lease replay/handoff.  Without this
+        # local critical section an exact replay could enter its worker scope
+        # after another thread observed the idle marker but before that thread
+        # completed the durable handoff.
+        with self._lock:
+            # Allocation and source replay happen before this process-local
+            # critical section.  Refresh the durable status here so cleanup
+            # cannot transition ACTIVE -> CLEANUP_PENDING between the earlier
+            # read and execution lease admission.
+            authority = self.repository.get(workspace_id)
+            if authority.status == "CLEANUP_PENDING":
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_CLEANUP_UNAVAILABLE,
+                    "workspace cleanup has started and execution cannot resume",
+                )
+            if authority.status in {"CLEANED", "QUARANTINED"}:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_CLEANUP_UNAVAILABLE,
+                    f"workspace is terminal: {authority.status}",
+                )
+            handoff = self._eligible_handoff(authority)
+            if handoff is not None and (
+                handoff.lease_owner != lease_owner or handoff.lease_token != token
+            ):
+                try:
+                    acquired = self.repository.handoff_lease(
+                        workspace_id,
+                        lease_owner=handoff.lease_owner,
+                        lease_token=handoff.lease_token,
+                        lease_fencing_token=handoff.lease_fencing_token,
+                        next_lease_owner=lease_owner,
+                        next_lease_token=token,
+                        lease_ms=self.lease_ms,
+                        expected_status_version=authority.status_version,
+                    ).authority
+                except WorkspaceRepositoryError as exc:
+                    if not self._expired_handoff_can_take_over(
+                        exc,
+                        authority=authority,
+                        handoff=handoff,
+                    ):
+                        raise
+                    # The exact idle lease expired after its local scope had
+                    # quiesced.  Refreshing and preserving every durable field
+                    # except wall-clock liveness lets acquire_lease perform the
+                    # authoritative expiry check and monotonic takeover CAS.
+                    refreshed = self.repository.get(workspace_id)
+                    if not self._same_expired_handoff_epoch(
+                        before=authority,
+                        refreshed=refreshed,
+                        handoff=handoff,
+                    ):
+                        raise
+                    acquired = self.repository.acquire_lease(
+                        workspace_id,
+                        lease_owner=lease_owner,
+                        lease_token=token,
+                        lease_ms=self.lease_ms,
+                        expected_status_version=refreshed.status_version,
+                    ).authority
+            else:
+                acquired = self.repository.acquire_lease(
+                    workspace_id,
+                    lease_owner=lease_owner,
+                    lease_token=token,
+                    lease_ms=self.lease_ms,
+                    expected_status_version=authority.status_version,
+                ).authority
+            lease = DurableWorkspaceLease(
+                workspace_id=workspace_id,
+                lease_owner=lease_owner,
+                lease_token=token,
+                lease_fencing_token=acquired.lease_fencing_token,
+            )
+            self._leases[workspace_id] = lease
+            self._handoff_ready.pop(workspace_id, None)
+        return lease
+
+    def _allocate_graph_workspace(
+        self,
+        *,
+        binding: dict[str, Any],
+        source_ref: str,
+    ) -> WorkspaceMutation:
+        values = self._workspace_allocation_values(
+            binding=binding,
+            source_ref=source_ref,
+        )
+        try:
+            return self.allocator.allocate(**values)
+        except WorkspaceRepositoryError as conflict:
+            if conflict.reason_code != WORKSPACE_AUTHORITY_CONFLICT:
+                raise
+
+            # A concurrent first admission may have frozen a different HEAD
+            # after this caller observed a get-miss.  Only that server-derived
+            # source race is recoverable: every other immutable binding must
+            # already equal the exact graph epoch requested by this caller.
+            try:
+                durable = self.repository.get(binding["workspace_id"])
+            except WorkspaceRepositoryError:
+                raise conflict
+            expected_workspace_id = self.workspace_id_for(
+                graph_id=binding["graph_id"],
+                graph_revision=binding["graph_revision"],
+            )
+            immutable_matches = (
+                binding["workspace_id"] == expected_workspace_id
+                and durable.workspace_id == expected_workspace_id
+                and durable.root_work_order_id == binding["root_work_order_id"]
+                and durable.graph_id == binding["graph_id"]
+                and durable.graph_revision == binding["graph_revision"]
+                and durable.owner_principal_id == binding["principal_id"]
+                and durable.managed_root_ref == self.managed_root_ref
+                and durable.workspace_relpath == expected_workspace_id
+                and durable.isolation_mode == "DIRECTORY_FENCE"
+                and durable.allowed_paths == (".",)
+            )
+            if not immutable_matches:
+                raise conflict
+            durable_source_ref = self.allocator.validate_git_source_ref(
+                self.git_source_key,
+                durable.source_ref,
+            )
+            return self.allocator.allocate(
+                **self._workspace_allocation_values(
+                    binding=binding,
+                    source_ref=durable_source_ref,
+                )
+            )
+
+    def _workspace_allocation_values(
+        self,
+        *,
+        binding: dict[str, Any],
+        source_ref: str,
+    ) -> dict[str, Any]:
+        return {
+            "workspace_id": binding["workspace_id"],
+            "root_work_order_id": binding["root_work_order_id"],
+            "graph_id": binding["graph_id"],
+            "graph_revision": binding["graph_revision"],
+            "owner_principal_id": binding["principal_id"],
+            "managed_root_ref": self.managed_root_ref,
+            "source_ref": source_ref,
+            "isolation_mode": "DIRECTORY_FENCE",
+            "allowed_paths": (".",),
+        }
+
+    def _enter_execution_scope(self, resolution: WorkspaceResolution) -> WorkspaceAuthority:
+        with self._lock:
+            self._refresh_process_instance_locked()
+            lease = self._lease_for_resolution(resolution)
+            key = self._lease_key(lease)
+            if self._workspace_active_scope_count(lease.workspace_id) > 0:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_LEASE_CONFLICT,
+                    "workspace execution scope is already active in this process",
+                )
+            authority = self.assert_live(resolution)
+            self._handoff_ready.pop(lease.workspace_id, None)
+            self._active_scopes[key] = 1
+        return authority
+
+    def _leave_execution_scope(
+        self,
+        resolution: WorkspaceResolution,
+        *,
+        handoff_ready: bool,
+    ) -> None:
+        try:
+            lease = self._lease_for_resolution(resolution)
+        except DurableWorkspaceRuntimeError:
+            return
+        key = self._lease_key(lease)
+        with self._lock:
+            count = self._active_scopes.get(key, 0)
+            if count <= 1:
+                self._active_scopes.pop(key, None)
+                if handoff_ready:
+                    self._handoff_ready[lease.workspace_id] = lease
+            else:
+                self._active_scopes[key] = count - 1
+
+    def _eligible_handoff(
+        self,
+        authority: WorkspaceAuthority,
+    ) -> DurableWorkspaceLease | None:
+        with self._lock:
+            lease = self._handoff_ready.get(authority.workspace_id)
+            if lease is None:
+                return None
+            if self._active_scopes.get(self._lease_key(lease), 0) != 0:
+                return None
+        if (
+            authority.status != "ACTIVE"
+            or authority.lease_owner != lease.lease_owner
+            or authority.lease_fencing_token != lease.lease_fencing_token
+        ):
+            with self._lock:
+                self._handoff_ready.pop(authority.workspace_id, None)
+            return None
+        return lease
+
+    @staticmethod
+    def _expired_handoff_can_take_over(
+        exc: WorkspaceRepositoryError,
+        *,
+        authority: WorkspaceAuthority,
+        handoff: DurableWorkspaceLease,
+    ) -> bool:
+        """Whitelist only an unchanged idle lease's expiry-shaped failure."""
+
+        return (
+            exc.reason_code == WORKSPACE_STALE_FENCE
+            and exc.detail
+            == "workspace lease is absent, expired, or fenced by another owner"
+            and authority.status == "ACTIVE"
+            and authority.lease_owner == handoff.lease_owner
+            and authority.lease_fencing_token == handoff.lease_fencing_token
+        )
+
+    @staticmethod
+    def _same_expired_handoff_epoch(
+        *,
+        before: WorkspaceAuthority,
+        refreshed: WorkspaceAuthority,
+        handoff: DurableWorkspaceLease,
+    ) -> bool:
+        """Reject every durable drift before delegating expiry to acquire CAS."""
+
+        return (
+            refreshed == before
+            and refreshed.status == "ACTIVE"
+            and refreshed.lease_owner == handoff.lease_owner
+            and refreshed.lease_fencing_token == handoff.lease_fencing_token
+        )
+
+    def _workspace_active_scope_count(self, workspace_id: str) -> int:
+        """Return active local execution scopes while the runtime lock is held."""
+
+        return sum(
+            count
+            for (candidate_workspace_id, _owner, _fence), count in self._active_scopes.items()
+            if candidate_workspace_id == workspace_id
+        )
+
+    @staticmethod
+    def _lease_key(lease: DurableWorkspaceLease) -> tuple[str, str, int]:
+        return (
+            lease.workspace_id,
+            lease.lease_owner,
+            lease.lease_fencing_token,
+        )
+
+    def heartbeat_scope(self, resolution: WorkspaceResolution) -> _WorkspaceHeartbeatScope:
+        return _WorkspaceHeartbeatScope(self, resolution)
+
+    def heartbeat_once(
+        self,
+        resolution: WorkspaceResolution,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> WorkspaceAuthority:
+        with self._lock:
+            lease = self._lease_for_resolution(resolution)
+            return self.repository.heartbeat_lease(
+                lease.workspace_id,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+                lease_ms=self.lease_ms,
+                cancelled=cancelled,
+            )
+
+    def assert_live(self, resolution: WorkspaceResolution) -> WorkspaceAuthority:
+        with self._lock:
+            lease = self._lease_for_resolution(resolution)
+            authority = self.repository.authorize_lease(
+                lease.workspace_id,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+            )
+            if authority.status != "ACTIVE":
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace execution requires ACTIVE authority",
+                )
+            return authority
+
+    def cleanup(self, workspace_id: str) -> WorkspaceCleanupReceipt:
+        """Execute or continue an explicitly durable cleanup transition."""
+
+        self._ensure_process_instance()
+        with self._lock:
+            authority = self.repository.get(workspace_id)
+            if authority.status == "CLEANED":
+                return WorkspaceCleanupReceipt(
+                    workspace_id=authority.workspace_id,
+                    receipt_ref=str(authority.cleanup_receipt_ref),
+                    digest=str(authority.cleanup_digest),
+                    replayed=True,
+                )
+            if authority.status not in {"ACTIVE", "CLEANUP_PENDING"}:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_CLEANUP_UNAVAILABLE,
+                    f"workspace cannot enter cleanup from {authority.status}",
+                )
+            if self._workspace_active_scope_count(authority.workspace_id) > 0:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_CLEANUP_UNAVAILABLE,
+                    "workspace cleanup is forbidden while execution scopes are active",
+                )
+            if authority.workspace_id in self._cleanup_inflight:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_CLEANUP_UNAVAILABLE,
+                    "workspace cleanup is already in progress",
+                )
+            self._cleanup_inflight.add(authority.workspace_id)
+            try:
+                lease = self._cleanup_lease(authority)
+                if authority.status == "ACTIVE":
+                    authority = self.repository.begin_cleanup(
+                        workspace_id,
+                        lease_owner=lease.lease_owner,
+                        lease_token=lease.lease_token,
+                        lease_fencing_token=lease.lease_fencing_token,
+                        expected_status_version=authority.status_version,
+                    )
+                self._handoff_ready.pop(authority.workspace_id, None)
+            except BaseException:
+                self._cleanup_inflight.discard(authority.workspace_id)
+                raise
+
+        try:
+            cleanup = self.allocator.remove_git_worktree(lease)
+            evidence = {
+                "schema": "Natsume.agent.workspace_cleanup_receipt.v1",
+                "workspace_id": authority.workspace_id,
+                "root_work_order_id": authority.root_work_order_id,
+                "graph_id": authority.graph_id,
+                "graph_revision": authority.graph_revision,
+                "owner_principal_id": authority.owner_principal_id,
+                "managed_root_ref": authority.managed_root_ref,
+                "source_ref": cleanup.source_ref,
+                "lease_fencing_token": lease.lease_fencing_token,
+                "adapter": "git_worktree_remove",
+                "already_absent": cleanup.already_absent,
+            }
+            encoded = json.dumps(
+                evidence,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            digest = "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+            receipt_ref = (
+                f"workspace-cleanup://{workspace_id}/{digest.removeprefix('sha256:')}"
+            )
+            latest = self.repository.get(workspace_id)
+            cleaned = self.repository.record_cleanup(
+                workspace_id,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+                expected_status_version=latest.status_version,
+                cleanup_receipt_ref=receipt_ref,
+                cleanup_digest=digest,
+            )
+            with self._lock:
+                self._leases.pop(workspace_id, None)
+            return WorkspaceCleanupReceipt(
+                workspace_id=workspace_id,
+                receipt_ref=str(cleaned.cleanup_receipt_ref),
+                digest=str(cleaned.cleanup_digest),
+                replayed=False,
+            )
+        finally:
+            with self._lock:
+                self._cleanup_inflight.discard(authority.workspace_id)
+
+    def continue_pending_cleanups(
+        self,
+        *,
+        limit: int = 100,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        if cancelled is not None and not callable(cancelled):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "cleanup continuation cancellation probe must be callable",
+            )
+        results: list[dict[str, Any]] = []
+        for authority in self.repository.list_cleanup_pending(limit=limit):
+            if cancelled is not None and cancelled():
+                break
+            try:
+                receipt = self.cleanup(authority.workspace_id)
+                results.append(
+                    {
+                        "workspace_id": authority.workspace_id,
+                        "status": "CLEANED",
+                        "receipt_ref": receipt.receipt_ref,
+                        "digest": receipt.digest,
+                    }
+                )
+            except (WorkspaceRepositoryError, DurableWorkspaceRuntimeError) as exc:
+                results.append(
+                    {
+                        "workspace_id": authority.workspace_id,
+                        "status": "DEFERRED",
+                        "reason_code": str(getattr(exc, "reason_code", WORKSPACE_CLEANUP_UNAVAILABLE)),
+                    }
+                )
+        return tuple(results)
+
+    def _cleanup_lease(self, authority: WorkspaceAuthority) -> DurableWorkspaceLease:
+        with self._lock:
+            cached = self._leases.get(authority.workspace_id)
+        if cached is not None:
+            try:
+                self.repository.authorize_lease(
+                    cached.workspace_id,
+                    lease_owner=cached.lease_owner,
+                    lease_token=cached.lease_token,
+                    lease_fencing_token=cached.lease_fencing_token,
+                )
+                return cached
+            except WorkspaceRepositoryError as exc:
+                if exc.reason_code != WORKSPACE_STALE_FENCE:
+                    raise
+        instance_digest = self._runtime_instance_digest()
+        lease_owner = (
+            f"{self.runtime_owner_id}::cleanup::{instance_digest}::"
+            f"{authority.workspace_id}"
+        )
+        if len(lease_owner) > 240:
+            digest = hashlib.sha256(lease_owner.encode("utf-8")).hexdigest()[:32]
+            lease_owner = f"runtime-cleanup::{instance_digest}::{digest}"
+        token = self._lease_token(
+            workspace_id=authority.workspace_id,
+            lease_owner=lease_owner,
+            graph_id=authority.graph_id,
+            graph_revision=authority.graph_revision,
+        )
+        acquired = self.repository.acquire_lease(
+            authority.workspace_id,
+            lease_owner=lease_owner,
+            lease_token=token,
+            lease_ms=self.lease_ms,
+            expected_status_version=authority.status_version,
+        ).authority
+        lease = DurableWorkspaceLease(
+            workspace_id=authority.workspace_id,
+            lease_owner=lease_owner,
+            lease_token=token,
+            lease_fencing_token=acquired.lease_fencing_token,
+        )
+        with self._lock:
+            self._leases[authority.workspace_id] = lease
+        return lease
+
+    def _lease_for_resolution(self, resolution: WorkspaceResolution) -> DurableWorkspaceLease:
+        workspace_id = str(resolution.workspace_id or "").strip()
+        if resolution.source != "durable_workspace" or not workspace_id:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "resolution is not a durable workspace",
+            )
+        with self._lock:
+            self._refresh_process_instance_locked()
+            lease = self._leases.get(workspace_id)
+        if (
+            lease is None
+            or lease.lease_owner != resolution.lease_owner
+            or lease.lease_fencing_token != resolution.lease_fencing_token
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace resolution has no matching server-side lease",
+            )
+        return lease
+
+    def _order_binding(
+        self,
+        order: AgentWorkOrder,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(order, AgentWorkOrder):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace lease requires an AgentWorkOrder",
+            )
+        metadata = dict(order.metadata or {})
+        authority = dict(execution_authority or {})
+        root_work_order_id = str(metadata.get("root_work_order_id") or order.work_order_id).strip()
+        graph_id = str(metadata.get("task_graph_id") or "").strip()
+        raw_revision = metadata.get("graph_revision")
+        if isinstance(raw_revision, bool):
+            raw_revision = 0
+        try:
+            graph_revision = int(raw_revision)
+        except (TypeError, ValueError):
+            graph_revision = 0
+        expected_workspace_id = self.workspace_id_for(
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+        )
+        if str(workspace_id or "").strip() != expected_workspace_id:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace id is not the server-derived graph workspace",
+            )
+        authority_graph = self._required(authority.get("graph_id"), "authority.graph_id", 240)
+        authority_root = self._required(
+            authority.get("root_work_order_id"),
+            "authority.root_work_order_id",
+            240,
+        )
+        authority_node = self._required(authority.get("node_id"), "authority.node_id", 240)
+        authority_attempt = self._required(
+            authority.get("attempt_id"),
+            "authority.attempt_id",
+            240,
+        )
+        authority_lease = self._required(authority.get("lease_id"), "authority.lease_id", 240)
+        authority_command = self._required(
+            authority.get("command_id"),
+            "authority.command_id",
+            240,
+        )
+        authority_principal = self._required(
+            authority.get("principal_id"),
+            "authority.principal_id",
+            240,
+        )
+        authority_lease_owner = self._required(
+            authority.get("lease_owner_id"),
+            "authority.lease_owner_id",
+            240,
+        )
+        raw_authority_revision = authority.get("graph_revision")
+        raw_fence = authority.get("fencing_token")
+        if isinstance(raw_authority_revision, bool) or isinstance(raw_fence, bool):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "execution authority integer fields are invalid",
+            )
+        try:
+            authority_revision = int(raw_authority_revision)
+            authority_fence = int(raw_fence)
+        except (TypeError, ValueError) as exc:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "execution authority integer fields are invalid",
+            ) from exc
+        expected_node = str(metadata.get("task_node_id") or "").strip()
+        if (
+            authority_graph != graph_id
+            or authority_revision != graph_revision
+            or authority_root != root_work_order_id
+            or authority_node != expected_node
+            or authority_lease_owner != self.runtime_owner_id
+            or authority_fence < 1
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "execution authority does not match the admitted graph attempt",
+            )
+        owner_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "attempt_id": authority_attempt,
+                    "command_id": authority_command,
+                    "fencing_token": authority_fence,
+                    "graph_id": authority_graph,
+                    "graph_revision": authority_revision,
+                    "lease_id": authority_lease,
+                    "node_id": authority_node,
+                    "runtime_instance_id": self._runtime_instance_id,
+                    "runtime_owner_id": self.runtime_owner_id,
+                    "runtime_pid": self._runtime_pid,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:40]
+        instance_digest = self._runtime_instance_digest()
+        lease_owner = (
+            f"{self.runtime_owner_id}::workspace::{instance_digest}::{owner_digest}"
+        )
+        if len(lease_owner) > 240:
+            lease_owner = f"runtime-workspace::{instance_digest}::{owner_digest}"
+        return {
+            "workspace_id": expected_workspace_id,
+            "root_work_order_id": self._required(root_work_order_id, "root_work_order_id", 240),
+            "graph_id": self._required(graph_id, "graph_id", 240),
+            "graph_revision": graph_revision,
+            "principal_id": authority_principal,
+            "lease_owner": lease_owner,
+        }
+
+    def _lease_token(
+        self,
+        *,
+        workspace_id: str,
+        lease_owner: str,
+        graph_id: str,
+        graph_revision: int,
+    ) -> str:
+        message = (
+            f"{workspace_id}\n{lease_owner}\n{graph_id}\n{graph_revision}\n"
+            f"{self._runtime_pid}\n{self._runtime_instance_id}"
+        ).encode("utf-8")
+        digest = hmac.new(self._token_secret, message, hashlib.sha256).digest()
+        return "workspace-lease-" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+    def _ensure_process_instance(self) -> None:
+        with self._lock:
+            self._refresh_process_instance_locked()
+
+    def _refresh_process_instance_locked(self) -> None:
+        """Invalidate inherited process-local credentials after a fork."""
+
+        current_pid = os.getpid()
+        if current_pid == self._runtime_pid:
+            return
+        self._runtime_pid = current_pid
+        self._runtime_instance_id = secrets.token_hex(24)
+        self._leases.clear()
+        self._active_scopes.clear()
+        self._handoff_ready.clear()
+        self._cleanup_inflight.clear()
+
+    def _runtime_instance_digest(self) -> str:
+        binding = (
+            f"{self.runtime_owner_id}\n{self._runtime_pid}\n"
+            f"{self._runtime_instance_id}"
+        )
+        return hashlib.sha256(binding.encode("utf-8")).hexdigest()[:24]
+
+    @staticmethod
+    def _required(value: Any, field: str, maximum: int) -> str:
+        normalized = str(value or "").strip()
+        if not normalized or len(normalized) > maximum:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                f"{field} is missing or invalid",
+            )
+        return normalized
+
+
+__all__ = [
+    "DurableWorkspaceRuntime",
+    "DurableWorkspaceRuntimeError",
+    "WORKSPACE_CLEANUP_UNAVAILABLE",
+    "WORKSPACE_HEARTBEAT_LOST",
+    "WORKSPACE_RUNTIME_BINDING_INVALID",
+    "WorkspaceCleanupReceipt",
+]

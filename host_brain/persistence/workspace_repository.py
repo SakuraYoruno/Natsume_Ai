@@ -8,24 +8,30 @@ an absolute filesystem path; physical roots belong to process composition.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import sqlite3
-from typing import Any, TypeVar
+import time
+from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.persistence.workspace_operation_fencing import (
+    WORKSPACE_AUTHORITY_INVALID,
+    WORKSPACE_OPERATION_TIMEOUT,
+    WORKSPACE_STALE_FENCE,
+    WorkspaceOperationContext,
+    WorkspaceOperationFencingMixin,
+)
 
 
-WORKSPACE_AUTHORITY_INVALID = "WORKSPACE_AUTHORITY_INVALID"
 WORKSPACE_AUTHORITY_NOT_FOUND = "WORKSPACE_AUTHORITY_NOT_FOUND"
 WORKSPACE_AUTHORITY_CONFLICT = "WORKSPACE_AUTHORITY_CONFLICT"
 WORKSPACE_OWNERSHIP_CONFLICT = "WORKSPACE_OWNERSHIP_CONFLICT"
 WORKSPACE_LEASE_CONFLICT = "WORKSPACE_LEASE_CONFLICT"
-WORKSPACE_STALE_FENCE = "WORKSPACE_STALE_FENCE"
 WORKSPACE_SCHEMA_NOT_READY = "WORKSPACE_SCHEMA_NOT_READY"
 WORKSPACE_DURABLE_DATA_INVALID = "WORKSPACE_DURABLE_DATA_INVALID"
 
@@ -178,9 +184,6 @@ _TRIGGER_SQL_SHA256 = {
         "26c30d959ed16e375f403872cd717c14e9fa4e5782927c2f21051fbdeee02f60"
     ),
 }
-
-T = TypeVar("T")
-
 
 class WorkspaceRepositoryError(RuntimeError):
     def __init__(self, reason_code: str, detail: str) -> None:
@@ -363,8 +366,8 @@ def _canonical_allowed_paths(values: Iterable[str]) -> tuple[tuple[str, ...], st
     return ordered, encoded, _digest(encoded)
 
 
-class WorkspaceRepository:
-    """Canonical W1 authority with transaction-scoped fencing checks."""
+class WorkspaceRepository(WorkspaceOperationFencingMixin):
+    """Canonical W1 authority with lease-fenced external-operation guards."""
 
     def __init__(
         self,
@@ -388,6 +391,10 @@ class WorkspaceRepository:
         self.db_path = Path(raw_path).expanduser().resolve()
         self._clock = clock
         self._timeout_ms = max(1, int(timeout_ms))
+        self._operation_lock_root = (
+            self.db_path.parent
+            / f".{self.db_path.name}.workspace-operation-locks"
+        )
         if verify_schema:
             self.assert_schema_ready()
 
@@ -402,18 +409,47 @@ class WorkspaceRepository:
         conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
         return conn
 
+    @property
+    def operation_timeout_s(self) -> float:
+        """Maximum SQLite busy wait used by one repository operation."""
+
+        return self._timeout_ms / 1000.0
+
+    @staticmethod
+    def _workspace_operation_error(
+        reason_code: str,
+        detail: str,
+    ) -> WorkspaceRepositoryError:
+        return WorkspaceRepositoryError(reason_code, detail)
+
     @contextmanager
-    def _transaction(self, *, write: bool) -> Any:
-        conn = self._connect()
-        try:
-            conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    def _transaction(
+        self,
+        *,
+        write: bool,
+        workspace_lock_id: str | None = None,
+    ) -> Any:
+        lock_deadline = time.monotonic() + self.operation_timeout_s
+        guard = (
+            self.operation_lock(
+                namespace="workspace",
+                key=workspace_lock_id,
+                deadline_monotonic=lock_deadline,
+            )
+            if workspace_lock_id is not None
+            else nullcontext()
+        )
+        with guard:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def _now(self) -> int:
         value = self._clock()
@@ -699,7 +735,7 @@ class WorkspaceRepository:
             if expected_status_version is not None
             else None
         )
-        with self._transaction(write=True) as conn:
+        with self._transaction(write=True, workspace_lock_id=reference) as conn:
             ts_ms = self._now()
             row = self._require_row(conn, reference)
             authority = self._authority(row)
@@ -786,28 +822,141 @@ class WorkspaceRepository:
             )
             return self._authority(row)
 
-    def run_fenced(
+    def handoff_lease(
         self,
         workspace_id: str,
         *,
         lease_owner: str,
         lease_token: str,
         lease_fencing_token: int,
-        operation: Callable[[WorkspaceAuthority], T],
-    ) -> T:
-        """Run one filesystem adapter operation while holding the DB writer fence."""
+        next_lease_owner: str,
+        next_lease_token: str,
+        lease_ms: int,
+        expected_status_version: int,
+    ) -> WorkspaceMutation:
+        """Atomically hand an idle ACTIVE workspace to the next exact attempt.
 
-        if not callable(operation):
-            raise WorkspaceRepositoryError(
-                WORKSPACE_AUTHORITY_INVALID,
-                "operation must be callable",
-            )
+        The caller must prove possession of the current live lease.  Runtime
+        code decides whether that worker is idle; this store only performs the
+        exact compare-and-swap.  A successful handoff advances the durable
+        fence before returning the new lease, invalidating every stale handle.
+        """
+
         reference, owner, token_digest, fence = self._lease_arguments(
             workspace_id,
             lease_owner,
             lease_token,
             lease_fencing_token,
         )
+        next_owner = _required_text(
+            next_lease_owner,
+            field="next_lease_owner",
+            maximum=240,
+        )
+        next_token = _required_text(
+            next_lease_token,
+            field="next_lease_token",
+            maximum=512,
+        )
+        if len(next_token) < 32:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "next_lease_token must contain at least 32 characters",
+            )
+        next_token_digest = _digest(next_token)
+        if next_owner == owner and next_token_digest == token_digest:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "workspace handoff requires a distinct next lease",
+            )
+        duration = _lease_ms(lease_ms)
+        version = _nonnegative_int(
+            expected_status_version,
+            field="expected_status_version",
+        )
+        with self._transaction(write=True, workspace_lock_id=reference) as conn:
+            ts_ms = self._now()
+            row = self._require_row(conn, reference)
+            self._assert_live_lease(
+                row,
+                owner=owner,
+                token_digest=token_digest,
+                fence=fence,
+                ts_ms=ts_ms,
+            )
+            authority = self._authority(row)
+            if authority.status != "ACTIVE":
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_CONFLICT,
+                    "only an ACTIVE workspace lease can be handed off",
+                )
+            if authority.status_version != version:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace status version is stale",
+                )
+            cursor = conn.execute(
+                f"""
+                UPDATE {_TABLE}
+                SET status_version = status_version + 1,
+                    lease_owner = ?, lease_token_digest = ?,
+                    lease_fencing_token = lease_fencing_token + 1,
+                    lease_expires_ts_ms = ?, updated_ts_ms = ?
+                WHERE workspace_id = ? AND status = 'ACTIVE'
+                  AND status_version = ?
+                  AND lease_owner = ? AND lease_token_digest = ?
+                  AND lease_fencing_token = ?
+                  AND lease_expires_ts_ms > ?
+                """,
+                (
+                    next_owner,
+                    next_token_digest,
+                    ts_ms + duration,
+                    ts_ms,
+                    reference,
+                    version,
+                    owner,
+                    token_digest,
+                    fence,
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace handoff lost its durable fence",
+                )
+            return WorkspaceMutation(authority=self._require(conn, reference))
+
+    def heartbeat_lease(
+        self,
+        workspace_id: str,
+        *,
+        lease_owner: str,
+        lease_token: str,
+        lease_fencing_token: int,
+        lease_ms: int,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> WorkspaceAuthority:
+        """Extend one exact live lease without changing its fencing token.
+
+        A heartbeat is a durable state transition, so ``status_version`` still
+        advances exactly once.  An expired lease can never be revived here;
+        recovery must acquire a new lease and therefore a new fencing token.
+        """
+
+        reference, owner, token_digest, fence = self._lease_arguments(
+            workspace_id,
+            lease_owner,
+            lease_token,
+            lease_fencing_token,
+        )
+        duration = _lease_ms(lease_ms)
+        if cancelled is not None and not callable(cancelled):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "heartbeat cancellation probe must be callable",
+            )
         with self._transaction(write=True) as conn:
             ts_ms = self._now()
             row = self._require_row(conn, reference)
@@ -818,7 +967,45 @@ class WorkspaceRepository:
                 fence=fence,
                 ts_ms=ts_ms,
             )
-            return operation(self._authority(row))
+            authority = self._authority(row)
+            if authority.status != "ACTIVE":
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace heartbeat requires ACTIVE execution authority",
+                )
+            if cancelled is not None and cancelled():
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace heartbeat was cancelled before its durable write",
+                )
+            cursor = conn.execute(
+                f"""
+                UPDATE {_TABLE}
+                SET status_version = status_version + 1,
+                    lease_expires_ts_ms = ?, updated_ts_ms = ?
+                WHERE workspace_id = ? AND status = 'ACTIVE'
+                  AND status_version = ?
+                  AND lease_owner = ? AND lease_token_digest = ?
+                  AND lease_fencing_token = ?
+                  AND lease_expires_ts_ms > ?
+                """,
+                (
+                    ts_ms + duration,
+                    ts_ms,
+                    reference,
+                    authority.status_version,
+                    owner,
+                    token_digest,
+                    fence,
+                    ts_ms,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_STALE_FENCE,
+                    "workspace heartbeat lost its durable fence",
+                )
+            return self._require(conn, reference)
 
     def begin_cleanup(
         self,
@@ -882,6 +1069,38 @@ class WorkspaceRepository:
         with self._transaction(write=False) as conn:
             return self._require(conn, reference)
 
+    def list_cleanup_pending(self, *, limit: int = 100) -> tuple[WorkspaceAuthority, ...]:
+        """Return durable cleanup continuations without exposing physical paths."""
+
+        if isinstance(limit, bool):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "cleanup continuation limit must be an integer",
+            )
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "cleanup continuation limit must be an integer",
+            ) from exc
+        if normalized_limit < 1 or normalized_limit > 1_000:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "cleanup continuation limit must be between 1 and 1000",
+            )
+        with self._transaction(write=False) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM {_TABLE}
+                WHERE status = 'CLEANUP_PENDING'
+                ORDER BY updated_ts_ms, workspace_id
+                LIMIT ?
+                """,
+                (normalized_limit,),
+            ).fetchall()
+            return tuple(self._authority(row) for row in rows)
+
     def _fenced_transition(
         self,
         workspace_id: str,
@@ -904,7 +1123,7 @@ class WorkspaceRepository:
             expected_status_version,
             field="expected_status_version",
         )
-        with self._transaction(write=True) as conn:
+        with self._transaction(write=True, workspace_lock_id=reference) as conn:
             ts_ms = self._now()
             row = self._require_row(conn, reference)
             self._assert_live_lease(
@@ -1156,10 +1375,12 @@ __all__ = [
     "WORKSPACE_DURABLE_DATA_INVALID",
     "WORKSPACE_LEASE_CONFLICT",
     "WORKSPACE_OWNERSHIP_CONFLICT",
+    "WORKSPACE_OPERATION_TIMEOUT",
     "WORKSPACE_SCHEMA_NOT_READY",
     "WORKSPACE_STALE_FENCE",
     "WorkspaceAuthority",
     "WorkspaceMutation",
+    "WorkspaceOperationContext",
     "WorkspaceRepository",
     "WorkspaceRepositoryError",
 ]

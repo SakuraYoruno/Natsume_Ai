@@ -20,7 +20,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .base import SettingsFieldReport, inspect_setting
@@ -169,6 +169,32 @@ class CoreSettings(BaseSettings):
     task_runtime_canonical_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
+    agent_workspace_managed_root: Path = Field(
+        default_factory=lambda: Path.home() / ".natsume" / "agent_worktrees",
+        alias="HOST_AGENT_WORKSPACE_MANAGED_ROOT",
+    )
+    agent_workspace_lease_ms: int = Field(
+        default=120_000,
+        ge=1_000,
+        le=86_400_000,
+        alias="HOST_AGENT_WORKSPACE_LEASE_MS",
+    )
+    agent_workspace_heartbeat_ms: int = Field(
+        default=30_000,
+        ge=100,
+        le=86_399_999,
+        alias="HOST_AGENT_WORKSPACE_HEARTBEAT_MS",
+    )
+    agent_workspace_cleanup_poll_ms: int = Field(
+        default=5_000,
+        ge=100,
+        le=86_400_000,
+        alias="HOST_AGENT_WORKSPACE_CLEANUP_POLL_MS",
+    )
+    agent_workspace_hmac_secret: SecretStr = Field(
+        default=SecretStr(""),
+        alias="HOST_AGENT_WORKSPACE_HMAC_SECRET",
+    )
     task_graph_cancellation_operator_enabled: bool = Field(
         default=False,
         alias="HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED",
@@ -209,6 +235,13 @@ class CoreSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_task_reconciliation_authority(self) -> CoreSettings:
+        if self.agent_workspace_heartbeat_ms >= self.agent_workspace_lease_ms:
+            raise ValueError("AGENT_WORKSPACE_HEARTBEAT_MUST_PRECEDE_LEASE_EXPIRY")
+        workspace_secret = self.agent_workspace_hmac_secret.get_secret_value().encode(
+            "utf-8"
+        )
+        if workspace_secret and not 32 <= len(workspace_secret) <= 4_096:
+            raise ValueError("AGENT_WORKSPACE_HMAC_SECRET_INVALID")
         public_keys = parse_task_reconciliation_public_keys(
             self.task_reconciliation_ed25519_public_keys_json
         )
@@ -286,6 +319,50 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_TASK_RUNTIME_CANONICAL_OWNER",
                 default_value="",
                 current_value=s.task_runtime_canonical_owner,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_cleanup_poll_ms",
+                env_key="HOST_AGENT_WORKSPACE_CLEANUP_POLL_MS",
+                default_value=5_000,
+                current_value=s.agent_workspace_cleanup_poll_ms,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_hmac_secret",
+                env_key="HOST_AGENT_WORKSPACE_HMAC_SECRET",
+                default_value="",
+                current_value=(
+                    "configured"
+                    if s.agent_workspace_hmac_secret.get_secret_value()
+                    else ""
+                ),
+                is_required=True,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_managed_root",
+                env_key="HOST_AGENT_WORKSPACE_MANAGED_ROOT",
+                default_value=str(Path.home() / ".natsume" / "agent_worktrees"),
+                current_value=str(s.agent_workspace_managed_root),
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_lease_ms",
+                env_key="HOST_AGENT_WORKSPACE_LEASE_MS",
+                default_value=120_000,
+                current_value=s.agent_workspace_lease_ms,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_heartbeat_ms",
+                env_key="HOST_AGENT_WORKSPACE_HEARTBEAT_MS",
+                default_value=30_000,
+                current_value=s.agent_workspace_heartbeat_ms,
                 is_required=False,
             ),
             inspect_setting(

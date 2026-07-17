@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import logging
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ from host_brain.agent_runtime.verification_policy import (
 )
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
+from host_brain.agent_runtime.workspace_runtime import (
+    DurableWorkspaceRuntime,
+    DurableWorkspaceRuntimeError,
+)
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.core.subprocess_utils import run as _subprocess_run
 from host_brain.core.trace_redaction import sanitize_public_payload
@@ -163,19 +168,26 @@ class AgentRuntimeExecutor:
         *,
         artifact_store: AgentArtifactStore | None = None,
         workspace_policy: WorkspacePolicy | None = None,
+        workspace_runtime: DurableWorkspaceRuntime | None = None,
         verification_policy: VerificationPolicy | None = None,
         review_policy: ReviewPolicy | None = None,
         model_attempt_service: Any = None,
         prompt_registry: Any = None,
     ) -> None:
         self.artifact_store = artifact_store or AgentArtifactStore()
+        self.workspace_runtime = workspace_runtime
         self.workspace_policy = workspace_policy or WorkspacePolicy()
         self.verification_policy = verification_policy or VerificationPolicy()
         self.review_policy = review_policy or ReviewPolicy()
         self.model_attempt_service = model_attempt_service
         self.prompt_registry = prompt_registry
 
-    def execute(self, work_order: AgentWorkOrder | dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self,
+        work_order: AgentWorkOrder | dict[str, Any],
+        *,
+        workspace_execution_authority: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
         run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
         self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
@@ -184,8 +196,24 @@ class AgentRuntimeExecutor:
 
         try:
             order.validate()
-            resolution = self.workspace_policy.resolve(order)
-            allowed, reason = self.workspace_policy.enforce_write_policy(order, resolution)
+            effective_workspace_policy = self.workspace_policy
+            if (
+                self.workspace_runtime is not None
+                and str(dict(order.workspace or {}).get("strategy") or "").strip().lower()
+                == "durable_workspace"
+            ):
+                effective_workspace_policy = WorkspacePolicy(
+                    workspace_allocator=self.workspace_runtime.allocator,
+                    workspace_lease_provider=lambda candidate, workspace_id: (
+                        self.workspace_runtime.lease_for_order(
+                            candidate,
+                            workspace_id,
+                            execution_authority=workspace_execution_authority,
+                        )
+                    ),
+                )
+            resolution = effective_workspace_policy.resolve(order)
+            allowed, reason = effective_workspace_policy.enforce_write_policy(order, resolution)
             if not allowed:
                 result = blocked_result(
                     work_order_id=order.work_order_id,
@@ -244,32 +272,86 @@ class AgentRuntimeExecutor:
             before = empty_git_summary
 
         logger.info("Canonical AgentExecutor selected for %s", order.work_order_id)
+        workspace_scope = (
+            self.workspace_runtime.heartbeat_scope(resolution)
+            if self.workspace_runtime is not None
+            and resolution.source == "durable_workspace"
+            else None
+        )
+        scope = workspace_scope or nullcontext()
         try:
-            if self.model_attempt_service is None or self.prompt_registry is None:
-                raise RuntimeError("AGENT_MODEL_RUNTIME_NOT_COMPOSED")
-            result = AgentExecutor(
-                model_attempt_service=self.model_attempt_service,
-                prompt_registry=self.prompt_registry,
-            ).execute(order, workspace=resolution.path)
-        except Exception as exc:
-            logger.warning("Canonical AgentExecutor execution failed: %s", exc)
+            with scope:
+                try:
+                    if self.model_attempt_service is None or self.prompt_registry is None:
+                        raise RuntimeError("AGENT_MODEL_RUNTIME_NOT_COMPOSED")
+                    result = AgentExecutor(
+                        model_attempt_service=self.model_attempt_service,
+                        prompt_registry=self.prompt_registry,
+                    ).execute(
+                        order,
+                        workspace=resolution.path,
+                        cancelled=(
+                            workspace_scope.cancelled
+                            if workspace_scope is not None
+                            else None
+                        ),
+                    )
+                except Exception as exc:
+                    logger.warning("Canonical AgentExecutor execution failed: %s", exc)
+                    result = AgentResult(
+                        status="FAILED",
+                        work_order_id=order.work_order_id,
+                        summary="Agent executor execution crashed.",
+                        artifacts_dir=str(run_dir),
+                        verification={"status": "NOT_RUN", "reason": "agent crashed"},
+                        risk_flags=["agent_error"],
+                        review_required=self.review_policy.review_required(order),
+                        reason_code="AGENT_ERROR",
+                        detail=str(exc),
+                    )
+
+                if workspace_scope is not None:
+                    workspace_scope.assert_can_start_action(
+                        "post-execution git summary"
+                    )
+                try:
+                    after = _collect_git_summary(resolution.path)
+                    git_summary = _diff_git_summary(before, after)
+                except Exception:
+                    logger.warning("Could not collect post-execution git state for %s", order.work_order_id)
+                    git_summary = {
+                        "changed_files": [],
+                        "git_diff_stat": None,
+                        "git_status": None,
+                        "workspace_dirty_baseline": bool(before.get("status_map")),
+                        "baseline_changed_files": sorted(dict(before.get("status_map") or {}).keys()),
+                        "current_changed_files": [],
+                    }
+
+                if workspace_scope is not None:
+                    workspace_scope.assert_can_start_action(
+                        "post-execution verification"
+                    )
+                verification = self.verification_policy.run(
+                    order.verification_plan,
+                    workspace=resolution.path,
+                    request_id=str(order.metadata.get("request_id") or "").strip() or None,
+                    intent_id=event_id,
+                    work_order_id=order.work_order_id,
+                )
+        except DurableWorkspaceRuntimeError as exc:
+            logger.error("Durable workspace lease lost for %s: %s", order.work_order_id, exc)
             result = AgentResult(
                 status="FAILED",
                 work_order_id=order.work_order_id,
-                summary="Agent executor execution crashed.",
+                summary="Agent execution lost its durable workspace lease.",
                 artifacts_dir=str(run_dir),
-                verification={"status": "NOT_RUN", "reason": "agent crashed"},
-                risk_flags=["agent_error"],
-                review_required=self.review_policy.review_required(order),
-                reason_code="AGENT_ERROR",
-                detail=str(exc),
+                verification={"status": "NOT_RUN", "reason_code": exc.reason_code},
+                risk_flags=["workspace_lease_lost"],
+                review_required=True,
+                reason_code=exc.reason_code,
+                detail=exc.detail,
             )
-
-        try:
-            after = _collect_git_summary(resolution.path)
-            git_summary = _diff_git_summary(before, after)
-        except Exception:
-            logger.warning("Could not collect post-execution git state for %s", order.work_order_id)
             git_summary = {
                 "changed_files": [],
                 "git_diff_stat": None,
@@ -278,20 +360,16 @@ class AgentRuntimeExecutor:
                 "baseline_changed_files": sorted(dict(before.get("status_map") or {}).keys()),
                 "current_changed_files": [],
             }
-
-        verification = self.verification_policy.run(
-            order.verification_plan,
-            workspace=resolution.path,
-            request_id=str(order.metadata.get("request_id") or "").strip() or None,
-            intent_id=event_id,
-            work_order_id=order.work_order_id,
-        )
+            verification = dict(result.verification)
         metadata = dict(result.metadata or {})
         metadata.update(
             {
                 "execution_authority": "canonical_agent_executor",
                 "workspace": str(resolution.path),
                 "workspace_source": resolution.source,
+                "workspace_id": resolution.workspace_id,
+                "workspace_lease_owner": resolution.lease_owner,
+                "workspace_lease_fencing_token": resolution.lease_fencing_token,
                 "prompt_profile": prompt_profile_name(order),
                 "event_id": event_id,
                 "ts_ms": ts,

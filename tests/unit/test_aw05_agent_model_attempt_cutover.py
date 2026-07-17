@@ -113,6 +113,51 @@ def test_agent_executor_uses_one_request_with_service_owned_semantic_retry(
     assert result.metadata["model_id"] == "test-agent-model"
 
 
+def test_agent_executor_rechecks_cancellation_before_tool_side_effect(
+    tmp_path: Path,
+) -> None:
+    registry = build_live_production_prompt_registry()
+    adapter = _ScriptedAdapter(
+        [
+            json.dumps(
+                {
+                    "thought": "write after the model call",
+                    "tool_id": "agent_write_file",
+                    "tool_args": {"path": "must-not-exist.txt", "content": "unsafe"},
+                }
+            )
+        ]
+    )
+    service = _service(registry, adapter)
+    order = AgentWorkOrder.from_mapping(
+        {
+            "work_order_id": "wo-aw05-agent-cancel",
+            "domain": "code",
+            "run_mode": "worker",
+            "objective": "do not write after cancellation",
+            "allowed_actions": ["write_files"],
+            "forbidden_actions": ["modify_secret_files"],
+            "metadata": {"request_id": "req-aw05-agent-cancel"},
+        }
+    )
+    probes = iter((False, True))
+
+    result = AgentExecutor(
+        model_attempt_service=service,
+        prompt_registry=registry,
+    ).execute(
+        order,
+        workspace=tmp_path,
+        cancelled=lambda: next(probes, True),
+    )
+
+    assert result.status == "DEGRADED"
+    assert result.reason_code == "AGENT_CANCELLED"
+    assert result.metadata["stopped_reason"] == "CANCELLED"
+    assert result.risk_flags == ["agent_cancelled"]
+    assert not (tmp_path / "must-not-exist.txt").exists()
+
+
 def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypatch) -> None:
     registry = build_live_production_prompt_registry()
     adapter = _ScriptedAdapter(["sub-agent canonical output"])

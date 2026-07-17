@@ -89,6 +89,7 @@ from host_brain.composition.memory import (
     ProcessMemoryContainer,
     build_process_memory_container,
 )
+from host_brain.composition import agent_workspace as workspace
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.scheduler import (
@@ -696,6 +697,7 @@ def create_app() -> FastAPI:
     command_ingress_container: ProcessCommandIngressContainer | None = None
     memory_container: ProcessMemoryContainer | None = None
     task_runtime_container: ProcessTaskRuntimeContainer | None = None
+    agent_workspace_container: workspace.ProcessAgentWorkspaceContainer | None = None
     governed_host_runtime: GovernedHostRuntime | None = None
     governed_internal_runtime: GovernedInternalRuntime | None = None
     internal_agent_command_service: InternalAgentCommandService | None = None
@@ -821,6 +823,7 @@ def create_app() -> FastAPI:
         nonlocal security_container, command_ingress_container
         nonlocal memory_container
         nonlocal task_runtime_container, governed_host_runtime
+        nonlocal agent_workspace_container
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
@@ -1026,12 +1029,10 @@ def create_app() -> FastAPI:
                     episodic_projection_store=episodic_projection_store,
                 )
                 set_memory_service_container(memory)
-                logical_canonical_owner = (
-                    runtime_settings.task_runtime_canonical_owner
-                    or "host-task-runtime"
-                )
-                canonical_owner = task_runtime.execution_owner_id(
-                    logical_canonical_owner
+                logical_canonical_owner = runtime_settings.task_runtime_canonical_owner or "host-task-runtime"
+                canonical_owner = task_runtime.execution_owner_id(logical_canonical_owner)
+                agent_workspace_container = workspace.compose_agent_workspace_application_scope(
+                    application, task_runtime, runtime_settings, canonical_owner
                 )
                 governed_runtime = build_governed_host_runtime(
                     task_runtime_container=task_runtime,
@@ -1041,12 +1042,16 @@ def create_app() -> FastAPI:
                     capability_broker=get_capability_broker(),
                     model_attempt_service=ApplicationModelAttemptServicePort(),
                     production_authority_verifier=verify_durable_production_authority,
-                    cancellation_authority_verifier=(
-                        cancellation_authority_verifier
-                    ),
+                    cancellation_authority_verifier=cancellation_authority_verifier,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
                 )
+                canonical_agent_executor_kwargs: dict[str, Any] = {
+                    "model_attempt_service": get_model_attempt_service(),
+                    "prompt_registry": get_prompt_registry(),
+                }
+                if agent_workspace_container is not None:
+                    canonical_agent_executor_kwargs["workspace_runtime"] = agent_workspace_container.runtime
                 internal_runtime = build_governed_internal_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
@@ -1054,13 +1059,8 @@ def create_app() -> FastAPI:
                     result_repository=task_runtime.agent_result_repository,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
-                    canonical_executor=AgentRuntimeExecutor(
-                        model_attempt_service=get_model_attempt_service(),
-                        prompt_registry=get_prompt_registry(),
-                    ),
-                    cancellation_authority_verifier=(
-                        cancellation_authority_verifier
-                    ),
+                    canonical_executor=AgentRuntimeExecutor(**canonical_agent_executor_kwargs),
+                    cancellation_authority_verifier=cancellation_authority_verifier,
                 )
 
                 try:
@@ -1374,6 +1374,10 @@ def create_app() -> FastAPI:
                                 "HOST_SCHEDULER_CLOCK_CLOSE_FAILED",
                                 exc_info=True,
                             )
+                    workspace.quiesce_agent_workspace_application_scope(
+                        application, agent_workspace_container, task_runtime
+                    )
+                    agent_workspace_container = None
                     if task_runtime is not None:
                         try:
                             await task_runtime.aclose()
@@ -1460,6 +1464,7 @@ def create_app() -> FastAPI:
     application.state.command_ingress_container = None
     application.state.memory_service_container = None
     application.state.task_runtime_container = None
+    application.state.agent_workspace_container = None
     application.state.task_effect_reconciliation_command_service = None
     application.state.task_terminal_reconciliation_command_service = None
     application.state.task_terminal_reconciliation_read_authority = None
