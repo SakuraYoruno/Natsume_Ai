@@ -3,9 +3,9 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v2.6
+版本：v2.7
 日期：2026-07-18
-状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；执行事实以本文所在提交的工作树为准
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
@@ -205,6 +205,8 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - `CalibrationRepository`：durable prediction、baseline、selected path、actual outcome、cost；
 - `DomainBenchmarkPort`：真实 workload、baseline、verifier、budget、isolation；
 - Search result 标准编译为 node-bound immutable TaskGraph payload。
+
+当前已完成的基础切片仅限以下范围：D14 已把 `PlanningGoal`、`VirtualStateSnapshot`、动态 successor 合同、shadow workload 合同与 context-owned immutable compilation 接入公共内核；没有任何领域生产切流或收益结论。D15 已把 sealed governed `codex_runtime` 的 `ModelAttemptService` / 同源 `PromptRegistry` 端口接入 `AgentRuntimeExecutor`，但它只证明 read-only agent runtime 的受信模型端口可达。`agent_worker` 写入仍缺 task-bound WorkspaceGrant/WorkspaceRuntime，ReAct 模型调用也尚未消费 `ModelBudgetGuard`；因此它不是 Code 执行或 Code 规划切流。
 
 #### Research 第一真实领域
 

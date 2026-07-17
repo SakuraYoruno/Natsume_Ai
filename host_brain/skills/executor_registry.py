@@ -119,6 +119,42 @@ def _execute_agent_production_with_context(payload: dict[str, Any]) -> Any:
     )
 
 
+def _execute_agent_runtime_with_context(payload: dict[str, Any]) -> Any:
+    """Bridge composed model ports into the governed ``codex_runtime`` worker.
+
+    The runtime payload itself cannot carry service objects.  This adapter is
+    reached only after ``_broker_executor_adapter`` has revalidated a sealed
+    capability invocation and attached the internal authority snapshot.
+    """
+
+    context = payload.get("_context")
+    if not isinstance(context, Mapping):
+        raise RuntimeError("AGENT_RUNTIME_PORTS_NOT_COMPOSED")
+    sealed = context.get("_skill_execution_authority")
+    governed = context.get("_governed_execution_context")
+    model_attempt_service = context.get("model_attempt_service")
+    # ``_execute_skill`` composes only the ModelAttemptService into the
+    # governed context.  Its prompt registry is part of that same immutable
+    # model-runtime composition; never trust a separately caller-shaped
+    # ``_context.prompt_registry`` value.
+    prompt_registry = getattr(model_attempt_service, "prompt_registry", None)
+    if (
+        not isinstance(sealed, Mapping)
+        or not str(sealed.get("authority_id") or "").strip()
+        or not isinstance(governed, Mapping)
+        or str(governed.get("execution_mode") or "").strip()
+        != GOVERNED_PRODUCTION_EXECUTION_MODE
+        or model_attempt_service is None
+        or prompt_registry is None
+    ):
+        raise RuntimeError("AGENT_RUNTIME_PORTS_NOT_COMPOSED")
+    return execute_agent_runtime_payload(
+        payload,
+        model_attempt_service=model_attempt_service,
+        prompt_registry=prompt_registry,
+    )
+
+
 def _execute_skill_result_projection(payload: dict[str, Any]) -> dict[str, Any]:
     """Project a pure Skill result through the same governed Broker path."""
 
@@ -137,7 +173,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("browser", execute_browser_skill),
         ToolExecutorSpec("cursor", execute_ide_skill),
         ToolExecutorSpec("pycharm", execute_ide_skill),
-        ToolExecutorSpec("codex_runtime", execute_agent_runtime_payload),
+        ToolExecutorSpec("codex_runtime", _execute_agent_runtime_with_context),
         ToolExecutorSpec("codex_production", _execute_agent_production_with_context),
         ToolExecutorSpec("skill_result", _execute_skill_result_projection),
         ToolExecutorSpec("open_file_in_editor", execute_ide_skill),

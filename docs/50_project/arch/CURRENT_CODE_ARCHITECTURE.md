@@ -27,6 +27,7 @@
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
+| Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。正向证据仅为端口身份单测，`agent_worker` 写入仍缺 WorkspaceGrant/WorkspaceRuntime，ReAct 也尚未受 `ModelBudgetGuard` 约束 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
 | Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
@@ -298,6 +299,12 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 ### 5.4 Code / Research
 
 `tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract，不是一个已运行的真实 benchmark；当前证据仍没有真实仓库、真实 Research 来源、真实 model call 或真实 verifier。
+
+### 5.4.1 D15 governed Agent 模型端口桥
+
+此前 Host 的 `agent_worker → codex_runtime` Skill 路径虽然把 `ModelAttemptService` 放入 governed execution context，却直接构造裸 `AgentRuntimeExecutor`，所以会在首次模型调用前以 `AGENT_MODEL_RUNTIME_NOT_COMPOSED` 失败。D15 仅在 CapabilityBroker 已验证 sealed task authority 后，才由私有 executor adapter 读取 composition 提供的 `ModelAttemptService`，并从同一服务对象派生 `PromptRegistry`；调用方不能在 payload 中注入服务，缺 authority、模式或端口统一以 `AGENT_RUNTIME_PORTS_NOT_COMPOSED` 关闭。
+
+这不是 Code 写入切流。`agent_worker` 的默认 `runtime_repo` 写 WorkOrder 仍没有 task-bound `WorkspaceRuntime/WorkspaceGrant` 注入，会在 Workspace Policy 的模型调用前关闭；AgentExecutor 的 ReAct `ModelAttempt` 也没有接入 D11 的 `ModelBudgetGuard`。因此本切片的正向证据只覆盖 read-only `agent_inspect` 类端口接线，尚无真实模型调用、真实代码修复、预算 receipt 或生产 canary。
 
 ## 6. 状态与 authority
 

@@ -8,9 +8,9 @@
     "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-01",
+  "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "next_wave": "NE-02",
+  "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "production_enablement": {
@@ -69,6 +69,28 @@
         "host_brain/model_runtime/production_provider_adapters.py",
         "tests/unit/test_aw05_model_attempt_service.py",
         "tests/unit/test_aw05_production_provider_route.py"
+      ]
+    },
+    "governed_agent_runtime_model_ports": {
+      "status": "PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE",
+      "scope": [
+        "sealed governed Skill invocation",
+        "codex_runtime",
+        "read-only agent_inspect-class WorkOrder"
+      ],
+      "implemented": "After CapabilityBroker has revalidated a sealed governed task authority, the private codex_runtime adapter takes the composed ModelAttemptService from that trusted context and derives PromptRegistry from the same service before constructing AgentRuntimeExecutor. The payload has no service-injection field; missing authority, governed execution mode, service, or prompt registry fails closed with AGENT_RUNTIME_PORTS_NOT_COMPOSED.",
+      "positive_evidence_boundary": "The D15 unit contract proves port identity and rejects legacy direct execution. It is not a live-provider run, model-budget settlement receipt, or a production canary.",
+      "not_completed": [
+        "agent_worker write execution still has no task-bound durable WorkspaceRuntime/WorkspaceGrant injection and remains fail-closed before model work",
+        "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
+        "Code/Research planning domain adapters, isolated paired benchmark receipts, and production influence remain unimplemented",
+        "generic chat/delegate/runtime cutover remains incomplete"
+      ],
+      "evidence_refs": [
+        "host_brain/skills/executor_registry.py",
+        "host_brain/agent_runtime/executor.py",
+        "host_brain/executive_runtime/skill_execution.py",
+        "tests/unit/test_d15_governed_agent_runtime_model_bridge.py"
       ]
     },
     "scheduler_governed_runtime": {

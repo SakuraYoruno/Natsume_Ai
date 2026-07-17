@@ -55,7 +55,8 @@ def test_runtime_uses_canonical_agent_executor_with_default_environment(monkeypa
             assert dependencies["model_attempt_service"] is model_attempt_service
             assert dependencies["prompt_registry"] is prompt_registry
 
-        def execute(self, order, *, workspace: Path) -> AgentResult:
+        def execute(self, order, *, workspace: Path, cancelled=None) -> AgentResult:  # noqa: ANN001
+            assert cancelled is None
             calls.append((order.work_order_id, workspace))
             return AgentResult(
                 status="EXECUTED",
@@ -109,7 +110,8 @@ def test_runtime_converts_canonical_agent_crash_to_failed_result(monkeypatch, tm
         def __init__(self, **_dependencies: object) -> None:
             pass
 
-        def execute(self, _order, *, workspace: Path) -> AgentResult:
+        def execute(self, _order, *, workspace: Path, cancelled=None) -> AgentResult:  # noqa: ANN001
+            assert cancelled is None
             raise RuntimeError(f"boom in {workspace.name}")
 
     monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", CrashingAgentExecutor)

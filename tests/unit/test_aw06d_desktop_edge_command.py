@@ -145,9 +145,16 @@ def test_broker_adapter_injects_request_bound_read_only_authority_snapshot(
         "request_id": "req-desktop-1",
         "principal_id": "person-1",
         "target_id": "desktop_click",
+        "command_target_id": "desktop_click",
         "session_id": "session-1",
         "lease_id": "",
         "fencing_token": 0,
+        "reservation_id": "",
+        "node_grant_ref": "",
+        "parent_grant_ref": "",
+        "lease_owner_id": "",
+        "business_scope": "",
+        "operation_fingerprint": "",
         "expires_at_ms": 2_000_000_000_000,
     }
     for key, value in values.items():

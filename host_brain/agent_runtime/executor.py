@@ -405,7 +405,19 @@ class AgentRuntimeExecutor:
             self.artifact_store.write_json(run_dir / "verification.json", result.verification)
 
 
-def execute_agent_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def execute_agent_runtime_payload(
+    payload: dict[str, Any],
+    *,
+    model_attempt_service: Any = None,
+    prompt_registry: Any = None,
+) -> dict[str, Any]:
+    """Execute a normalized payload with ports supplied only by trusted wiring.
+
+    ``payload`` deliberately has no service-injection fields.  The only caller
+    that may supply model ports is the composed executor-registry adapter after
+    it has revalidated its sealed governed execution context.
+    """
+
     data = dict(payload or {})
     raw_order = data.get("work_order")
     if not isinstance(raw_order, dict):
@@ -442,7 +454,10 @@ def execute_agent_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "review_policy": {"review_required": False},
             "metadata": {"request_id": data.get("request_id")},
         }
-    return AgentRuntimeExecutor().execute(AgentWorkOrder.from_mapping(raw_order))
+    return AgentRuntimeExecutor(
+        model_attempt_service=model_attempt_service,
+        prompt_registry=prompt_registry,
+    ).execute(AgentWorkOrder.from_mapping(raw_order))
 
 
 __all__ = ["AgentRuntimeExecutor", "execute_agent_runtime_payload"]
