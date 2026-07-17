@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import time
 from typing import Any, Callable, Mapping
 
@@ -36,7 +37,7 @@ from natsume_contracts.edge.transport_v1 import (
 )
 
 
-EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION = 1
+EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION = 2
 EDGE_EMBODIMENT_RECEIPT_CORRUPT = "EDGE_EMBODIMENT_RECEIPT_CORRUPT"
 EDGE_EMBODIMENT_EXECUTOR_FAILED = "EDGE_EMBODIMENT_EXECUTOR_FAILED"
 
@@ -51,6 +52,14 @@ class EdgeEmbodimentTransportError(RuntimeError):
 class CommandClaim:
     execute: bool
     receipt: EmbodimentReceipt | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptLookup:
+    """One integrity-checked Edge receipt returned by a fenced read."""
+
+    receipt: EmbodimentReceipt
+    receipt_sha256: str | None
 
 
 class SQLiteEdgeEmbodimentStore:
@@ -92,11 +101,17 @@ class SQLiteEdgeEmbodimentStore:
                     "SELECT schema_version FROM edge_transport_schema WHERE component = ?",
                     ("embodiment",),
                 ).fetchone()
+                authority_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'edge_embodiment_command_authority'"
+                ).fetchone()
         except Exception as exc:
             raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_MIGRATION_REQUIRED") from exc
         if row is None:
             raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_MIGRATION_REQUIRED")
         if int(row["schema_version"]) != EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION:
+            raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_SCHEMA_DRIFT")
+        if authority_table is None:
             raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_SCHEMA_DRIFT")
 
     def open_session(
@@ -107,11 +122,25 @@ class SQLiteEdgeEmbodimentStore:
         ttl_ms: int = 30_000,
         reconnect_lease_id: str | None = None,
         reconnect_fencing_token: int | None = None,
+        rotate_fencing_token: bool = False,
     ) -> EdgeSessionLease:
+        """Open, renew, or explicitly replace one live Edge session lease.
+
+        A normal exact reconnect is a renewal: it deliberately preserves the
+        current lease id and fence so transient Host transport reconnects do
+        not invalidate in-flight work.  A Host *runtime replacement* is a
+        different operation.  It must present that same exact live credential
+        and explicitly request ``rotate_fencing_token``; within this SQLite
+        transaction Edge then advances the fence and replaces the lease id.
+        Consequently any command signed against the prior Edge fence reaches
+        ``_require_live_session_lease`` as stale, even if it arrives late.
+        """
         session = _text(session_id, EDGE_SESSION_RECONNECT_INVALID)
         owner = _text(owner_id, EDGE_SESSION_RECONNECT_INVALID)
         ttl = int(ttl_ms)
         if ttl < 1_000:
+            raise EdgeEmbodimentTransportError(EDGE_SESSION_RECONNECT_INVALID)
+        if not isinstance(rotate_fencing_token, bool):
             raise EdgeEmbodimentTransportError(EDGE_SESSION_RECONNECT_INVALID)
         now = self.now_ms()
         with self._transaction() as conn:
@@ -129,6 +158,37 @@ class SQLiteEdgeEmbodimentStore:
                 if not exact_reconnect:
                     raise EdgeEmbodimentTransportError(EDGE_SESSION_BUSY)
                 expires = now + ttl
+                if rotate_fencing_token:
+                    fence = int(row["fencing_token"]) + 1
+                    lease_id = stable_lease_id(
+                        session_id=session,
+                        owner_id=owner,
+                        fencing_token=fence,
+                    )
+                    conn.execute(
+                        "UPDATE edge_session_lease SET lease_id = ?, "
+                        "fencing_token = ?, issued_at_ms = ?, expires_at_ms = ?, "
+                        "updated_at_ms = ? "
+                        "WHERE session_id = ? AND lease_id = ? AND fencing_token = ?",
+                        (
+                            lease_id,
+                            fence,
+                            now,
+                            expires,
+                            now,
+                            session,
+                            str(row["lease_id"]),
+                            int(row["fencing_token"]),
+                        ),
+                    )
+                    return EdgeSessionLease(
+                        session_id=session,
+                        lease_id=lease_id,
+                        owner_id=owner,
+                        fencing_token=fence,
+                        issued_at_ms=now,
+                        expires_at_ms=expires,
+                    )
                 conn.execute(
                     "UPDATE edge_session_lease SET expires_at_ms = ?, updated_at_ms = ? "
                     "WHERE session_id = ? AND lease_id = ? AND fencing_token = ?",
@@ -173,7 +233,11 @@ class SQLiteEdgeEmbodimentStore:
         now = self.now_ms()
         digest = _command_digest(command)
         with self._transaction() as conn:
-            self._require_live_lease(conn, command=command, now=now)
+            live_lease = self._require_live_lease(conn, command=command, now=now)
+            authority_owner_id = _text(
+                live_lease["owner_id"],
+                EMBODIMENT_LEASE_INVALID,
+            )
             existing = conn.execute(
                 "SELECT * FROM edge_embodiment_command "
                 "WHERE command_id = ? OR idempotency_key = ?",
@@ -199,7 +263,14 @@ class SQLiteEdgeEmbodimentStore:
                     received_at_ms=now,
                     completed_at_ms=now,
                 )
-                self._insert_terminal(conn, command, digest, receipt, now=now)
+                self._insert_terminal(
+                    conn,
+                    command,
+                    digest,
+                    receipt,
+                    authority_owner_id=authority_owner_id,
+                    now=now,
+                )
                 return CommandClaim(False, receipt)
 
             conn.execute(
@@ -214,6 +285,12 @@ class SQLiteEdgeEmbodimentStore:
                     command.command_id, command.idempotency_key, digest,
                     command.session_id, command.lease_id, int(command.fencing_token), now, now,
                 ),
+            )
+            self._record_command_authority(
+                conn,
+                command_id=command.command_id,
+                owner_id=authority_owner_id,
+                admitted_at_ms=now,
             )
         return CommandClaim(True, None)
 
@@ -264,15 +341,77 @@ class SQLiteEdgeEmbodimentStore:
         return receipt
 
     def get_receipt(self, *, command_id: str) -> EmbodimentReceipt | None:
-        conn = self._connect()
-        try:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM edge_embodiment_command WHERE command_id = ?",
                 (str(command_id),),
             ).fetchone()
             return None if row is None else self._receipt_from_row(row, now=self.now_ms())
-        finally:
-            conn.close()
+
+    def query_receipt_for_live_lease(
+        self,
+        *,
+        session_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        command_id: str,
+        idempotency_key: str,
+    ) -> ReceiptLookup | None:
+        """Read one receipt without ever claiming or replaying its effect.
+
+        A valid envelope HMAC is checked by the FastAPI boundary.  This store
+        layer supplies the second half of the authority check: the caller must
+        present the exact *currently live* session lease, prove its owner, and
+        both durable command identity fields must match a row admitted by that
+        same owner.  Lease validation and receipt selection deliberately share
+        one immediate SQLite transaction so a lease replacement cannot race a
+        successful validation into an unrelated read.
+        """
+
+        now = self.now_ms()
+        session = _text(session_id, EMBODIMENT_LEASE_REQUIRED)
+        lease = _text(lease_id, EMBODIMENT_LEASE_REQUIRED)
+        owner = _text(owner_id, EMBODIMENT_LEASE_REQUIRED)
+        key = _text(idempotency_key, EMBODIMENT_COMMAND_CONFLICT)
+        target_command_id = _text(command_id, EMBODIMENT_COMMAND_CONFLICT)
+        try:
+            fence = int(fencing_token)
+        except (TypeError, ValueError) as exc:
+            raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_REQUIRED) from exc
+        if isinstance(fencing_token, bool) or fence < 1:
+            raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_REQUIRED)
+
+        with self._transaction() as conn:
+            live_lease = self._require_live_session_lease(
+                conn,
+                session_id=session,
+                lease_id=lease,
+                fencing_token=fence,
+                now=now,
+            )
+            if str(live_lease["owner_id"]) != owner:
+                raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_INVALID)
+            row = conn.execute(
+                "SELECT command.* FROM edge_embodiment_command AS command "
+                "INNER JOIN edge_embodiment_command_authority AS authority "
+                "ON authority.command_id = command.command_id "
+                "WHERE command.command_id = ? "
+                "AND command.idempotency_key = ? "
+                "AND command.session_id = ? "
+                "AND authority.owner_id = ?",
+                (target_command_id, key, session, owner),
+            ).fetchone()
+            if row is None:
+                return None
+            receipt = self._receipt_from_row(row, now=now)
+            stored_digest = str(row["receipt_sha256"] or "").strip()
+            return ReceiptLookup(
+                receipt=receipt,
+                receipt_sha256=(
+                    f"sha256:{stored_digest}" if stored_digest else None
+                ),
+            )
 
     def _require_live_lease(
         self,
@@ -280,21 +419,41 @@ class SQLiteEdgeEmbodimentStore:
         *,
         command: EmbodimentCommand,
         now: int,
-    ) -> None:
+    ) -> sqlite3.Row:
         if not command.session_id or not command.lease_id or int(command.fencing_token) < 1:
+            raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_REQUIRED)
+        return self._require_live_session_lease(
+            conn,
+            session_id=command.session_id,
+            lease_id=command.lease_id,
+            fencing_token=int(command.fencing_token),
+            now=now,
+        )
+
+    def _require_live_session_lease(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        lease_id: str,
+        fencing_token: int,
+        now: int,
+    ) -> sqlite3.Row:
+        if not session_id or not lease_id or int(fencing_token) < 1:
             raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_REQUIRED)
         row = conn.execute(
             "SELECT * FROM edge_session_lease WHERE session_id = ?",
-            (command.session_id,),
+            (session_id,),
         ).fetchone()
         if row is None:
             raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_INVALID)
         if int(row["expires_at_ms"]) <= now:
             raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_EXPIRED)
-        if int(row["fencing_token"]) != int(command.fencing_token):
+        if int(row["fencing_token"]) != int(fencing_token):
             raise EdgeEmbodimentTransportError(EMBODIMENT_FENCE_STALE)
-        if str(row["lease_id"]) != command.lease_id:
+        if str(row["lease_id"]) != lease_id:
             raise EdgeEmbodimentTransportError(EMBODIMENT_LEASE_INVALID)
+        return row
 
     def _insert_terminal(
         self,
@@ -303,6 +462,7 @@ class SQLiteEdgeEmbodimentStore:
         command_digest: str,
         receipt: EmbodimentReceipt,
         *,
+        authority_owner_id: str,
         now: int,
     ) -> None:
         serialized, receipt_digest = _serialize_receipt(receipt)
@@ -319,6 +479,35 @@ class SQLiteEdgeEmbodimentStore:
                 command.session_id, command.lease_id, int(command.fencing_token),
                 serialized, receipt_digest, now, now, now,
             ),
+        )
+        self._record_command_authority(
+            conn,
+            command_id=command.command_id,
+            owner_id=authority_owner_id,
+            admitted_at_ms=now,
+        )
+
+    @staticmethod
+    def _record_command_authority(
+        conn: sqlite3.Connection,
+        *,
+        command_id: str,
+        owner_id: str,
+        admitted_at_ms: int,
+    ) -> None:
+        """Persist the immutable non-secret owner observed at admission.
+
+        The authority is intentionally not derived later from
+        ``edge_session_lease``: that row is mutable when a session receives a
+        new fencing token or a new owner.  Legacy commands without this record
+        remain unreadable through the authenticated receipt-query path.
+        """
+
+        conn.execute(
+            "INSERT INTO edge_embodiment_command_authority("
+            "command_id, owner_id, admitted_at_ms"
+            ") VALUES (?, ?, ?)",
+            (command_id, owner_id, int(admitted_at_ms)),
         )
 
     def _receipt_from_row(self, row: sqlite3.Row, *, now: int) -> EmbodimentReceipt:
@@ -477,5 +666,5 @@ def _stable_receipt_ref(command_id: str) -> str:
 __all__ = [
     "EDGE_EMBODIMENT_TRANSPORT_SCHEMA_VERSION", "EDGE_EMBODIMENT_RECEIPT_CORRUPT",
     "EDGE_EMBODIMENT_EXECUTOR_FAILED", "EdgeEmbodimentTransportError",
-    "SQLiteEdgeEmbodimentStore", "DurableEmbodimentRuntime",
+    "ReceiptLookup", "SQLiteEdgeEmbodimentStore", "DurableEmbodimentRuntime",
 ]

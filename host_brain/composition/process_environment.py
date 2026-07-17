@@ -6,6 +6,9 @@ import logging
 import os
 from typing import Any
 
+from host_brain.composition.process_application_ports import (
+    require_process_application_ports,
+)
 from host_brain.composition.process_service_container import get_process_service_container
 
 _logger = logging.getLogger("Natsume.process_environment")

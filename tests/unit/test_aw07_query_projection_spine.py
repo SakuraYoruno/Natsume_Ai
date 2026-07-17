@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -409,7 +408,6 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     request = _obs_request(store)
     forbidden = Mock(side_effect=AssertionError("GET/SSE touched a source"))
     monkeypatch.setattr(trace, "_get_trace_builders", forbidden)
-    monkeypatch.setattr(sessions, "_get_ledger", forbidden)
 
     stream = trace.get_trace_stream_events("req-empty", request)
     assert stream.events == []
@@ -482,40 +480,12 @@ def test_projection_get_handlers_have_no_source_builder_calls():
         assert "_get_ledger(" not in inspect.getsource(handler)
 
 
-def test_embodiment_receipt_observer_projects_secret_free_device_status(tmp_path, monkeypatch):
-    from host_brain.composition import process_services as dependencies
-    from host_brain.channels import embodiment
-    from host_brain.app.observability_runtime import projection_runtime
-    from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
+def test_projection_runtime_has_no_embodiment_receipt_observer_or_process_subscription():
+    import inspect
 
-    store = _store(tmp_path)
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
-    projection_runtime.stop_embodiment_receipt_projection()
-    assert projection_runtime.configure_embodiment_receipt_projection() is True
-    try:
-        command = embodiment.build_host_embodiment_command(
-            kind="avatar",
-            action="status",
-            payload={"api_key": "RAW_DEVICE_SECRET"},
-            request_id="req-device-projection",
-        )
-        receipt = EmbodimentReceipt(
-            command_id=command.command_id,
-            idempotency_key=command.idempotency_key,
-            accepted=True,
-            status="COMPLETED",
-            reason_code=None,
-            detail="avatar ready",
-            received_at_ms=1234,
-            event={"device": "avatar", "token": "RAW_RECEIPT_SECRET"},
-        )
-        embodiment._publish_embodiment_receipt(command, receipt)
-        document = store.get("device_status", "avatar")
-        assert document is not None
-        assert document.payload["success"] is True
-        assert document.payload["event"] == {"device": "avatar"}
-        raw = Path(store.db_path).read_bytes()
-        assert b"RAW_DEVICE_SECRET" not in raw
-        assert b"RAW_RECEIPT_SECRET" not in raw
-    finally:
-        projection_runtime.stop_embodiment_receipt_projection()
+    from host_brain.app.observability_runtime import projection_runtime
+
+    source = inspect.getsource(projection_runtime)
+    assert "register_embodiment_receipt_observer" not in source
+    assert "configure_embodiment_receipt_projection" not in source
+    assert "stop_embodiment_receipt_projection" not in source

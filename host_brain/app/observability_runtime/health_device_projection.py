@@ -7,15 +7,12 @@ probe a service, instantiate an Agent, submit a command, or scan a ledger.
 from __future__ import annotations
 
 import json
-import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from natsume_contracts.edge.embodiment_v1 import EmbodimentCommand, EmbodimentReceipt
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
-from host_brain.channels.embodiment import register_embodiment_receipt_observer
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 from host_brain.observability.model_attempt_projection import (
@@ -84,12 +81,6 @@ ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST: Mapping[str, frozenset[str]] = {
     agent_id: _SAFE_OPERATIONAL_AGENT_METRICS
     for agent_id, _family, _module, _singleton in ORGAN_AGENT_REGISTRY
 }
-
-
-_receipt_lock = threading.Lock()
-_latest_receipts: dict[str, tuple[dict[str, Any], int]] = {}
-_job_lock = threading.Lock()
-_last_job_run: dict[str, float] = {}
 
 
 def _now_ms() -> int:
@@ -350,50 +341,20 @@ def _public_receipt_event(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return event
 
 
-def _observe_embodiment_receipt(
-    command: EmbodimentCommand,
-    receipt: EmbodimentReceipt,
-) -> None:
-    payload = {
-        "status": str(receipt.status or "UNKNOWN").upper(),
-        "success": bool(receipt.success),
-        "reason_code": receipt.reason_code,
-        "detail": _public_detail(receipt.detail),
-        "latency_ms": receipt.latency_ms,
-        "event": {
-            "kind": command.kind,
-            "action": command.action,
-            **_public_receipt_event(receipt.event),
-        },
-        "command_id": receipt.command_id,
-        "receipt_ref": receipt.receipt_ref,
-        "observed_at_ms": int(receipt.completed_at_ms or receipt.received_at_ms),
-    }
-    keys = {command.kind}
-    if command.kind == "avatar":
-        keys.add("vts")
-    if command.kind == "mateengine":
-        keys.add("mate")
-    cursor = int(receipt.completed_at_ms or receipt.received_at_ms)
-    with _receipt_lock:
-        for key in keys:
-            current = _latest_receipts.get(key)
-            if current is None or cursor >= current[1]:
-                _latest_receipts[key] = (dict(payload), cursor)
-
-
 def load_device_status_projection_sources(
     ledger: Any | None = None,
     *,
-    include_process_cache: bool = True,
+    include_process_cache: bool = False,
 ) -> dict[str, tuple[dict[str, Any], int]]:
+    """Rebuild device status exclusively from durable Host receipt facts.
+
+    ``include_process_cache`` remains a temporary source-compatible argument for
+    callers compiled before D8.  It deliberately has no effect: a process
+    cache cannot be a cross-restart or cross-application observation source.
+    """
+
+    del include_process_cache
     sources: dict[str, tuple[dict[str, Any], int]] = {}
-    if include_process_cache:
-        with _receipt_lock:
-            sources = {
-                key: (dict(payload), int(cursor))
-                for key, (payload, cursor) in _latest_receipts.items()
-            }
     if ledger is None:
         return sources
     rows = _ledger_rows(
@@ -707,35 +668,6 @@ def read_projection_payload(
     return (dict(document.payload) if document is not None and meta["available"] else None), meta
 
 
-def _run_job_if_due(
-    name: str,
-    interval_seconds: float,
-    callback: Callable[[], dict[str, int]],
-) -> dict[str, int | bool]:
-    now = time.monotonic()
-    with _job_lock:
-        previous = _last_job_run.get(name, 0.0)
-        if now - previous < max(0.1, float(interval_seconds)):
-            return {"skipped": True}
-        _last_job_run[name] = now
-    return callback()
-
-
-def run_health_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("health-passive", 30.0, refresh_health_query_projections)
-
-
-def run_device_status_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("device-status", 1.0, refresh_device_status_query_projections)
-
-
-def run_organ_tribe_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("organ-tribe", 10.0, refresh_organ_tribe_query_projection)
-
-
-register_embodiment_receipt_observer(_observe_embodiment_receipt)
-
-
 __all__ = [
     "DEVICE_MAX_AGE_MS", "DEVICE_STATUS_KIND", "HEALTH_MAX_AGE_MS",
     "LLM_NODE_HEALTH_KEY", "LLM_NODE_HEALTH_KIND", "ORGAN_AGENT_REGISTRY",
@@ -746,6 +678,4 @@ __all__ = [
     "load_organ_tribe_projection_source",
     "read_projection_payload", "refresh_device_status_query_projections",
     "refresh_health_query_projections", "refresh_organ_tribe_query_projection",
-    "run_device_status_projection_job", "run_health_projection_job",
-    "run_organ_tribe_projection_job",
 ]

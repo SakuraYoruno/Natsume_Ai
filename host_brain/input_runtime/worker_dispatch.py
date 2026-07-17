@@ -428,6 +428,26 @@ async def _dispatch_to_graph_worker(
             detail_parts.append(f"reply_form={gateway_delivery.get('reply_form')}")
             detail_parts.append(f"reply_form_reason={gateway_delivery.get('reply_form_reason')}")
             detail_parts.append(f"gateway_voice_sent={str(bool(gateway_delivery.get('voice_sent'))).lower()}")
+            if gateway_delivery.get("voice_delivery_state"):
+                detail_parts.append(
+                    "gateway_voice_delivery_state="
+                    f"{gateway_delivery.get('voice_delivery_state')}"
+                )
+            if gateway_delivery.get("voice_durable_admitted") is not None:
+                detail_parts.append(
+                    "gateway_voice_durable_admitted="
+                    f"{str(bool(gateway_delivery.get('voice_durable_admitted'))).lower()}"
+                )
+            if gateway_delivery.get("voice_physical_effect_verified") is not None:
+                detail_parts.append(
+                    "gateway_voice_physical_effect_verified="
+                    f"{str(bool(gateway_delivery.get('voice_physical_effect_verified'))).lower()}"
+                )
+            if gateway_delivery.get("voice_gateway_sent") is not None:
+                detail_parts.append(
+                    "gateway_voice_gateway_sent="
+                    f"{str(bool(gateway_delivery.get('voice_gateway_sent'))).lower()}"
+                )
             if gateway_reason_code:
                 detail_parts.append(f"gateway_reason_code={gateway_reason_code}")
             if gateway_detail:
@@ -540,6 +560,30 @@ async def _dispatch_to_graph_worker(
                 "voice_vts_expression_success"
             )
             completed_payload["gateway_voice_event"] = gateway_delivery.get("voice_event")
+            # The completion record must retain the distinction between a
+            # durable Host admission and an Edge-confirmed physical effect.
+            # `voice_success=None` alone is not enough to reconstruct it.
+            completed_payload["gateway_voice_delivery_state"] = gateway_delivery.get(
+                "voice_delivery_state"
+            )
+            completed_payload["gateway_voice_durable_admitted"] = gateway_delivery.get(
+                "voice_durable_admitted"
+            )
+            completed_payload["gateway_voice_physical_effect_verified"] = gateway_delivery.get(
+                "voice_physical_effect_verified"
+            )
+            completed_payload["gateway_voice_gateway_sent"] = gateway_delivery.get(
+                "voice_gateway_sent"
+            )
+            completed_payload["gateway_voice_gateway_status"] = gateway_delivery.get(
+                "voice_gateway_status"
+            )
+            completed_payload["gateway_voice_gateway_detail"] = gateway_delivery.get(
+                "voice_gateway_detail"
+            )
+            completed_payload["gateway_voice_gateway_latency_ms"] = gateway_delivery.get(
+                "voice_gateway_latency_ms"
+            )
 
         _log_input_event(
             ledger=ledger,

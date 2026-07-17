@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.1
+版本：v2.2
 
-核对日期：2026-07-17
+核对日期：2026-07-18
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -426,7 +426,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。这个收敛仍不改变Host source、Chat/Delegate、Acceptance Effect等底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition、真实Edge连接和物理回执仍未证明。因此Query Plane、Composition与NE-01继续为partial/in-progress。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。D8 另为每个 Host ASGI lifespan 建立显式具身 runtime；0104 以 canonical DB 派生 scope、durable runtime lease/fence 与持久 Edge reconnect credential 阻止同库双 writer，Edge 0002 冻结 command owner。child Edge 的 loopback TCP/HMAC/SQLite receipt query v2 与重启 exact replay 已测，但真实设备仍未测试；Life、reply-performance、Gateway voice 等已迁移路径也只 durable queue。这个收敛仍不改变Host source、Chat/Delegate、Acceptance Effect等底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition、剩余 direct embodiment adapter 和全局 locator 删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -529,18 +529,44 @@ accepted reply effect 经 [gateway_delivery.py](../../../host_brain/input_runtim
 
 ## 8. Edge 设备与实体副作用
 
-Host 只创建版本化 `EmbodimentCommand`，不导入设备 driver。[embodiment.py](../../../host_brain/channels/embodiment.py) 把 avatar、voice、desktop 等意图发送给 Edge；Edge 是唯一物理 actuator。
+Host 只创建版本化 `EmbodimentCommand`，不导入设备 driver。[embodiment.py](../../../host_brain/channels/embodiment.py) 把 avatar、voice、desktop 等意图发送给 Edge；Edge 是唯一物理 actuator。D8 后，Host 不再通过 module-global outbox、lease 或 receipt observer 共享这条 authority：每个 ASGI lifespan 创建一个 [`HostEmbodimentRuntime`](../../../host_brain/channels/embodiment.py)。0104 同时让每条新 outbox 记录绑定不可变 `runtime_scope_id`，并以 durable runtime lease/fence 保证同一 canonical DB/scope 只有一个 Host 进程可 claim 或投递；第二实例失败关闭，历史无 scope 行不被接管。
 
-当前存在两条 Host 提交方式：
+该 runtime 的 Edge session/owner 由 normalized canonical DB path 的稳定 hash 派生，并在持有当前 Host runtime fence 时保存 Edge 返回的精确 lease/fence。替代进程重启后读取该 credential，以同 session/owner 做 exact reconnect；若旧 Edge lease 仍 live，必须请求原子轮换 fence，且只接受新 lease ID 与旧 fence 加一的回包，才开放路由。回包、精确重连或 Host authority 任一不成立都会失败关闭；不同 store 不会争用默认 lease；同一 store 的第二 app 无 durable Host lease，不能借不同进程内身份获得第二 writer。
 
-| 方式 | 流程 | 状态 |
+| 阶段 | 当前流程 | 当前定级 |
 |---|---|---|
-| Host durable embodiment outbox | enqueue → lease/fence → Edge RPC → durable receipt / `IN_DOUBT` | `WIRED` |
-| async direct submit | 取得 durable Edge session lease/fence → Edge RPC → Edge 持久 claim → device effect → receipt | `PARTIAL` |
+| 选定 Host 路径入队 | MateEngine router、Life delivery、reply-performance、chat cue 与 Gateway voice 从 app runtime 入队，新命令响应为 `PENDING / DURABLY_QUEUED`；精确重复返回既有 durable 状态，只有既有 `APPLIED` receipt 才能令 `physical_effect_verified=true`；`voice_started/vts_started` 不得由 admission 置真 | `PARTIAL_APP_OWNED` |
+| Host writer authority | 新行必须匹配 canonical DB 的 `runtime_scope_id`；enqueue、claim、过期、收口、对账与 Edge credential persistence 各自在同一 SQLite 写事务复验当前 durable runtime lease/fence，第二实例与旧 fence 失败关闭 | `WIRED_FOR_D8_SCOPE` |
+| 正常投递 | Host `PENDING → DISPATCHING`，取得 Edge session lease/fence 后 HMAC RPC；Edge 按 command/idempotency key 持久去重并写 durable receipt | `WIRED_FOR_D8_SCOPE` |
+| 不确定性 | 过期 claim 转 `IN_DOUBT`；Host 只发 receipt query，绝不 submit/retry。FOUND receipt 必须以 command/key identity 与 receipt digest CAS 收口；重复同 digest 不重复推进 observer/audit，`NOT_FOUND`、传输/校验失败保持 `IN_DOUBT` | `WIRED_FOR_D8_SCOPE` |
+| 未迁移路径 | 其余 legacy direct adapter 仍需要显式 runtime 注入；并非每个 Host embodiment 调用都先经过 Host Acceptance Effect Outbox | `INCOMPLETE` |
 
-[embodiment_outbox_repository.py](../../../host_brain/persistence/embodiment_outbox_repository.py) 管理 Host outbox 的 `PENDING → DISPATCHING → completed/IN_DOUBT`。[embodiment_runtime.py](../../../edge_client/gateway/embodiment_runtime.py) 在 Edge 端用 command/idempotency key 去重；若进程崩溃时命令处于 `DISPATCHING` 但没有 receipt，恢复后标记 `IN_DOUBT`，不盲目重执行物理动作。
+```text
+Host ASGI lifespan
+  → build Task Runtime and apply canonical migrations
+  → construct migration-gated Life authority and Query Projection store
+  → acquire one durable Host runtime lease for canonical DB runtime_scope
+  → second app for the same scope fails closed
+  → HostEmbodimentRuntime (scope-filtered outbox / dispatcher / observers)
+  → inherited live Edge lease: exact reconnect + rotate fence, verify new lease/fence+1
+  → durable enqueue acknowledgement only
+  → claim PENDING command
+  → load or persist exact Edge session / owner / lease / fence
+  → HMAC Edge command RPC
+  → Edge SQLite command/key dedupe + immutable owner authority + durable receipt
 
-边界是：Edge 端的持久化与回执已成立，但并非每个 Host embodiment 调用都先写 Host Acceptance Effect Outbox。因此“所有外部副作用均统一通过 Host effect outbox”仍是 `TARGET`，不是当前事实。
+claim expiry or unknown command outcome
+  → Host IN_DOUBT
+  → HMAC+nonce read-only /v1/edge/embodiment/receipt
+  → owner + current session + lease + fencing token + exact command_id/key
+  → FOUND: identity + receipt-digest CAS settle
+  → legacy ownerless / NOT_FOUND / lookup error: keep IN_DOUBT
+  → never replay or resubmit the physical command
+```
+
+[`embodiment_outbox_repository.py`](../../../host_brain/persistence/embodiment_outbox_repository.py) 管理 Host scope、runtime lease、outbox 和 Edge reconnect credential；[`embodiment_runtime.py`](../../../edge_client/gateway/embodiment_runtime.py) 管理 Edge 端 durable owner authority 与 receipt。receipt query 本身不执行命令：它只在同 owner 的 current live lease/session/fence 内返回同一 `command_id + idempotency_key` 的 receipt；legacy ownerless、跨 owner/session 或不匹配查询得到 `NOT_FOUND` 且不泄漏 receipt。Host transport 的明文 HTTP 只允许 loopback/localhost，非 loopback 必须使用 HTTPS并在创建 client 前失败关闭。
+
+真实 child Edge 的 loopback TCP/HMAC/SQLite 测试已覆盖命令、receipt query 和重启后的 exact replay。该最小 profile 故意不启动 MateEngine/实际设备，结果只能证明传输、认证和 durable receipt，不证明 TTS、VTS、桌面或任何硬件物理效果；因此物理效果保持 `NOT_TESTED`。所有外部副作用统一先经 Host Acceptance Effect Outbox 仍是 `TARGET`，不是当前事实。
 
 ## 9. Memory、Persona 与 Scene
 

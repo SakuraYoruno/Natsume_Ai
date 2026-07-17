@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.input_runtime.contracts_and_normalization import (
     _build_gateway_route_started_voice_ack_text,
     _build_gateway_reply_text,
@@ -63,6 +64,19 @@ def _ports(**overrides):  # noqa: ANN003
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
     overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
     return replace(build_input_runtime_application_ports(), **overrides)
+
+
+class _RecordingEmbodimentRuntime:
+    def __init__(self) -> None:
+        self.commands = []
+
+    def enqueue(self, command):  # noqa: ANN001, ANN201
+        self.commands.append(command)
+        return EmbodimentOutboxAck(
+            outbox_id=f"outbox-{len(self.commands)}",
+            command_id=command.command_id,
+            idempotency_key=command.idempotency_key,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -1244,92 +1258,63 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
 
 
-def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabled(monkeypatch) -> None:
+def test_deliver_gateway_reply_durably_queues_voice_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
-    with patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=True,
-                status="ACCEPTED",
-                reason_code=None,
-                detail="tts queued; tts playback started",
-                latency_ms=287,
-                event={
-                    "event_type": "TTS_PLAYBACK_STARTED",
-                    "vts_talk_result": {"success": True},
-                    "vts_expression_result": {"success": True},
-                    "vts_mouth_sync": {"started": True, "state": "running"},
+    embodiment_runtime = _RecordingEmbodimentRuntime()
+    result = _run(
+        _deliver_gateway_reply(
+            request_id="req_gateway_reply_voice_only_001",
+            payload={
+                "platform": "wechat",
+                "conversation_id": "wxid_voice_only_001",
+                "raw_extra": {
+                    "force_dual_voice_reply": True,
+                    "wait_voice_reply_result": True,
                 },
-            )
-        ),
-    ) as speak_mock:
-        result = _run(
-            _deliver_gateway_reply(
-                request_id="req_gateway_reply_voice_only_001",
-                payload={
-                    "platform": "wechat",
-                    "conversation_id": "wxid_voice_only_001",
-                    "raw_extra": {
-                        "force_dual_voice_reply": True,
-                        "wait_voice_reply_result": True,
-                    },
-                },
-                decision="APPROVE",
-                reason_code=None,
-                narrative="我先直接在你这边把结果念出来。",
-                emotion_tag="GENTLE",
-                user_msg_type="text",
-                tts_text_ja="こっちで先に読んであげる。",
-                ports=_ports(),
-            )
+            },
+            decision="APPROVE",
+            reason_code=None,
+            narrative="我先直接在你这边把结果念出来。",
+            emotion_tag="GENTLE",
+            user_msg_type="text",
+            tts_text_ja="こっちで先に読んであげる。",
+            ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
         )
+    )
 
-    speak_mock.assert_awaited_once()
-    voiced_text = speak_mock.await_args.kwargs["payload"]["text"]
+    assert len(embodiment_runtime.commands) == 1
+    voiced_text = embodiment_runtime.commands[0].payload["text"]
     assert voiced_text == "我先直接在你这边把结果念出来。"
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
     assert result["voice_sent"] is True
     assert result["voice_waited"] is True
-    assert result["voice_success"] is True
-    assert result["voice_started"] is True
-    assert result["voice_vts_started"] is True
-    assert result["voice_vts_expression_success"] is True
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_durable_admitted"] is True
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_vts_started"] is False
+    assert result["voice_vts_expression_success"] is False
 
 
-def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monkeypatch) -> None:
+def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_durably_queues_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    embodiment_runtime = _RecordingEmbodimentRuntime()
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="text sent",
+            latency_ms=24,
+        )
+    )
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=True,
-                status="SENT",
-                reason_code=None,
-                detail="text sent",
-                latency_ms=24,
-            )
-        ),
-    ), patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=True,
-                status="ACCEPTED",
-                reason_code=None,
-                detail="tts queued; tts playback started",
-                latency_ms=320,
-                event={
-                    "event_type": "TTS_PLAYBACK_STARTED",
-                    "vts_talk_result": {"success": True},
-                    "vts_expression_result": {"success": True},
-                    "vts_mouth_sync": {"started": True, "state": "running"},
-                },
-            )
-        ),
-    ) as speak_mock:
+        new=post_gateway_reply_mock,
+    ):
         result = _run(
             _deliver_gateway_reply(
                 request_id="req_gateway_reply_voice_wait_001",
@@ -1339,6 +1324,7 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
                     "raw_extra": {
                         "force_dual_voice_reply": True,
                         "wait_voice_reply_result": True,
+                        "send_gateway_voice_message": True,
                     },
                 },
                 decision="APPROVE",
@@ -1347,20 +1333,29 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
                 emotion_tag="HAPPY",
                 user_msg_type="text",
                 tts_text_ja="今日はそのまま声で伝えるね。",
-                ports=_ports(),
+                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
             )
         )
 
-    speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["payload"]["text"] == "今天我会直接把结果说给你听。"
+    assert post_gateway_reply_mock.await_count == 1
+    assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
+    assert len(embodiment_runtime.commands) == 1
+    command = embodiment_runtime.commands[0]
+    assert command.payload["text"] == "今天我会直接把结果说给你听。"
+    assert command.payload["export_audio"] is True
     assert result["success"] is True
     assert result["reply_form_reason"] == "force_dual_voice_reply"
     assert result["voice_sent"] is True
     assert result["voice_waited"] is True
-    assert result["voice_success"] is True
-    assert result["voice_started"] is True
-    assert result["voice_vts_started"] is True
-    assert result["voice_vts_expression_success"] is True
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_vts_started"] is False
+    assert result["voice_vts_expression_success"] is False
+    assert result["voice_audio_path"] == ""
+    assert result["voice_gateway_sent"] is False
+    assert result["voice_gateway_status"] == "WAITING_RECEIPT"
 
 
 def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy_force_env(monkeypatch) -> None:
@@ -1377,25 +1372,11 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
             latency_ms=24,
         )
     )
+    embodiment_runtime = _RecordingEmbodimentRuntime()
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
-    ), patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=True,
-                status="ACCEPTED",
-                reason_code=None,
-                detail="tts queued; tts playback started",
-                latency_ms=120,
-                event={
-                    "event_type": "TTS_PLAYBACK_STARTED",
-                    "audio_path": "D:\\tmp\\presence.wav",
-                },
-            )
-        ),
-    ) as speak_mock:
+    ):
         result = _run(
             _deliver_gateway_reply(
                 request_id="req_gateway_reply_smart_short_001",
@@ -1413,26 +1394,31 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
                 emotion_tag="SURPRISED",
                 bond_stage="CONFIDANT",
                 user_msg_type="text",
-                ports=_ports(),
+                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
             )
         )
 
     assert post_gateway_reply_mock.await_count == 1
     assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
-    speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["payload"]["text"] == "哈？"
-    assert speak_mock.await_args.kwargs["payload"]["export_audio"] is False
+    assert len(embodiment_runtime.commands) == 1
+    assert embodiment_runtime.commands[0].payload["text"] == "哈？"
+    assert embodiment_runtime.commands[0].payload["export_audio"] is False
     assert result["success"] is True
     assert result["reply_form_reason"] == "embodied_presence_voice"
     assert result["voice_sent"] is True
     assert result["voice_waited"] is True
-    assert result["voice_started"] is True
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_vts_started"] is False
     assert result["voice_gateway_sent"] is False
     assert "disabled" in result["voice_gateway_detail"].lower()
 
 
 def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delivery_fails(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    embodiment_runtime = _RecordingEmbodimentRuntime()
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=AsyncMock(
@@ -1444,24 +1430,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
                 latency_ms=18,
             )
         ),
-    ), patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=AsyncMock(
-            return_value=SimpleNamespace(
-                success=True,
-                status="ACCEPTED",
-                reason_code=None,
-                detail="tts queued; tts playback started",
-                latency_ms=301,
-                event={
-                    "event_type": "TTS_PLAYBACK_STARTED",
-                    "vts_talk_result": {"success": True},
-                    "vts_expression_result": {"success": True},
-                    "vts_mouth_sync": {"started": True, "state": "running"},
-                },
-            )
-        ),
-    ) as speak_mock:
+    ):
         result = _run(
             _deliver_gateway_reply(
                 request_id="req_gateway_reply_voice_on_failure_001",
@@ -1480,18 +1449,20 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
                 emotion_tag="HAPPY",
                 user_msg_type="text",
                 tts_text_ja="文字が届かなくても、先に声でつなぐね。",
-                ports=_ports(),
+                ports=_ports(get_embodiment_runtime=lambda: embodiment_runtime),
             )
         )
 
-    speak_mock.assert_awaited_once()
-    assert speak_mock.await_args.kwargs["payload"]["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
+    assert len(embodiment_runtime.commands) == 1
+    assert embodiment_runtime.commands[0].payload["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
     assert result["voice_sent"] is True
-    assert result["voice_success"] is True
-    assert result["voice_started"] is True
-    assert result["voice_vts_started"] is True
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_vts_started"] is False
 
 
 def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monkeypatch) -> None:

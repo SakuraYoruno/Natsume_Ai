@@ -32,9 +32,13 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0103_retire_llm_node_call_log.sql"
+        "0104_host_embodiment_runtime_authority.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert (
+        "host_brain/audit/migrations/0104_host_embodiment_runtime_authority.sql"
+        in migration_files
+    )
     assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files
     assert "host_brain/audit/migrations/0102_task_runtime_node_artifact.sql" in migration_files
     assert "host_brain/audit/migrations/0101_agent_workspace_authority.sql" in migration_files
@@ -59,6 +63,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert "host_brain/audit/migrations/0085_task_runtime_budget_usage.sql" in migration_files
     assert "host_brain/audit/migrations/0084_capability_forge_proposal_log.sql" in migration_files
     assert "host_brain/audit/migrations/0083_host_embodiment_outbox.sql" in migration_files
+    assert "edge_client/gateway/migrations/0002_embodiment_command_authority.sql" in migration_files
     assert "edge_client/gateway/migrations/0001_embodiment_transport.sql" in migration_files
     for name in (
         "packages",

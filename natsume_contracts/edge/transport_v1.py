@@ -1,9 +1,11 @@
 """Versioned Edge transport session and fencing contracts.
 
 The lease is deliberately transport-neutral.  A reconnect may renew the same
-lease only while presenting its exact lease id and fencing token.  Once a
-lease expires, the next owner receives a higher fence and every command bound
-to the previous fence is rejected.
+lease only while presenting its exact lease id and fencing token.  A runtime
+replacement may instead explicitly request ``rotate_fencing_token`` using
+that same exact credential; Edge atomically advances the fence and returns a
+new lease id.  Once a lease expires, the next owner likewise receives a
+higher fence and every command bound to the previous fence is rejected.
 """
 
 from __future__ import annotations

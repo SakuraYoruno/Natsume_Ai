@@ -326,8 +326,8 @@ Ensure-PathContains -Directory $dockerDir
 Ensure-DockerDaemonRunning -DockerExe $dockerExe -TimeoutSeconds $DockerDaemonWaitSeconds
 
 $envValues = Read-EnvFile -Path $EnvFile
-$neo4jUri = if ($envValues.ContainsKey("BOND_NEO4J_URI")) { [string]$envValues["BOND_NEO4J_URI"] } elseif ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } else { "bolt://127.0.0.1:7687" }
-$neo4jPort = Get-PortFromUri -UriText $neo4jUri -DefaultPort 7687
+$neo4jUri = if ($envValues.ContainsKey("BOND_NEO4J_URI")) { [string]$envValues["BOND_NEO4J_URI"] } elseif ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } else { "bolt://127.0.0.1:17687" }
+$neo4jPort = Get-PortFromUri -UriText $neo4jUri -DefaultPort 17687
 $neo4jHttpPort = 7474
 $neo4jAuthRef = if ($envValues.ContainsKey("BOND_NEO4J_AUTH_REF")) { [string]$envValues["BOND_NEO4J_AUTH_REF"] } elseif ($env:BOND_NEO4J_AUTH_REF) { [string]$env:BOND_NEO4J_AUTH_REF } else { "" }
 $neo4jAuthValue = Resolve-Neo4jAuth -AuthRef $neo4jAuthRef -RepoRoot $repoRoot

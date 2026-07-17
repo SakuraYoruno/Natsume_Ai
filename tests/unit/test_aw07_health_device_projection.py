@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 from types import SimpleNamespace
 
 
-def test_device_projection_observes_receipt_after_submission(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
+def test_device_projection_rebuilds_only_from_durable_receipt_facts() -> None:
     from host_brain.channels import embodiment
     from host_brain.app.observability_runtime.health_device_projection import (
         load_device_status_projection_sources,
     )
-    from host_brain.app.observability_runtime import health_device_projection
     from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
-
-    with health_device_projection._receipt_lock:
-        health_device_projection._latest_receipts.clear()
 
     command = embodiment.build_host_embodiment_command(
         kind="avatar",
@@ -24,40 +18,30 @@ def test_device_projection_observes_receipt_after_submission(monkeypatch) -> Non
         request_id="aw07-device-receipt",
     )
     durable_facts: list[dict] = []
-    monkeypatch.setattr(
-        dependencies,
-        "get_ledger",
-        lambda: SimpleNamespace(log_voice_event=lambda row: durable_facts.append(dict(row))),
+    receipt = EmbodimentReceipt(
+        command_id=command.command_id,
+        idempotency_key=command.idempotency_key,
+        accepted=True,
+        status="APPLIED",
+        reason_code=None,
+        detail="ready",
+        received_at_ms=100,
+        completed_at_ms=105,
+        event={"device": "avatar", "connected": True, "token": "must-not-project"},
     )
+    embodiment.build_embodiment_receipt_audit_observer(
+        lambda row: durable_facts.append(dict(row))
+    )(command, receipt)
 
-    class Port:
-        async def submit(self, submitted):  # noqa: ANN001
-            assert submitted is command
-            return EmbodimentReceipt(
-                command_id=command.command_id,
-                idempotency_key=command.idempotency_key,
-                accepted=True,
-                status="APPLIED",
-                reason_code=None,
-                detail="ready",
-                received_at_ms=100,
-                completed_at_ms=105,
-                event={"device": "avatar", "connected": True, "token": "must-not-project"},
-            )
+    class Ledger:
+        def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
+            assert table == "voice_event_log"
+            return durable_facts
 
-    unsubscribe = embodiment.register_embodiment_receipt_observer(
-        embodiment.build_embodiment_receipt_audit_observer(
-            lambda row: durable_facts.append(dict(row))
-        )
-    )
-    try:
-        receipt = asyncio.run(
-            embodiment.submit_embodiment_command(command, command_port=Port())
-        )
-    finally:
-        unsubscribe()
-
-    sources = load_device_status_projection_sources()
+    assert load_device_status_projection_sources() == {}
+    # Compatibility input cannot resurrect a process-local cache.
+    assert load_device_status_projection_sources(include_process_cache=True) == {}
+    sources = load_device_status_projection_sources(Ledger())
     assert receipt.status == "APPLIED"
     assert sources["avatar"][0]["success"] is True
     assert sources["vts"][0]["event"] == {

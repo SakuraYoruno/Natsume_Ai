@@ -16,7 +16,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | Scheduler | `WIRED` | 真实 occurrence 已贯通 V3、Budget、child grant、Review、Verification、Acceptance 与 Receipt |
 | Internal Agent | `WIRED` | 外部 v2 仅作边界输入，进入 runtime 前编译为 V3；Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay 已贯通 |
 | Workspace 隔离 | `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CLOSED` | 0101 authority 继续唯一绑定 graph epoch/root WorkOrder/owner/configured root/allow-list；W2 又在认证 Internal Agent 写路线接入服务端派生 `workspace_id`、冻结 source commit、独立 Git worktree、实例/PID 绑定租约、独占执行 scope、heartbeat、单调 handoff/takeover、cleanup receipt 与 `CLEANUP_PENDING` 续作；启动同步最多处理 1 条，其余交后台 worker。仅 provisioning/allocator/cleanup adapter 的 Git/文件 callback 已移出 SQLite transaction，并由 workspace/source 跨进程锁、单一 deadline 和前后 exact fence/status/expiry 短事务约束；Agent tool 只在动作间协作取消，Verification 只在整体启动前验活，二者都没有逐操作 fence。`HOST_AGENT_WORKSPACE_HMAC_SECRET` 未配置时 Host 可降级启动，但写请求 fail closed；已配置也只是显式 opt-in，尚无真实 canary。失租不能强杀正在运行的模型/工具/Verification；成功晋升/失败废弃、Domain Pack/Codex runtime 接线、accepted checkpoint HEAD、OS/container/tenant 与句柄级 TOCTOU 隔离仍缺，因此不得称完整 Workspace Isolation |
-| 显式 Composition | `INCOMPLETE / D7C_OBS_APP_ASSEMBLY_AND_SKILL_FAIL_CLOSED_PARTIAL` | D1～D7a 的 app-local factory、route ports、21 个 producer 与 Host 查询切流继续成立。D7b 将 source-mode 更新为 `6 durable / 3 static / 8 partial / 4 authenticated-host-read / 0 typed-unavailable`；这是声明能力，不是运行成功率。Life Body 只聚合同一 Obs app 已物化的 runtime、digital-life overview、insights、trace roots 与 canonical ledger 有界只读 lineage；缺失、无效、过期或 ledger 不可读会写入 typed `SOURCE_UNAVAILABLE`，安全/Gateway 风险不得被空病理覆盖，未变化根只刷新 freshness 而不追加 journal，也不会持久化 content/private body。Direct Skill worker 的 resource manager、episodic store、semantic recaller 由 Host lifespan 捕获后冻结在 `GovernedSkillExecutionPorts`；授权先于依赖预检，缺后端失败关闭且不生成成功 Skill receipt。D7c 还将 Obs application/job assembly 移入 app 层，使 composition→app 反向依赖违规归零且不加白名单。该切片仍不等于完整对象图：Host source 底层 process authority、Chat/Delegate 依赖与 `PROCESS_LIFE_PROVIDER` 仍共享，`ProcessServiceContainer` 仍约有 53 个非锁可变服务引用，完整 Host/Worker composition、全局 Service Locator 删除、真实 Edge TCP 和物理回执验收均未完成。8 个 partial 与 4 个认证 job 仍可能在运行时降级，因此 health 继续 `DEGRADED`，NE-01 继续 `IN_PROGRESS`。 |
+| 显式 Composition / 具身执行 | `INCOMPLETE / PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | D1～D7c 的 app-local 查询、Life Body 冷聚合、Direct Skill 冻结依赖和 Obs app assembly 继续成立。D8 让具身 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`；同一 DB/scope 同时只允许一个持 durable Host runtime lease 的进程，第二实例失败关闭，历史无 scope 行不会被猜测接管。每次 enqueue、claim、过期、收口与对账都在同一 SQLite 写事务内复验该 Host lease/fence。Host 持久保存精确 Edge `session/owner/lease/fence`；替代 runtime 在开放路由前必须以 exact reconnect 轮换 Edge fence，并验证新 lease 与 `fence+1`，否则失败关闭。Edge receipt query v2 同时绑定 owner、session、lease、fence 与 command/key，legacy ownerless 行返回 `NOT_FOUND`。Life、reply-performance 与 Gateway voice 的新入队只返回 `PENDING / DURABLY_QUEUED`；精确重复请求返回既有 durable 状态，只有既有 `APPLIED` receipt 才能表明该动作已被 Edge 收口，绝不把新 admission 当作声音、Avatar 或设备已生效。非 loopback HTTP 被拒绝，远端必须 HTTPS。真实 loopback TCP/HMAC/SQLite/restart smoke 已通过，但刻意不接硬件，实体设备仍 `NOT_TESTED`。Host source、Chat/Delegate/Acceptance Effect、剩余 direct adapter、完整 Host/Worker composition 与全局 Service Locator 删除仍未完成；health 继续 `DEGRADED`，NE-01 继续 `IN_PROGRESS`。 |
 | Planning Search | `KERNEL_AVAILABLE / BENEFIT_UNPROVEN` | 公共搜索内核存在；Host 尚不生成竞争方案，跨领域真实收益未证明 |
 | Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |
@@ -265,6 +265,14 @@ python -m host_brain.obs_main --host 127.0.0.1 --port 18082
 # Edge RPC，本文示例显式固定为 17800
 python -m edge_client --host 127.0.0.1 --port 17800
 ```
+
+若只需验证 Host transport → Edge 的真实 TCP/HMAC/durable receipt 链，而不希望启动 QQ、Unified Gateway、ASR、TTS、VTS 或任何硬件，请运行：
+
+```powershell
+python scripts/runtime/test_edge_tcp_receipt_smoke.py --timeout-seconds 60
+```
+
+该脚本以动态 loopback 端口和独立 SQLite 启动两次真实 Edge 子进程，验证 HMAC、owner/session/lease/fence、幂等回执、receipt query v2 与重启回放。legacy ownerless command 不会被 receipt query 猜测归属。它故意把 MateEngine `health` 指向未监听的 loopback 地址；通过时的预期回执是 `DEGRADED/MATEENGINE_UNAVAILABLE`，并且始终表示 `physical_effect_status=NOT_TESTED`，不是设备成功证明。Host→Edge 明文 HTTP 只允许 loopback/localhost，远端地址必须使用 HTTPS。
 
 Host 与独立 Obs 若要读取实时 sys-mode、Capability Forge、Semantic Recall、Governance 和 Organ/Tribe，必须在两个进程中配置同一非空 `HOST_OBS_READ_TOKEN`；该值不得复用 `HOST_INTERNAL_TRIBE_TOKEN`。`HOST_OBS_HOST_API_BASE_URL` 指向远端时必须使用 HTTPS，只有 loopback/localhost 允许 HTTP。未配置不会伪造健康空数据，而会让对应投影保持 `SOURCE_UNAVAILABLE`。
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from host_brain.app.chat_handler import _evaluate_governor_with_timing
 from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator
 from host_brain.app.durable_task_status import build_durable_task_status_projection
@@ -29,11 +32,25 @@ from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 
 
-def build_input_runtime_application_ports() -> InputRuntimeApplicationPorts:
+def build_input_runtime_application_ports(
+    *,
+    embodiment_runtime_provider: Callable[[], Any | None] | None = None,
+) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
 
     def get_task_status_projection():
         return build_durable_task_status_projection(ledger=get_ledger())
+
+    async def trigger_reply_performance_with_runtime(**kwargs: Any) -> Any:
+        runtime = (
+            embodiment_runtime_provider()
+            if embodiment_runtime_provider is not None
+            else None
+        )
+        return await trigger_reply_performance(
+            **kwargs,
+            embodiment_runtime=runtime,
+        )
 
     return InputRuntimeApplicationPorts(
         get_intent_engine=get_intent_engine,
@@ -54,9 +71,10 @@ def build_input_runtime_application_ports() -> InputRuntimeApplicationPorts:
         reply_form_decision_type=ReplyFormDecision,
         get_reply_form_decider=get_reply_form_decider,
         message_type=MsgType,
-        trigger_reply_performance=trigger_reply_performance,
+        trigger_reply_performance=trigger_reply_performance_with_runtime,
         render_quick_gateway_progress_text=render_quick_gateway_progress_text,
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
+        get_embodiment_runtime=embodiment_runtime_provider,
     )
 
 

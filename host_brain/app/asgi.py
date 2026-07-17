@@ -160,7 +160,11 @@ def _compose_life_command_authority(
     return service, reader
 
 
-def _compose_life_dispatchers(ledger: Any) -> tuple[Any, Any]:
+def _compose_life_dispatchers(
+    ledger: Any,
+    *,
+    embodiment_runtime: Any,
+) -> tuple[Any, Any]:
     """Bind projection and delivery workers to the canonical Life repository."""
 
     from host_brain.app.life_projection_handlers import (  # noqa: PLC0415
@@ -180,7 +184,13 @@ def _compose_life_dispatchers(ledger: Any) -> tuple[Any, Any]:
     repository = LifeCommandRepository.from_ledger(ledger)
     return (
         LifeProjectionDispatcher(repository, handle_life_projection),
-        LifeOutboxDispatcher(repository, LifeDeliveryTransport(ledger=ledger)),
+        LifeOutboxDispatcher(
+            repository,
+            LifeDeliveryTransport(
+                ledger=ledger,
+                embodiment_runtime=embodiment_runtime,
+            ),
+        ),
     )
 
 
@@ -711,7 +721,9 @@ def create_app() -> FastAPI:
     configure_tribe_application_ports()
     configure_process_service_ports()
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports()
-    input_runtime_ports = build_input_runtime_application_ports()
+    input_runtime_ports = build_input_runtime_application_ports(
+        embodiment_runtime_provider=lambda: embodiment_runtime,
+    )
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service
     # locator and no app-state lookup inside the API registry.
@@ -743,10 +755,8 @@ def create_app() -> FastAPI:
         tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort] | None
     ) = None
     life_dispatchers: tuple[Any, Any] | None = None
-    embodiment_outbox: Any | None = None
-    embodiment_dispatcher: Any | None = None
-    embodiment_outbox_unbind: Callable[[], None] | None = None
-    embodiment_audit_unsubscribe: Callable[[], None] | None = None
+    embodiment_runtime: Any | None = None
+    embodiment_authority_task: asyncio.Task[None] | None = None
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
@@ -782,6 +792,9 @@ def create_app() -> FastAPI:
         current = canon_container
         return current.application if current is not None else None
 
+    def embodiment_runtime_provider() -> Any | None:
+        return embodiment_runtime
+
     route_ports = HostRoutePorts(
         canon_service_provider=canon_service_provider,
         tool_broker_provider=get_tool_broker,
@@ -789,6 +802,7 @@ def create_app() -> FastAPI:
         bond_engine_provider=resolve_bond_engine,
         bond_writer_provider=get_bond_dynamics_writer,
         mode_transition_service_provider=mode_transition_service_provider,
+        embodiment_runtime_provider=embodiment_runtime_provider,
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,
@@ -910,8 +924,7 @@ def create_app() -> FastAPI:
         nonlocal host_obs_source_epoch
         nonlocal canon_container
         nonlocal life_command_authority, life_dispatchers
-        nonlocal embodiment_outbox, embodiment_dispatcher
-        nonlocal embodiment_outbox_unbind, embodiment_audit_unsubscribe
+        nonlocal embodiment_runtime, embodiment_authority_task
         async with runtime_lifespan(
             get_ledger=get_ledger,
             logger=logger,
@@ -950,9 +963,6 @@ def create_app() -> FastAPI:
                 # Host source readers may observe these services, but never
                 # construct them from a GET request.
                 host_obs_ledger = ledger
-                host_query_projection_store = QueryProjectionStore(
-                    str(getattr(ledger, "canonical_db_path", "") or "")
-                )
                 host_obs_source_epoch = HostObsSourceEpoch.create()
                 host_obs_tribe_state_reader = (
                     require_process_tribe_runtime().state_registry.snapshot
@@ -1007,8 +1017,6 @@ def create_app() -> FastAPI:
                     in truthy,
                     "domain_mode": "domain",
                 }
-                life_command_authority = _compose_life_command_authority(ledger)
-                life_dispatchers = _compose_life_dispatchers(ledger)
                 runtime_settings = get_core_settings()
                 task_runtime = build_process_task_runtime_container(
                     ledger=ledger,
@@ -1025,6 +1033,18 @@ def create_app() -> FastAPI:
                             False,
                         )
                     ),
+                )
+                # Digital Life repositories are migration-gated.  The task
+                # runtime owns canonical migration application, so Life must
+                # be composed only after that startup gate has completed.
+                life_command_authority = _compose_life_command_authority(ledger)
+                # ``QueryProjectionStore`` requires migration 0082.  The task
+                # runtime is the startup migration authority, so constructing
+                # this read model before the runtime above would make a fresh
+                # database fail for the wrong reason and bypass the canonical
+                # migration error contract.
+                host_query_projection_store = QueryProjectionStore(
+                    str(task_runtime.canonical_db_path)
                 )
                 terminal_reconciliation_read_authority = None
                 if bool(getattr(runtime_settings, "nle_operator_views_enabled", False)):
@@ -1047,13 +1067,9 @@ def create_app() -> FastAPI:
                         )
                     )
                 from host_brain.channels.embodiment import (  # noqa: PLC0415
-                    bind_embodiment_outbox_authority,
+                    HostEmbodimentRuntime,
                     build_embodiment_receipt_audit_observer,
-                    register_embodiment_receipt_observer,
-                )
-                from host_brain.channels.embodiment_outbox import (  # noqa: PLC0415
-                    DurableEmbodimentOutbox,
-                    EmbodimentOutboxDispatcher,
+                    build_durable_host_embodiment_session_config,
                 )
                 from host_brain.persistence.embodiment_outbox_repository import (  # noqa: PLC0415
                     EmbodimentOutboxRepository,
@@ -1062,17 +1078,34 @@ def create_app() -> FastAPI:
                 embodiment_repository = EmbodimentOutboxRepository(
                     task_runtime.canonical_db_path
                 )
-                embodiment_outbox = DurableEmbodimentOutbox(embodiment_repository)
-                embodiment_dispatcher = EmbodimentOutboxDispatcher(
-                    embodiment_repository,
-                    worker_id="host-embodiment-dispatcher",
+                embodiment_runtime = HostEmbodimentRuntime(
+                    repository=embodiment_repository,
+                    worker_id=f"{task_runtime.recovery_id}::embodiment",
+                    session_config=build_durable_host_embodiment_session_config(
+                        task_runtime.canonical_db_path
+                    ),
+                    receipt_observers=(
+                        build_embodiment_receipt_audit_observer(
+                            ledger.log_voice_event
+                        ),
+                    ),
                 )
-                embodiment_outbox_unbind = bind_embodiment_outbox_authority(
-                    embodiment_outbox
+                # A replacement process must rotate any inherited live Edge
+                # fence before routes can admit more physical work.  Fresh
+                # stores have no inherited lease and do not force Edge startup.
+                await embodiment_runtime.establish_transport_authority()
+                embodiment_authority_task = asyncio.create_task(
+                    embodiment_runtime.run_authority_heartbeat(),
+                    name="host-embodiment-authority-heartbeat",
                 )
-                embodiment_audit_unsubscribe = register_embodiment_receipt_observer(
-                    build_embodiment_receipt_audit_observer(ledger.log_voice_event)
+                # Ensure the lifespan-owned heartbeat has entered its renewal
+                # loop before composition can eventually expose routes.
+                await asyncio.sleep(0)
+                life_dispatchers = _compose_life_dispatchers(
+                    ledger,
+                    embodiment_runtime=embodiment_runtime,
                 )
+                application.state.embodiment_runtime = embodiment_runtime
                 canon = build_process_canon_container(
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
@@ -1336,13 +1369,42 @@ def create_app() -> FastAPI:
                     }
 
                 async def embodiment_io_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    if embodiment_dispatcher is None:
+                    if embodiment_runtime is None:
                         return {
                             "status": "FAILED",
                             "reason_code": "EMBODIMENT_DISPATCHER_UNAVAILABLE",
                         }
-                    batch = await embodiment_dispatcher.dispatch_pending_async(limit=100)
-                    return batch.as_dict()
+                    # An uncertain command must never be replayed by a later
+                    # scheduler tick.  Run normal pending delivery and the
+                    # independent read-only reconciliation pass separately so
+                    # one transient dispatch failure cannot prevent recovery
+                    # of an older ``IN_DOUBT`` command.
+                    dispatch_error: Exception | None = None
+                    try:
+                        batch = await embodiment_runtime.dispatch_pending_async(limit=100)
+                        dispatch = batch.as_dict()
+                    except Exception as exc:  # durable claim expires to IN_DOUBT
+                        dispatch_error = exc
+                        dispatch = {
+                            "status": "DEGRADED",
+                            "reason_code": "EMBODIMENT_DISPATCH_UNAVAILABLE",
+                        }
+                    reconciliation = await embodiment_runtime.reconcile_in_doubt_async(
+                        limit=100
+                    )
+                    result = {
+                        "status": (
+                            "SUCCEEDED"
+                            if dispatch.get("status") == "SUCCEEDED"
+                            and reconciliation.as_dict().get("status") == "SUCCEEDED"
+                            else "DEGRADED"
+                        ),
+                        "dispatch": dispatch,
+                        "reconciliation": reconciliation.as_dict(),
+                    }
+                    if dispatch_error is not None:
+                        result["reason_code"] = "EMBODIMENT_DISPATCH_UNAVAILABLE"
+                    return result
 
                 def scheduler_current_mode() -> str:
                     return str(get_hard_state().sys_mode or "normal")
@@ -1551,17 +1613,20 @@ def create_app() -> FastAPI:
                             )
                 finally:
                     try:
+                        if embodiment_authority_task is not None:
+                            embodiment_authority_task.cancel()
+                            try:
+                                await embodiment_authority_task
+                            except asyncio.CancelledError:
+                                pass
+                            embodiment_authority_task = None
                         _reset_life_command_authority()
                         life_command_authority = None
                         life_dispatchers = None
-                        if embodiment_outbox_unbind is not None:
-                            embodiment_outbox_unbind()
-                            embodiment_outbox_unbind = None
-                        if embodiment_audit_unsubscribe is not None:
-                            embodiment_audit_unsubscribe()
-                            embodiment_audit_unsubscribe = None
-                        embodiment_outbox = None
-                        embodiment_dispatcher = None
+                        if embodiment_runtime is not None:
+                            embodiment_runtime.close()
+                        embodiment_runtime = None
+                        application.state.embodiment_runtime = None
                         set_memory_service_container(None)
                         if memory is not None:
                             memory.close()
@@ -1638,6 +1703,7 @@ def create_app() -> FastAPI:
     application.state.task_graph_cancellation_command_service = None
     application.state.task_operation_reconciliation_command_service = None
     application.state.canon_container = None
+    application.state.embodiment_runtime = None
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports
     application.state.task_runtime_container_provider = (

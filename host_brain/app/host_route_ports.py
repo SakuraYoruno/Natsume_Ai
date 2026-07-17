@@ -27,6 +27,7 @@ class HostRoutePorts:
     bond_engine_provider: RouteProvider | None = None
     bond_writer_provider: RouteProvider | None = None
     mode_transition_service_provider: RouteProvider | None = None
+    embodiment_runtime_provider: RouteProvider | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -36,6 +37,7 @@ class HostRoutePorts:
             "bond_engine_provider",
             "bond_writer_provider",
             "mode_transition_service_provider",
+            "embodiment_runtime_provider",
         ):
             provider = getattr(self, field_name)
             if provider is not None and not callable(provider):

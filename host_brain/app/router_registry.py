@@ -24,7 +24,7 @@ from host_brain.app.internal_security_immune_routes import router as internal_se
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.digital_life_routes import router as digital_life_router
 from host_brain.app.memory_routes import router as memory_router
-from host_brain.app.mateengine_routes import router as mateengine_router
+from host_brain.app.mateengine_routes import create_mateengine_router
 from host_brain.app.pentest_secure_run_routes import (
     PentestSecureRunCompositionProvider,
     create_pentest_secure_run_http_router,
@@ -171,7 +171,7 @@ def register_host_routers(
     app.include_router(internal_security_immune_router)
     app.include_router(digital_life_router)
     app.include_router(memory_router)
-    app.include_router(mateengine_router)
+    app.include_router(create_mateengine_router(route_ports))
     app.include_router(
         create_obs_command_http_router(
             ingress_provider=obs_command_ingress_provider,

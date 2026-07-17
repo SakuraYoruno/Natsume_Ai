@@ -296,6 +296,22 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     pentest_composition = object()
     signed_ingress = object()
     skill_registry = object()
+    query_projection_store = object()
+    class EmbodimentRuntime:
+        async def establish_transport_authority(self) -> None:
+            events.append("embodiment-transport-fenced")
+
+        async def run_authority_heartbeat(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                events.append("embodiment-heartbeat-stopped")
+                raise
+
+        def close(self) -> None:
+            events.append("embodiment-runtime-closed")
+
+    embodiment_runtime = EmbodimentRuntime()
 
     class Container:
         obs_command_composition = SimpleNamespace(
@@ -561,6 +577,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(
         asgi,
+        "QueryProjectionStore",
+        lambda db_path: query_projection_store
+        if db_path == ledger.canonical_db_path
+        else pytest.fail("wrong query projection path"),
+    )
+    monkeypatch.setattr(
+        asgi,
         "_compose_life_command_authority",
         lambda current: (object(), object())
         if current is ledger
@@ -569,9 +592,27 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current: (object(), object())
-        if current is ledger
+        lambda current, *, embodiment_runtime: (object(), object())
+        if current is ledger and embodiment_runtime is not None
         else pytest.fail("wrong Life dispatcher ledger"),
+    )
+    from host_brain.channels import embodiment as embodiment_module
+    from host_brain.persistence import embodiment_outbox_repository as embodiment_repo_module
+
+    monkeypatch.setattr(
+        embodiment_repo_module,
+        "EmbodimentOutboxRepository",
+        lambda db_path: SimpleNamespace(canonical_db_path=db_path),
+    )
+    monkeypatch.setattr(
+        embodiment_module,
+        "HostEmbodimentRuntime",
+        lambda **_kwargs: embodiment_runtime,
+    )
+    monkeypatch.setattr(
+        embodiment_module,
+        "build_embodiment_receipt_audit_observer",
+        lambda _writer: object(),
     )
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(asgi, "get_capability_broker", lambda: capability_broker)
@@ -721,6 +762,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.memory_service_container is memory_container
             assert application.state.agent_workspace_container is workspace_container
             assert application.state.canon_container is canon_container
+            assert application.state.embodiment_runtime is embodiment_runtime
             assert (
                 application.state.task_operation_reconciliation_command_service
                 is task_runtime_container.operation_reconciliation_service
@@ -768,6 +810,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "base-started",
         "container-built",
         "task-runtime-built",
+        "embodiment-transport-fenced",
         "canon-built",
         "canon-synced",
         "command-ingress-built",
@@ -785,6 +828,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "scheduler-clock-stopped",
         "workspace-closed",
         "task-runtime-closed",
+        "embodiment-heartbeat-stopped",
+        "embodiment-runtime-closed",
         "memory-unpublished",
         "memory-closed",
         "command-ingress-closed",
@@ -945,6 +990,20 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     )
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(asgi, "get_token_service", object)
+    # This test stops at the Life-authority prewarm boundary; it is not a
+    # Task Runtime migration test.  Keep the unit fixture independent from
+    # the production-only durable-path requirement introduced by D8.
+    class _TaskRuntimeFixture:
+        canonical_db_path = ledger.canonical_db_path
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        asgi,
+        "build_process_task_runtime_container",
+        lambda **_kwargs: _TaskRuntimeFixture(),
+    )
     monkeypatch.setattr(
         asgi,
         "build_process_security_service_container",

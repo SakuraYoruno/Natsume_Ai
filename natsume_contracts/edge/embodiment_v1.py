@@ -21,6 +21,13 @@ EMBODIMENT_COMMAND_EXPIRED = "EMBODIMENT_COMMAND_EXPIRED"
 EMBODIMENT_COMMAND_DUPLICATE = "EMBODIMENT_COMMAND_DUPLICATE"
 EMBODIMENT_COMMAND_CONFLICT = "EMBODIMENT_COMMAND_CONFLICT"
 EMBODIMENT_COMMAND_IN_DOUBT = "EMBODIMENT_COMMAND_IN_DOUBT"
+# Receipt queries now carry the lease holder identity as well as the mutable
+# lease fence.  This is deliberately a new schema revision: accepting a v1
+# query would leave the Edge unable to prove that the caller is the durable
+# command authority owner.
+EMBODIMENT_RECEIPT_QUERY_SCHEMA_VERSION = "natsume.edge.embodiment-receipt-query.v2"
+EMBODIMENT_RECEIPT_QUERY_INVALID = "EMBODIMENT_RECEIPT_QUERY_INVALID"
+EMBODIMENT_RECEIPT_NOT_FOUND = "EMBODIMENT_RECEIPT_NOT_FOUND"
 EMBODIMENT_LEASE_REQUIRED = "EMBODIMENT_LEASE_REQUIRED"
 EMBODIMENT_LEASE_INVALID = "EMBODIMENT_LEASE_INVALID"
 EMBODIMENT_LEASE_EXPIRED = "EMBODIMENT_LEASE_EXPIRED"
@@ -116,6 +123,38 @@ class EmbodimentReceipt:
             "latency_ms": self.latency_ms,
             "event": dict(self.event or {}),
             "receipt_ref": self.receipt_ref,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EmbodimentReceiptQuery:
+    """A read-only, lease-fenced request for one durable Edge receipt.
+
+    The query deliberately binds both the stable command identifier and its
+    idempotency key and the non-secret owner identity from the current lease.
+    It is subsequently carried inside the authenticated Edge RPC envelope; the
+    Edge store must prove in one read boundary that the supplied lease is live,
+    its live owner equals ``owner_id``, and the durable command was admitted by
+    that same owner before returning any receipt.
+    """
+
+    command_id: str
+    idempotency_key: str
+    session_id: str
+    lease_id: str
+    owner_id: str
+    fencing_token: int
+    schema_version: str = EMBODIMENT_RECEIPT_QUERY_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "command_id": self.command_id,
+            "idempotency_key": self.idempotency_key,
+            "session_id": self.session_id,
+            "lease_id": self.lease_id,
+            "owner_id": self.owner_id,
+            "fencing_token": int(self.fencing_token),
         }
 
 
@@ -216,6 +255,57 @@ def parse_embodiment_receipt(raw: Mapping[str, Any] | Any) -> EmbodimentReceipt:
     )
 
 
+def build_embodiment_receipt_query(
+    *,
+    command_id: str,
+    idempotency_key: str,
+    session_id: str,
+    lease_id: str,
+    owner_id: str,
+    fencing_token: int,
+) -> EmbodimentReceiptQuery:
+    """Build an exact, owner- and session-fenced receipt lookup request."""
+
+    key = _required_text(idempotency_key, "idempotency_key")
+    resolved_command_id = _required_text(command_id, "command_id")
+    if resolved_command_id != stable_command_id(idempotency_key=key):
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID)
+    try:
+        fence = int(fencing_token)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID) from exc
+    if isinstance(fencing_token, bool) or fence < 1:
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID)
+    return EmbodimentReceiptQuery(
+        command_id=resolved_command_id,
+        idempotency_key=key,
+        session_id=_required_text(session_id, "session_id"),
+        lease_id=_required_text(lease_id, "lease_id"),
+        owner_id=_required_text(owner_id, "owner_id"),
+        fencing_token=fence,
+    )
+
+
+def parse_embodiment_receipt_query(
+    raw: Mapping[str, Any] | Any,
+) -> EmbodimentReceiptQuery:
+    if not isinstance(raw, Mapping):
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID)
+    if str(raw.get("schema_version") or "") != EMBODIMENT_RECEIPT_QUERY_SCHEMA_VERSION:
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID)
+    try:
+        return build_embodiment_receipt_query(
+            command_id=str(raw.get("command_id") or ""),
+            idempotency_key=str(raw.get("idempotency_key") or ""),
+            session_id=str(raw.get("session_id") or ""),
+            lease_id=str(raw.get("lease_id") or ""),
+            owner_id=str(raw.get("owner_id") or ""),
+            fencing_token=raw.get("fencing_token"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(EMBODIMENT_RECEIPT_QUERY_INVALID) from exc
+
+
 def _required_text(value: Any, field: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -227,12 +317,15 @@ __all__ = [
     "EMBODIMENT_COMMAND_SCHEMA_VERSION", "EMBODIMENT_RECEIPT_SCHEMA_VERSION",
     "EMBODIMENT_COMMAND_INVALID", "EMBODIMENT_COMMAND_EXPIRED",
     "EMBODIMENT_COMMAND_DUPLICATE", "EMBODIMENT_COMMAND_CONFLICT",
-    "EMBODIMENT_COMMAND_IN_DOUBT", "EMBODIMENT_LEASE_REQUIRED",
+    "EMBODIMENT_COMMAND_IN_DOUBT", "EMBODIMENT_RECEIPT_QUERY_SCHEMA_VERSION",
+    "EMBODIMENT_RECEIPT_QUERY_INVALID", "EMBODIMENT_RECEIPT_NOT_FOUND",
+    "EMBODIMENT_LEASE_REQUIRED",
     "EMBODIMENT_LEASE_INVALID", "EMBODIMENT_LEASE_EXPIRED",
     "EMBODIMENT_FENCE_STALE", "EMBODIMENT_KIND_VOICE",
     "EMBODIMENT_KIND_AVATAR", "EMBODIMENT_KIND_MATEENGINE",
     "EMBODIMENT_KIND_DESKTOP", "EMBODIMENT_KINDS", "EmbodimentCommand",
     "EmbodimentReceipt", "EmbodimentCommandPort", "stable_command_id",
     "build_embodiment_command", "parse_embodiment_command",
-    "parse_embodiment_receipt",
+    "parse_embodiment_receipt", "EmbodimentReceiptQuery",
+    "build_embodiment_receipt_query", "parse_embodiment_receipt_query",
 ]

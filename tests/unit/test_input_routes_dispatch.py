@@ -11,6 +11,7 @@ import host_brain.input_runtime.ingress as input_routes_module
 import host_brain.input_runtime.contracts_and_normalization as input_contracts
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.input_runtime.contracts_and_normalization import InputPayload, _build_gateway_reply_text, _build_gateway_voice_text
 from host_brain.input_runtime.audit import log_input_event as _log_input_event
 from host_brain.input_runtime.gateway_delivery import _send_gateway_voice_reply
@@ -25,6 +26,19 @@ def _run(coro):
 
 def _ports(**overrides):  # noqa: ANN003
     return replace(build_input_runtime_application_ports(), **overrides)
+
+
+class _RecordingEmbodimentRuntime:
+    def __init__(self) -> None:
+        self.commands = []
+
+    def enqueue(self, command):  # noqa: ANN001, ANN201
+        self.commands.append(command)
+        return EmbodimentOutboxAck(
+            outbox_id=f"outbox-{len(self.commands)}",
+            command_id=command.command_id,
+            idempotency_key=command.idempotency_key,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -535,22 +549,11 @@ def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
     assert voice_text == "我在呢，你慢慢说。"
 
 
-def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
-    post_speak_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="ACCEPTED",
-            detail="playback started",
-            latency_ms=12,
-            event={"audio_path": "D:\\tmp\\voice.wav"},
-        )
-    )
+def test_send_gateway_voice_reply_durably_queues_chinese_tts_without_claiming_playback() -> None:
+    embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock()
 
     with patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=post_speak_mock,
-    ), patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ):
@@ -560,45 +563,37 @@ def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
                 conversation_id="qq_dm_voice_lang_001",
                 tts_text="我在呢。",
                 request_id="req_gateway_voice_lang",
+                embodiment_runtime=embodiment_runtime,
             )
         )
 
-    assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["payload"]["lang_hint"] == "zh"
-    assert post_speak_mock.await_args.kwargs["payload"]["export_audio"] is False
-    assert post_gateway_reply_mock.await_count == 0
-    assert result["voice_status"] == "ACCEPTED"
-    assert result["voice_success"] is True
+    assert len(embodiment_runtime.commands) == 1
+    command = embodiment_runtime.commands[0]
+    assert command.kind == "voice"
+    assert command.action == "speak"
+    assert command.payload["text"] == "我在呢。"
+    assert command.payload["lang_hint"] == "zh"
+    assert command.payload["export_audio"] is False
+    assert command.request_id == "req_gateway_voice_lang"
+    assert command.idempotency_key == "req_gateway_voice_lang:gateway-voice"
+    post_gateway_reply_mock.assert_not_awaited()
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_durable_admitted"] is True
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_vts_started"] is False
+    assert result["voice_audio_path"] == ""
+    assert result["voice_physical_effect_verified"] is False
     assert result["voice_gateway_sent"] is False
     assert "disabled" in result["voice_gateway_detail"].lower()
 
 
-def test_send_gateway_voice_reply_can_opt_in_to_platform_voice_message() -> None:
-    post_speak_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="ACCEPTED",
-            detail="playback started",
-            latency_ms=12,
-            event={
-                "event_type": "TTS_PLAYBACK_STARTED",
-                "audio_path": "D:\\tmp\\voice.wav",
-            },
-        )
-    )
-    post_gateway_reply_mock = AsyncMock(
-        return_value=SimpleNamespace(
-            success=True,
-            status="SENT",
-            detail="voice sent",
-            latency_ms=34,
-        )
-    )
+def test_send_gateway_voice_reply_platform_voice_waits_for_later_receipt() -> None:
+    embodiment_runtime = _RecordingEmbodimentRuntime()
+    post_gateway_reply_mock = AsyncMock()
 
     with patch(
-        "host_brain.channels.embodiment.submit_voice_command",
-        new=post_speak_mock,
-    ), patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
     ):
@@ -609,14 +604,44 @@ def test_send_gateway_voice_reply_can_opt_in_to_platform_voice_message() -> None
                 tts_text="我在呢。",
                 request_id="req_gateway_voice_opt_in",
                 send_gateway_voice_message=True,
+                embodiment_runtime=embodiment_runtime,
             )
         )
 
-    assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["payload"]["export_audio"] is True
-    assert post_gateway_reply_mock.await_count == 1
-    voice_call = post_gateway_reply_mock.await_args.kwargs
-    assert voice_call["msg_type"] == "voice"
-    assert voice_call["media_path"] == "D:\\tmp\\voice.wav"
-    assert result["voice_gateway_sent"] is True
-    assert result["voice_gateway_status"] == "SENT"
+    assert len(embodiment_runtime.commands) == 1
+    command = embodiment_runtime.commands[0]
+    assert command.payload["export_audio"] is True
+    post_gateway_reply_mock.assert_not_awaited()
+    assert result["voice_status"] == "PENDING"
+    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
+    assert result["voice_success"] is None
+    assert result["voice_started"] is False
+    assert result["voice_audio_path"] == ""
+    assert result["voice_gateway_sent"] is False
+    assert result["voice_gateway_status"] == "WAITING_RECEIPT"
+    assert "later Edge receipt" in result["voice_gateway_detail"]
+
+
+def test_send_gateway_voice_reply_without_app_runtime_fails_closed() -> None:
+    post_gateway_reply_mock = AsyncMock()
+
+    with patch(
+        "host_brain.channels.edge_transport.submit_gateway_reply",
+        new=post_gateway_reply_mock,
+    ):
+        result = _run(
+            _send_gateway_voice_reply(
+                platform="qq",
+                conversation_id="qq_dm_voice_no_runtime",
+                tts_text="我在呢。",
+                request_id="req_gateway_voice_no_runtime",
+            )
+        )
+
+    post_gateway_reply_mock.assert_not_awaited()
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "EMBODIMENT_RUNTIME_REQUIRED"
+    assert result["voice_durable_admitted"] is False
+    assert result["voice_success"] is False
+    assert result["voice_started"] is False
+    assert result["voice_gateway_sent"] is False

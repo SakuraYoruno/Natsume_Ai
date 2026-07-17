@@ -124,7 +124,6 @@ async def _deliver_gateway_reply(
     }
     if not _gateway_auto_reply_enabled():
         if voice_options["force_dual_voice_reply"] and platform and conversation_id and reply_text:
-            voice_result["voice_sent"] = True
             if voice_options["wait_voice_reply_result"]:
                 voice_result["voice_waited"] = True
                 voice_result.update(
@@ -136,7 +135,14 @@ async def _deliver_gateway_reply(
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
+                        embodiment_runtime=_embodiment_runtime(ports),
                     )
+                )
+                # ``voice_sent`` is a compatibility field for a voice command
+                # admitted to Host's durable pipeline.  It must not remain
+                # true when the attempted admission itself was rejected.
+                voice_result["voice_sent"] = bool(
+                    voice_result.get("voice_durable_admitted", False)
                 )
             else:
                 voice_result["voice_waited"] = True
@@ -149,7 +155,11 @@ async def _deliver_gateway_reply(
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
+                        embodiment_runtime=_embodiment_runtime(ports),
                     )
+                )
+                voice_result["voice_sent"] = bool(
+                    voice_result.get("voice_durable_admitted", False)
                 )
         return {
             "success": True,
@@ -464,7 +474,6 @@ async def _deliver_gateway_reply(
         if not voice_text or form_decision.secondary != MsgType.VOICE:
             return dict(voice_result)
 
-        voice_result["voice_sent"] = True
         voice_result["voice_waited"] = True
         voice_result.update(
             await _send_gateway_voice_reply(
@@ -475,7 +484,13 @@ async def _deliver_gateway_reply(
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
+                embodiment_runtime=_embodiment_runtime(ports),
             )
+        )
+        # This means durable admission, not physical playback.  Playback is
+        # represented separately by ``voice_physical_effect_verified``.
+        voice_result["voice_sent"] = bool(
+            voice_result.get("voice_durable_admitted", False)
         )
         return dict(voice_result)
 
@@ -560,14 +575,45 @@ async def _send_gateway_voice_reply(
     emotion_tag: str = "NEUTRAL",
     emotion_intensity: float | None = None,
     send_gateway_voice_message: bool = False,
+    embodiment_runtime: Any | None = None,
 ) -> dict[str, Any]:
-    """合成语音并驱动 Edge 播放/VTS；平台语音消息仅显式开关发送。"""
+    """Durably admit a voice effect without claiming that Edge played it.
+
+    The synchronous Gateway reply path owns neither an Edge receipt nor the
+    exported audio file.  It therefore commits the command to the app-owned
+    Host outbox.  Physical playback and optional platform voice delivery
+    require separate receipt-driven follow-up work.
+    """
     import logging as _logging  # noqa: PLC0415
     _vlogger = _logging.getLogger("Natsume.gateway_voice")
+    if embodiment_runtime is None:
+        return {
+            "voice_success": False,
+            "voice_status": "FAILED",
+            "voice_reason_code": "EMBODIMENT_RUNTIME_REQUIRED",
+            "voice_detail": "gateway voice durable admission failed: app-owned embodiment runtime unavailable",
+            "voice_latency_ms": 0,
+            "voice_started": False,
+            "voice_vts_started": False,
+            "voice_vts_expression_success": False,
+            "voice_audio_path": "",
+            "voice_gateway_sent": False,
+            "voice_gateway_status": None,
+            "voice_gateway_detail": "platform voice message not sent: no durable embodiment admission",
+            "voice_gateway_latency_ms": None,
+            "voice_event": {},
+            "voice_delivery_state": "FAILED",
+            "voice_durable_admitted": False,
+            "voice_physical_effect_verified": False,
+        }
     try:
-        from host_brain.channels.edge_transport import submit_gateway_reply as post_gateway_reply  # noqa: PLC0415
-        from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
+        from host_brain.channels.embodiment import (  # noqa: PLC0415
+            build_host_embodiment_command,
+            queue_embodiment_command,
+        )
         from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
+        from natsume_contracts.edge.embodiment_v1 import EMBODIMENT_KIND_VOICE  # noqa: PLC0415
+
         _tts_text_normalized = str(tts_text or "").strip()
         if not _tts_text_normalized:
             return {
@@ -585,6 +631,9 @@ async def _send_gateway_voice_reply(
                 "voice_gateway_detail": None,
                 "voice_gateway_latency_ms": None,
                 "voice_event": {},
+                "voice_delivery_state": "SKIPPED",
+                "voice_durable_admitted": False,
+                "voice_physical_effect_verified": False,
             }
 
         tts_params = TtsContextRouter().route(
@@ -592,7 +641,8 @@ async def _send_gateway_voice_reply(
             emotion_tag=emotion_tag,
         )
         effective_emotion_tag = _resolve_gateway_voice_emotion_tag(emotion_tag)
-        result = await submit_voice_command(
+        command = build_host_embodiment_command(
+            kind=EMBODIMENT_KIND_VOICE,
             action="speak",
             payload={
                 "text": _tts_text_normalized,
@@ -604,41 +654,94 @@ async def _send_gateway_voice_reply(
             request_id=request_id,
             idempotency_key=f"{request_id}:gateway-voice",
         )
-        voice_result = _extract_gateway_voice_result(result)
-        audio_path = str(voice_result.get("voice_audio_path") or "").strip()
-        if not send_gateway_voice_message:
-            voice_result["voice_gateway_detail"] = "Gateway voice message disabled; Edge playback/VTS only"
-        elif audio_path and platform and conversation_id:
-            gateway_timeout_ms = get_input_settings().gateway_voice_reply_timeout_ms
-            gateway_result = await post_gateway_reply(
-                platform=platform,
-                conversation_id=conversation_id,
-                content="",
-                msg_type="voice",
-                media_path=audio_path,
-                request_id=f"{request_id}::voice_record",
-                raw_extra={
-                    "message_kind": "voice_reply",
-                    "reply_source": "edge_tts_export",
-                    "tts_request_id": request_id,
-                    "emotion_tag": str(effective_emotion_tag or "").strip().upper(),
-                },
-                wait_result=True,
-                timeout_ms=gateway_timeout_ms,
-            )
-            voice_result["voice_gateway_sent"] = bool(getattr(gateway_result, "success", False))
-            voice_result["voice_gateway_status"] = str(getattr(gateway_result, "status", "") or "")
-            voice_result["voice_gateway_detail"] = str(getattr(gateway_result, "detail", "") or "")
-            voice_result["voice_gateway_latency_ms"] = int(getattr(gateway_result, "latency_ms", 0) or 0)
+        ack = queue_embodiment_command(command, runtime=embodiment_runtime)
+        ack_status = str(getattr(ack, "status", "PENDING") or "PENDING").strip().upper()
+        # The concrete v1 acknowledgement exposes ``durable_admitted``.  The
+        # status fallback keeps an older test/adaptor acknowledgement from
+        # misreporting a replayed APPLIED/DISPATCHING row as a new failure.
+        durable_admitted = (
+            ack_status in {"PENDING", "DISPATCHING", "IN_DOUBT", "APPLIED"}
+            or bool(getattr(ack, "durable_admitted", getattr(ack, "success", False)))
+        ) and ack_status not in {"REJECTED", "FAILED", "ERROR"}
+        physical_effect_verified = bool(
+            getattr(ack, "effect_verified", False)
+        ) or ack_status == "APPLIED"
+        if ack_status in {"PENDING", "QUEUED", "ACCEPTED"}:
+            delivery_state = "DURABLY_QUEUED"
+        elif ack_status == "DISPATCHING":
+            delivery_state = "DISPATCHING"
+        elif ack_status == "APPLIED":
+            delivery_state = "APPLIED"
+        elif ack_status == "IN_DOUBT":
+            delivery_state = "IN_DOUBT"
+        elif ack_status == "REJECTED":
+            delivery_state = "REJECTED"
         else:
-            voice_result["voice_gateway_detail"] = "TTS audio export path missing; Gateway voice message not sent"
+            delivery_state = "FAILED"
+        if physical_effect_verified:
+            voice_success: bool | None = True
+        elif durable_admitted:
+            voice_success = None
+        else:
+            voice_success = False
+
+        if send_gateway_voice_message:
+            gateway_delivery_status = (
+                "RECEIPT_AVAILABLE_PENDING_DELIVERY"
+                if physical_effect_verified
+                else "WAITING_RECEIPT"
+                if durable_admitted
+                else "NOT_QUEUED"
+            )
+            gateway_delivery_detail = (
+                "platform voice message not sent: receipt is available but receipt-driven delivery has not run"
+                if physical_effect_verified
+                else "platform voice message not sent: waiting for a later Edge receipt and exported audio path"
+                if durable_admitted
+                else "platform voice message not sent: Host did not durably admit the voice command"
+            )
+        else:
+            gateway_delivery_status = "DISABLED"
+            gateway_delivery_detail = (
+                "Gateway voice message disabled; physical voice command is durably queued"
+                if durable_admitted
+                else "Gateway voice message disabled; physical voice command was not durably admitted"
+            )
+
+        voice_result = {
+            # ``voice_success`` means physical voice success in this response
+            # contract.  Admission alone cannot establish it.
+            "voice_success": voice_success,
+            "voice_status": ack_status,
+            "voice_reason_code": getattr(ack, "reason_code", None),
+            "voice_detail": str(getattr(ack, "detail", "") or "voice command committed to durable Host outbox"),
+            "voice_latency_ms": int(getattr(ack, "latency_ms", 0) or 0),
+            "voice_started": False,
+            "voice_vts_started": False,
+            "voice_vts_expression_success": False,
+            "voice_audio_path": "",
+            "voice_gateway_sent": False,
+            "voice_gateway_status": gateway_delivery_status,
+            "voice_gateway_detail": gateway_delivery_detail,
+            "voice_gateway_latency_ms": None,
+            "voice_event": {
+                "event_type": (
+                    "HOST_EMBODIMENT_DURABLY_QUEUED"
+                    if delivery_state == "DURABLY_QUEUED"
+                    else "HOST_EMBODIMENT_DURABLE_STATUS_REPLAYED"
+                ),
+                **(ack.as_dict() if hasattr(ack, "as_dict") else {}),
+            },
+            "voice_delivery_state": delivery_state,
+            "voice_durable_admitted": durable_admitted,
+            "voice_physical_effect_verified": physical_effect_verified,
+        }
         _vlogger.debug(
-            "gateway_voice completed platform=%s conversation=%s success=%s started=%s vts_started=%s platform_voice=%s len=%d",
+            "gateway_voice admitted platform=%s conversation=%s status=%s durable=%s platform_voice=%s len=%d",
             platform,
             conversation_id,
-            voice_result["voice_success"],
-            voice_result["voice_started"],
-            voice_result["voice_vts_started"],
+            voice_result["voice_status"],
+            voice_result["voice_durable_admitted"],
             voice_result.get("voice_gateway_sent"),
             len(_tts_text_normalized),
         )
@@ -660,4 +763,12 @@ async def _send_gateway_voice_reply(
             "voice_gateway_detail": None,
             "voice_gateway_latency_ms": None,
             "voice_event": {},
+            "voice_delivery_state": "FAILED",
+            "voice_durable_admitted": False,
+            "voice_physical_effect_verified": False,
         }
+
+
+def _embodiment_runtime(ports: InputRuntimeApplicationPorts) -> Any | None:
+    provider = getattr(ports, "get_embodiment_runtime", None)
+    return provider() if callable(provider) else None

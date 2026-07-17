@@ -52,11 +52,14 @@ from natsume_contracts.edge.v1 import (
 )
 from natsume_contracts.edge.embodiment_v1 import (
     EMBODIMENT_COMMAND_INVALID,
+    EMBODIMENT_RECEIPT_NOT_FOUND,
+    EMBODIMENT_RECEIPT_QUERY_INVALID,
     EMBODIMENT_KIND_AVATAR,
     EMBODIMENT_KIND_DESKTOP,
     EMBODIMENT_KIND_MATEENGINE,
     EMBODIMENT_KIND_VOICE,
     parse_embodiment_command,
+    parse_embodiment_receipt_query,
 )
 from natsume_contracts.edge.transport_v1 import (
     EDGE_SESSION_RECONNECT_INVALID,
@@ -275,6 +278,29 @@ def create_edge_fastapi_app(
             enabled=runtime_config.rpc_gateway_enabled,
             disabled_detail="edge embodiment session gateway disabled by config",
             handler=lambda _active_runtime, envelope: _handle_embodiment_session(
+                envelope,
+                store=embodiment_store_value,
+            ),
+        )
+
+    @app.post("/v1/edge/embodiment/receipt")
+    async def edge_embodiment_receipt(request: Request) -> JSONResponse:
+        """Return one Edge-durable receipt through the normal HMAC envelope.
+
+        This is a reconciliation read, not a replay endpoint.  The handler
+        requires the exact current session lease, its owner identity, and the
+        command's stable idempotency identity before it reveals a receipt.
+        """
+
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge embodiment receipt gateway disabled by config",
+            handler=lambda _active_runtime, envelope: _handle_embodiment_receipt_query(
                 envelope,
                 store=embodiment_store_value,
             ),
@@ -978,6 +1004,10 @@ def _handle_embodiment_session(
             reconnect_fencing_token=(
                 int(reconnect_fence) if reconnect_fence is not None else None
             ),
+            # This value intentionally reaches the store without bool-like
+            # coercion: only a JSON boolean may ask Edge to invalidate the
+            # current live fence during a Host runtime replacement.
+            rotate_fencing_token=payload.get("rotate_fencing_token", False),
         )
     except (TypeError, ValueError, EdgeEmbodimentTransportError) as exc:
         reason_code = getattr(exc, "reason_code", EDGE_SESSION_RECONNECT_INVALID)
@@ -996,6 +1026,80 @@ def _handle_embodiment_session(
         stage="S_EDGE_EMBODIMENT_SESSION",
         detail="edge embodiment transport lease active",
         event={"lease": lease.as_dict()},
+    )
+
+
+def _handle_embodiment_receipt_query(
+    envelope: EdgeRpcEnvelope,
+    *,
+    store: SQLiteEdgeEmbodimentStore,
+) -> EdgeGatewayResult:
+    """Read, but never replay, one receipt owned by the current lease holder."""
+
+    try:
+        query = parse_embodiment_receipt_query(envelope.payload)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=EMBODIMENT_RECEIPT_QUERY_INVALID,
+            stage="S_EDGE_EMBODIMENT_RECEIPT_QUERY",
+            detail=f"invalid embodiment receipt query: {exc}",
+            event={},
+        )
+    try:
+        lookup = store.query_receipt_for_live_lease(
+            session_id=query.session_id,
+            lease_id=query.lease_id,
+            owner_id=query.owner_id,
+            fencing_token=query.fencing_token,
+            command_id=query.command_id,
+            idempotency_key=query.idempotency_key,
+        )
+    except EdgeEmbodimentTransportError as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=exc.reason_code,
+            stage="S_EDGE_EMBODIMENT_RECEIPT_QUERY",
+            detail=f"edge embodiment receipt query rejected: {exc.reason_code}",
+            event={},
+        )
+
+    query_event: dict[str, Any] = {
+        "schema_version": query.schema_version,
+        "command_id": query.command_id,
+        "idempotency_key": query.idempotency_key,
+        "session_id": query.session_id,
+        "owner_id": query.owner_id,
+    }
+    if lookup is None:
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=EMBODIMENT_RECEIPT_NOT_FOUND,
+            stage="S_EDGE_EMBODIMENT_RECEIPT_QUERY",
+            detail="no durable embodiment receipt matches the live session query",
+            event={
+                "receipt_query": {**query_event, "status": "NOT_FOUND"},
+                "receipt": None,
+            },
+        )
+
+    return EdgeGatewayResult(
+        success=True,
+        status=STATUS_ACCEPTED,
+        reason_code=None,
+        stage="S_EDGE_EMBODIMENT_RECEIPT_QUERY",
+        detail="edge durable embodiment receipt found",
+        event={
+            "receipt_query": {
+                **query_event,
+                "status": "FOUND",
+                "receipt_sha256": lookup.receipt_sha256,
+            },
+            "receipt": lookup.receipt.as_dict(),
+        },
     )
 
 

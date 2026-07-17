@@ -32,6 +32,7 @@ class InputRuntimeApplicationPorts:
     trigger_reply_performance: Callable[..., Any]
     render_quick_gateway_progress_text: Callable[..., str]
     render_quick_gateway_realign_text: Callable[..., str]
+    get_embodiment_runtime: Callable[[], Any | None] | None = None
 
 
 __all__ = ["InputRuntimeApplicationPorts"]

@@ -15,6 +15,7 @@ async def trigger_reply_performance(
     request_id: str,
     reply_envelope: ReplyEnvelope | Mapping[str, Any],
     enable_vts: bool = True,
+    embodiment_runtime: Any | None = None,
 ) -> dict[str, Any]:
     """Drive non-text performance channels from the same final reply envelope.
 
@@ -40,28 +41,42 @@ async def trigger_reply_performance(
         }
 
     try:
-        from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
-
-        receipt = await submit_avatar_command(
-            action="set_expression",
-            payload={
-                "emotion_tag": performance.emotion_tag,
-                "emotion_intensity": performance.emotion_intensity,
-            },
-            request_id=request_id,
-            idempotency_key=f"{request_id}:reply-performance:vts",
+        from host_brain.channels.embodiment import (  # noqa: PLC0415
+            build_host_embodiment_command,
+            queue_embodiment_command,
         )
-        effect = dict(receipt.event or {})
+        from natsume_contracts.edge.embodiment_v1 import (  # noqa: PLC0415
+            EMBODIMENT_KIND_AVATAR,
+        )
+
+        ack = queue_embodiment_command(
+            build_host_embodiment_command(
+                kind=EMBODIMENT_KIND_AVATAR,
+                action="set_expression",
+                payload={
+                    "emotion_tag": performance.emotion_tag,
+                    "emotion_intensity": performance.emotion_intensity,
+                },
+                request_id=request_id,
+                idempotency_key=f"{request_id}:reply-performance:vts",
+            ),
+            runtime=embodiment_runtime,
+        )
         return {
             "invoked": True,
-            "affected_output": True,
+            # Durable admission is not evidence that Edge has applied the
+            # expression.  The embodiment dispatcher and receipt projection
+            # own that later physical-effect transition.
+            "affected_output": False,
+            "delivery_state": "DURABLY_QUEUED",
             "source": performance.source or "reply_envelope",
-            "status": receipt.status,
-            "success": bool(receipt.success),
-            "reason_code": receipt.reason_code,
+            "status": ack.status,
+            "success": bool(ack.success),
+            "reason_code": ack.reason_code,
             "emotion_tag": performance.emotion_tag,
-            "expression_id": effect.get("expression_id"),
-            "command_id": receipt.command_id,
+            "expression_id": None,
+            "command_id": ack.command_id,
+            "outbox_id": ack.outbox_id,
             "performance": performance.as_dict(),
         }
     except Exception as exc:

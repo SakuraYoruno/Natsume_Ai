@@ -99,6 +99,139 @@ def test_session_reconnect_requires_exact_lease_and_rotates_fence_after_expiry(t
         store.claim_command(stale_command)
 
 
+def test_live_exact_reconnect_can_rotate_fence_and_reject_late_old_fence_command(tmp_path) -> None:
+    """A replacement Host fences an old still-live Host before dispatch."""
+
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    first = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
+    old_fence_command = _command(first, key="old-edge-fence")
+
+    # Ordinary renewal is deliberately not a replacement and retains the
+    # fence.  This avoids invalidating healthy in-flight work on each tick.
+    renewed = store.open_session(
+        session_id="host-session",
+        owner_id="host",
+        ttl_ms=10_000,
+        reconnect_lease_id=first.lease_id,
+        reconnect_fencing_token=first.fencing_token,
+    )
+    assert renewed.lease_id == first.lease_id
+    assert renewed.fencing_token == first.fencing_token
+
+    replacement = store.open_session(
+        session_id="host-session",
+        owner_id="host",
+        ttl_ms=10_000,
+        reconnect_lease_id=renewed.lease_id,
+        reconnect_fencing_token=renewed.fencing_token,
+        rotate_fencing_token=True,
+    )
+    assert replacement.fencing_token == first.fencing_token + 1
+    assert replacement.lease_id != first.lease_id
+    assert replacement.issued_at_ms == clock.value
+
+    with pytest.raises(EdgeEmbodimentTransportError, match=EMBODIMENT_FENCE_STALE):
+        store.claim_command(old_fence_command)
+    assert store.claim_command(
+        _command(replacement, key="replacement-edge-fence")
+    ).execute is True
+
+
+def test_live_fence_rotation_requires_exact_same_owner_reconnect_credential(tmp_path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    first = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
+
+    # A competing owner and a caller without the precise current credential
+    # cannot turn an active session into a replacement session.
+    with pytest.raises(EdgeEmbodimentTransportError, match=EDGE_SESSION_BUSY):
+        store.open_session(
+            session_id="host-session",
+            owner_id="other-host",
+            ttl_ms=10_000,
+            reconnect_lease_id=first.lease_id,
+            reconnect_fencing_token=first.fencing_token,
+            rotate_fencing_token=True,
+        )
+    with pytest.raises(EdgeEmbodimentTransportError, match=EDGE_SESSION_BUSY):
+        store.open_session(
+            session_id="host-session",
+            owner_id="host",
+            ttl_ms=10_000,
+            rotate_fencing_token=True,
+        )
+    with pytest.raises(EdgeEmbodimentTransportError, match=EDGE_SESSION_BUSY):
+        store.open_session(
+            session_id="host-session",
+            owner_id="host",
+            ttl_ms=10_000,
+            reconnect_lease_id="forged-lease",
+            reconnect_fencing_token=first.fencing_token,
+            rotate_fencing_token=True,
+        )
+    with pytest.raises(EdgeEmbodimentTransportError, match=EDGE_SESSION_RECONNECT_INVALID):
+        store.open_session(
+            session_id="host-session",
+            owner_id="host",
+            ttl_ms=10_000,
+            reconnect_lease_id=first.lease_id,
+            reconnect_fencing_token=first.fencing_token,
+            rotate_fencing_token="true",  # type: ignore[arg-type]
+        )
+
+
+def test_session_handler_forwards_exact_live_fence_rotation_request(tmp_path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    initial = _handle_embodiment_session(
+        EdgeRpcEnvelope(
+            request_id="open-session",
+            ts_ms=clock.value,
+            nonce="nonce-open",
+            signature="signature",
+            payload={"session_id": "host-session", "owner_id": "host", "ttl_ms": 10_000},
+        ),
+        store=store,
+    )
+    first = parse_edge_session_lease(initial.event["lease"])
+    old_command = _command(first, key="handler-old-fence")
+
+    rotated = _handle_embodiment_session(
+        EdgeRpcEnvelope(
+            request_id="replace-session",
+            ts_ms=clock.value,
+            nonce="nonce-replace",
+            signature="signature",
+            payload={
+                "session_id": first.session_id,
+                "owner_id": first.owner_id,
+                "ttl_ms": 10_000,
+                "reconnect_lease_id": first.lease_id,
+                "reconnect_fencing_token": first.fencing_token,
+                "rotate_fencing_token": True,
+            },
+        ),
+        store=store,
+    )
+    replacement = parse_edge_session_lease(rotated.event["lease"])
+    assert replacement.fencing_token == first.fencing_token + 1
+
+    rejected = _handle_embodiment_command(
+        object(),
+        EdgeRpcEnvelope(
+            request_id=old_command.request_id,
+            ts_ms=clock.value,
+            nonce="nonce-old-command",
+            signature="signature",
+            payload=old_command.as_dict(),
+        ),
+        transport_runtime=DurableEmbodimentRuntime(store),
+    )
+    assert rejected.success is False
+    assert rejected.reason_code == EMBODIMENT_FENCE_STALE
+
+
 def test_receipt_survives_process_reopen_and_replay_never_reexecutes(tmp_path) -> None:
     clock = _Clock()
     db_path = tmp_path / "edge-transport.sqlite3"

@@ -3,8 +3,8 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.14
-核对日期：2026-07-17
+版本：v5.15
+核对日期：2026-07-18
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -28,7 +28,8 @@
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE / D7C_OBS_APP_ASSEMBLY_AND_SKILL_FAIL_CLOSED_PARTIAL` | D1～D7a 的app-local routes、21个producer、Host五合同lineage、Memory/VTS冷读与0103边界继续成立。D7b接通同app durable roots + canonical ledger有界lineage的Life Body冷聚合，并将Direct Skill的resource/episodic/semantic实例冻结到typed execution ports；声明source-mode为`6/3/8/4-auth/0-unavailable`，失败root仍物化typed unavailable，风险语义与幂等journal受测试守护，缺技能后端在authority后失败关闭。D7c将Obs application/job assembly移入app层，composition→app反向依赖违规归零且无白名单。底层Host source、Chat/Delegate和Acceptance Effect authority仍process-global，约53个非锁可变服务引用、完整Host/Worker composition、真实Edge和全局Service Locator删除仍未完成；NE-01不得封板 |
+| Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
+| Composition | `INCOMPLETE / PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | D1～D7c 的app-local routes、21个producer、Host五合同lineage、Memory/VTS冷读、Life Body冷聚合、Direct Skill冻结依赖和Obs app assembly继续成立。D8 把选定具身路径的 runtime 注入 Host app lifespan，并以 durable scope/lease 防止同库双 writer；新入队返回 `PENDING / DURABLY_QUEUED`，精确重复只回放既有 durable 状态，只有既有 `APPLIED` receipt 是物理收口证据。它没有清除底层Host source、Chat/Delegate、Acceptance Effect的process-global authority，也没有完成剩余 direct adapter、完整Host/Worker composition或全局 Service Locator 删除。真实 Edge TCP/SQLite 最小回执链有证据，真实设备效果没有；NE-01不得封板 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -292,13 +293,17 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | Capability execution | `CapabilityBroker` + execution journal | 签名和授权主干存在 |
 | Digital Life | Life command/event/reducer/projection | 单核资产已建立 |
 | Memory / Canon | typed repositories + governed apply | projection/cache 不应成为 writer |
-| Edge physical effect | Edge actuator + durable receipt | 真实硬件完整验收仍受环境限制 |
+| Host embodiment dispatch | app-lifespan `HostEmbodimentRuntime` + `EmbodimentOutboxRepository` | 没有 module default；outbox 按 runtime scope 过滤，同 scope 由 durable Host lease/fence 选出唯一 writer，Edge reconnect credential 持久保存；lifespan 独立 heartbeat 续租，不依赖默认关闭的 governed Scheduler |
+| Edge durable receipt | Edge SQLite receipt store + HMAC/nonce receipt query v2 | owner/current session/lease/fence 与 command/idempotency key 精确绑定；legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 只读查询后用 identity+digest CAS 收口，相同 digest 重查不重复落审计，`NOT_FOUND`/失败不重放 |
+| Edge physical effect | Edge actuator + durable receipt | loopback TCP/HMAC/SQLite/restart replay 已测，但真实硬件/设备效果仍 `NOT_TESTED` |
 | Operator read | `QueryProjectionStore` | Query Plane 以 projection 为主 |
 | Task/recent read routes | Durable Task projection + conversation history | 只读，不创建平行任务状态 |
 
 ## 7. Composition 现状
 
 `ProcessTaskRuntimeContainer` 是较好的显式 typed composition：它拥有 migration、TaskStore、ReviewStore、CommandRepository、EventStore 与 lifecycle。
+
+Host ASGI 必须先让该 container 完成 canonical migration/readiness，再构造 `QueryProjectionStore`、具身 runtime 与其余依赖这些 schema 的应用对象；fresh database 因此会先得到 canonical migration 的真实结果，不会被 projection 的次生 schema 错误抢先遮蔽。具身 runtime 的 durable authority 由 lifespan 自有 heartbeat 续租，不能依赖默认关闭的 governed Scheduler；shutdown 先 cancel/join heartbeat，再精确释放 runtime lease。任一步失败都发生在 lifespan yield 前，路由不会开放。
 
 但全局对象图尚未收敛：
 
@@ -322,7 +327,13 @@ Host source closure只在ASGI lifespan内预热、捕获并在finally清空；�
 
 D7 静态扫描现有 `obs_routes*.py` 时，`process_services` 与 `_get_ledger` 的直接词法引用均为0；这个数字只描述该文件集合，不是全仓Service Locator计数。`capability_stats_projection`、`domain_state_projection`、`projection_ledger_view`、`remaining_query_projection`已删除全局兼容reader/factory/source fallback，生产保留的是显式`*_from_store` reader和由composition传入store/ledger/source的job。Host的`/v1/digital-life/world/snapshot`、`/health/canon_sync`、`/startup`、`/v1/memory/context/debug`、`/v1/memory/health`、`/v1/memory/events/recent`从Host lifespan持有的Query Projection Store读取；mode service经`HostRoutePorts`，Life action-preview的trusted context/token validator经`ObsRoutePorts`注入，缺端口失败关闭，preview仍不执行动作。没有挂载消费者的core ledger compatibility handlers已删除，不保留伪route port。Host app factory强制接收typed `ObsRoutePorts`；Process/Tribe全局ports不再捕获特定app closure。模块级daemon与导入期注册继续保持删除，app-local `ProjectionJobDaemon`保留。
 
-D7b还把Direct Skill worker的resource manager、episodic store和semantic recaller从执行期全局getter改为Host lifespan捕获的实例快照；两个Governed runtime交错执行、关闭其中一个以及全局poison替换都不能改变另一个端口绑定。Durable node grant与child intent先验证，随后按Skill语义预检所需后端；缺依赖返回稳定失败，不进入低层executor，也不生成accepted或成功Skill receipt。Life Body把prompt injection/high-risk以及Gateway/capability风险映射为病理、免疫状态和诊断动作；根事实未变时沿用source identity，仅刷新freshness。D7c又把`obs_application.py`和`obs_projection_jobs.py`移入app层，NLE composition→app违规从85降为0且没有新增allowlist。这个证明只覆盖Direct Skill和Obs assembly：Chat/Delegate的dispatcher、`PROCESS_LIFE_PROVIDER`、Host source底层authority和其余Worker对象图仍未迁移。`ProcessServiceContainer`仍有60个字段，排除6个锁和`application_ports`后约53个可变服务引用；真实Edge进程、设备和物理回执没有验收证据。因此D7c不是完整Query Plane、Composition或NE-01完成。
+D7b还把Direct Skill worker的resource manager、episodic store和semantic recaller从执行期全局getter改为Host lifespan捕获的实例快照；两个Governed runtime交错执行、关闭其中一个以及全局poison替换都不能改变另一个端口绑定。Durable node grant与child intent先验证，随后按Skill语义预检所需后端；缺依赖返回稳定失败，不进入低层executor，也不生成accepted或成功Skill receipt。Life Body把prompt injection/high-risk以及Gateway/capability风险映射为病理、免疫状态和诊断动作；根事实未变时沿用source identity，仅刷新freshness。D7c又把`obs_application.py`和`obs_projection_jobs.py`移入app层，NLE composition→app违规从85降为0且没有新增allowlist。这个证明只覆盖Direct Skill和Obs assembly：Chat/Delegate的dispatcher、`PROCESS_LIFE_PROVIDER`、Host source底层authority和其余Worker对象图仍未迁移。
+
+D8 把 Host 具身 authority 收口为 ASGI lifespan 的 `HostEmbodimentRuntime`，但“app-owned”不表示同库可并行：ASGI 必须先通过 Task Runtime migration gate，再构造依赖 schema 的 Life authority 和 Query Projection。0104 令 outbox 新行绑定 canonical DB 派生的不可变 `runtime_scope_id`，同 scope 的 durable runtime lease/fence 同时只授予一个进程，第二实例在取得 authority 时失败关闭，历史无 scope 行也不会被新实例猜测 claim。Host 在当前 runtime fence 下持久保存精确 Edge `session/owner/lease/fence`，正常替代进程以同身份重启时必须先轮换 live Edge fence；旧 Host fence 不能更新该 credential。MateEngine router、Life delivery、reply-performance、chat cue 与 Gateway voice 等已迁移路径显式取得当前 runtime；新入队报告 `PENDING / DURABLY_QUEUED`，精确重复回放既有状态，只有既有 `APPLIED` receipt 才可令 `physical_effect_verified=true`，`voice_started/vts_started` 仍不能由 admission 推导。
+
+Edge 0002 在 command admission 时冻结 owner；HMAC+nonce 的 read-only receipt query v2 在同一 authority 判断中校验 owner、current session、lease、fencing token 与 `command_id/idempotency_key`，legacy ownerless command 返回 `NOT_FOUND`。`FOUND` 才返回精确 durable receipt，`NOT_FOUND` 不泄漏 receipt 且不会执行命令。Host 对过期 `DISPATCHING` 先转 `IN_DOUBT`，随后只读查询；只有 identity+receipt-digest CAS 命中才落入已知结果，相同 digest 重查不重复推进状态或 observer，`NOT_FOUND`、传输或校验故障保持不确定，绝不重放。非 loopback HTTP 在建立 client 前拒绝，远端必须 HTTPS。真实 child Edge 的 loopback TCP/HMAC/SQLite、receipt query 与重启 exact replay 已有测试；minimal RPC profile 故意没有 MateEngine/设备，物理效果仍 `NOT_TESTED`。`ProcessServiceContainer`仍有60个字段，排除6个锁和`application_ports`后约53个可变服务引用；剩余 legacy direct embodiment adapter、完整 Host/Worker 对象图和全局 Service Locator 删除均未完成。因此 D8 不是完整 Query Plane、Composition 或 NE-01完成。
+
+Edge session/owner 不是默认的进程字符串：Host 从 normalized canonical DB path 的稳定 hash 派生二者。同一 durable store 的替代进程先取得新的 Host runtime fence，再读取持久化的精确 Edge credential，以原 identity 重连并查询历史 receipt；不同 store 有不同 identity，不会彼此争用默认 lease；两个 app 指向同一 store 时只有 durable Host lease winner 能访问该 Edge authority，另一个失败关闭。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
 
@@ -358,7 +369,7 @@ D7b还把Direct Skill worker的resource manager、episodic store和semantic reca
 3. 维持 0093/0095 故障矩阵：deterministic legacy identity、升级 ID/key 稳定、revisioned/legacy payload、trigger/index readiness、source-ref 一对一、append-success/complete-loss exact replay、零重复 Event、per-revision 顺序和 Event/Review/Operator exact read；不得把 delivery claim 误当成 0092 cancellation claim。
 4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源；持续守护 Budget contention 合同，并完成 promotion+claim 单事务、历史半状态 reconciliation，以及 general/batch/pre-budget recovery。single-node post-budget takeover 不得被泛化为这一项已完成。
 5. 对 0096 Review continuation 做跨进程故障矩阵与 canary，确保 enqueue 原子性、过期扫描、takeover/stale fence、surface 路由、grant renewal 与关闭顺序持续成立。
-6. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes。
+6. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes；把 D8 未覆盖的 legacy direct embodiment adapter 迁入 app-owned runtime，并在真实设备环境单独验证物理效果，不能把 queued ack 或 Edge SQLite receipt 当作设备成功。
 7. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
 8. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
 9. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。

@@ -100,7 +100,10 @@ def log_input_event(
                 "gateway_voice_reason_code", "gateway_voice_detail",
                 "gateway_voice_latency_ms", "gateway_voice_started",
                 "gateway_voice_vts_started", "gateway_voice_vts_expression_success",
-                "gateway_voice_event",
+                "gateway_voice_event", "gateway_voice_delivery_state",
+                "gateway_voice_durable_admitted", "gateway_voice_physical_effect_verified",
+                "gateway_voice_gateway_sent", "gateway_voice_gateway_status",
+                "gateway_voice_gateway_detail", "gateway_voice_gateway_latency_ms",
             )
             for field in gateway_fields:
                 value = (input_payload or {}).get(field)
