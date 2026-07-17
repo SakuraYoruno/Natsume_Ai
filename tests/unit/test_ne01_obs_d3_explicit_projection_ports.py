@@ -62,16 +62,16 @@ def test_default_obs_projection_factory_has_registered_19_of_19_coverage(
         ports.close_owned_resources()
 
 
-def test_d3_counts_are_producer_metadata_and_direct_locator_boundaries(
+def test_d4_route_scope_and_producer_metadata_remain_truthful(
     tmp_path: Path,
 ) -> None:
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-boundary.sqlite3",
     )
     try:
-        # These numbers describe registered producer callbacks and their
-        # declared source modes. They are not runtime success counters and do
-        # not claim that every query route has left the process locator.
+        # Producer counts remain declared source metadata, while D4 separately
+        # proves that the identified HTTP/WebSocket projection routes no
+        # longer rediscover their store through read_process_projection.
         assert ports.projection_coverage == "REGISTERED_19_OF_19"
         assert len(ports.projection_jobs) == 19
         assert sum(
@@ -100,8 +100,9 @@ def test_d3_counts_are_producer_metadata_and_direct_locator_boundaries(
             ROOT / "host_brain" / "app" / "obs_routes_summary.py"
         ).read_text(encoding="utf-8")
         assert "def read_process_projection(" in process_projection_source
-        assert "peek_query_projection_store" in process_projection_source
+        assert "peek_query_projection_store" not in process_projection_source
         assert "read_process_projection(" in summary_source
+        assert "require_obs_query_projection_store(request)" in summary_source
 
         machine = json.loads(
             (ROOT / "configs" / "release" / "current_architecture_status.json")
@@ -113,6 +114,19 @@ def test_d3_counts_are_producer_metadata_and_direct_locator_boundaries(
             "PROCESS_LOCAL_MODULE_CACHE_COUPLED": 0,
         }
         assert machine["obs_process_local_module_cache_coupled_jobs"] == []
+        assert machine["obs_app_local_query_projection_endpoint_count"] == 36
+        assert machine["obs_app_local_query_projection_http_endpoint_count"] == 35
+        assert machine["obs_app_local_query_projection_websocket_endpoint_count"] == 1
+        assert machine["obs_d4_migrated_read_process_projection_http_get_count"] == 19
+        assert machine["obs_read_process_projection_indirect_http_get_count"] == 0
+        assert (
+            machine["obs_indirect_process_projection_locator"]
+            == "REMOVED_EXPLICIT_STORE_PARAMETER"
+        )
+        assert (
+            machine["obs_other_global_query_projection_locator_boundary"]
+            == "PRESENT_OUTSIDE_D4_19_GET_SLICE"
+        )
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()

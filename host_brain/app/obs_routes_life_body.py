@@ -7,9 +7,10 @@ import copy
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.obs_routes_core import (
     _env_int,
     _get_ledger,
@@ -42,6 +43,7 @@ from host_brain.persistence.life_body_query_repository import (
     LifeBodyQueryRepository,
     decode_life_body_row,
 )
+from host_brain.observability.projection_store import QueryProjectionStore
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -1999,8 +2001,12 @@ def _build_life_body_payload(
     return payload.model_dump()
 
 
-def _get_life_body_snapshot(window_minutes: int) -> dict[str, Any]:
+def _get_life_body_snapshot(
+    store: QueryProjectionStore,
+    window_minutes: int,
+) -> dict[str, Any]:
     payload, projection = read_process_projection(
+        store,
         LIFE_BODY_KIND,
         window_key(window_minutes),
         max_age_ms=LIFE_BODY_MAX_AGE_MS,
@@ -2016,12 +2022,17 @@ def _get_life_body_snapshot(window_minutes: int) -> dict[str, Any]:
 
 
 @router.get("/life-body", response_model=LifeBodyResponse)
-def get_life_body(window_minutes: int = Query(360, ge=1, le=10080, description="聚合时间窗口（分钟）")):
-    return LifeBodyResponse(**_get_life_body_snapshot(window_minutes))
+def get_life_body(
+    request: Request,
+    window_minutes: int = Query(360, ge=1, le=10080, description="聚合时间窗口（分钟）"),
+):
+    store = require_obs_query_projection_store(request)
+    return LifeBodyResponse(**_get_life_body_snapshot(store, window_minutes))
 
 
 @router.get("/life-timeline", response_model=LifeTimelineResponse)
 def get_life_timeline(
+    request: Request,
     window_minutes: int = Query(360, ge=1, le=10080, description="聚合时间窗口（分钟）"),
     event_type: str = Query("", alias="type", description="事件类型过滤"),
     organ: str = Query("", description="器官系统过滤"),
@@ -2029,7 +2040,8 @@ def get_life_timeline(
     session_id: str = Query("", description="session 过滤"),
     tick_id: str = Query("", description="tick / scheduler 事件过滤"),
 ):
-    payload = _get_life_body_snapshot(window_minutes)
+    store = require_obs_query_projection_store(request)
+    payload = _get_life_body_snapshot(store, window_minutes)
     model = _as_dict(payload.get("model"))
     items = _clone_payload(_as_list(model.get("timelineEventPool") or model.get("timelineEvents")))
     normalized_type = event_type.strip() if isinstance(event_type, str) else ""
@@ -2056,12 +2068,14 @@ def get_life_timeline(
 
 @router.get("/pathologies", response_model=PathologiesResponse)
 def get_pathologies(
+    request: Request,
     window_minutes: int = Query(360, ge=1, le=10080, description="聚合时间窗口（分钟）"),
     organ: str = Query("", description="器官系统过滤"),
     severity: str = Query("", description="病灶级别过滤"),
     pathology_id: str = Query("", description="聚焦单个病灶"),
 ):
-    payload = _get_life_body_snapshot(window_minutes)
+    store = require_obs_query_projection_store(request)
+    payload = _get_life_body_snapshot(store, window_minutes)
     model = _as_dict(payload.get("model"))
     items = [_as_dict(item) for item in _as_list(model.get("pathologies"))]
     related_events = [_as_dict(item) for item in _as_list(model.get("timelineEventPool") or model.get("timelineEvents"))]

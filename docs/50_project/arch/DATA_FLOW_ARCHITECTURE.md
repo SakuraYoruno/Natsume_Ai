@@ -342,7 +342,7 @@ Obs 读取不借用 Host 进程内 Task container：`obs_fastapi_app` 仅在 `HO
 
 0099 terminal reconciliation 在主 Host 与独立 Obs 都提供 `candidates/cases/challenge` 三条 GET，并要求 `obs:task-runtime:read`；两处都只构造同 canonical SQLite 的 `mode=ro + query_only=ON` reader，禁止 fallback 到完整 `DurableTaskStore`。Cases 只给最小摘要，subject snapshot 不出库。Challenge 从 OperatorQueryGateway request context 取得认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`，在 authority 已绑定 key ID 时拒绝不一致请求；权威 builder 用 case、current subject 与确定性 Graph/Budget Outbox 生成 Store 实际验证的 final canonical bytes和 `command_request`。HTTP → 真实 Ed25519 → Store round-trip 已通过，但外部 key lifecycle/canary 未验证。
 
-D3 后独立 Obs 同时保留三条必须区分的数据流：
+D4 后独立 Obs 同时保留三条必须区分的数据流：
 
 ```text
 create_obs_app
@@ -357,16 +357,16 @@ create_obs_app
   → QueryProjectionStore
   → /health DEGRADED（missing=0，但 typed-unavailable=8）
 
-17 selected production endpoints (16 HTTP + 1 WebSocket) / sessions cache
+36 identified production projection endpoints (35 HTTP + 1 WebSocket) / sessions cache
   → request.app.state.obs_route_ports
   → app-local QueryProjectionStore / app-local response single-flight
 
-19 remaining production GET routes
-  → read_process_projection
-  → process_services.peek_query_projection_store
+19 D4-migrated production GET routes
+  → read_process_projection(explicit app-local store, ...)
+  → no process store discovery
 ```
 
-19 个 producer callback 执行路径不调用 `process_services`；standalone `health-passive/device-status` 又显式设置 `include_process_cache=false`，不会读取 `service_health_heartbeat` 或 `_latest_receipts` 模块缓存，因此 11 个非 typed-unavailable producer 都只读 durable/static/app-owned source。Daemon start/run single-flight；stop 先阻止新 wave并等待 background/manual in-flight，超时保留 container/ports/readers、leader lease 与 SQLite 供重试。`obs_routes*.py` 仍有 15 个直接 `process_services` 词法边界（不是 route 数），且上述 19-GET 间接 locator 与 legacy `_default_daemon` 仍是兼容全局链；8 个 typed-unavailable source 也尚未注入，故 producer registration、完整 source coverage和完整 Query Plane/route 数据流仍不能混为一谈。
+19个 producer callback 执行路径不调用 `process_services`；11个非 typed-unavailable producer 都只读 durable/static/app-owned source。D4 将原19个间接 GET 改为必需显式 store 参数，Life/Operator 双 app 隔离和 BioOps 8 路由 locator-fail 回归已覆盖。Daemon start/run single-flight，关闭超时保留 retry graph。`obs_routes*.py` 仍有15个直接 `process_services` 词法边界（非 route 数），`capability_stats_projection/projection_ledger_view/remaining_query_projection` 等 helper 仍有其他全局 store，legacy `_default_daemon` 仍在，8个 typed-unavailable source也未注入；因此已识别 route 隔离、完整 source coverage与完整 Query Plane仍不能混为一谈。
 
 ```text
 conversation.user_turn

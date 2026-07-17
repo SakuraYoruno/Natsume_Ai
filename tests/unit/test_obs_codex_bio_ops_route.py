@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import host_brain.app.obs_routes_agent_bio_ops as route_module
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import QueryProjectionStore
 
@@ -30,6 +31,15 @@ def _materialize_bio_ops_projection(tmp_path, monkeypatch) -> QueryProjectionSto
     refreshed = process_state_projection.refresh_bio_ops_projection()
     assert refreshed["document_count"] >= 2
     return store
+
+
+def _app_with_projection_store(store: QueryProjectionStore) -> FastAPI:
+    app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: store,
+    )
+    app.include_router(route_module.router)
+    return app
 
 
 def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) -> None:
@@ -169,9 +179,8 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})
 
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    _materialize_bio_ops_projection(tmp_path, monkeypatch)
-    app = FastAPI()
-    app.include_router(route_module.router)
+    store = _materialize_bio_ops_projection(tmp_path, monkeypatch)
+    app = _app_with_projection_store(store)
 
     response = TestClient(app).get("/obs/codex-bio-ops")
 
@@ -227,9 +236,8 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
         },
     )
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    _materialize_bio_ops_projection(tmp_path, monkeypatch)
-    app = FastAPI()
-    app.include_router(route_module.router)
+    store = _materialize_bio_ops_projection(tmp_path, monkeypatch)
+    app = _app_with_projection_store(store)
     client = TestClient(app)
 
     listed = client.get("/obs/codex-bio-ops/adoptions")
@@ -283,3 +291,120 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
     )
     for path in pure_queries:
         assert client.get(path).status_code == 200, path
+
+
+def test_all_bio_ops_get_routes_read_only_the_app_local_projection_store(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from host_brain.composition import process_services
+
+    db_path = tmp_path / "explicit-bio-ops-projection.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="bio-ops-explicit-store",
+    )
+    assert result.success, result.as_dict()
+    store = QueryProjectionStore(db_path)
+    store.upsert(
+        route_module.BIO_OPS_KIND,
+        route_module.BIO_OPS_LATEST_KEY,
+        {
+            "ok": True,
+            "artifact_available": True,
+            "run_id": "app-store-run",
+            "artifact_ref": "bio-ops://app-store-run",
+            "capability_count": 1,
+            "status_counts": {"CANDIDATE": 1},
+            "adoptions": [
+                {
+                    "candidate_id": "candidate-from-app-store",
+                    "pending": True,
+                    "status": "PENDING_REVIEW",
+                }
+            ],
+            "owner_inbox": [
+                {
+                    "candidate_id": "inbox-from-app-store",
+                    "status": "PENDING_REVIEW",
+                }
+            ],
+            "owner_import_candidates": [
+                {"candidate_id": "import-from-app-store"}
+            ],
+            "owner_queues": [{"candidate_id": "queue-from-app-store"}],
+            "owner_state": [{"candidate_id": "state-from-app-store"}],
+            "owner_runtime_hints": [
+                {
+                    "candidate_id": "hint-from-app-store",
+                    "status": "ACTIVE",
+                }
+            ],
+        },
+        source_cursor=1,
+        source_ref="test:app-local-bio-ops",
+    )
+
+    def forbidden_process_locator():
+        raise AssertionError("BioOps GET must not use the process service locator")
+
+    monkeypatch.setattr(
+        process_services,
+        "get_query_projection_store",
+        forbidden_process_locator,
+    )
+    monkeypatch.setattr(
+        process_services,
+        "peek_query_projection_store",
+        forbidden_process_locator,
+    )
+    client = TestClient(_app_with_projection_store(store))
+
+    cases = (
+        ("/obs/codex-bio-ops", "run_id", "app-store-run"),
+        (
+            "/obs/codex-bio-ops/adoptions",
+            "adoptions",
+            "candidate-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-from-app-store",
+            "adoption",
+            "candidate-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-inbox",
+            "items",
+            "inbox-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-inbox/import-candidates",
+            "items",
+            "import-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-queues",
+            "items",
+            "queue-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state",
+            "items",
+            "state-from-app-store",
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state/runtime-hints",
+            "items",
+            "hint-from-app-store",
+        ),
+    )
+    for path, field, expected in cases:
+        response = client.get(path)
+        assert response.status_code == 200, (path, response.text)
+        payload = response.json()
+        if field == "run_id":
+            assert payload[field] == expected
+        elif field == "adoption":
+            assert payload[field]["candidate_id"] == expected
+        else:
+            assert payload[field][0]["candidate_id"] == expected
+        assert payload["projection"]["key"] == route_module.BIO_OPS_LATEST_KEY

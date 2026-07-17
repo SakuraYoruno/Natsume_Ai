@@ -16,7 +16,7 @@ from typing import Any
 
 from .process_state_projection import read_process_projection
 from .projection_ledger_view import get_projection_ledger_view
-from host_brain.observability.projection_store import digest_json
+from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
 
 GATEWAY_STATS_SOURCE_KIND = "gateway_stats_source"
@@ -36,12 +36,13 @@ _last_job_run = 0.0
 
 
 def read_operator_live_projection(
+    store: QueryProjectionStore,
     kind: str,
     key: str,
     *,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    return read_process_projection(kind, key, max_age_ms=max_age_ms)
+    return read_process_projection(store, kind, key, max_age_ms=max_age_ms)
 
 
 def _public_gateway_health(value: Mapping[str, Any] | None) -> dict[str, Any]:

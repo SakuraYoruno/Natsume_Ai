@@ -7,6 +7,9 @@ import sqlite3
 import time
 from types import SimpleNamespace
 
+from fastapi import FastAPI, Request
+
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import QueryProjectionStore
 from natsume_contracts.operator.v1 import ProjectionDegradedState
@@ -25,6 +28,14 @@ def _document(payload: dict, *, cursor: int = 7):
         degraded_state=ProjectionDegradedState.HEALTHY,
         degraded_detail=None,
     )
+
+
+def _request_for_store(store) -> Request:  # noqa: ANN001
+    app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: store,
+    )
+    return Request({"type": "http", "app": app})
 
 
 def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) -> None:
@@ -52,11 +63,8 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
             {"status": "OK", "source": "live_manager", "timestamp": 14, "running": True}
         ),
     }
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        lambda: SimpleNamespace(get=lambda kind, key: documents.get((kind, key))),
-    )
+    store = SimpleNamespace(get=lambda kind, key: documents.get((kind, key)))
+    request = _request_for_store(store)
 
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("GET called a live/file/aggregate source")
@@ -68,12 +76,25 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     monkeypatch.setattr(life, "_build_targeted_request_event", forbidden)
     monkeypatch.setattr(core, "_load_resource_manager_status_file", forbidden)
     monkeypatch.setattr(dependencies, "get_resource_manager", forbidden)
+    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
 
-    insights = summary.get_insights_summary_snapshot(window_minutes=60)
-    overview = asyncio.run(summary.get_digital_life_overview_snapshot(window_minutes=360))
-    runtime = sysmode.get_digital_life_runtime_snapshot(current_topic="private topic")
-    body = life.get_life_body(window_minutes=360)
+    insights = summary.get_insights_summary_snapshot(
+        request=request,
+        window_minutes=60,
+    )
+    overview = asyncio.run(
+        summary.get_digital_life_overview_snapshot(
+            request=request,
+            window_minutes=360,
+        )
+    )
+    runtime = sysmode.get_digital_life_runtime_snapshot(
+        request=request,
+        current_topic="private topic",
+    )
+    body = life.get_life_body(request=request, window_minutes=360)
     timeline = life.get_life_timeline(
+        request=request,
         window_minutes=360,
         event_type="",
         organ="",
@@ -81,7 +102,7 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
         session_id="",
         tick_id="",
     )
-    resource = core.get_resource_manager_status()
+    resource = core.get_resource_manager_status(request=request)
 
     assert insights["govData"]["total"] == 1
     assert insights["projection"]["projection_version"] == 2
@@ -123,11 +144,8 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
         "owner_state": [],
         "owner_runtime_hints": [],
     }
-    monkeypatch.setattr(
-        dependencies,
-        "peek_query_projection_store",
-        lambda: SimpleNamespace(get=lambda _kind, _key: _document(payload)),
-    )
+    store = SimpleNamespace(get=lambda _kind, _key: _document(payload))
+    request = _request_for_store(store)
 
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("BioOps GET scanned files")
@@ -139,15 +157,25 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
     monkeypatch.setattr(routes.BioOpsOwnerIntakeConsumer, "scan_queue", forbidden)
     monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_state", forbidden)
     monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_runtime_hints", forbidden)
+    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
 
-    overview = routes.get_codex_bio_ops_observability("run-1")
-    adoptions = routes.list_codex_bio_ops_adoptions("run-1", "pending")
-    adoption = routes.get_codex_bio_ops_adoption("candidate-1", "run-1")
-    inbox = routes.get_codex_bio_ops_owner_inbox("run-1", "memory", "all")
-    imports = routes.get_codex_bio_ops_owner_import_candidates("run-1", "memory")
-    queues = routes.get_codex_bio_ops_owner_queues("run-1", "memory")
-    state = routes.get_codex_bio_ops_owner_state("run-1", "memory")
-    hints = routes.get_codex_bio_ops_owner_runtime_hints("run-1", "memory", True)
+    overview = routes.get_codex_bio_ops_observability(request, "run-1")
+    adoptions = routes.list_codex_bio_ops_adoptions(request, "run-1", "pending")
+    adoption = routes.get_codex_bio_ops_adoption(request, "candidate-1", "run-1")
+    inbox = routes.get_codex_bio_ops_owner_inbox(request, "run-1", "memory", "all")
+    imports = routes.get_codex_bio_ops_owner_import_candidates(
+        request,
+        "run-1",
+        "memory",
+    )
+    queues = routes.get_codex_bio_ops_owner_queues(request, "run-1", "memory")
+    state = routes.get_codex_bio_ops_owner_state(request, "run-1", "memory")
+    hints = routes.get_codex_bio_ops_owner_runtime_hints(
+        request,
+        "run-1",
+        "memory",
+        True,
+    )
 
     assert overview["artifact_dir"] is None
     assert overview["bio_ops"]["pending_adoptions"][0]["candidate_id"] == "candidate-1"
@@ -168,15 +196,31 @@ def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -
     from host_brain.app import obs_routes_summary as summary
     from host_brain.app import obs_routes_sysmode as sysmode
 
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: None)
+    request = _request_for_store(SimpleNamespace(get=lambda _kind, _key: None))
+    monkeypatch.setattr(
+        dependencies,
+        "peek_query_projection_store",
+        lambda: (_ for _ in ()).throw(AssertionError("GET touched process locator")),
+    )
 
     values = (
-        summary.get_insights_summary_snapshot(window_minutes=60)["projection"],
-        asyncio.run(summary.get_digital_life_overview_snapshot(window_minutes=360))["projection"],
-        sysmode.get_digital_life_runtime_snapshot(current_topic="").projection,
-        life.get_life_body(window_minutes=360).meta["projection"],
-        core.get_resource_manager_status()["projection"],
-        bio.get_codex_bio_ops_observability(None)["projection"],
+        summary.get_insights_summary_snapshot(
+            request=request,
+            window_minutes=60,
+        )["projection"],
+        asyncio.run(
+            summary.get_digital_life_overview_snapshot(
+                request=request,
+                window_minutes=360,
+            )
+        )["projection"],
+        sysmode.get_digital_life_runtime_snapshot(
+            request=request,
+            current_topic="",
+        ).projection,
+        life.get_life_body(request=request, window_minutes=360).meta["projection"],
+        core.get_resource_manager_status(request=request)["projection"],
+        bio.get_codex_bio_ops_observability(request, None)["projection"],
     )
     for projection in values:
         assert projection["projection_version"] == 0

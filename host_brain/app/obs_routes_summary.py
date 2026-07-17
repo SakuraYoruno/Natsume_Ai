@@ -10,9 +10,10 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.obs_routes_stats_agent import get_agent_loop_stats, get_memory_stats
 from host_brain.app.obs_routes_stats_capability_agent import get_capability_gaps_stats
 from host_brain.app.obs_routes_stats_governor import get_errors, get_governor_stats, get_subsystems_stats
@@ -208,9 +209,11 @@ async def _build_digital_life_overview_snapshot_async(
 
 @router.get("/insights/summary-snapshot", response_model=InsightsSummarySnapshotResponse)
 def get_insights_summary_snapshot(
+    request: Request,
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
     payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
         INSIGHTS_SUMMARY_KIND,
         window_key(window_minutes),
         max_age_ms=SUMMARY_MAX_AGE_MS,
@@ -221,9 +224,11 @@ def get_insights_summary_snapshot(
 
 @router.get("/digital-life/overview-snapshot", response_model=DigitalLifeOverviewSnapshotResponse)
 async def get_digital_life_overview_snapshot(
+    request: Request,
     window_minutes: int = Query(360, ge=1, le=10080),
 ):
     payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
         DIGITAL_LIFE_OVERVIEW_KIND,
         window_key(window_minutes),
         max_age_ms=DIGITAL_LIFE_MAX_AGE_MS,

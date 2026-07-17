@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -21,7 +21,10 @@ from host_brain.app.observability_runtime.live_source_projection import (
     read_operator_live_projection,
 )
 from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
-from host_brain.app.obs_route_ports import require_obs_route_ports
+from host_brain.app.obs_route_ports import (
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -465,11 +468,14 @@ def _compose_gateway_stats_response(
 
 @router.get("/gateway/stats", response_model=GatewayStatsResponse)
 def get_gateway_stats(
+    request: Request,
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Read the materialized gateway source and apply a pure window filter."""
 
+    store = require_obs_query_projection_store(request)
     source, projection = read_operator_live_projection(
+        store,
         GATEWAY_STATS_SOURCE_KIND,
         GATEWAY_STATS_SOURCE_KEY,
         max_age_ms=GATEWAY_STATS_MAX_AGE_MS,

@@ -3306,9 +3306,10 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/resource-manager/status")
-def get_resource_manager_status():
+def get_resource_manager_status(request: Request):
     """Whole-system resource manager status for scheduler explainability."""
     payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
         RESOURCE_MANAGER_KIND,
         RESOURCE_MANAGER_KEY,
         max_age_ms=RESOURCE_MANAGER_MAX_AGE_MS,

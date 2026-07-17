@@ -1,10 +1,10 @@
 """Background-only projections for process, file and aggregate OBS state.
 
-The route handlers consuming these documents are intentionally boring: they
-peek the already-composed :class:`QueryProjectionStore` and shape an empty
-response when a document is missing or stale.  Every live manager lookup,
-process snapshot, ledger aggregation and filesystem scan stays in the jobs in
-this module.
+The route handlers consuming these documents are intentionally boring: each
+receives its application's :class:`QueryProjectionStore` explicitly and
+shapes an empty response when a document is missing or stale.  Every live
+manager lookup, process snapshot, ledger aggregation and filesystem scan stays
+in the jobs in this module.
 
 BioOps owner artifacts receive a stricter projection than the generic public
 serializer.  Only identifiers, state metadata, logical references and a
@@ -79,23 +79,20 @@ def complete_projection_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def read_process_projection(
+    store: QueryProjectionStore,
     kind: str,
     key: str,
     *,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """Peek one durable document without constructing a store or source."""
+    """Read one durable document through an explicitly composed store."""
 
-    from host_brain.composition.process_services import peek_query_projection_store
-
-    store = peek_query_projection_store()
     document = None
     error_name: str | None = None
-    if store is not None:
-        try:
-            document = store.get(kind, key)
-        except Exception as exc:  # read boundary must remain available
-            error_name = type(exc).__name__
+    try:
+        document = store.get(kind, key)
+    except Exception as exc:  # read boundary must remain available
+        error_name = type(exc).__name__
     meta = complete_projection_meta(
         projection_meta(kind, key, document, max_age_ms=max_age_ms)
     )

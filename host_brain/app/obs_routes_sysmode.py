@@ -10,11 +10,12 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_host_proxy import fetch_host_json
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.observability_runtime.live_source_projection import (
     SYS_MODE_HISTORY_KEY,
     SYS_MODE_HISTORY_KIND,
@@ -315,9 +316,11 @@ def _build_runtime_snapshot_response(
 
 
 @router.get("/sys-mode", response_model=SysModeStatusResponse)
-def get_sys_mode():
+def get_sys_mode(request: Request):
     """Read mode state without constructing the writer-capable service."""
+    store = require_obs_query_projection_store(request)
     status, projection = read_operator_live_projection(
+        store,
         SYS_MODE_STATUS_KIND,
         SYS_MODE_STATUS_KEY,
         max_age_ms=SYS_MODE_MAX_AGE_MS,
@@ -340,10 +343,12 @@ def get_sys_mode():
 
 @router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
 def get_digital_life_runtime_snapshot(
+    request: Request,
     current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
 ):
     """获取统一数字生命 runtime snapshot（只读观测面）。"""
     payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
         RUNTIME_SNAPSHOT_KIND,
         RUNTIME_SNAPSHOT_KEY,
         max_age_ms=RUNTIME_MAX_AGE_MS,
@@ -398,10 +403,13 @@ def switch_sys_mode(body: SysModeSwitchRequest):
 
 @router.get("/sys-mode/history", response_model=SysModeHistoryResponse)
 def get_sys_mode_history(
+    request: Request,
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
 ):
     """Read projected mode transitions; slicing is request-local and pure."""
+    store = require_obs_query_projection_store(request)
     payload, projection = read_operator_live_projection(
+        store,
         SYS_MODE_HISTORY_KIND,
         SYS_MODE_HISTORY_KEY,
         max_age_ms=SYS_MODE_MAX_AGE_MS,
