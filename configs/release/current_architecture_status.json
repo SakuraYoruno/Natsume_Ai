@@ -559,9 +559,16 @@
       "reason": "Host plan search only validates and orders approved planned_steps."
     },
     "pentest_conditional_mcts": {
-      "status": "SHADOW_ONLY_MEMORY_CALIBRATION",
+      "status": "SHADOW_ONLY_DURABLE_INJECTION_PARTIAL",
       "production_influence": "DISABLED_UNTIL_DURABLE_PROMOTION",
-      "reason": "Adapter always selects the L1/L2 baseline. Candidate expansion is root-fixed, calibration is in-memory and baseline-root scoped, and no durable promotion authority exists."
+      "durable_evidence": "AVAILABLE_BY_EXPLICIT_INJECTION_ONLY",
+      "reason": "Adapter always selects the L1/L2 baseline. Migration 0105 provides an append-only generic calibration repository with restart replay, physical-schema semantic verification, and identity/outcome drift rejection, but default compatibility remains in-memory; injected-store failure is observable and skips only optional shadow evidence, Pentest outcomes are UNVERIFIED_RUNTIME_RECORD projections, candidate expansion is root-fixed, and no durable promotion authority exists.",
+      "evidence_refs": [
+        "host_brain/planning_search/calibration.py",
+        "host_brain/persistence/planning_search_calibration_repository.py",
+        "host_brain/pentest/agent/planning_search_adapter.py",
+        "tests/integration/test_d13_planning_search_calibration_sqlite.py"
+      ]
     },
     "research_production_planning_benefit": {
       "status": "UNPROVEN",

@@ -66,7 +66,7 @@ flowchart LR
 | 领域 | 当前材料来源 | 当前结论 |
 |---|---|---|
 | Host Plan | Governor 已批准的 `planned_steps/steps` | 只做合法拓扑选择，未生成竞争方案 |
-| Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only，内存校准阈值不能影响真实选择，未完成 durable calibration |
+| Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only；0105 durable calibration 仅显式注入时写入，target 在 fingerprint 前收口，库故障只记 unavailable 事件，outcome 仍是未验证运行记录投影 |
 | Research | 冻结模拟 fixture | 没有真实来源、模型和 verifier 对照 |
 | Code | 冻结模拟 fixture | 没有真实 worktree、测试和成本对照 |
 

@@ -225,6 +225,22 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 
 显式 failure-replan metadata 可以构造 graph revision + 1，但这只是合同能力，不是完整的自动重规划闭环。
 
+### 4.5 PlanningSearch shadow calibration
+
+Pentest 的公共 L3 只在纯虚拟状态中计算。0105 提供通用、append-only 的 calibration repository，但它不是执行 authority：只有调用方显式把 repository 注入 Pentest kernel context 时，adapter 才会写 prediction；候选 target 会在计算 candidate fingerprint 前收口到授权 scope，真实动作始终来自 L1/L2 baseline。
+
+```text
+L1/L2 baseline selection ───────────────────────────────→ actual Pentest action
+       │                                                        │
+       └→ L3 virtual shadow → immutable prediction ────────────┤
+                                                                ▼
+     explicit SQLite CalibrationRepository ← UNVERIFIED_RUNTIME_RECORD projection
+                   │ busy/schema/drift
+                   └→ observable unavailable event; baseline continues
+```
+
+prediction 固定 virtual state digest、baseline/executed/shadow path、trace、budget 与纯虚拟 counters；outcome 固定实际执行的 baseline candidate、规范化结果摘要和 verifier label。两表禁止 update/delete，重复只允许 exact replay，身份、candidate 或 outcome drift 一律拒绝；repository 会验证 table/index/FK/trigger 物理语义，防止 catalog-only replay 掩盖半残 schema。当前 runtime record 没有 durable Task/Run receipt，因此该 outcome 不能证明未执行的 L3 路径收益，也不能喂给 promotion；repository 未注入时仅保留兼容内存 ledger，注入库不可用时只记录 unavailable 事件而不阻断 baseline。
+
 ## 5. TaskGraph 状态流与回执
 
 ### 5.1 Admission

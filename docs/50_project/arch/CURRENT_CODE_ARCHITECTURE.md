@@ -23,7 +23,7 @@
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
-| Pentest L3 | `WIRED_SHADOW_ONLY_MEMORY_CALIBRATION` | Conditional MCTS 可运行，但 adapter 强制选择 L1/L2 baseline；内存校准即使过阈值也没有 production influence，且不能证明 uplift |
+| Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
@@ -254,6 +254,7 @@ Task Runtime Outbox 已由 0093 建立跨进程 durable claim/CAS，0095 则把 
 - `SearchRequest`、`SearchCandidate`、`SearchBudget`、`SearchResult`；
 - Candidate Expansion、Cognitive Ranking、Virtual Transition、Reward、MCTS Condition ports；
 - UCB 选择、rollout、backpropagation、预算和确定性 trace；
+- `CalibrationPrediction` / `CalibrationOutcome` / `CalibrationRepository`：shadow-only、JSON-safe 的不可变 evidence 合同；
 - 不包含工具执行、网络访问或状态写入端口。
 
 公共算法本身成立，但“算法存在”不等于“生产规划能力已成立”。
@@ -281,9 +282,9 @@ Pentest L1/L2 已接入公共 service，L3 使用纯虚拟 transition/reward，�
 1. 根节点前先用真实 `PreActionGate` 过滤候选；
 2. virtual expander 只排列根节点已可执行的同一批候选；
 3. 无法表达“A 获得 capability 后才解锁 B”的后继生成；
-4. calibration ledger 是内存对象，不能跨 run 形成可靠证据。
+4. 0105 的 `SQLitePlanningCalibrationRepository` 已可跨重启保存 immutable prediction/outcome、拒绝 identity/outcome drift，并验证 table/index/FK/trigger 的物理语义；但只有显式注入 `PentestAgentLoop` / adapter 的实例会使用它，默认兼容 ledger 仍在内存。
 
-shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行替代路径的真实结果。因此 adapter 已强制 production influence 为 `DISABLED_UNTIL_DURABLE_PROMOTION`；内存 ledger 的阈值不再能改变真实动作。未来必须同时具备 durable calibration、反事实证据和已批准 promotion gate，才可另行引入受控切流。
+shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行替代路径的真实结果。候选 target 会在生成 fingerprint 前先收口到授权 scope；D13 写入 durable repository 的 outcome 仅是脱敏 `UNVERIFIED_RUNTIME_RECORD` 投影，并不伪装成 Task/Run receipt。库 busy/schema/drift 会产出可观察的 `mcts_durable_calibration_unavailable`，但因为它只是可选 shadow evidence，不能在真实 baseline 执行后抛出中断。因此 adapter 已强制 production influence 为 `DISABLED_UNTIL_DURABLE_PROMOTION`；无论内存或 durable evidence 的阈值如何，均不能改变真实动作。未来必须同时具备 receipt-bound counterfactual evidence、动态 successor 和已批准 promotion gate，才可另行引入受控切流。
 
 ### 5.4 Code / Research
 
