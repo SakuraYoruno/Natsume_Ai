@@ -46,12 +46,12 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "52a8bcd32441d1b48e8ea4c848bd54d716c85af107a790fdfc4716485f7c337c"
+    "1fc33b2e4811fa03b6aa1a460f055245f0349c95856a02c96828c28a74fdd977"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "d0814ded6d01d4004a52d5c40d70e3343459ec092f42fe75bef394f737cca34a",
+    "terminal_replay": "cb8f08e075f09a0293e2448e331262cd07298abe91abb7c8e8059bddc6d30c4b",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
@@ -208,7 +208,8 @@ def test_projection_and_record_helpers_are_narrow_boundaries() -> None:
         {
             "get_latest_parallel_settlement_decision": 1,
             "read_scheduler_snapshot": 1,
-            "get_operation_reservation": 1,
+                "get_operation_reservation": 1,
+                "get_node_artifact": 1,
         }
     )
     assert Counter(
@@ -391,7 +392,8 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "get_attempt": 1,
             "reserve_operation": 1,
             "get_active_lease": 1,
-            "commit_operation": 1,
+                "commit_operation": 1,
+                "resolve_node_input_artifacts": 1,
         },
         "_runtime_outbox": {"build": 6, "publish_pending": 14},
         "_budgets": {
@@ -403,7 +405,8 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         },
         "_node_lifecycle": {
             "transition_graph": 4,
-            "transition_node": 7,
+                "transition_node": 6,
+                "accept_node_output": 1,
             "transition_attempt": 2,
             "finalize_node_budget": 8,
             "reject_budget_charge": 3,

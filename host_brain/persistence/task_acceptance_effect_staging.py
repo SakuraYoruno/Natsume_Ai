@@ -9,11 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Mapping, Sequence
 
-from host_brain.contracts.agent_runtime.acceptance_judge import (
-    AcceptanceGate,
-    AcceptanceJudgement,
-)
-from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.acceptance_judge import AcceptanceJudgement
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus, TaskNodeStatus
 from host_brain.persistence.task_record_codec import (
     _ACCEPTANCE_EFFECT_TYPE_PATTERN,
@@ -24,9 +20,7 @@ from host_brain.persistence.task_record_codec import (
     _dumps,
     _graph_record,
     _loads_object,
-    _node_record,
     _parallel_success_decision_record,
-    _validated_node_payload,
     build_acceptance_effect_payload_digest,
 )
 from host_brain.persistence.task_store_types import (
@@ -104,116 +98,30 @@ class TaskAcceptanceEffectStagingMixin:
         expected_version: int,
         outbox: OutboxMessage,
         acceptance_judgement: AcceptanceJudgement | Mapping[str, Any],
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
         effect_intents: Sequence[AcceptanceEffectIntentSpec | Mapping[str, Any]],
     ) -> dict[str, Any]:
-        """Commit ``TaskNode.ACCEPTED`` and NODE effects in one transaction.
+        """Compatibility adapter onto the unified Node Acceptance UoW.
 
-        Every intent must bind the exact node and a successful attempt of that
-        node.  Any acceptance, CAS, identity, idempotency, or payload-drift
-        failure rolls back both the state transition and every staged effect.
+        Artifact-free GR06 acceptance is no longer a second terminal writer.
+        Existing callers retain the method name but must now supply the exact
+        worker receipt/output used by the canonical artifact authority.
         """
 
-        self.assert_acceptance_effect_intent_ready()
-        specs = self._normalize_acceptance_effect_intent_specs(effect_intents)
-        graph_ref = str(graph_id or "").strip()
-        node_ref = str(node_id or "").strip()
-        revision = int(graph_revision)
-        for spec in specs:
-            if (
-                spec.graph_id != graph_ref
-                or spec.graph_revision != revision
-                or spec.node_id != node_ref
-                or spec.commit_scope is not AcceptanceEffectCommitScope.NODE
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "atomic node acceptance effects must bind the exact node with NODE scope",
-                )
-        ts_ms = self._now()
-        with self._transaction() as conn:
-            self._assert_graph_not_cancelling(
-                conn,
-                graph_id=graph_ref,
-                graph_revision=revision,
-            )
-            current_node = self._require_node(
-                conn,
-                graph_ref,
-                revision,
-                node_ref,
-            )
-            if (
-                int(current_node["status_version"]) == int(expected_version) + 1
-                and str(current_node["status"]) == TaskNodeStatus.ACCEPTED.value
-            ):
-                graph_row = self._require_graph(conn, graph_ref, revision)
-                node_payload = _validated_node_payload(current_node)
-                try:
-                    AcceptanceGate.validate_node_transition(
-                        acceptance_judgement,
-                        target_status=TaskNodeStatus.ACCEPTED.value,
-                        graph_id=graph_ref,
-                        node_id=node_ref,
-                        root_work_order_id=str(graph_row["root_work_order_id"]),
-                        node_acceptance_criteria=tuple(
-                            node_payload.get("acceptance_criteria") or ()
-                        ),
-                        outbox_evidence_refs=outbox.evidence_refs,
-                    )
-                except ContractViolation as exc:
-                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
-                self._assert_mutation_outbox_replay(
-                    conn,
-                    outbox,
-                    expected_aggregate=(
-                        "TASK_NODE",
-                        f"{graph_ref}@{revision}/{node_ref}",
-                        int(expected_version) + 1,
-                    ),
-                    expected_event_type="TASK_NODE_ACCEPTED",
-                    expected_attempt_id=None,
-                )
-                staged = tuple(
-                    self._stage_acceptance_effect_intent_in_transaction(
-                        conn,
-                        spec,
-                        ts_ms=ts_ms,
-                        require_succeeded_attempt=True,
-                        allow_insert=False,
-                    )
-                    for spec in specs
-                )
-                return {
-                    "node": _node_record(current_node),
-                    "effect_intents": staged,
-                    "replayed": True,
-                }
-            node_record = self._transition_node_in_transaction(
-                conn,
-                graph_id=graph_ref,
-                graph_revision=revision,
-                node_id=node_ref,
-                expected_version=expected_version,
-                target_status=TaskNodeStatus.ACCEPTED,
-                outbox=outbox,
-                verification_result=None,
-                acceptance_judgement=acceptance_judgement,
-                ts_ms=ts_ms,
-            )
-            staged = tuple(
-                self._stage_acceptance_effect_intent_in_transaction(
-                    conn,
-                    spec,
-                    ts_ms=ts_ms,
-                    require_succeeded_attempt=True,
-                )
-                for spec in specs
-            )
-            return {
-                "node": node_record,
-                "effect_intents": staged,
-                "replayed": False,
-            }
+        return self.commit_node_acceptance(
+            graph_id,
+            graph_revision,
+            node_id,
+            expected_version=expected_version,
+            outbox=outbox,
+            acceptance_judgement=acceptance_judgement,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            worker_output=worker_output,
+            effect_intents=effect_intents,
+        )
 
     def transition_graph_and_stage_acceptance_effects(
         self,
@@ -315,6 +223,7 @@ class TaskAcceptanceEffectStagingMixin:
                     spec,
                     ts_ms=ts_ms,
                     require_succeeded_attempt=True,
+                    allow_terminal_graph_insert=True,
                 )
                 for spec in specs
             )
@@ -470,9 +379,10 @@ class TaskAcceptanceEffectStagingMixin:
         ts_ms: int,
         require_succeeded_attempt: bool = False,
         allow_insert: bool = True,
+        allow_terminal_graph_insert: bool = False,
     ) -> dict[str, Any]:
         payload_json = _dumps(dict(spec.payload))
-        self._require_graph(conn, spec.graph_id, spec.graph_revision)
+        graph = self._require_graph(conn, spec.graph_id, spec.graph_revision)
         node = self._require_node(
             conn,
             spec.graph_id,
@@ -596,6 +506,31 @@ class TaskAcceptanceEffectStagingMixin:
             raise TaskStoreError(
                 TASK_STORE_OUTBOX_CONFLICT,
                 f"atomic acceptance replay is missing effect intent: {spec.effect_id}",
+            )
+        artifact_schema = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+            """
+        ).fetchone()
+        if (
+            artifact_schema is not None
+            and spec.commit_scope is AcceptanceEffectCommitScope.NODE
+            and str(node["status"]) == TaskNodeStatus.ACCEPTED.value
+        ):
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                "a NODE effect cannot be added after its TaskNode was ACCEPTED",
+            )
+        if (
+            artifact_schema is not None
+            and spec.commit_scope is AcceptanceEffectCommitScope.GRAPH
+            and str(graph["status"]) == TaskGraphStatus.COMPLETED.value
+            and not allow_terminal_graph_insert
+        ):
+            raise TaskStoreError(
+                TASK_STORE_OUTBOX_CONFLICT,
+                "a GRAPH effect cannot be added after its TaskGraph was COMPLETED",
             )
         if frozen_by_success:
             raise TaskStoreError(

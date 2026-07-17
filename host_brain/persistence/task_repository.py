@@ -761,6 +761,7 @@ class DurableTaskStore(
         verification_result: VerificationResult | Mapping[str, Any] | None,
         acceptance_judgement: AcceptanceJudgement | Mapping[str, Any] | None,
         ts_ms: int,
+        outbox_attempt_id: str | None = None,
     ) -> dict[str, Any]:
         row = self._require_node(conn, graph_id, graph_revision, node_id)
         self._require_version(row, expected_version, subject=f"TaskNode {node_id}")
@@ -808,6 +809,27 @@ class DurableTaskStore(
                 )
             except ContractViolation as exc:
                 raise TaskStoreError(exc.reason_code, exc.detail) from exc
+            # 0102 is the lowest Acceptance state fence. Every caller,
+            # including internal atomic helpers, must materialize and validate
+            # the immutable output before the status CAS can become visible.
+            # A database deliberately pinned before 0102 retains its historical
+            # transition contract so it can be upgraded/reconciled; once the
+            # 0102 table exists, the public low-level transition cannot bypass
+            # the canonical Acceptance UoW.
+            artifact_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+                """
+            ).fetchone()
+            if artifact_schema is not None:
+                self._require_valid_node_artifact(
+                    conn,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    node_id=str(node_id),
+                    allow_pre_acceptance_owner=True,
+                )
         node_payload["status"] = target.value
         node_payload["status_version"] = int(expected_version) + 1
         cancel_ts = (
@@ -845,7 +867,9 @@ class DurableTaskStore(
                 int(expected_version) + 1,
             ),
             expected_event_type=f"TASK_NODE_{target.value}",
-            expected_attempt_id=None,
+            expected_attempt_id=(
+                str(outbox_attempt_id) if outbox_attempt_id is not None else None
+            ),
         )
         return _node_record(
             self._require_node(conn, graph_id, graph_revision, node_id)

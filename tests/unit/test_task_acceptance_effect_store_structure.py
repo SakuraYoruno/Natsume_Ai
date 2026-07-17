@@ -77,6 +77,9 @@ from host_brain.persistence.task_terminal_reconciliation_read_store import (
 from host_brain.persistence.task_budget_usage_store import (
     TaskBudgetUsageStoreMixin,
 )
+from host_brain.persistence.task_node_artifact_store import (
+    TaskNodeArtifactStoreMixin,
+)
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
 )
@@ -166,6 +169,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskEffectReconciliationStoreMixin,
         TaskGraphCancellationEffectOverlayMixin,
         TaskTerminalReconciliationStoreMixin,
+        TaskNodeArtifactStoreMixin,
         TaskBudgetUsageStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,
@@ -175,6 +179,9 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
             TaskAcceptanceEffectStagingMixin,
             name,
         )
+    assert task_repository.DurableTaskStore.commit_node_acceptance is (
+        TaskNodeArtifactStoreMixin.commit_node_acceptance
+    )
     for name in DELIVERY_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskAcceptanceEffectDeliveryMixin,

@@ -175,6 +175,21 @@ class TaskStorePort(Protocol):
         worker_output: Mapping[str, Any],
     ) -> Mapping[str, Any]: ...
 
+    def commit_node_acceptance(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
+        effect_intents: Sequence[Mapping[str, Any] | Any] = (),
+    ) -> Mapping[str, Any]: ...
+
     def transition_node_and_stage_acceptance_effects(
         self,
         graph_id: str,
@@ -184,6 +199,9 @@ class TaskStorePort(Protocol):
         expected_version: int,
         outbox: Any,
         acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
         effect_intents: Sequence[Mapping[str, Any] | Any],
     ) -> Mapping[str, Any]: ...
 

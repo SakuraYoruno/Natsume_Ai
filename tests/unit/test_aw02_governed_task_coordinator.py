@@ -244,6 +244,42 @@ class _FakeTaskStore:
         self.node["node"]["status_version"] = self.node["status_version"]
         return self.get_node(graph_id, revision, node_id)
 
+    def commit_node_acceptance(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Any,
+        effect_intents: Any = (),
+    ) -> dict[str, Any]:
+        del outbox, acceptance_judgement, worker_output
+        node = self.transition_node(
+            graph_id,
+            revision,
+            node_id,
+            expected_version=expected_version,
+            target_status="ACCEPTED",
+            outbox=None,
+        )
+        return {
+            "node": node,
+            "artifact": {
+                "graph_id": graph_id,
+                "graph_revision": revision,
+                "node_id": node_id,
+                "attempt_id": attempt_id,
+                "receipt_ref": receipt_ref,
+            },
+            "effect_intents": tuple(effect_intents),
+            "replayed": False,
+        }
+
     def create_attempt(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append("attempt:CREATED")
         attempt = {
@@ -484,7 +520,7 @@ def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
                 dependencies=(),
                 route="executive_runtime",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),

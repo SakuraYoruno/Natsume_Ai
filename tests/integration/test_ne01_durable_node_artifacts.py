@@ -10,6 +10,10 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.contract_errors import (
+    TASK_GRAPH_INVALID,
+    ContractViolation,
+)
 from host_brain.contracts.agent_runtime.node_artifact import (
     artifact_digest,
     build_task_result_artifact_ref,
@@ -19,13 +23,18 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
+    validate_task_graph_admission_state,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.task_repository import (
+    AcceptanceEffectCommitScope,
     DurableTaskStore,
     OutboxMessage,
+    TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
+    TASK_STORE_NOT_FOUND,
     TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED,
+    TASK_STORE_OUTBOX_CONFLICT,
     TASK_STORE_SCHEMA_NOT_READY,
     TaskStoreError,
     build_outbox_payload_ref,
@@ -65,6 +74,7 @@ def _event(
     event_type: str,
     *,
     graph_revision: int | None = None,
+    attempt_id: str | None = None,
     evidence_refs: tuple[str, ...] = (),
 ) -> OutboxMessage:
     return OutboxMessage.create(
@@ -83,6 +93,7 @@ def _event(
             f"node-artifact:{aggregate_type}:{aggregate_id}:"
             f"{aggregate_version}:{event_type}"
         ),
+        attempt_id=attempt_id,
         outbox_id=(
             f"outbox::node-artifact::{aggregate_type}::{aggregate_id}::"
             f"{aggregate_version}"
@@ -129,7 +140,9 @@ def _graph(
                 dependencies=(),
                 route="chat:root",
                 input_refs=("input://node-artifact/root",),
-                output_contract=root_contract or _output_contract(),
+                output_contract=(
+                    root_contract if root_contract is not None else _output_contract()
+                ),
                 retry_policy={"max_attempts": 1},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -256,12 +269,17 @@ def _acceptance(graph: TaskGraph, *, attempt_id: str = ATTEMPT_ID) -> dict[str, 
     }
 
 
-def _accept_outbox(graph: TaskGraph) -> OutboxMessage:
+def _accept_outbox(
+    graph: TaskGraph,
+    *,
+    attempt_id: str = ATTEMPT_ID,
+) -> OutboxMessage:
     return _event(
         "TASK_NODE",
         f"{graph.graph_id}@{graph.revision}/{ROOT_NODE_ID}",
         4,
         "TASK_NODE_ACCEPTED",
+        attempt_id=attempt_id,
         evidence_refs=(EVIDENCE_REF,),
     )
 
@@ -271,18 +289,50 @@ def _commit_artifact(
     graph: TaskGraph,
     *,
     worker_output: dict[str, Any] | None = None,
+    effect_intents: tuple[dict[str, Any], ...] = (),
+    expected_version: int = 3,
 ) -> dict[str, Any]:
-    return store.transition_node_to_accepted_with_artifact(
+    return store.commit_node_acceptance(
         graph.graph_id,
         graph.revision,
         ROOT_NODE_ID,
-        expected_version=3,
+        expected_version=expected_version,
         outbox=_accept_outbox(graph),
         acceptance_judgement=_acceptance(graph),
         attempt_id=ATTEMPT_ID,
         receipt_ref=RECEIPT_REF,
         worker_output=worker_output or {"result": "root-result"},
+        effect_intents=effect_intents,
     )
+
+
+def _effect_spec(
+    *,
+    effect_id: str = "acceptance-effect://node-artifact/assistant-turn",
+    attempt_id: str = ATTEMPT_ID,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_payload = payload or {"role": "assistant", "content": "root-result"}
+    payload_json = json.dumps(
+        normalized_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "effect_id": effect_id,
+        "graph_id": GRAPH_ID,
+        "graph_revision": REVISION,
+        "node_id": ROOT_NODE_ID,
+        "attempt_id": attempt_id,
+        "commit_scope": AcceptanceEffectCommitScope.NODE,
+        "effect_type": "conversation.assistant_turn",
+        "payload_ref": "effect-payload://node-artifact/assistant-turn",
+        "payload": normalized_payload,
+        "payload_sha256": "sha256:"
+        + hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+        "idempotency_key": "node-artifact:assistant-turn",
+    }
 
 
 def test_0102_migration_asset_and_physical_schema_are_checksum_bound(
@@ -311,6 +361,49 @@ def test_0102_migration_asset_and_physical_schema_are_checksum_bound(
     DurableTaskStore(db_path, clock=lambda: NOW).assert_node_artifact_ready()
 
 
+def test_new_graph_admission_rejects_an_empty_output_contract() -> None:
+    graph = TaskGraph(
+        graph_id="graph-empty-output-contract",
+        root_work_order_id="work-order::graph-empty-output-contract",
+        revision=1,
+        planner_ref="planner://node-artifact/empty-output-contract",
+        status=TaskGraphStatus.CREATED,
+        created_at=NOW,
+        nodes=(
+            TaskNode(
+                node_id="node-empty-output-contract",
+                dependencies=(),
+                route="chat",
+                input_refs=("input://node-artifact/empty-output-contract",),
+                output_contract={},
+                retry_policy={"max_attempts": 1},
+                risk_level=1,
+                acceptance_criteria=(),
+                status=TaskNodeStatus.READY,
+            ),
+        ),
+    )
+
+    with pytest.raises(ContractViolation) as invalid:
+        validate_task_graph_admission_state(graph)
+    assert invalid.value.reason_code == TASK_GRAPH_INVALID
+
+
+def test_upgraded_active_empty_output_contract_requires_reconciliation(
+    tmp_path: Path,
+) -> None:
+    store = DurableTaskStore(_migrated_db(tmp_path), clock=lambda: NOW)
+    graph = _graph(root_contract={})
+    _seed_graph(store, graph)
+
+    with pytest.raises(TaskStoreError) as legacy:
+        store.assert_node_artifact_ready()
+    assert (
+        legacy.value.reason_code
+        == TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED
+    )
+
+
 def test_node_acceptance_and_artifact_are_atomic_and_exactly_replayable(
     tmp_path: Path,
 ) -> None:
@@ -334,6 +427,14 @@ def test_node_acceptance_and_artifact_are_atomic_and_exactly_replayable(
         graph.revision,
         CHILD_NODE_ID,
     ) == [first["artifact"]]
+    with sqlite3.connect(store.db_path) as conn:
+        acceptance_lineage = conn.execute(
+            """
+            SELECT attempt_id FROM task_runtime_outbox
+            WHERE event_type = 'TASK_NODE_ACCEPTED'
+            """
+        ).fetchone()
+    assert acceptance_lineage == (ATTEMPT_ID,)
 
     with pytest.raises(TaskStoreError) as drift:
         _commit_artifact(store, graph, worker_output={"result": "different"})
@@ -343,13 +444,45 @@ def test_node_acceptance_and_artifact_are_atomic_and_exactly_replayable(
     )
 
 
+def test_low_level_accepted_transition_cannot_bypass_unified_acceptance_uow(
+    tmp_path: Path,
+) -> None:
+    store = DurableTaskStore(_migrated_db(tmp_path), clock=lambda: NOW)
+    graph = _graph()
+    _seed_graph(store, graph)
+
+    with pytest.raises(TaskStoreError) as blocked:
+        store.transition_node(
+            graph.graph_id,
+            graph.revision,
+            ROOT_NODE_ID,
+            expected_version=3,
+            target_status=TaskNodeStatus.ACCEPTED,
+            outbox=_accept_outbox(graph),
+            acceptance_judgement=_acceptance(graph),
+        )
+
+    assert blocked.value.reason_code == TASK_STORE_NOT_FOUND
+    assert store.get_node(graph.graph_id, graph.revision, ROOT_NODE_ID)["status"] == (
+        "VERIFIED"
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_node_artifact"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox "
+            "WHERE event_type = 'TASK_NODE_ACCEPTED'"
+        ).fetchone()[0] == 0
+
+
 def test_output_contract_failure_rolls_back_node_and_artifact(tmp_path: Path) -> None:
     store = DurableTaskStore(_migrated_db(tmp_path), clock=lambda: NOW)
     graph = _graph(root_contract=_output_contract(required=("receipt_ref", "missing")))
     _seed_graph(store, graph)
 
     with pytest.raises(TaskStoreError) as invalid:
-        _commit_artifact(store, graph)
+        _commit_artifact(store, graph, effect_intents=(_effect_spec(),))
 
     assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
     assert store.get_node(graph.graph_id, graph.revision, ROOT_NODE_ID)["status"] == (
@@ -358,6 +491,45 @@ def test_output_contract_failure_rolls_back_node_and_artifact(tmp_path: Path) ->
     with sqlite3.connect(store.db_path) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_node_artifact"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox "
+            "WHERE event_type = 'TASK_NODE_ACCEPTED'"
+        ).fetchone()[0] == 0
+
+
+def test_node_cas_failure_rolls_back_artifact_effect_and_acceptance_outbox(
+    tmp_path: Path,
+) -> None:
+    store = DurableTaskStore(_migrated_db(tmp_path), clock=lambda: NOW)
+    graph = _graph()
+    _seed_graph(store, graph)
+
+    with pytest.raises(TaskStoreError) as conflict:
+        _commit_artifact(
+            store,
+            graph,
+            expected_version=2,
+            effect_intents=(_effect_spec(),),
+        )
+
+    assert conflict.value.reason_code == TASK_STORE_CAS_CONFLICT
+    assert store.get_node(graph.graph_id, graph.revision, ROOT_NODE_ID)["status"] == (
+        "VERIFIED"
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_node_artifact"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox "
+            "WHERE event_type = 'TASK_NODE_ACCEPTED'"
         ).fetchone()[0] == 0
 
 
@@ -400,12 +572,16 @@ def test_artifact_insert_conflict_rolls_back_accepted_transition(tmp_path: Path)
         conn.commit()
 
     with pytest.raises(TaskStoreError) as conflict:
-        _commit_artifact(store, graph)
+        _commit_artifact(store, graph, effect_intents=(_effect_spec(),))
 
     assert conflict.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
     assert store.get_node(graph.graph_id, graph.revision, ROOT_NODE_ID)["status"] == (
         "VERIFIED"
     )
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
+        ).fetchone()[0] == 0
 
 
 class _LostAcceptanceResponseStore(DurableTaskStore):
@@ -413,8 +589,8 @@ class _LostAcceptanceResponseStore(DurableTaskStore):
         super().__init__(*args, **kwargs)
         self.lose_once = True
 
-    def transition_node_to_accepted_with_artifact(self, *args: Any, **kwargs: Any):
-        result = super().transition_node_to_accepted_with_artifact(*args, **kwargs)
+    def commit_node_acceptance(self, *args: Any, **kwargs: Any):
+        result = super().commit_node_acceptance(*args, **kwargs)
         if self.lose_once:
             self.lose_once = False
             raise ConnectionError("simulated response loss after COMMIT")
@@ -428,15 +604,20 @@ def test_lost_acceptance_response_replays_exact_artifact_without_second_write(
     store = _LostAcceptanceResponseStore(db_path, clock=lambda: NOW)
     graph = _graph()
     _seed_graph(store, graph)
+    spec = _effect_spec()
 
     with pytest.raises(ConnectionError, match="after COMMIT"):
-        _commit_artifact(store, graph)
-    replay = _commit_artifact(store, graph)
+        _commit_artifact(store, graph, effect_intents=(spec,))
+    replay = _commit_artifact(store, graph, effect_intents=(spec,))
 
     assert replay["replayed"] is True
+    assert replay["effect_intents"][0]["replayed"] is True
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_node_artifact"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
         ).fetchone()[0] == 1
         assert conn.execute(
             """
@@ -444,6 +625,15 @@ def test_lost_acceptance_response_replays_exact_artifact_without_second_write(
             WHERE event_type = 'TASK_NODE_ACCEPTED'
             """
         ).fetchone()[0] == 1
+
+    with pytest.raises(TaskStoreError) as missing_effect:
+        _commit_artifact(store, graph, effect_intents=())
+    assert missing_effect.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+    drifted = _effect_spec(payload={"role": "assistant", "content": "drifted"})
+    with pytest.raises(TaskStoreError) as effect_drift:
+        _commit_artifact(store, graph, effect_intents=(drifted,))
+    assert effect_drift.value.reason_code == TASK_STORE_OUTBOX_CONFLICT
 
 
 @pytest.mark.parametrize(
@@ -530,6 +720,108 @@ def test_upgraded_active_accepted_predecessor_without_artifact_is_quarantined(
     )
     assert store.get_node(graph.graph_id, graph.revision, CHILD_NODE_ID)["status"] == (
         "BLOCKED"
+    )
+
+
+def test_upgraded_terminal_effect_without_exact_artifact_is_quarantined(
+    tmp_path: Path,
+) -> None:
+    store = DurableTaskStore(_migrated_db(tmp_path), clock=lambda: NOW)
+    graph = TaskGraph(
+        graph_id="graph-terminal-effect-without-artifact",
+        root_work_order_id="work-order::graph-terminal-effect-without-artifact",
+        revision=1,
+        planner_ref="planner://node-artifact/terminal-effect",
+        status=TaskGraphStatus.COMPLETED,
+        created_at=NOW,
+        result_node_id="node-terminal-effect",
+        nodes=(
+            TaskNode(
+                node_id="node-terminal-effect",
+                dependencies=(),
+                route="chat",
+                input_refs=("input://node-artifact/terminal-effect",),
+                output_contract={"type": "object"},
+                retry_policy={"max_attempts": 1},
+                risk_level=1,
+                acceptance_criteria=(),
+                status=TaskNodeStatus.ACCEPTED,
+                status_version=1,
+            ),
+        ),
+    )
+    store.create_graph(
+        graph,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph.graph_id,
+            0,
+            "TASK_GRAPH_CREATED",
+            graph_revision=graph.revision,
+        ),
+    )
+    attempt_id = "attempt-terminal-effect-without-artifact"
+    payload = {"role": "assistant", "content": "legacy terminal effect"}
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, 1, 'node-terminal-effect', 1, 'SUCCEEDED', 3,
+                      'legacy-worker', 'legacy-terminal-effect', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                graph.graph_id,
+                "sha256:" + ("d" * 64),
+                NOW,
+                NOW,
+                NOW,
+                NOW + 1,
+                NOW + 1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_acceptance_effect_intent(
+                effect_id, graph_id, graph_revision, node_id, attempt_id,
+                commit_scope, effect_type, payload_ref, payload_json,
+                payload_sha256, idempotency_key, status, available_ts_ms,
+                fencing_token, attempt_count, status_version,
+                created_ts_ms, updated_ts_ms
+            ) VALUES ('acceptance-effect://node-artifact/legacy-terminal', ?, 1,
+                      'node-terminal-effect', ?, 'GRAPH',
+                      'conversation.assistant_turn',
+                      'effect-payload://node-artifact/legacy-terminal', ?, ?,
+                      'node-artifact:legacy-terminal', 'PENDING', ?, 0, 0, 0, ?, ?)
+            """,
+            (
+                graph.graph_id,
+                attempt_id,
+                payload_json,
+                "sha256:" + hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+                NOW,
+                NOW,
+                NOW,
+            ),
+        )
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as legacy:
+        store.assert_node_artifact_ready()
+    assert (
+        legacy.value.reason_code
+        == TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED
     )
 
 

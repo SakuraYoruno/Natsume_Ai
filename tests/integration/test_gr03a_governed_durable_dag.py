@@ -45,6 +45,7 @@ from host_brain.persistence.task_repository import (
     OutboxMessage,
     TaskStoreError,
 )
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.task_runtime import (
     AdmittedExecution,
     GovernedRuntimeError,
@@ -166,7 +167,7 @@ def _contracts(
                 dependencies=dependencies,
                 route=f"worker:{node_id}",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -254,6 +255,78 @@ class _Worker:
                 },
                 "evidence_refs": [f"model-budget://{node_id}/stable"],
             },
+        }
+
+
+class _DurableReviewWorker(_Worker):
+    """Persist the exact worker projection required by post-review replay."""
+
+    def __init__(
+        self,
+        calls: list[str],
+        projection_store: WorkerProjectionStore,
+    ) -> None:
+        super().__init__(calls, set())
+        self._projection_store = projection_store
+
+    async def execute_stream(self, *, execution_context: dict[str, Any], **_: Any):
+        node_id = str(execution_context["node_id"])
+        self._calls.append(node_id)
+        budget_usage = {
+            "schema_version": "Natsume.task_runtime.worker_budget_usage.v1",
+            "usage_id": f"worker-usage://{node_id}/durable-review",
+            "measurements": {
+                "token_count": 10,
+                "retry_count": 0,
+                "model_cost_micros": 25,
+            },
+            "evidence_refs": [f"model-budget://{node_id}/durable-review"],
+        }
+        body = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": None,
+            "command_id": str(execution_context["command_id"]),
+            "request_id": str(execution_context["request_id"]),
+            "narrative": "durable review projection",
+            "route_type": "chat",
+            "target_id": str(execution_context["target_id"]),
+            "graph_id": str(execution_context["graph_id"]),
+            "graph_revision": int(execution_context["graph_revision"]),
+            "node_id": node_id,
+            "attempt_id": str(execution_context["attempt_id"]),
+            "node_grant_ref": str(
+                execution_context.get("node_grant_ref")
+                or "governor-grant://gr03a/legacy-node"
+            ),
+            "audit_refs": {},
+            "budget_usage": budget_usage,
+        }
+        encoded = json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        projection_id = (
+            f"worker-projection://gr03a/1/{node_id}/"
+            f"{execution_context['attempt_id']}/{digest}"
+        )
+        self._projection_store.stage(
+            projection_id=projection_id,
+            projection={
+                **body,
+                "projection_id": projection_id,
+                "payload_digest": f"sha256:{digest}",
+                "schema_version": "Natsume.task_runtime.worker_projection.v1",
+            },
+        )
+        yield {
+            **body,
+            "receipt_ref": projection_id,
         }
 
 
@@ -575,6 +648,7 @@ def _coordinator(
     fanout_event_buffer_size: int = 32,
     outbox_publisher: Any = None,
     node_grant_verifier: Any = None,
+    projection_reader: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
@@ -596,6 +670,7 @@ def _coordinator(
         acceptance=(
             acceptance if acceptance is not None else _Acceptance(acceptance_decision)
         ),
+        projection_reader=projection_reader,
         review_runtime=review_runtime,
         node_grant_verifier=node_grant_verifier,
         owner_id="gr03a-worker",
@@ -724,6 +799,8 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
     contracts = _contracts((("root", ()),))
     calls: list[str] = []
     review_store = ReviewStore(db_path, clock=lambda: NOW)
+    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
+    worker = _DurableReviewWorker(calls, projection_store)
     app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
         coordinator=_coordinator(
@@ -731,6 +808,8 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
             calls,
             review_runtime=TaskNodeReviewRuntime(review_store, clock=lambda: NOW),
             acceptance_decision="REVIEW",
+            worker_resolver=_StaticResolver(worker),
+            projection_reader=projection_store,
         ),
     )
 

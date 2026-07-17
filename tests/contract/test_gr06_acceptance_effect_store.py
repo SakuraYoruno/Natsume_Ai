@@ -42,6 +42,10 @@ from host_brain.persistence.task_repository import (
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "host_brain" / "audit" / "migrations"
+GR06_OPERATION_SCOPE = "gr06:node-operation"
+GR06_OPERATION_FINGERPRINT = "sha256:" + ("a" * 64)
+GR06_RESERVATION_ID = "reservation-gr06"
+GR06_RECEIPT_REF = "worker-projection://gr06/accepted"
 
 
 @dataclass
@@ -243,6 +247,8 @@ def _seed_attempt(store: DurableTaskStore) -> None:
         node_id="node-gr06",
         attempt_no=1,
         expected_node_version=0,
+        operation_scope=GR06_OPERATION_SCOPE,
+        operation_fingerprint=GR06_OPERATION_FINGERPRINT,
         outbox=_event(
             "TASK_ATTEMPT",
             "attempt-gr06",
@@ -304,6 +310,40 @@ def _prepare_node_acceptance(store: DurableTaskStore):
             "attempt-gr06",
             2,
             "TASK_ATTEMPT_RUNNING",
+            attempt_id="attempt-gr06",
+        ),
+    )
+    reserved = store.reserve_operation(
+        reservation_id=GR06_RESERVATION_ID,
+        business_scope=GR06_OPERATION_SCOPE,
+        operation_fingerprint=GR06_OPERATION_FINGERPRINT,
+        attempt_id="attempt-gr06",
+        lease_id=lease["lease_id"],
+        owner_id="worker-gr06",
+        fencing_token=lease["fencing_token"],
+        ttl_ms=10_000,
+        outbox=_event(
+            "OPERATION_RESERVATION",
+            GR06_RESERVATION_ID,
+            0,
+            "OPERATION_RESERVED",
+            attempt_id="attempt-gr06",
+        ),
+    )
+    assert reserved.acquired is True
+    store.commit_operation(
+        GR06_RESERVATION_ID,
+        attempt_id="attempt-gr06",
+        lease_id=lease["lease_id"],
+        owner_id="worker-gr06",
+        fencing_token=lease["fencing_token"],
+        expected_version=0,
+        receipt_ref=GR06_RECEIPT_REF,
+        outbox=_event(
+            "OPERATION_RESERVATION",
+            GR06_RESERVATION_ID,
+            1,
+            "OPERATION_COMMITTED",
             attempt_id="attempt-gr06",
         ),
     )
@@ -388,20 +428,59 @@ def _prepare_node_acceptance(store: DurableTaskStore):
 
 def _accept_node(store: DurableTaskStore) -> None:
     judgement = _prepare_node_acceptance(store)
-    store.transition_node(
+    acceptance_event = _event(
+        "TASK_NODE",
+        "graph-gr06@1/node-gr06",
+        7,
+        "TASK_NODE_ACCEPTED",
+        attempt_id="attempt-gr06",
+        evidence_refs=judgement.evidence_refs,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        has_artifact_schema = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+            """
+        ).fetchone() is not None
+    if not has_artifact_schema:
+        # Explicit compatibility coverage for a database pinned before 0102.
+        store.transition_node(
+            "graph-gr06",
+            1,
+            "node-gr06",
+            expected_version=6,
+            target_status=TaskNodeStatus.ACCEPTED,
+            outbox=_event(
+                "TASK_NODE",
+                "graph-gr06@1/node-gr06",
+                7,
+                "TASK_NODE_ACCEPTED",
+                evidence_refs=judgement.evidence_refs,
+            ),
+            acceptance_judgement=judgement,
+        )
+        return
+    node_effects = tuple(
+        item
+        for item in store.list_acceptance_effect_intents(
+            graph_id="graph-gr06",
+            graph_revision=1,
+            node_id="node-gr06",
+        )
+        if item["commit_scope"] == AcceptanceEffectCommitScope.NODE.value
+    )
+    store.commit_node_acceptance(
         "graph-gr06",
         1,
         "node-gr06",
         expected_version=6,
-        target_status=TaskNodeStatus.ACCEPTED,
-        outbox=_event(
-            "TASK_NODE",
-            "graph-gr06@1/node-gr06",
-            7,
-            "TASK_NODE_ACCEPTED",
-            evidence_refs=judgement.evidence_refs,
-        ),
+        outbox=acceptance_event,
         acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
+        effect_intents=node_effects,
     )
 
 
@@ -440,6 +519,7 @@ def _effect_spec(
     effect_id: str = "acceptance-effect://gr06/assistant-turn",
     commit_scope: AcceptanceEffectCommitScope = AcceptanceEffectCommitScope.NODE,
     idempotency_key: str = "gr06:assistant-turn",
+    attempt_id: str = "attempt-gr06",
     payload: bytes = b'{"role":"assistant"}',
 ) -> dict[str, object]:
     return {
@@ -447,7 +527,7 @@ def _effect_spec(
         "graph_id": "graph-gr06",
         "graph_revision": 1,
         "node_id": "node-gr06",
-        "attempt_id": "attempt-gr06",
+        "attempt_id": attempt_id,
         "commit_scope": commit_scope,
         "effect_type": "conversation.assistant_turn",
         "payload_ref": "effect-payload://gr06/assistant-turn",
@@ -698,6 +778,157 @@ def test_gr06_claim_is_acceptance_gated_and_terminal_transitions_are_idempotent(
     assert failed_replay["replayed"] is True
 
 
+@pytest.mark.parametrize(
+    "commit_scope",
+    (AcceptanceEffectCommitScope.NODE, AcceptanceEffectCommitScope.GRAPH),
+)
+def test_gr06_claim_requires_the_exact_attempt_that_materialized_the_artifact(
+    tmp_path: Path,
+    commit_scope: AcceptanceEffectCommitScope,
+) -> None:
+    """A successful sibling Attempt cannot borrow another Attempt's Acceptance."""
+
+    store = _store(tmp_path)
+    _seed_attempt(store)
+    _accept_node(store)
+    stale_attempt_id = "attempt-gr06-stale"
+    effect_id = f"acceptance-effect://gr06/stale-{commit_scope.value.lower()}"
+    spec = _effect_spec(
+        effect_id=effect_id,
+        commit_scope=commit_scope,
+        idempotency_key=f"gr06:stale-{commit_scope.value.lower()}",
+        attempt_id=stale_attempt_id,
+    )
+    payload_json = json.dumps(
+        spec["payload"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms
+            ) VALUES (?, 'graph-gr06', 1, 'node-gr06', 2, 'SUCCEEDED', 3,
+                      'worker-gr06-stale', ?, ?, 10000, 10000, 10000, 10001, 10001)
+            """,
+            (
+                stale_attempt_id,
+                "gr06:node-operation:stale",
+                "sha256:" + ("b" * 64),
+            ),
+        )
+        # Deliberately model a direct-SQL/application bypass.  The dispatcher
+        # must still fence it because no exact 0102 artifact belongs to this
+        # otherwise successful Attempt.
+        conn.execute(
+            """
+            INSERT INTO task_runtime_acceptance_effect_intent(
+                effect_id, graph_id, graph_revision, node_id, attempt_id,
+                commit_scope, effect_type, payload_ref, payload_json,
+                payload_sha256, idempotency_key, status, available_ts_ms,
+                fencing_token, attempt_count, status_version,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 10000,
+                      0, 0, 0, 10000, 10000)
+            """,
+            (
+                spec["effect_id"],
+                spec["graph_id"],
+                spec["graph_revision"],
+                spec["node_id"],
+                spec["attempt_id"],
+                commit_scope.value,
+                spec["effect_type"],
+                spec["payload_ref"],
+                payload_json,
+                spec["payload_sha256"],
+                spec["idempotency_key"],
+            ),
+        )
+        conn.commit()
+
+    if commit_scope is AcceptanceEffectCommitScope.GRAPH:
+        store.transition_graph(
+            "graph-gr06",
+            1,
+            expected_version=1,
+            target_status=TaskGraphStatus.COMPLETED,
+            outbox=_event("TASK_GRAPH", "graph-gr06", 2, "TASK_GRAPH_COMPLETED"),
+        )
+
+    assert store.claim_acceptance_effect_intent(
+        owner_id="dispatcher-stale",
+        effect_id=effect_id,
+    ) is None
+
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_acceptance_effect_intent
+            SET status = 'CLAIMED', lease_owner = 'dispatcher-stale',
+                lease_expires_ts_ms = 20000, fencing_token = 1,
+                attempt_count = 1, status_version = 1
+            WHERE effect_id = ?
+            """,
+            (effect_id,),
+        )
+        conn.commit()
+    with pytest.raises(TaskStoreError) as replay_bypass:
+        store.claim_acceptance_effect_intent(
+            owner_id="dispatcher-stale",
+            effect_id=effect_id,
+        )
+    assert replay_bypass.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+@pytest.mark.parametrize("claimed_replay", (False, True))
+def test_gr06_claim_revalidates_artifact_content_before_dispatch(
+    tmp_path: Path,
+    claimed_replay: bool,
+) -> None:
+    store = _store(tmp_path)
+    _seed_attempt(store)
+    effect = _stage(store)
+    _accept_node(store)
+    effect_id = str(effect["effect_id"])
+
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DROP TRIGGER trg_task_runtime_node_artifact_immutable_update")
+        conn.execute(
+            """
+            UPDATE task_runtime_node_artifact
+            SET payload_json = '{"receipt_ref":"worker-projection://tampered"}'
+            WHERE graph_id = 'graph-gr06' AND graph_revision = 1
+              AND node_id = 'node-gr06'
+            """
+        )
+        if claimed_replay:
+            conn.execute(
+                """
+                UPDATE task_runtime_acceptance_effect_intent
+                SET status = 'CLAIMED', lease_owner = 'dispatcher-tamper',
+                    lease_expires_ts_ms = 20000, fencing_token = 1,
+                    attempt_count = 1, status_version = 1
+                WHERE effect_id = ?
+                """,
+                (effect_id,),
+            )
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as tampered:
+        store.claim_acceptance_effect_intent(
+            owner_id="dispatcher-tamper",
+            effect_id=effect_id,
+        )
+    assert tampered.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
 def test_gr06_delivery_mutations_remain_compatible_before_0098(
     tmp_path: Path,
 ) -> None:
@@ -837,6 +1068,7 @@ def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(
         "graph-gr06@1/node-gr06",
         7,
         "TASK_NODE_ACCEPTED",
+        attempt_id="attempt-gr06",
         evidence_refs=judgement.evidence_refs,
     )
 
@@ -847,6 +1079,9 @@ def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(
         expected_version=6,
         outbox=acceptance_event,
         acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
         effect_intents=(spec,),
     )
 
@@ -860,6 +1095,9 @@ def test_gr06_node_acceptance_and_effect_staging_are_one_atomic_commit(
         expected_version=6,
         outbox=acceptance_event,
         acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
         effect_intents=(spec,),
     )
     assert replay["replayed"] is True
@@ -891,9 +1129,13 @@ def test_gr06_effect_replay_is_exact_and_drift_rolls_back_node_acceptance(
                 "graph-gr06@1/node-gr06",
                 7,
                 "TASK_NODE_ACCEPTED",
+                attempt_id="attempt-gr06",
                 evidence_refs=judgement.evidence_refs,
             ),
             acceptance_judgement=judgement,
+            attempt_id="attempt-gr06",
+            receipt_ref=GR06_RECEIPT_REF,
+            worker_output={"result_text": "effect staged"},
             effect_intents=(drifted,),
         )
     assert conflict.value.reason_code == TASK_STORE_OUTBOX_CONFLICT
@@ -916,9 +1158,13 @@ def test_gr06_effect_replay_is_exact_and_drift_rolls_back_node_acceptance(
             "graph-gr06@1/node-gr06",
             7,
             "TASK_NODE_ACCEPTED",
+            attempt_id="attempt-gr06",
             evidence_refs=judgement.evidence_refs,
         ),
         acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
         effect_intents=(original,),
     )
     assert replayed["node"]["status"] == TaskNodeStatus.ACCEPTED.value
@@ -975,3 +1221,30 @@ def test_gr06_graph_completion_and_graph_effect_staging_are_acceptance_gated(
         owner_id="dispatcher-atomic-graph",
         effect_id=str(graph_spec["effect_id"]),
     ) is not None
+
+
+def test_gr06_standalone_graph_effect_cannot_be_added_after_completion(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _seed_attempt(store)
+    _accept_node(store)
+    store.transition_graph(
+        "graph-gr06",
+        1,
+        expected_version=1,
+        target_status=TaskGraphStatus.COMPLETED,
+        outbox=_event("TASK_GRAPH", "graph-gr06", 2, "TASK_GRAPH_COMPLETED"),
+    )
+
+    effect_id = "acceptance-effect://gr06/late-graph-effect"
+    with pytest.raises(TaskStoreError) as late:
+        _stage(
+            store,
+            effect_id=effect_id,
+            commit_scope=AcceptanceEffectCommitScope.GRAPH,
+            idempotency_key="gr06:late-graph-effect",
+        )
+    assert late.value.reason_code == TASK_STORE_OUTBOX_CONFLICT
+    with pytest.raises(TaskStoreError):
+        store.get_acceptance_effect_intent(effect_id)

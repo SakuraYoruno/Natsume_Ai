@@ -3,8 +3,8 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.10
-核对日期：2026-07-16
+版本：v5.11
+核对日期：2026-07-17
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `WIRED` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102 已为 production normal/checkpoint/Review acceptance 建立 immutable Node artifact UoW 与 successor exact-input；启动门禁阻断 ACTIVE legacy 缺 artifact，但低层 ACCEPTED/SQL 旁路尚存。Budget、窄 continuation/finalization 与 0099 证据继续有效；Cancellation/Operation/Effect/terminal 仍默认关闭，general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
@@ -144,9 +144,9 @@ operation reservation 建立后，`DurableNodeExecutionRuntime` 会创建 `Durab
 
 `AcceptedGraphFinalizationRuntime` 被 normal Node、上述 continuation 与 outer DAG 共享。它关闭了另一个独立崩溃窗：Node 已 `ACCEPTED`、Graph 仍 `ACTIVE`、Effect 尚未落盘时，重启从 exact checkpoint 与 canonical WorkerProjection 重建 Effect，并调用既有 `transition_graph_and_stage_acceptance_effects` 原子提交 Graph+Effect。测试证明 worker 不重跑、Effect identity/digest/idempotency 不漂移；篡改 projection 时 Graph 保持未完成且 Effect 不产生。
 
-0102 `task_runtime_node_artifact` 现在是非空 `output_contract` 的 Node 结果权威。normal、COMMITTED checkpoint continuation 与 Review approve 都调用 `transition_node_to_accepted_with_artifact()`，在同一个 SQLite writer transaction 中提交 Node `ACCEPTED`、immutable artifact 和 Node Outbox；artifact 复核 exact graph/revision/node、SUCCEEDED Attempt、唯一 COMMITTED receipt、canonical contract/payload/digest。compiler 生成的 dependency result refs 不能由 planner 伪造，READY/执行/恢复前只解析同 revision 的全部前驱 artifact，`FrozenNodeInput` 再校验 ref 集合与 payload digest。`ProcessTaskRuntimeContainer` 在 recovery 前校验 0102 asset/schema checksum并扫描 active legacy inventory，结果按 Store 缓存，热路径不反复全库扫描。
+0102 `task_runtime_node_artifact` 现在是 Node 结果权威，GR06 NODE Effect 也已并入 canonical `commit_node_acceptance()`。normal、COMMITTED checkpoint continuation 与 Review approve 在同一个 SQLite writer transaction 中冻结 exact NODE Effect 集（可为空）、写 immutable artifact、推进 Node `ACCEPTED` 并追加绑定 exact Attempt 的 Node Outbox；任何 effect set、artifact、CAS、judgement 或 Outbox 漂移整笔回滚，响应丢失只能逐项重验后精确 replay。Effect dispatcher 在 0102 存在时还会命中并重新验证同 graph/revision/node/Attempt 的 artifact，旧 `SUCCEEDED Attempt` 不能借用另一个 Attempt 的 Acceptance。compiler 生成的 dependency result refs 不能由 planner 伪造，READY/执行/恢复前只解析同 revision 的全部前驱 artifact，`FrozenNodeInput` 再校验 ref 集合与 payload digest。新 HostCommand/Task admission 拒绝空 `output_contract`；`ProcessTaskRuntimeContainer` 在 recovery 前校验 0102 asset/schema checksum，并把非终态 active legacy 空合同/缺 artifact，以及缺 exact artifact 的可投递 terminal legacy Effect 隔离为 reconciliation required。
 
-这仍不是物理全封闭：低层 public `transition_node(ACCEPTED)` 和 SQL 状态本身尚未强制 artifact/Attempt/receipt 同步存在。生产三条 acceptance 路径已经接线，但彻底删除旁路需要把 GR06 Acceptance Effect staging 与 Node artifact 合并成统一 acceptance UoW；在此之前不能宣称所有 writer 或一般 recovery 已完成。
+应用 Store 的 public `transition_node(ACCEPTED)` 在 0102 存在时已要求有效 artifact，生产三条 acceptance 路径不再拥有第二 writer。但这仍不是数据库物理全封闭：Acceptance 前 standalone Effect pre-stage 仍是兼容入口，低层 `create_graph()` 仍服务 legacy/internal 状态构造，SQL 也没有跨 Effect/artifact/Node/Outbox 的强制 trigger。准确定级是 `UNIFIED_APPLICATION_STORE_UOW_WIRED / PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT`，不能据此宣称一般 recovery 或 production fan-out 完成。
 
 Coordinator 现在有两个独立实验能力：`atomic_graph_success_enabled` 决定进程是否能执行 frozen atomic policy，`bounded_fanout_enabled` 决定 scheduler 多节点批次是否实际并发；二者构造默认值均为 `false`，Host、Scheduler、Internal 三处生产 composition 均未传入启用值。Application 在 `repository.admit` 前检查 atomic capability、node-grant service 与 parent grant，任一缺失即拒绝且不写 durable admission。Coordinator 再要求 `node_grant_refs` 精确覆盖整个 admitted Graph。atomic 图即使是单节点或顺序执行也使用 deferred child + outer terminal authority；terminal-leaf 实际并行还必须另开 bounded fan-out。progress buffer/控制槽的反压语义保持 B4 合同。
 

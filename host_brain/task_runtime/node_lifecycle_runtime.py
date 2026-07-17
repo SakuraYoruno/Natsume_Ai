@@ -120,13 +120,14 @@ class DurableNodeLifecycleRuntime:
         worker_output: Mapping[str, Any],
         evidence_refs: Sequence[str] = (),
         acceptance_judgement: Mapping[str, Any],
+        effect_intents: Sequence[Any] = (),
     ) -> dict[str, Any]:
         """Atomically accept one node and persist its canonical output."""
 
         version = _version(node)
         result = _mapping(
             await _maybe_await(
-                self._store.transition_node_to_accepted_with_artifact(
+                self._store.commit_node_acceptance(
                     admitted.graph_id,
                     admitted.graph_revision,
                     admitted.node_id,
@@ -140,12 +141,14 @@ class DurableNodeLifecycleRuntime:
                         ),
                         aggregate_version=version + 1,
                         event_type="TASK_NODE_ACCEPTED",
+                        attempt_id=attempt_id,
                         evidence_refs=evidence_refs,
                     ),
                     acceptance_judgement=acceptance_judgement,
                     attempt_id=attempt_id,
                     receipt_ref=receipt_ref,
                     worker_output=worker_output,
+                    effect_intents=effect_intents,
                 )
             ),
             field_name="atomic node artifact acceptance",

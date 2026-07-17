@@ -18,6 +18,7 @@ from host_brain.persistence.task_record_codec import (
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectStatus,
     TASK_STORE_CANCELLATION_CONFLICT,
+    TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
     TASK_STORE_LEASE_CONFLICT,
     TASK_STORE_NOT_FOUND,
@@ -207,10 +208,44 @@ class TaskAcceptanceEffectDeliveryMixin:
                     and str(existing_claim["lease_owner"] or "") == owner
                     and int(existing_claim["lease_expires_ts_ms"] or 0) > ts_ms
                 ):
+                    artifact_schema = conn.execute(
+                        """
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table'
+                          AND name = 'task_runtime_node_artifact'
+                        """
+                    ).fetchone()
+                    if artifact_schema is not None:
+                        self._require_valid_node_artifact(
+                            conn,
+                            graph_id=str(existing_claim["graph_id"]),
+                            graph_revision=int(existing_claim["graph_revision"]),
+                            node_id=str(existing_claim["node_id"]),
+                            expected_attempt_id=str(existing_claim["attempt_id"]),
+                        )
                     replay = _acceptance_effect_record(existing_claim)
                     replay["replayed"] = True
                     return replay
             selected_clause = " AND effect.effect_id = ?" if selected_effect is not None else ""
+            artifact_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+                """
+            ).fetchone()
+            artifact_join = ""
+            artifact_guard = ""
+            if artifact_schema is not None:
+                artifact_join = """
+                LEFT JOIN task_runtime_node_artifact AS artifact
+                  ON artifact.graph_id = effect.graph_id
+                 AND artifact.graph_revision = effect.graph_revision
+                 AND artifact.node_id = effect.node_id
+                 AND artifact.attempt_id = effect.attempt_id
+                """
+                artifact_guard = """
+                  AND artifact.artifact_ref IS NOT NULL
+                """
             parameters: list[Any] = [ts_ms, ts_ms]
             if selected_effect is not None:
                 parameters.append(selected_effect)
@@ -230,6 +265,9 @@ class TaskAcceptanceEffectDeliveryMixin:
                 JOIN task_runtime_graph AS graph_row
                   ON graph_row.graph_id = effect.graph_id
                  AND graph_row.revision = effect.graph_revision
+                """
+                + artifact_join
+                + """
                 WHERE (
                     (effect.status = 'PENDING' AND effect.available_ts_ms <= ?)
                     OR
@@ -237,6 +275,9 @@ class TaskAcceptanceEffectDeliveryMixin:
                   )
                   AND attempt.status = 'SUCCEEDED'
                   AND node.status = 'ACCEPTED'
+                """
+                + artifact_guard
+                + """
                   AND (
                     effect.commit_scope = 'NODE'
                     OR
@@ -253,6 +294,14 @@ class TaskAcceptanceEffectDeliveryMixin:
             ).fetchone()
             if row is None:
                 return None
+            if artifact_schema is not None:
+                self._require_valid_node_artifact(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    node_id=str(row["node_id"]),
+                    expected_attempt_id=str(row["attempt_id"]),
+                )
             cursor = conn.execute(
                 """
                 UPDATE task_runtime_acceptance_effect_intent

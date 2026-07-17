@@ -252,7 +252,8 @@ claim runnable node
   → execute worker with node-bound grant
   → verification
   → POST acceptance review if required
-  → atomic accept node + immutable result artifact (when output_contract exists)
+  → atomic freeze exact NODE effects + immutable result artifact
+  → accept node + append Attempt-bound Node Outbox
   → progress dependants
   → finalize graph receipt
 ```
@@ -268,7 +269,7 @@ claim runnable node
 | Resume | 消费 token 后由 composition worker 按原 HostCommand surface 自动重调度；PRE 无伪 Attempt，POST 不重跑 worker | `WIRED_0096` |
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
-| Node result artifact | 0102 将 production normal/checkpoint/Review 的 `ACCEPTED + artifact + Node Outbox` 放入一个 UoW；后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs，worker 输入再次冻结 ref/digest。启动门禁扫描 active legacy 缺 artifact；低层 ACCEPTED/SQL bypass 尚存 | `PRODUCTION_PATH_WIRED / LOW_LEVEL_BYPASS_PRESENT` |
+| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。应用低层 ACCEPTED writer 已封口；pre-stage、legacy/internal graph create 与 direct SQL 仍存在 | `UNIFIED_APPLICATION_STORE_UOW_WIRED / PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT` |
 | Completion policy | TaskGraph v1 可选 `ATOMIC_GRAPH_SUCCESS_V1` 必须显式 sink result；legacy 多 sink 无 result。PlanningGraphCompiler 默认 legacy，只有显式请求/重规划继承才 atomic | `B5_DURABLE_POLICY_WIRED_SHADOW` |
 | DAG 并发 | `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 独立默认 OFF，三处生产 composition 未启用。atomic 可单节点/串行 outer 封口；bounded 才允许 terminal-leaf 实际有界并发 | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW` |
 | 并行合流 | progress 用 `fanout_event_buffer_size` 个 semaphore slot（默认 32、非正值拒绝）限制在途事件，并为每个 child 预留独立 control 容量；size=1 慢消费者仍会反压 child，自发 `CancelledError` 也不会因 progress 满而丢失监督信号。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |

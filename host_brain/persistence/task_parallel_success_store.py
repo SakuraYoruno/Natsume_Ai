@@ -525,6 +525,7 @@ class TaskParallelSuccessStoreMixin:
                     spec,
                     ts_ms=ts_ms,
                     require_succeeded_attempt=True,
+                    allow_terminal_graph_insert=True,
                 )
                 for spec in specs
             )

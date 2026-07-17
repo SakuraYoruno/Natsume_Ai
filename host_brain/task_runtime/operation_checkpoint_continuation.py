@@ -26,7 +26,6 @@ from .coordinator_records import (
     _exception_reason,
     _mapping,
     _node_input_refs,
-    _node_output_contract,
     _record_positive_int,
     _required_record_text,
     _review_evidence_refs,
@@ -498,24 +497,15 @@ class CommittedCheckpointContinuation:
             )
             return
 
-        if _node_output_contract(current_node):
-            current_node = await self._node_lifecycle.accept_node_output(
-                admitted,
-                current_node,
-                attempt_id=attempt_id,
-                receipt_ref=receipt_ref,
-                worker_output=worker_commit,
-                evidence_refs=acceptance_refs,
-                acceptance_judgement=acceptance,
-            )
-        else:
-            current_node = await self._node_lifecycle.transition_node(
-                admitted,
-                current_node,
-                "ACCEPTED",
-                evidence_refs=acceptance_refs,
-                acceptance_judgement=acceptance,
-            )
+        current_node = await self._node_lifecycle.accept_node_output(
+            admitted,
+            current_node,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            worker_output=worker_commit,
+            evidence_refs=acceptance_refs,
+            acceptance_judgement=acceptance,
+        )
         all_nodes_accepted = not defer_shared_terminal
         if all_nodes_accepted:
             for binding in admitted.nodes:

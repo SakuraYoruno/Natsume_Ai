@@ -50,7 +50,7 @@
 | 功能域 | 外部入口/呈现 | 当前主 owner | 主要下游 | 当前裁决 |
 |---|---|---|---|---|
 | 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 为 `WIRED`；进度/最近轮次走只读投影，Executive 已退出生产路由 |
-| 任务、Skill 与 Delegate | Chat 意图、`/v1/agent/run`、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；0102 Node artifact 的 production acceptance/successor input 已接线，但低层 ACCEPTED bypass、通用恢复与生产并发仍 `PARTIAL` |
+| 任务、Skill 与 Delegate | Chat 意图、`/v1/agent/run`、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；0102+GR06 canonical Node Acceptance 已统一 exact Effect/artifact/`ACCEPTED`/Attempt Outbox，successor exact input 与 delivery guard 已接线。pre-stage、legacy/internal graph create、direct SQL、通用恢复与生产并发仍 `PARTIAL` |
 | 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | 定义、时钟、持久化与 governed execution 已接通；DAG 自动恢复仍受 Lane B 限制 |
 | 记忆、检索与设定 | Memory/Canon API、Monitor Memory/Canon | `memory`、`retrieval`、`canon` | SQLite、Chroma、Neo4j、Surface Context | 多类记忆与 Canon proposal/apply 可用；统一 Knowledge OS 为 `MISSING` |
 | 数字生命状态 | `/v1/digital-life/*`、Monitor Life Systems | `digital_life` | Projection、Persona、Lifecycle、Delivery Outbox | command/event/reducer 地基 `WIRED`；World/Scene/Intent 统一上下文仍 `PARTIAL/MISSING` |

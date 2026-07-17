@@ -38,7 +38,6 @@ from .coordinator_records import (
     _exception_reason,
     _mapping,
     _node_input_refs,
-    _node_output_contract,
     _record_non_negative_int,
     _record_positive_int,
     _required_record_text,
@@ -1350,24 +1349,15 @@ class DurableNodeExecutionRuntime:
             yield terminal_event(receipt)
             return
 
-        if _node_output_contract(node):
-            node = await self._node_lifecycle.accept_node_output(
-                admitted,
-                node,
-                attempt_id=attempt_id,
-                receipt_ref=receipt_ref,
-                worker_output=worker_commit,
-                evidence_refs=acceptance_refs,
-                acceptance_judgement=acceptance,
-            )
-        else:
-            node = await self._node_lifecycle.transition_node(
-                admitted,
-                node,
-                "ACCEPTED",
-                evidence_refs=acceptance_refs,
-                acceptance_judgement=acceptance,
-            )
+        node = await self._node_lifecycle.accept_node_output(
+            admitted,
+            node,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            worker_output=worker_commit,
+            evidence_refs=acceptance_refs,
+            acceptance_judgement=acceptance,
+        )
         all_nodes_accepted = not defer_shared_terminal
         if all_nodes_accepted:
             for binding in admitted.nodes:

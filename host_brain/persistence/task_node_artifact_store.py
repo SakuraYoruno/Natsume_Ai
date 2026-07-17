@@ -111,6 +111,7 @@ class TaskNodeArtifactStoreMixin:
                 schema_digest = ""
             if schema_digest == _NODE_ARTIFACT_SCHEMA_METADATA_SHA256:
                 self._assert_no_unmaterialized_active_artifacts(conn)
+                self._assert_no_deliverable_effect_without_artifact(conn)
         except sqlite3.DatabaseError as exc:
             raise TaskStoreError(
                 TASK_STORE_SCHEMA_NOT_READY,
@@ -143,7 +144,7 @@ class TaskNodeArtifactStoreMixin:
             )
         self._node_artifact_schema_ready = True
 
-    def transition_node_to_accepted_with_artifact(
+    def commit_node_acceptance(
         self,
         graph_id: str,
         graph_revision: int,
@@ -155,15 +156,20 @@ class TaskNodeArtifactStoreMixin:
         attempt_id: str,
         receipt_ref: str,
         worker_output: Mapping[str, Any],
+        effect_intents: Sequence[Mapping[str, Any] | Any] = (),
     ) -> dict[str, Any]:
-        """Commit TaskNode.ACCEPTED and its immutable output in one UoW.
+        """Commit the complete Node Acceptance authority in one UoW.
 
-        Repeating the exact call after a lost response returns the original
-        node/artifact.  Any identity, output, contract, digest, or Outbox drift
-        fails closed without mutating either authority.
+        The immutable artifact is mandatory.  NODE-scoped Acceptance Effects
+        are optional, but when supplied their *complete* set is frozen by the
+        same transaction.  Exact response-loss replay validates every durable
+        lineage rather than inserting a missing part after Acceptance.
         """
 
         self.assert_node_artifact_ready()
+        specs = self._normalize_optional_node_acceptance_effects(effect_intents)
+        if specs:
+            self.assert_acceptance_effect_intent_ready()
         ts_ms = self._now()
         graph_ref = str(graph_id or "").strip()
         node_ref = str(node_id or "").strip()
@@ -182,6 +188,18 @@ class TaskNodeArtifactStoreMixin:
                 TASK_STORE_INVALID,
                 "node artifact acceptance identity is incomplete",
             )
+        for spec in specs:
+            if (
+                spec.graph_id != graph_ref
+                or spec.graph_revision != graph_revision
+                or spec.node_id != node_ref
+                or spec.attempt_id != attempt_ref
+                or spec.commit_scope.value != "NODE"
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "Node Acceptance effect must bind the exact Graph, Node, Attempt and NODE scope",
+                )
         with self._transaction() as conn:
             self._assert_graph_not_cancelling(
                 conn,
@@ -231,7 +249,7 @@ class TaskNodeArtifactStoreMixin:
                         int(expected_version) + 1,
                     ),
                     expected_event_type="TASK_NODE_ACCEPTED",
-                    expected_attempt_id=None,
+                    expected_attempt_id=attempt_ref,
                 )
                 artifact = self._require_valid_node_artifact(
                     conn,
@@ -243,12 +261,56 @@ class TaskNodeArtifactStoreMixin:
                     expected_output_contract=output_contract,
                     expected_payload=artifact_payload,
                 )
+                staged = tuple(
+                    self._stage_acceptance_effect_intent_in_transaction(
+                        conn,
+                        spec,
+                        ts_ms=ts_ms,
+                        require_succeeded_attempt=True,
+                        allow_insert=False,
+                    )
+                    for spec in specs
+                )
+                self._assert_exact_node_acceptance_effect_set(
+                    conn,
+                    graph_id=graph_ref,
+                    graph_revision=graph_revision,
+                    node_id=node_ref,
+                    attempt_id=attempt_ref,
+                    expected_effect_ids=tuple(spec.effect_id for spec in specs),
+                )
                 return {
                     "node": _node_record(current),
                     "artifact": artifact,
+                    "effect_intents": staged,
                     "replayed": True,
                 }
 
+            staged = tuple(
+                self._stage_acceptance_effect_intent_in_transaction(
+                    conn,
+                    spec,
+                    ts_ms=ts_ms,
+                    require_succeeded_attempt=True,
+                )
+                for spec in specs
+            )
+            if any(str(item.get("status") or "") != "PENDING" for item in staged):
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "new Node Acceptance cannot adopt an already dispatched effect",
+                )
+            self._insert_node_artifact_in_transaction(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                node_id=node_ref,
+                attempt_id=attempt_ref,
+                receipt_ref=receipt,
+                output_contract=output_contract,
+                artifact_payload=artifact_payload,
+                ts_ms=ts_ms,
+            )
             node = self._transition_node_in_transaction(
                 conn,
                 graph_id=graph_ref,
@@ -260,44 +322,8 @@ class TaskNodeArtifactStoreMixin:
                 verification_result=None,
                 acceptance_judgement=acceptance_judgement,
                 ts_ms=ts_ms,
+                outbox_attempt_id=attempt_ref,
             )
-            artifact_ref = build_task_result_artifact_ref(
-                graph_ref,
-                graph_revision,
-                node_ref,
-            )
-            contract_json = canonical_artifact_json(output_contract)
-            payload_json = canonical_artifact_json(artifact_payload)
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO task_runtime_node_artifact(
-                        artifact_ref, schema_version, graph_id, graph_revision,
-                        node_id, attempt_id, receipt_ref,
-                        output_contract_json, output_contract_sha256,
-                        payload_json, payload_sha256, created_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        artifact_ref,
-                        NODE_ARTIFACT_SCHEMA_VERSION,
-                        graph_ref,
-                        graph_revision,
-                        node_ref,
-                        attempt_ref,
-                        receipt,
-                        contract_json,
-                        artifact_digest(output_contract),
-                        payload_json,
-                        artifact_digest(artifact_payload),
-                        int(ts_ms),
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise TaskStoreError(
-                    TASK_STORE_DURABLE_DATA_INVALID,
-                    "node artifact identity already exists with conflicting output",
-                ) from exc
             artifact = self._require_valid_node_artifact(
                 conn,
                 graph_id=graph_ref,
@@ -308,7 +334,153 @@ class TaskNodeArtifactStoreMixin:
                 expected_output_contract=output_contract,
                 expected_payload=artifact_payload,
             )
-            return {"node": node, "artifact": artifact, "replayed": False}
+            self._assert_exact_node_acceptance_effect_set(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                node_id=node_ref,
+                attempt_id=attempt_ref,
+                expected_effect_ids=tuple(spec.effect_id for spec in specs),
+            )
+            return {
+                "node": node,
+                "artifact": artifact,
+                "effect_intents": staged,
+                "replayed": False,
+            }
+
+    def _normalize_optional_node_acceptance_effects(
+        self,
+        values: Sequence[Mapping[str, Any] | Any],
+    ) -> tuple[Any, ...]:
+        if isinstance(values, (str, bytes, bytearray, Mapping)):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect_intents must be a sequence",
+            )
+        try:
+            materialized = tuple(values)
+        except TypeError as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "effect_intents must be a sequence",
+            ) from exc
+        if not materialized:
+            return ()
+        return tuple(self._normalize_acceptance_effect_intent_specs(materialized))
+
+    @staticmethod
+    def _insert_node_artifact_in_transaction(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        receipt_ref: str,
+        output_contract: Mapping[str, Any],
+        artifact_payload: Mapping[str, Any],
+        ts_ms: int,
+    ) -> None:
+        artifact_ref = build_task_result_artifact_ref(
+            graph_id,
+            graph_revision,
+            node_id,
+        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node_artifact(
+                    artifact_ref, schema_version, graph_id, graph_revision,
+                    node_id, attempt_id, receipt_ref,
+                    output_contract_json, output_contract_sha256,
+                    payload_json, payload_sha256, created_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    artifact_ref,
+                    NODE_ARTIFACT_SCHEMA_VERSION,
+                    graph_id,
+                    graph_revision,
+                    node_id,
+                    attempt_id,
+                    receipt_ref,
+                    canonical_artifact_json(output_contract),
+                    artifact_digest(output_contract),
+                    canonical_artifact_json(artifact_payload),
+                    artifact_digest(artifact_payload),
+                    int(ts_ms),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "node artifact identity already exists with conflicting output",
+            ) from exc
+
+    @staticmethod
+    def _assert_exact_node_acceptance_effect_set(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        expected_effect_ids: Sequence[str],
+    ) -> None:
+        expected = tuple(str(item) for item in expected_effect_ids)
+        if len(expected) != len(set(expected)):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Node Acceptance effect set contains duplicate effect identities",
+            )
+        rows = conn.execute(
+            """
+            SELECT effect_id, attempt_id
+            FROM task_runtime_acceptance_effect_intent
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+              AND attempt_id = ? AND commit_scope = 'NODE'
+            ORDER BY effect_id
+            """,
+            (graph_id, graph_revision, node_id, attempt_id),
+        ).fetchall()
+        actual = tuple(str(row["effect_id"]) for row in rows)
+        if (
+            set(actual) != set(expected)
+            or len(actual) != len(expected)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "durable Node Acceptance effect set differs from the exact Attempt lineage",
+            )
+
+    def transition_node_to_accepted_with_artifact(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: OutboxMessage,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Compatibility alias that preserves the unified Acceptance UoW."""
+
+        return self.commit_node_acceptance(
+            graph_id,
+            graph_revision,
+            node_id,
+            expected_version=expected_version,
+            outbox=outbox,
+            acceptance_judgement=acceptance_judgement,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            worker_output=worker_output,
+            effect_intents=(),
+        )
 
     def get_node_artifact(
         self,
@@ -477,6 +649,21 @@ class TaskNodeArtifactStoreMixin:
             ).fetchall()
             for node_row in node_rows:
                 payload = _validated_node_payload(node_row)
+                node_status = str(node_row["status"])
+                if node_status not in {
+                    TaskNodeStatus.FAILED.value,
+                    TaskNodeStatus.CANCEL_REQUESTED.value,
+                    TaskNodeStatus.CANCELLED.value,
+                }:
+                    try:
+                        normalize_output_contract(payload.get("output_contract"))
+                    except NodeArtifactContractError as exc:
+                        raise TaskStoreError(
+                            TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED,
+                            "active TaskGraph has a TaskNode without a canonical "
+                            "output_contract and must be reconciled before execution: "
+                            f"{graph_id}@{revision}/{node_row['node_id']}: {exc}",
+                        ) from exc
                 input_refs = tuple(str(item) for item in payload.get("input_refs") or ())
                 dependencies = tuple(
                     str(item) for item in payload.get("dependencies") or ()
@@ -501,10 +688,7 @@ class TaskNodeArtifactStoreMixin:
                             TASK_STORE_DURABLE_DATA_INVALID,
                             "active TaskGraph contains cross-lineage result artifact refs",
                         )
-                if (
-                    str(node_row["status"]) != TaskNodeStatus.ACCEPTED.value
-                    or not payload.get("output_contract")
-                ):
+                if node_status != TaskNodeStatus.ACCEPTED.value:
                     continue
                 exists = conn.execute(
                     """
@@ -519,6 +703,68 @@ class TaskNodeArtifactStoreMixin:
                         "active TaskGraph has an ACCEPTED TaskNode without its 0102 artifact: "
                         f"{graph_id}@{revision}/{node_row['node_id']}",
                     )
+
+    @staticmethod
+    def _assert_no_deliverable_effect_without_artifact(
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Quarantine upgraded terminal Effect rows that 0102 cannot dispatch."""
+
+        effect_schema = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_acceptance_effect_intent'
+            """
+        ).fetchone()
+        if effect_schema is None:
+            return
+        orphan = conn.execute(
+            """
+            SELECT effect.effect_id, effect.graph_id, effect.graph_revision,
+                   effect.node_id, effect.attempt_id
+            FROM task_runtime_acceptance_effect_intent AS effect
+            JOIN task_runtime_attempt AS attempt
+              ON attempt.attempt_id = effect.attempt_id
+             AND attempt.graph_id = effect.graph_id
+             AND attempt.graph_revision = effect.graph_revision
+             AND attempt.node_id = effect.node_id
+            JOIN task_runtime_node AS node
+              ON node.graph_id = effect.graph_id
+             AND node.graph_revision = effect.graph_revision
+             AND node.node_id = effect.node_id
+            JOIN task_runtime_graph AS graph_row
+              ON graph_row.graph_id = effect.graph_id
+             AND graph_row.revision = effect.graph_revision
+            LEFT JOIN task_runtime_node_artifact AS artifact
+              ON artifact.graph_id = effect.graph_id
+             AND artifact.graph_revision = effect.graph_revision
+             AND artifact.node_id = effect.node_id
+             AND artifact.attempt_id = effect.attempt_id
+            WHERE effect.status IN ('PENDING', 'CLAIMED')
+              AND attempt.status = 'SUCCEEDED'
+              AND node.status = 'ACCEPTED'
+              AND (
+                effect.commit_scope = 'NODE'
+                OR (
+                  effect.commit_scope = 'GRAPH'
+                  AND graph_row.status = 'COMPLETED'
+                )
+              )
+              AND artifact.artifact_ref IS NULL
+            ORDER BY effect.created_ts_ms, effect.effect_id
+            LIMIT 1
+            """
+        ).fetchone()
+        if orphan is not None:
+            raise TaskStoreError(
+                TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED,
+                "deliverable Acceptance Effect has no exact 0102 artifact and "
+                "must be reconciled before dispatch: "
+                f"{orphan['effect_id']} -> {orphan['graph_id']}@"
+                f"{orphan['graph_revision']}/{orphan['node_id']}/"
+                f"{orphan['attempt_id']}",
+            )
 
     @staticmethod
     def _artifact_output_contract(node_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -624,6 +870,7 @@ class TaskNodeArtifactStoreMixin:
         expected_receipt_ref: str | None = None,
         expected_output_contract: Mapping[str, Any] | None = None,
         expected_payload: Mapping[str, Any] | None = None,
+        allow_pre_acceptance_owner: bool = False,
     ) -> dict[str, Any]:
         row = conn.execute(
             """
@@ -656,7 +903,10 @@ class TaskNodeArtifactStoreMixin:
             )
         node_row = self._require_node(conn, graph_id, graph_revision, node_id)
         node_payload = _validated_node_payload(node_row)
-        if str(node_row["status"]) != TaskNodeStatus.ACCEPTED.value:
+        if (
+            str(node_row["status"]) != TaskNodeStatus.ACCEPTED.value
+            and not allow_pre_acceptance_owner
+        ):
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "TaskNode artifact owner is not ACCEPTED",

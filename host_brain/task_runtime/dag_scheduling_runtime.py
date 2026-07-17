@@ -35,7 +35,6 @@ from .coordinator_records import (
     _attempt_id,
     _mapping,
     _node_input_refs,
-    _node_output_contract,
     _optional_record_non_negative_int,
     _record_evidence_refs,
     _record_non_negative_int,
@@ -469,42 +468,33 @@ class DurableDagSchedulingRuntime:
                         "started_at_ms": command.created_at_ms,
                         "finished_at_ms": command.created_at_ms,
                     }
-                    if _node_output_contract(review_node):
-                        if not receipt_ref or self._projection_reader is None:
-                            raise GovernedRuntimeError(
-                                GOVERNED_DURABLE_STATE_CONFLICT,
-                                "review-approved TaskNode has no durable worker projection",
-                            )
-                        loaded = await _maybe_await(
-                            self._projection_reader.load(receipt_ref)
+                    if not receipt_ref or self._projection_reader is None:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "review-approved TaskNode has no durable worker projection",
                         )
-                        try:
-                            worker_output = validate_worker_projection_payload(
-                                loaded if isinstance(loaded, Mapping) else {},
-                                expected_projection_id=receipt_ref,
-                            )
-                        except WorkerProjectionStoreError as exc:
-                            raise GovernedRuntimeError(
-                                GOVERNED_DURABLE_STATE_CONFLICT,
-                                "review-approved TaskNode worker projection is invalid",
-                            ) from exc
-                        await self._node_lifecycle.accept_node_output(
-                            review_admission,
-                            review_node,
-                            attempt_id=attempt_id,
-                            receipt_ref=receipt_ref,
-                            worker_output=worker_output,
-                            evidence_refs=post_review_refs,
-                            acceptance_judgement=acceptance_judgement,
+                    loaded = await _maybe_await(
+                        self._projection_reader.load(receipt_ref)
+                    )
+                    try:
+                        worker_output = validate_worker_projection_payload(
+                            loaded if isinstance(loaded, Mapping) else {},
+                            expected_projection_id=receipt_ref,
                         )
-                    else:
-                        await self._node_lifecycle.transition_node(
-                            review_admission,
-                            review_node,
-                            "ACCEPTED",
-                            evidence_refs=post_review_refs,
-                            acceptance_judgement=acceptance_judgement,
-                        )
+                    except WorkerProjectionStoreError as exc:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "review-approved TaskNode worker projection is invalid",
+                        ) from exc
+                    await self._node_lifecycle.accept_node_output(
+                        review_admission,
+                        review_node,
+                        attempt_id=attempt_id,
+                        receipt_ref=receipt_ref,
+                        worker_output=worker_output,
+                        evidence_refs=post_review_refs,
+                        acceptance_judgement=acceptance_judgement,
+                    )
                     if graph_status == "BLOCKED":
                         await self._node_lifecycle.transition_graph(review_admission, graph, "ACTIVE")
                     await self._runtime_outbox.publish_pending()
