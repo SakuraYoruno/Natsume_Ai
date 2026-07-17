@@ -1176,6 +1176,11 @@ def create_app() -> FastAPI:
                 agent_workspace_container = workspace.compose_agent_workspace_application_scope(
                     application, task_runtime, runtime_settings, canonical_owner
                 )
+                governed_skill_resource_manager = get_resource_manager(
+                    create_if_missing=False,
+                )
+                governed_skill_episodic_store = episodic_projection_store
+                governed_skill_semantic_recaller = host_obs_semantic_recaller
                 governed_runtime = build_governed_host_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
@@ -1184,6 +1189,9 @@ def create_app() -> FastAPI:
                     capability_broker=get_capability_broker(),
                     model_attempt_service=ApplicationModelAttemptServicePort(),
                     production_authority_verifier=verify_durable_production_authority,
+                    resource_manager=governed_skill_resource_manager,
+                    episodic_store=governed_skill_episodic_store,
+                    semantic_recaller=governed_skill_semantic_recaller,
                     cancellation_authority_verifier=cancellation_authority_verifier,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,

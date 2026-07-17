@@ -106,12 +106,12 @@
         {
           "path": "host_brain/app/observability_runtime/domain_command_ports.py",
           "symbol": "WorldCanonStore.approve_proposal",
-          "line": 380
+          "line": 419
         },
         {
           "path": "host_brain/app/observability_runtime/domain_command_ports.py",
           "symbol": "WorldCanonStore.rollback_proposal",
-          "line": 402
+          "line": 459
         }
       ]
     },

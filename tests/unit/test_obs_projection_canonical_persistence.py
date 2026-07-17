@@ -12,7 +12,7 @@ from host_brain.app.observability_runtime.domain_state_projection import (
 )
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
-from host_brain.composition.obs_application import build_default_obs_application_ports
+from host_brain.app.obs_application import build_default_obs_application_ports
 from host_brain.observability.degradation_state import _default_runtime_event_db_path
 
 

@@ -41,7 +41,7 @@ def client(monkeypatch, tmp_path):
         OPERATOR_QUERY_AUTH_BINDINGS_ENV,
     )
     from host_brain.app.obs_fastapi_app import create_obs_app
-    from host_brain.composition.obs_application import build_default_obs_application_ports
+    from host_brain.app.obs_application import build_default_obs_application_ports
 
     token = "web-ui-contract-operator"
     monkeypatch.setenv(

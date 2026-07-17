@@ -28,7 +28,7 @@ from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.persistence.life_command_repository import LifeCommandRepository
-from host_brain.composition.obs_projection_jobs import (
+from host_brain.app.obs_projection_jobs import (
     DURABLE_READ,
     TYPED_UNAVAILABLE,
     build_explicit_obs_projection_callbacks,
@@ -40,11 +40,8 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "bio-ops-metadata",
     "capability-forge-operator",
     "device-status",
-    "digital-life-overview",
     "governance-snapshot",
     "health-passive",
-    "insights-summary",
-    "life-body",
     "operator-live-state",
     "organ-tribe",
     "remaining-operator-queries",
@@ -56,6 +53,9 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "skill-pack-catalog",
     "task-runtime",
     "trace",
+    "digital-life-overview",
+    "insights-summary",
+    "life-body",
 )
 
 @dataclass(frozen=True, slots=True)

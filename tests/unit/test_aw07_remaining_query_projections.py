@@ -75,7 +75,7 @@ class _SourceLedger:
 def test_background_job_materializes_metadata_without_private_bodies(
     tmp_path, monkeypatch
 ) -> None:
-    from host_brain.composition.obs_projection_jobs import (
+    from host_brain.app.obs_projection_jobs import (
         _remaining_queries_callback,
     )
     from host_brain.memory import canon_world_store

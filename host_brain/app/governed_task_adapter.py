@@ -104,7 +104,39 @@ GOVERNED_HOST_DRAIN_TIMEOUT = "GOVERNED_HOST_DRAIN_TIMEOUT"
 GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
     "GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE"
 )
+GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE = (
+    "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE"
+)
 GOVERNED_HOST_WORKER_ROUTE = "skill"
+
+_MEMORY_SEARCH_SCOPES = frozenset(
+    {"recent_episode", "long_term", "line", "hybrid"}
+)
+_MEMORY_SEARCH_SCOPE_ALIASES = {
+    "recent": "recent_episode",
+    "recent_episodic": "recent_episode",
+    "episode": "recent_episode",
+    "episodic": "recent_episode",
+    "semantic": "long_term",
+    "longterm": "long_term",
+    "long_term_semantic": "long_term",
+    "quote": "line",
+    "quotes": "line",
+    "dialogue": "line",
+    "lines": "line",
+    "line_semantic": "line",
+    "mixed": "hybrid",
+    "auto": "",
+}
+_MEMORY_RECENT_EPISODE_TAGS = frozenset(
+    {"conversation", "event", "task", "reminder", "dream", "diary"}
+)
+_MEMORY_LINE_SEMANTIC_TAGS = frozenset(
+    {"quote", "line", "dialogue", "style"}
+)
+_MEMORY_LONG_TERM_TAGS = frozenset(
+    {"fact", "preference", "bond", "emotion"}
+)
 
 _FORBIDDEN_DURABLE_KEYS = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|"
@@ -183,6 +215,7 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "direct skill target is absent from WorkOrderV3 capability lineage",
             )
+        execution_args = _mapping(intent_draft.get("args"))
         node_grant_ref = str(execution_context.get("node_grant_ref") or "").strip()
         if not node_grant_ref:
             raise GovernedHostAdapterError(
@@ -225,6 +258,11 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "node grant child intent differs from its durable verifier projection",
             )
+        _require_frozen_skill_dependencies(
+            ports=self._execution_ports,
+            target=target,
+            args=execution_args,
+        )
         # SQLiteLedger owns a thread-affine connection.  Execute the skill in
         # a worker thread, then persist its receipt on the owning event-loop
         # thread instead of silently losing the audit row.
@@ -232,7 +270,7 @@ class _FrozenSkillWorker:
             execute_frozen_governed_skill,
             ports=self._execution_ports,
             durable_authority_ledger=self._ledger,
-            request_body={"args": dict(intent_draft.get("args") or {})},
+            request_body={"args": execution_args},
             request_id=command.request_id,
             session_id=command.session_id,
             person_id=str(pack.get("person_id") or command.principal_id),
@@ -245,7 +283,7 @@ class _FrozenSkillWorker:
             emotion_context=_mapping(pack.get("emotion_context")),
             render_target_lang=str(pack.get("render_target_lang") or "zh"),
             governed_execution_context=execution_context,
-            execution_args_override=dict(intent_draft.get("args") or {}),
+            execution_args_override=execution_args,
             verified_node_grant=verified_grant.to_dict(),
         )
         payload = _mapping(getattr(outcome, "payload", None))
@@ -353,6 +391,77 @@ class _FrozenSkillWorker:
                 )
             commit["receipt_ref"] = projection_id
         yield commit
+
+
+def _require_frozen_skill_dependencies(
+    *,
+    ports: GovernedSkillExecutionPorts,
+    target: str,
+    args: Mapping[str, Any],
+) -> None:
+    """Reject a frozen Skill whose required startup snapshot is unavailable."""
+
+    skill_id = str(target or "").strip().lower()
+    missing_dependency = ""
+    if skill_id == "resource_manager_status":
+        if ports.resource_manager is None:
+            missing_dependency = "resource_manager"
+    elif skill_id == "memory_store":
+        if ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+    elif skill_id == "memory_forget":
+        if not bool(args.get("dry_run", False)) and ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+    elif skill_id == "memory_search":
+        scope = _frozen_memory_search_scope(args)
+        if scope == "recent_episode" and ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+        elif scope in {"long_term", "line"} and ports.semantic_recaller is None:
+            missing_dependency = "semantic_recaller"
+        elif (
+            scope == "hybrid"
+            and ports.episodic_store is None
+            and ports.semantic_recaller is None
+        ):
+            missing_dependency = "episodic_store_or_semantic_recaller"
+    if missing_dependency:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
+            f"frozen Skill {skill_id} requires composed {missing_dependency}",
+        )
+
+
+def _frozen_memory_search_scope(args: Mapping[str, Any]) -> str:
+    """Mirror the declarative memory normalizer without executing the Skill."""
+
+    raw_scope = str(args.get("search_scope") or args.get("scope") or "").strip().lower()
+    scope = _MEMORY_SEARCH_SCOPE_ALIASES.get(raw_scope, raw_scope)
+    if scope in _MEMORY_SEARCH_SCOPES:
+        return scope
+    memory_type = str(args.get("memory_type") or "all").strip().lower()
+    if memory_type not in {"episodic", "semantic", "working", "all"}:
+        memory_type = "all"
+    tags_raw = args.get("tags")
+    tags = (
+        {
+            str(tag or "").strip().lower()
+            for tag in tags_raw
+            if str(tag or "").strip()
+        }
+        if isinstance(tags_raw, list)
+        else set()
+    )
+    if memory_type == "semantic":
+        return "long_term"
+    if memory_type in {"episodic", "working"}:
+        return "recent_episode"
+    if tags & _MEMORY_LINE_SEMANTIC_TAGS:
+        return "line"
+    if tags & _MEMORY_RECENT_EPISODE_TAGS:
+        return "recent_episode"
+    if tags & _MEMORY_LONG_TERM_TAGS:
+        return "long_term"
+    return "recent_episode"
 
 
 def _trusted_skill_budget_observations(value: Any) -> Mapping[str, Any]:
@@ -1002,6 +1111,9 @@ def build_governed_host_runtime(
     capability_broker: Any,
     model_attempt_service: Any,
     production_authority_verifier: Any,
+    resource_manager: Any | None,
+    episodic_store: Any | None,
+    semantic_recaller: Any | None,
     cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
@@ -1027,6 +1139,9 @@ def build_governed_host_runtime(
         capability_broker=capability_broker,
         model_attempt_service=model_attempt_service,
         production_authority_verifier=production_authority_verifier,
+        resource_manager=resource_manager,
+        episodic_store=episodic_store,
+        semantic_recaller=semantic_recaller,
     )
     projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     canonical = _FrozenSkillWorker(
@@ -1533,6 +1648,7 @@ __all__ = [
     "GOVERNED_HOST_GOVERNOR_GRANT_MISSING",
     "GOVERNED_HOST_ROUTE_UNSUPPORTED",
     "GOVERNED_HOST_RUNTIME_INACTIVE",
+    "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE",
     "GovernedHostAdapterError",
     "GovernedHostRuntime",
     "build_governed_host_runtime",

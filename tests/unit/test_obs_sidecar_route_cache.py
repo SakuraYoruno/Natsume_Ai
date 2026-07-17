@@ -10,7 +10,7 @@ from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes import router as obs_router
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 from host_brain.app.web_ui import router as web_ui_router
-from host_brain.composition.obs_projection_jobs import _sessions_callback
+from host_brain.app.obs_projection_jobs import _sessions_callback
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
 
 

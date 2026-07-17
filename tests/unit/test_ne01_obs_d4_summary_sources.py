@@ -258,7 +258,7 @@ def test_insights_callback_recovers_after_typed_unavailable_first_wave(
         AGENT_LOOP_KIND,
     )
     from host_brain.composition import process_services
-    from host_brain.composition.obs_projection_jobs import (
+    from host_brain.app.obs_projection_jobs import (
         ProjectionTarget,
         _aggregate_summary_callback,
     )
@@ -330,7 +330,7 @@ def test_digital_life_callback_recovers_when_query_dependencies_arrive(
         LEDGER_STATS_ROW_CAP,
     )
     from host_brain.composition import process_services
-    from host_brain.composition.obs_projection_jobs import (
+    from host_brain.app.obs_projection_jobs import (
         ProjectionTarget,
         _aggregate_summary_callback,
     )

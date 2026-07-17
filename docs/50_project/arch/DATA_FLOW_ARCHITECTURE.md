@@ -342,22 +342,23 @@ Obs 读取不借用 Host 进程内 Task container：`obs_fastapi_app` 仅在 `HO
 
 0099 terminal reconciliation 在主 Host 与独立 Obs 都提供 `candidates/cases/challenge` 三条 GET，并要求 `obs:task-runtime:read`；两处都只构造同 canonical SQLite 的 `mode=ro + query_only=ON` reader，禁止 fallback 到完整 `DurableTaskStore`。Cases 只给最小摘要，subject snapshot 不出库。Challenge 从 OperatorQueryGateway request context 取得认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`，在 authority 已绑定 key ID 时拒绝不一致请求；权威 builder 用 case、current subject 与确定性 Graph/Budget Outbox 生成 Store 实际验证的 final canonical bytes和 `command_request`。HTTP → 真实 Ed25519 → Store round-trip 已通过，但外部 key lifecycle/canary 未验证。
 
-D7 后独立 Obs 与主 Host 同时保留以下必须区分的数据流：
+D7b 后独立 Obs 与主 Host 同时保留以下必须区分的数据流：
 
 ```text
 create_obs_app
   → ObsApplicationPorts
   → 21 registered producer callbacks（registration，不是运行成功证明）
-      → 20 declared non-TYPED_UNAVAILABLE（非运行成功证明）
-          → 16 durable/static/app-owned source callbacks
+      → 21 declared non-TYPED_UNAVAILABLE（非运行成功证明）
+          → 17 durable/static/app-owned source callbacks
           → 4 AUTHENTICATED_HOST_READ（Forge / Semantic / Governance / Organ）
           → 0 process-local module-cache coupled callbacks
-          → 7 DURABLE_READ_PARTIAL（缺 target 时仍写 typed unavailable）
-      → 1 TYPED_UNAVAILABLE（Life Body）
-          → durable SOURCE_UNAVAILABLE
+          → 8 DURABLE_READ_PARTIAL（缺 source/target 时仍写 typed unavailable）
+              → Life Body 读取同 app runtime / overview / insights / trace roots
+              → 再读 canonical ledger 有界 lineage；不读取 Host/process locator
+              → root missing / invalid / stale / ledger failure 写 SOURCE_UNAVAILABLE
   → app-local ProjectionJobDaemon
   → QueryProjectionStore
-  → /health DEGRADED（missing=0，但 typed-unavailable=1、partial=7；认证源另看运行态）
+  → /health DEGRADED（missing=0、typed-unavailable=0，但 partial=8；认证源另看运行态）
 
 36 identified production projection endpoints (35 HTTP + 1 WebSocket)
 and identified projection/stats queries / sessions + prompt cache
@@ -412,13 +413,20 @@ runtime endpoint → organ-tribe job → one document
 Capability v1 compatibility child provider failure
   → only that child becomes typed SOURCE_UNAVAILABLE
   → capability-forge remains available when its own authority is valid
+
+Host lifespan
+  → 捕获 resource manager / episodic store / semantic recaller 实例
+  → GovernedSkillExecutionPorts immutable snapshot
+  → Direct Skill worker thread
+  → 不在执行期回读 process_services
+  → runtime A/B 交错与单侧关闭保持各自实例
 ```
 
 21个producer callback执行路径不调用`process_services`。Host source endpoint不在GET时构造服务；ASGI lifespan预热并捕获provider、关闭时清空，但其底层Mode/Forge/ledger/Semantic/Governance/Scheduler/Tribe仍来自process authority。合同只递归约束`timestamp`、`*_ts_ms`、`*_at_ms`字段不晚于Host observed，不是“所有future字段”过滤器；Obs允许相对本地接收时钟最多5秒skew，正evidence最大年龄120秒，并把freshness写成`min(source evidence, local receive)`。五路径分别缓存，lineage以SQLite单事务CAS更新当前head并从immutable journal读取完整epoch历史。三层公共序列化与合同复验保护通用payload；Organ `key_metrics`另以逐agent显式数值/布尔allowlist阻断任意state标量。
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports；没有挂载消费者的core ledger compatibility handlers已删除，不保留伪ledger route port。Host factory强制接收typed `ObsRoutePorts`，Process/Tribe全局ports不再捕获特定app closure。这个数据流收敛不改变底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition仍缺；Life Body仍固定typed-unavailable，真实Edge连接和物理回执仍未证明。因此Query Plane、Composition与NE-01继续为partial/in-progress。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。这个收敛仍不改变Host source、Chat/Delegate、Acceptance Effect等底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition、真实Edge连接和物理回执仍未证明。因此Query Plane、Composition与NE-01继续为partial/in-progress。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 

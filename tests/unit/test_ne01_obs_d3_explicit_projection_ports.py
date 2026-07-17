@@ -17,12 +17,12 @@ from host_brain.app.observability_runtime.operator_live_sources import (
     OperatorSourceUnavailable,
 )
 from host_brain.composition import process_services
-from host_brain.composition.obs_application import (
+from host_brain.app.obs_application import (
     OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS,
     ObsApplicationContainer,
     build_default_obs_application_ports,
 )
-from host_brain.composition.obs_projection_jobs import (
+from host_brain.app.obs_projection_jobs import (
     AUTHENTICATED_HOST_READ,
     DURABLE_READ,
     DURABLE_READ_PARTIAL,
@@ -70,7 +70,7 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
         assert sum(
             job.source_mode == TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 1
+        ) == 0
         assert sum(
             job.source_mode == AUTHENTICATED_HOST_READ
             for job in ports.projection_jobs
@@ -80,11 +80,11 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
         assert sum(
             job.source_mode == DURABLE_READ_PARTIAL
             for job in ports.projection_jobs
-        ) == 7
+        ) == 8
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 20
+        ) == 21
         assert process_container.application_ports is before
     finally:
         assert ports.close_owned_resources is not None
@@ -106,11 +106,11 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 20
+        ) == 21
         assert sum(
             job.source_mode == TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 1
+        ) == 0
         assert sum(
             job.source_mode == AUTHENTICATED_HOST_READ
             for job in ports.projection_jobs
@@ -312,7 +312,12 @@ def test_host_owned_sources_without_token_are_runtime_unavailable_documents(
             for job in ports.projection_jobs
             if job.source_mode == TYPED_UNAVAILABLE
         }
-        assert set(unavailable_jobs) == {"life-body"}
+        assert unavailable_jobs == {}
+        assert {
+            job.name
+            for job in ports.projection_jobs
+            if job.source_mode == DURABLE_READ_PARTIAL
+        } >= {"life-body"}
         authenticated_jobs = {
             job.name: job
             for job in ports.projection_jobs
@@ -356,6 +361,15 @@ def test_host_owned_sources_without_token_are_runtime_unavailable_documents(
             unavailable_meta["reason_code"]
             == "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE"
         )
+
+        life_body = ports.query_projection_store.get(
+            "life_body_snapshot",
+            "window:360",
+        )
+        assert life_body is not None
+        assert life_body.degraded_state is ProjectionDegradedState.SOURCE_UNAVAILABLE
+        assert life_body.payload["job_name"] == "life-body"
+        assert life_body.payload["reason_code"] == "OBS_LIFE_BODY_ROOT_SOURCE_UNAVAILABLE"
 
         # Simulate a committed projection response whose caller never saw the
         # return value.  An exact retry observes the durable state and is a
@@ -524,7 +538,7 @@ def test_semantic_and_governance_authenticated_job_failures_are_independent(
 
 def test_d3_projection_adapter_source_has_no_host_locator_fallback() -> None:
     source = (
-        ROOT / "host_brain" / "composition" / "obs_projection_jobs.py"
+        ROOT / "host_brain" / "app" / "obs_projection_jobs.py"
     ).read_text(encoding="utf-8")
     assert "composition.process_services" not in source
     assert "PROCESS_LIFE_PROVIDER" not in source

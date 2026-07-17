@@ -35,7 +35,7 @@ from host_brain.app.observability_runtime.projection_ledger_view import (
     refresh_ledger_stats_projection,
 )
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections
-from host_brain.composition.obs_projection_jobs import (
+from host_brain.app.obs_projection_jobs import (
     _health_callback,
     _sessions_callback,
 )

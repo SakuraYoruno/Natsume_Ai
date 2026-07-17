@@ -17,7 +17,7 @@ from host_brain.app.obs_routes_task_runtime import (
     get_task_effect_reconciliation_challenge,
 )
 from host_brain.app.settings.core import get_core_settings
-from host_brain.composition.obs_application import ObsApplicationPorts
+from host_brain.app.obs_application import ObsApplicationPorts
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.operator_query_gateway import (
     DigestOperatorQueryAuthenticator,

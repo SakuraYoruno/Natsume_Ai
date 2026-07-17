@@ -1,4 +1,4 @@
-"""Application-local projection callbacks for the standalone Obs process.
+"""Obs application-local projection callbacks for the standalone process.
 
 Every callback in this module closes over its source and destination ports.
 It deliberately has no fallback to Host process globals.  Sources which are
@@ -112,6 +112,11 @@ from host_brain.app.observability_runtime.host_read_transport import HostReadTra
 from host_brain.app.observability_runtime.host_projection_sources import (
     AuthenticatedHostProjectionSources,
 )
+from host_brain.app.observability_runtime.life_body_source import (
+    LIFE_BODY_WINDOW_MINUTES,
+    LifeBodySourceReader,
+    LifeBodySourceUnavailable,
+)
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections
 from host_brain.app.obs_routes_summary import (
     DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
@@ -123,11 +128,18 @@ from host_brain.app.obs_routes_summary import (
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
 from host_brain.canon.application import CanonApplicationService
 from host_brain.integrations.runtime_events import RuntimeEventStore
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import (
+    QueryProjectionStore,
+    digest_json,
+    public_projection_payload,
+)
 from host_brain.observability.projection_worker import QueryProjectionWorker
 from host_brain.persistence.canon_repository import CanonRepository
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.life_body_query_repository import (
+    LifeBodyQueryRepository,
+)
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.channels.edge_transport import resolve_gateway_base_urls
 
@@ -701,6 +713,79 @@ def _runtime_snapshot_callback(
     return refresh
 
 
+def _life_body_callback(
+    store: QueryProjectionStore,
+    reader: LifeBodySourceReader,
+) -> Callable[[], object]:
+    target = ProjectionTarget(
+        LIFE_BODY_KIND,
+        window_key(LIFE_BODY_WINDOW_MINUTES),
+    )
+
+    def refresh() -> dict[str, int]:
+        try:
+            payload, cursor = reader()
+        except LifeBodySourceUnavailable as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name="life-body",
+                target=target,
+                reason_code=exc.reason_code,
+                detail=f"Required Life Body root is unavailable: {exc.root_name}",
+                source_scope=exc.source_scope,
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        current = store.get(target.kind, target.key)
+        public_payload = public_projection_payload(payload)
+        if (
+            current is not None
+            and current.degraded_state is ProjectionDegradedState.HEALTHY
+            and current.payload == public_payload
+        ):
+            # Source facts are unchanged.  Retain the same immutable source
+            # tuple and journal head; only refresh the observation freshness.
+            _upsert(
+                store,
+                target.kind,
+                target.key,
+                payload,
+                source_cursor=int(current.source_cursor),
+                source_ref="obs-app://life-body/durable-read-models",
+                degraded_state=ProjectionDegradedState.HEALTHY,
+                degraded_detail=None,
+                freshness_ts_ms=_now_ms(),
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 0,
+                "changed_document_count": 0,
+            }
+        if current is not None and cursor <= int(current.source_cursor):
+            cursor = int(current.source_cursor) + 1
+        _upsert(
+            store,
+            target.kind,
+            target.key,
+            payload,
+            source_cursor=cursor,
+            source_ref="obs-app://life-body/durable-read-models",
+            degraded_state=ProjectionDegradedState.HEALTHY,
+            degraded_detail=None,
+            freshness_ts_ms=_now_ms(),
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
 def _authenticated_host_projection_callback(
     store: QueryProjectionStore,
     *,
@@ -946,12 +1031,7 @@ def build_explicit_obs_projection_callbacks(
         else None
     )
 
-    unavailable: dict[str, tuple[tuple[ProjectionTarget, ...], str]] = {
-        "life-body": (
-            (ProjectionTarget(LIFE_BODY_KIND, window_key(360)),),
-            "life-body aggregation requires explicit Host read ports",
-        ),
-    }
+    unavailable: dict[str, tuple[tuple[ProjectionTarget, ...], str]] = {}
     if host_sources is None:
         unavailable.update(
             {
@@ -1034,6 +1114,18 @@ def build_explicit_obs_projection_callbacks(
                 ),
                 window_minutes=INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES,
                 async_builder=False,
+            ),
+            DURABLE_READ_PARTIAL,
+            30_000,
+        ),
+        "life-body": ExplicitObsProjectionCallback(
+            "life-body",
+            _life_body_callback(
+                store,
+                LifeBodySourceReader(
+                    store=store,
+                    query_repository=LifeBodyQueryRepository.from_ledger(ledger),
+                ),
             ),
             DURABLE_READ_PARTIAL,
             30_000,
@@ -1192,7 +1284,6 @@ def build_explicit_obs_projection_callbacks(
             {
                 "capability-forge-operator": 15_000,
                 "governance-snapshot": 30_000,
-                "life-body": 30_000,
                 "organ-tribe": 10_000,
                 "semantic-recall-stats": 60_000,
             }[name],
@@ -1203,11 +1294,8 @@ def build_explicit_obs_projection_callbacks(
         "bio-ops-metadata",
         "capability-forge-operator",
         "device-status",
-        "digital-life-overview",
         "governance-snapshot",
         "health-passive",
-        "insights-summary",
-        "life-body",
         "operator-live-state",
         "organ-tribe",
         "remaining-operator-queries",
@@ -1219,6 +1307,9 @@ def build_explicit_obs_projection_callbacks(
         "skill-pack-catalog",
         "task-runtime",
         "trace",
+        "digital-life-overview",
+        "insights-summary",
+        "life-body",
     )
     if set(callbacks) != set(required_order):
         raise RuntimeError("OBS_EXPLICIT_PROJECTION_COVERAGE_INVALID")

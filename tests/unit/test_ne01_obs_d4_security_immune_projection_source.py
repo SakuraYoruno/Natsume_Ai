@@ -9,7 +9,7 @@ from host_brain.app.observability_runtime.domain_state_projection import (
     SECURITY_IMMUNE_KEY,
     SECURITY_IMMUNE_KIND,
 )
-from host_brain.composition.obs_application import build_default_obs_application_ports
+from host_brain.app.obs_application import build_default_obs_application_ports
 
 
 def _job(ports):  # noqa: ANN001
@@ -68,7 +68,7 @@ def test_security_immune_projection_persists_stable_typed_unavailable_document(
     tmp_path,
     monkeypatch,
 ) -> None:  # noqa: ANN001
-    from host_brain.composition import obs_projection_jobs
+    from host_brain.app import obs_projection_jobs
 
     observed_at = [1_000]
     monkeypatch.setattr(obs_projection_jobs, "_now_ms", lambda: observed_at[0])

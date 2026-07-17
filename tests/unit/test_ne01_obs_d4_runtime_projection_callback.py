@@ -10,8 +10,8 @@ from host_brain.app.observability_runtime.runtime_snapshot_source import (
     RUNTIME_LIFE_SNAPSHOT_NOT_FOUND,
     RuntimeSnapshotSourceUnavailable,
 )
-from host_brain.composition.obs_application import build_default_obs_application_ports
-from host_brain.composition.obs_projection_jobs import _runtime_snapshot_callback
+from host_brain.app.obs_application import build_default_obs_application_ports
+from host_brain.app.obs_projection_jobs import _runtime_snapshot_callback
 
 
 class _PartialReader:

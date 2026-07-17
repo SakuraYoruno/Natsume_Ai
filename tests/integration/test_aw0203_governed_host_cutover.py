@@ -114,6 +114,7 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             task_store=task_store,
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
+            review_continuation_store=None,
         )
         PROCESS_LIFE_PROVIDER.clear()
         with pytest.raises(GovernedHostAdapterError) as unavailable:
@@ -125,6 +126,9 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
                 capability_broker=dependencies.get_capability_broker(),
                 model_attempt_service=ApplicationModelAttemptServicePort(),
                 production_authority_verifier=verify_durable_production_authority,
+                resource_manager=None,
+                episodic_store=None,
+                semantic_recaller=None,
                 runtime_router=CanonicalRuntimeRouter(),
                 owner_id="integration-owner-fail-closed",
             )
@@ -137,6 +141,9 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             capability_broker=dependencies.get_capability_broker(),
             model_attempt_service=ApplicationModelAttemptServicePort(),
             production_authority_verifier=verify_durable_production_authority,
+            resource_manager=None,
+            episodic_store=None,
+            semantic_recaller=None,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="integration-owner",
             # This focused cutover fixture predates the Life composition.  The

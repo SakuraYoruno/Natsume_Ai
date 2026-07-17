@@ -42,12 +42,12 @@ from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
 from host_brain.app.settings import get_persistence_settings
 from host_brain.app.settings.core import get_core_settings
-from host_brain.composition.obs_application import (
+from host_brain.app.obs_application import (
     ObsApplicationContainer,
     ObsApplicationPorts,
     build_default_obs_application_ports,
 )
-from host_brain.composition.obs_projection_jobs import (
+from host_brain.app.obs_projection_jobs import (
     AUTHENTICATED_HOST_READ,
     TYPED_UNAVAILABLE,
 )

@@ -10,15 +10,15 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 import pytest
 
 import host_brain.app.obs_fastapi_app as obs_fastapi_app_module
-import host_brain.composition.obs_application as obs_application_module
+import host_brain.app.obs_application as obs_application_module
 from host_brain.app.obs_fastapi_app import app, create_obs_app
 from host_brain.app.settings.core import get_core_settings
-from host_brain.composition.obs_application import (
+from host_brain.app.obs_application import (
     ObsApplicationContainer,
     ObsProjectionJob,
     build_default_obs_application_ports,
 )
-from host_brain.composition.obs_projection_jobs import AUTHENTICATED_HOST_READ
+from host_brain.app.obs_projection_jobs import AUTHENTICATED_HOST_READ
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,11 +57,8 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "bio-ops-metadata",
             "capability-forge-operator",
             "device-status",
-            "digital-life-overview",
             "governance-snapshot",
             "health-passive",
-            "insights-summary",
-            "life-body",
             "operator-live-state",
             "organ-tribe",
             "remaining-operator-queries",
@@ -73,12 +70,15 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "skill-pack-catalog",
             "task-runtime",
             "trace",
+            "digital-life-overview",
+            "insights-summary",
+            "life-body",
         ]
         assert payload["composition"]["missing_jobs"] == []
         assert payload["composition"]["registered_count"] == 21
-        assert payload["composition"]["declared_non_typed_unavailable_count"] == 20
-        assert payload["composition"]["typed_unavailable_job_count"] == 1
-        assert payload["composition"]["declared_partial_job_count"] == 7
+        assert payload["composition"]["declared_non_typed_unavailable_count"] == 21
+        assert payload["composition"]["typed_unavailable_job_count"] == 0
+        assert payload["composition"]["declared_partial_job_count"] == 8
         assert payload["composition"]["authenticated_host_read_job_count"] == 4
         assert payload["composition"]["authenticated_host_read_jobs"] == [
             {
@@ -124,10 +124,7 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
         )
         assert {
             item["name"] for item in payload["composition"]["unavailable_jobs"]
-        } == {"life-body"}
-        assert payload["composition"]["unavailable_jobs"][0]["reason_code"] == (
-            "OBS_HOST_RUNTIME_SOURCE_NOT_INJECTED"
-        )
+        } == set()
         assert {
             item["name"] for item in payload["composition"]["partial_jobs"]
         } == {
@@ -138,6 +135,7 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "remaining-operator-queries",
             "runtime-snapshot",
             "trace",
+            "life-body",
         }
         for kind, key, job_name in (
             ("capability_forge_operator", "current", "capability-forge-operator"),

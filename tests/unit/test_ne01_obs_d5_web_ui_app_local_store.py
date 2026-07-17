@@ -15,7 +15,7 @@ from host_brain.app.observability_runtime.projection_runtime import (
     SESSION_KIND,
     TRACE_KIND,
 )
-from host_brain.composition.obs_application import (
+from host_brain.app.obs_application import (
     ObsApplicationPorts,
     build_default_obs_application_ports,
 )

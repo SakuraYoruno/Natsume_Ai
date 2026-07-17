@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from host_brain.app.obs_fastapi_app import create_obs_app
 from host_brain.app.settings.core import get_core_settings
-from host_brain.composition.obs_application import ObsApplicationPorts
+from host_brain.app.obs_application import ObsApplicationPorts
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.operator_query_gateway import (
     OPERATOR_QUERY_AUTH_BINDINGS_ENV,
