@@ -221,6 +221,10 @@ def test_private_bare_paired_worktrees_do_not_modify_protected_source(tmp_path: 
     assert report.report.baseline_outcome is not None
     assert report.report.selected_outcome is not None
     assert report.report.baseline_outcome.executed is True
+    assert report.cleanup_receipt is not None
+    assert report.cleanup_receipt.status == "VERIFIED_CLEAN"
+    assert report.cleanup_receipt.run_id == report.run_id
+    assert report.cleanup_receipt.source_before_digest == report.cleanup_receipt.source_after_digest
     assert report.baseline_evidence.source_commit == commit
     assert report.baseline_evidence.workspace_diff_digest != report.selected_evidence.workspace_diff_digest
     assert verifier.seen == {

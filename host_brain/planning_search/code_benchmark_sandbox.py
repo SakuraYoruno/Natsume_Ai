@@ -34,6 +34,7 @@ from host_brain.planning_search.code_benchmark_models import (
     CODE_HISTORICAL_BENCHMARK_MODE,
     CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION,
     CodeBenchmarkArmEvidence,
+    CodeBenchmarkCleanupReceipt,
     CodeBenchmarkContractError,
     CodeBenchmarkPathPolicy,
     CodeHistoricalBenchmarkRun,
@@ -264,6 +265,8 @@ class CodeHistoricalBenchmarkSandbox:
 
         opened_targets: list[Path] = []
         primary_failure: BaseException | None = None
+        completed_run: CodeHistoricalBenchmarkRun | None = None
+        cleanup_receipt: CodeBenchmarkCleanupReceipt | None = None
         try:
             self._create_private_bare(private_bare)
             _assert_private_directory(
@@ -309,7 +312,7 @@ class CodeHistoricalBenchmarkSandbox:
                 baseline_outcome=baseline_outcome,
                 selected_outcome=selected_outcome,
             )
-            return CodeHistoricalBenchmarkRun(
+            completed_run = CodeHistoricalBenchmarkRun(
                 run_id=normalized_run_id,
                 report=report,
                 baseline_evidence=baseline_evidence,
@@ -319,17 +322,32 @@ class CodeHistoricalBenchmarkSandbox:
             primary_failure = exc
             raise
         finally:
-            cleanup_error = self._cleanup(
+            cleanup_result = self._cleanup(
                 private_bare=private_bare,
                 run_root=run_root,
                 opened_targets=opened_targets,
                 source_before=source_before,
+                run_id=normalized_run_id,
+                return_receipt=True,
             )
+            assert isinstance(cleanup_result, tuple)
+            cleanup_receipt, cleanup_error = cleanup_result
             if cleanup_error is not None:
                 if primary_failure is not None:
                     primary_failure.add_note(f"benchmark cleanup also failed: {cleanup_error}")
                 else:
                     raise cleanup_error
+        if completed_run is None or cleanup_receipt is None:
+            raise CodeBenchmarkSandboxError(
+                "benchmark did not produce a cleanup-verified paired receipt"
+            )
+        return CodeHistoricalBenchmarkRun(
+            run_id=completed_run.run_id,
+            report=completed_run.report,
+            baseline_evidence=completed_run.baseline_evidence,
+            selected_evidence=completed_run.selected_evidence,
+            cleanup_receipt=cleanup_receipt,
+        )
 
     def _validate_request(
         self,
@@ -642,7 +660,13 @@ class CodeHistoricalBenchmarkSandbox:
         run_root: Path,
         opened_targets: Sequence[Path],
         source_before: str,
-    ) -> CodeBenchmarkSandboxError | None:
+        run_id: str | None = None,
+        return_receipt: bool = False,
+    ) -> (
+        CodeBenchmarkSandboxError
+        | None
+        | tuple[CodeBenchmarkCleanupReceipt | None, CodeBenchmarkSandboxError | None]
+    ):
         failures: list[str] = []
         direct_children: tuple[Path, ...] = ()
         if _path_entry_exists(run_root):
@@ -725,14 +749,40 @@ class CodeHistoricalBenchmarkSandbox:
                 failures.append("private bare repository was not removed")
         except BaseException as exc:  # noqa: BLE001
             failures.append(f"private bare cleanup failed: {exc}")
+        source_after: str | None = None
         try:
-            if self._source_fingerprint() != source_before:
+            source_after = self._source_fingerprint()
+            if source_after != source_before:
                 failures.append("protected source repository changed during benchmark run")
         except BaseException as exc:  # noqa: BLE001
             failures.append(f"protected source verification failed: {exc}")
-        if not failures:
-            return None
-        return CodeBenchmarkSandboxError("; ".join(failures))
+        cleanup_error = (
+            None if not failures else CodeBenchmarkSandboxError("; ".join(failures))
+        )
+        if not return_receipt:
+            return cleanup_error
+        if cleanup_error is not None:
+            return None, cleanup_error
+        if not isinstance(run_id, str) or not run_id.strip() or source_after is None:
+            return None, CodeBenchmarkSandboxError(
+                "cleanup receipt requires a run id and verified source fingerprint"
+            )
+        try:
+            receipt = CodeBenchmarkCleanupReceipt(
+                run_id=run_id,
+                source_before_digest=source_before,
+                source_after_digest=source_after,
+                private_bare_removed=not _path_entry_exists(private_bare),
+                worktrees_removed=all(
+                    not _path_entry_exists(target) for target in opened_targets
+                ),
+                run_root_removed=not _path_entry_exists(run_root),
+            )
+        except CodeBenchmarkContractError as exc:
+            error = CodeBenchmarkSandboxError("cleanup could not produce a verified receipt")
+            error.__cause__ = exc
+            return None, error
+        return receipt, None
 
 
 def _git(repository: Path, *args: str) -> str:

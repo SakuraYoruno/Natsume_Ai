@@ -255,7 +255,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.7 D17 Code historical trusted-process private-bare experiment flow
+### 4.7 D17/D18 Code historical trusted-process experiment and durable evidence flow
 
 ```text
 registered clean protected source (unshared non-link .git; local Git config is trusted)
@@ -270,10 +270,14 @@ registered clean protected source (unshared non-link .git; local Git config is t
   → compare private bare refs unchanged
   → remove both worktrees + private bare
   → recheck protected source HEAD / refs / status / worktree / Git-control fingerprint
-  → SHADOW_ONLY DomainBenchmarkReport (no production influence)
+  → path-free VERIFIED_CLEAN receipt (private bare/worktrees/run root removed
+     and protected source fingerprint unchanged)
+  → D18 0106 durable ledger: preregistered workload + exact RunSpec
+     + BASELINE/SELECTED evidence/outcome + cleanup + terminal receipt
+  → EXPERIMENT_EVIDENCE_ONLY (no production influence, winner or promotion)
 ```
 
-该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；但 executor/verifier 是当前 Python process 的受信仓库代码，能够绕开 API 的不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。它是真实本地 Git 机械链，但口径仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：Git hardening 不是 container/tenant/OS/filesystem/network 隔离，也没有隐藏 oracle process、execution budget、durable 0106 workload/run/outcome/comparison 或 cleanup retry receipt，故不能用于收益或 promotion 结论。
+该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；但 executor/verifier 是当前 Python process 的受信仓库代码，能够绕开 API 的不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D18 只在 runner 成功返回后写入 0106；SQL 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：Git hardening 和账本不是 container/tenant/OS/filesystem/network 隔离；declared execution budget 不是模型/工具/测试 hard gate，也没有隐藏 oracle process、cleanup retry worker、cohort/statistical comparison 或收益/promotion 结论。
 
 ## 5. TaskGraph 状态流与回执
 
@@ -742,7 +746,7 @@ All ingress sources
 | Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（均已接通 canonical admission） |
 | Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |
 | Workspace 路径围栏与 W2 Internal worktree | [workspace_paths.py](../../../host_brain/agent_runtime/workspace_paths.py)，[workspace_repository.py](../../../host_brain/persistence/workspace_repository.py)，[workspace_operation_fencing.py](../../../host_brain/persistence/workspace_operation_fencing.py)，[workspace_allocator.py](../../../host_brain/agent_runtime/workspace_allocator.py)，[workspace_runtime.py](../../../host_brain/agent_runtime/workspace_runtime.py)，[workspace_policy.py](../../../host_brain/agent_runtime/workspace_policy.py)，[agent_workspace.py](../../../host_brain/composition/agent_workspace.py) |
-| D17 Code private-bare benchmark experiment | [code_benchmark_models.py](../../../host_brain/planning_search/code_benchmark_models.py)，[code_benchmark_sandbox.py](../../../host_brain/planning_search/code_benchmark_sandbox.py) |
+| D17/D18 Code private-bare benchmark experiment ledger | [code_benchmark_models.py](../../../host_brain/planning_search/code_benchmark_models.py)，[code_benchmark_sandbox.py](../../../host_brain/planning_search/code_benchmark_sandbox.py)，[code_benchmark_ledger.py](../../../host_brain/planning_search/code_benchmark_ledger.py)，[code_benchmark_ledger_repository.py](../../../host_brain/persistence/code_benchmark_ledger_repository.py) |
 | Acceptance effects | [acceptance_effects.py](../../../host_brain/task_runtime/acceptance_effects.py)，[acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py)，[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) |
 | Life/Memory post-process | [digital_life/service.py](../../../host_brain/digital_life/service.py)，[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py)，[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) |
 | Gateway inbound/outbound | [delivery_runtime.py](../../../edge_client/gateway/delivery_runtime.py)，[input_reporter.py](../../../edge_client/channels/input_reporter.py)，[ingress.py](../../../host_brain/input_runtime/ingress.py)，[gateway_transport_repository.py](../../../host_brain/persistence/gateway_transport_repository.py)，[outbound.py](../../../edge_client/gateway/outbound.py) |

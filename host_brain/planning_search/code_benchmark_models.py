@@ -30,6 +30,8 @@ CODE_HISTORICAL_BENCHMARK_SCHEMA = "natsume.code-historical-benchmark.v1"
 CODE_HISTORICAL_BENCHMARK_MODE = "PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY"
 CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST = "TRUSTED_IN_PROCESS_ONLY"
 CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION = "NOT_ENFORCED"
+CODE_BENCHMARK_CLEANUP_STATUS = "VERIFIED_CLEAN"
+CODE_BENCHMARK_CLEANUP_ADAPTER_REVISION = "code-private-bare-cleanup-v1"
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,119}$")
@@ -241,6 +243,103 @@ class CodeBenchmarkArmEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class CodeBenchmarkCleanupReceipt:
+    """Path-free proof that a private benchmark run finished cleanly.
+
+    The receipt deliberately records only facts that the trusted D17 adapter
+    can establish after its finally-block completes.  It is *not* evidence of
+    a container, OS, tenant or network sandbox.  In particular, the source
+    fingerprints prove that the protected Git checkout did not change during
+    this one run; they do not authenticate the source or grant promotion.
+    """
+
+    run_id: str
+    source_before_digest: str
+    source_after_digest: str
+    private_bare_removed: bool
+    worktrees_removed: bool
+    run_root_removed: bool
+    cleanup_adapter_revision: str = CODE_BENCHMARK_CLEANUP_ADAPTER_REVISION
+    status: str = CODE_BENCHMARK_CLEANUP_STATUS
+    receipt_ref: str = ""
+
+    def __post_init__(self) -> None:
+        run_id = _identifier(self.run_id, field_name="run_id")
+        before = _digest_text(
+            self.source_before_digest,
+            field_name="source_before_digest",
+        )
+        after = _digest_text(
+            self.source_after_digest,
+            field_name="source_after_digest",
+        )
+        if before != after:
+            raise CodeBenchmarkContractError(
+                "verified cleanup requires an unchanged protected source fingerprint"
+            )
+        for field_name in (
+            "private_bare_removed",
+            "worktrees_removed",
+            "run_root_removed",
+        ):
+            if getattr(self, field_name) is not True:
+                raise CodeBenchmarkContractError(
+                    f"verified cleanup requires {field_name} to be true"
+                )
+        revision = _identifier(
+            self.cleanup_adapter_revision,
+            field_name="cleanup_adapter_revision",
+        )
+        status = str(self.status or "").strip().upper()
+        if status != CODE_BENCHMARK_CLEANUP_STATUS:
+            raise CodeBenchmarkContractError(
+                "cleanup receipt status must be VERIFIED_CLEAN"
+            )
+        identity = {
+            "schema": CODE_HISTORICAL_BENCHMARK_SCHEMA,
+            "run_id": run_id,
+            "source_before_digest": before,
+            "source_after_digest": after,
+            "private_bare_removed": True,
+            "worktrees_removed": True,
+            "run_root_removed": True,
+            "cleanup_adapter_revision": revision,
+            "status": CODE_BENCHMARK_CLEANUP_STATUS,
+        }
+        digest = _digest(identity)
+        supplied = str(self.receipt_ref or "").strip()
+        expected_ref = f"benchmark-cleanup://sha256/{digest}"
+        if supplied and supplied != expected_ref:
+            raise CodeBenchmarkContractError("receipt_ref does not bind cleanup evidence")
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "source_before_digest", before)
+        object.__setattr__(self, "source_after_digest", after)
+        object.__setattr__(self, "private_bare_removed", True)
+        object.__setattr__(self, "worktrees_removed", True)
+        object.__setattr__(self, "run_root_removed", True)
+        object.__setattr__(self, "cleanup_adapter_revision", revision)
+        object.__setattr__(self, "status", CODE_BENCHMARK_CLEANUP_STATUS)
+        object.__setattr__(self, "receipt_ref", expected_ref)
+
+    @property
+    def receipt_digest(self) -> str:
+        return self.receipt_ref.removeprefix("benchmark-cleanup://sha256/")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "source_before_digest": self.source_before_digest,
+            "source_after_digest": self.source_after_digest,
+            "private_bare_removed": True,
+            "worktrees_removed": True,
+            "run_root_removed": True,
+            "cleanup_adapter_revision": self.cleanup_adapter_revision,
+            "status": CODE_BENCHMARK_CLEANUP_STATUS,
+            "receipt_ref": self.receipt_ref,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CodeHistoricalBenchmarkRun:
     """One paired private-bare run; never a production promotion authority."""
 
@@ -248,6 +347,7 @@ class CodeHistoricalBenchmarkRun:
     report: DomainBenchmarkReport
     baseline_evidence: CodeBenchmarkArmEvidence
     selected_evidence: CodeBenchmarkArmEvidence
+    cleanup_receipt: CodeBenchmarkCleanupReceipt | None = None
     mode: str = CODE_HISTORICAL_BENCHMARK_MODE
     production_influence_enabled: bool = False
 
@@ -267,8 +367,16 @@ class CodeHistoricalBenchmarkRun:
             raise CodeBenchmarkContractError("selected evidence does not bind selected arm")
         if self.baseline_evidence.source_commit != self.selected_evidence.source_commit:
             raise CodeBenchmarkContractError("benchmark arms must use the same frozen commit")
+        if self.baseline_evidence.source_ref != self.selected_evidence.source_ref:
+            raise CodeBenchmarkContractError("benchmark arms must use the same frozen source ref")
         if self.baseline_evidence.path_policy_digest != self.selected_evidence.path_policy_digest:
             raise CodeBenchmarkContractError("benchmark arms must use the same path policy")
+        cleanup = self.cleanup_receipt
+        if cleanup is not None:
+            if not isinstance(cleanup, CodeBenchmarkCleanupReceipt):
+                raise CodeBenchmarkContractError("cleanup_receipt is invalid")
+            if cleanup.run_id != run_id:
+                raise CodeBenchmarkContractError("cleanup receipt does not bind run_id")
         if str(self.mode or "").strip().upper() != CODE_HISTORICAL_BENCHMARK_MODE:
             raise CodeBenchmarkContractError(
                 "historical Code benchmark must remain trusted-process-only"
@@ -292,6 +400,9 @@ class CodeHistoricalBenchmarkRun:
             "report": self.report.to_dict(),
             "baseline_evidence": self.baseline_evidence.to_dict(),
             "selected_evidence": self.selected_evidence.to_dict(),
+            "cleanup_receipt": (
+                self.cleanup_receipt.to_dict() if self.cleanup_receipt else None
+            ),
             "mode": CODE_HISTORICAL_BENCHMARK_MODE,
             "production_influence_enabled": False,
         }
@@ -470,10 +581,13 @@ def _thaw_json(value: Any) -> Any:
 
 __all__ = (
     "CODE_HISTORICAL_BENCHMARK_EXECUTOR_TRUST",
+    "CODE_BENCHMARK_CLEANUP_ADAPTER_REVISION",
+    "CODE_BENCHMARK_CLEANUP_STATUS",
     "CODE_HISTORICAL_BENCHMARK_MODE",
     "CODE_HISTORICAL_BENCHMARK_NETWORK_ISOLATION",
     "CODE_HISTORICAL_BENCHMARK_SCHEMA",
     "CodeBenchmarkArmEvidence",
+    "CodeBenchmarkCleanupReceipt",
     "CodeBenchmarkContractError",
     "CodeBenchmarkPathPolicy",
     "CodeHistoricalBenchmarkRun",
