@@ -89,6 +89,7 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_IDEMPOTENCY_RECOVERY_REQUIRED,
     TASK_STORE_LEASE_CONFLICT,
     TASK_STORE_NOT_FOUND,
+    TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED,
     TASK_STORE_OUTBOX_CONFLICT,
     TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEMA_NOT_READY,
@@ -198,6 +199,9 @@ from host_brain.persistence.task_budget_usage_store import (
 )
 from host_brain.persistence.task_terminal_reconciliation_store import (
     TaskTerminalReconciliationStoreMixin,
+)
+from host_brain.persistence.task_node_artifact_store import (
+    TaskNodeArtifactStoreMixin,
 )
 
 
@@ -422,6 +426,7 @@ class DurableTaskStore(
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
     TaskTerminalReconciliationStoreMixin,
+    TaskNodeArtifactStoreMixin,
     TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
@@ -4313,6 +4318,7 @@ __all__ = [
     "TASK_STORE_INVALID",
     "TASK_STORE_LEASE_CONFLICT",
     "TASK_STORE_NOT_FOUND",
+    "TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED",
     "TASK_STORE_OUTBOX_CONFLICT",
     "TASK_STORE_OWNERSHIP_CONFLICT",
     "TASK_STORE_RECONCILIATION_PROOF_REQUIRED",

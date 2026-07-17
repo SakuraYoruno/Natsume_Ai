@@ -156,6 +156,12 @@ def _node_input_refs(node: Mapping[str, Any]) -> tuple[str, ...]:
         return ()
     return tuple(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
+
+def _node_output_contract(node: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _nested_mapping(node, "node").get("output_contract")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
 def _record_evidence_refs(record: Mapping[str, Any]) -> tuple[str, ...]:
     raw = record.get("evidence_refs") if isinstance(record, Mapping) else None
     if not isinstance(raw, (list, tuple)):
@@ -265,6 +271,7 @@ __all__ = [
     "_mapping",
     "_nested_mapping",
     "_node_input_refs",
+    "_node_output_contract",
     "_optional_record_non_negative_int",
     "_record_evidence_refs",
     "_record_non_negative_int",

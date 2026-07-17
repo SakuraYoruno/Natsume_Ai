@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.contracts.agent_runtime.node_artifact import (
+    is_task_result_artifact_ref,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphCompletionPolicy,
     TaskNodeStatus,
+)
+from host_brain.persistence.worker_projection_repository import (
+    WorkerProjectionStoreError,
+    validate_worker_projection_payload,
 )
 
 from .admission import AdmittedExecution, AdmittedTaskNode
@@ -27,6 +34,8 @@ from .coordinator_records import (
     _assert_durable_identity,
     _attempt_id,
     _mapping,
+    _node_input_refs,
+    _node_output_contract,
     _optional_record_non_negative_int,
     _record_evidence_refs,
     _record_non_negative_int,
@@ -437,37 +446,69 @@ class DurableDagSchedulingRuntime:
                 post_review_refs = tuple(
                     dict.fromkeys((*_record_evidence_refs(review_node), *review_refs))
                 )
+                reservation = await self._node_execution_projection.try_operation(
+                    review_admission.reservation_id
+                )
+                receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.allowed:
-                    await self._node_lifecycle.transition_node(
-                        review_admission,
-                        review_node,
-                        "ACCEPTED",
-                        evidence_refs=post_review_refs,
-                        acceptance_judgement={
-                            "schema_version": "Natsume.agent.acceptance_judgement.v1",
-                            "judgement_id": f"review-accept::{gate.review_id}",
-                            "work_order_id": review_admission.work_order_id,
-                            "task_graph_id": review_admission.graph_id,
-                            "task_node_id": review_admission.node_id,
-                            "attempt_id": attempt_id,
-                            "decision": "ACCEPT",
-                            "reason_code": None,
-                            "evidence_refs": list(post_review_refs),
-                            "criteria": [],
-                            "critic_candidate": {
-                                "source": "durable_review",
-                                "review": gate.to_dict(),
-                            },
-                            "started_at_ms": command.created_at_ms,
-                            "finished_at_ms": command.created_at_ms,
+                    acceptance_judgement = {
+                        "schema_version": "Natsume.agent.acceptance_judgement.v1",
+                        "judgement_id": f"review-accept::{gate.review_id}",
+                        "work_order_id": review_admission.work_order_id,
+                        "task_graph_id": review_admission.graph_id,
+                        "task_node_id": review_admission.node_id,
+                        "attempt_id": attempt_id,
+                        "decision": "ACCEPT",
+                        "reason_code": None,
+                        "evidence_refs": list(post_review_refs),
+                        "criteria": [],
+                        "critic_candidate": {
+                            "source": "durable_review",
+                            "review": gate.to_dict(),
                         },
-                    )
+                        "started_at_ms": command.created_at_ms,
+                        "finished_at_ms": command.created_at_ms,
+                    }
+                    if _node_output_contract(review_node):
+                        if not receipt_ref or self._projection_reader is None:
+                            raise GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                "review-approved TaskNode has no durable worker projection",
+                            )
+                        loaded = await _maybe_await(
+                            self._projection_reader.load(receipt_ref)
+                        )
+                        try:
+                            worker_output = validate_worker_projection_payload(
+                                loaded if isinstance(loaded, Mapping) else {},
+                                expected_projection_id=receipt_ref,
+                            )
+                        except WorkerProjectionStoreError as exc:
+                            raise GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                "review-approved TaskNode worker projection is invalid",
+                            ) from exc
+                        await self._node_lifecycle.accept_node_output(
+                            review_admission,
+                            review_node,
+                            attempt_id=attempt_id,
+                            receipt_ref=receipt_ref,
+                            worker_output=worker_output,
+                            evidence_refs=post_review_refs,
+                            acceptance_judgement=acceptance_judgement,
+                        )
+                    else:
+                        await self._node_lifecycle.transition_node(
+                            review_admission,
+                            review_node,
+                            "ACCEPTED",
+                            evidence_refs=post_review_refs,
+                            acceptance_judgement=acceptance_judgement,
+                        )
                     if graph_status == "BLOCKED":
                         await self._node_lifecycle.transition_graph(review_admission, graph, "ACTIVE")
                     await self._runtime_outbox.publish_pending()
                     continue
-                reservation = await self._node_execution_projection.try_operation(review_admission.reservation_id)
-                receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.disposition == "REVIEW_DENIED":
                     await self._node_lifecycle.transition_node(
                         review_admission,
@@ -862,9 +903,29 @@ class DurableDagSchedulingRuntime:
 
             if decision.dependency_ready_node_ids or decision.retry_due_node_ids:
                 for node_id in decision.dependency_ready_node_ids:
+                    dependency_node = durable_nodes[node_id]
+                    if any(
+                        is_task_result_artifact_ref(ref)
+                        for ref in _node_input_refs(dependency_node)
+                    ):
+                        resolved = await _maybe_await(
+                            self._store.resolve_node_input_artifacts(
+                                admitted.graph_id,
+                                admitted.graph_revision,
+                                node_id,
+                            )
+                        )
+                        if not isinstance(resolved, Sequence) or isinstance(
+                            resolved,
+                            (str, bytes, bytearray),
+                        ) or any(not isinstance(item, Mapping) for item in resolved):
+                            raise GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                "dependency-ready TaskNode artifact resolution is invalid",
+                            )
                     await self._node_lifecycle.transition_node(
                         admitted.for_node(node_id),
-                        durable_nodes[node_id],
+                        dependency_node,
                         "READY",
                     )
                 for node_id in decision.retry_due_node_ids:

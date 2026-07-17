@@ -764,6 +764,7 @@ def build_process_task_runtime_container(
         task_store.assert_graph_cancellation_continuation_ready()
         task_store.assert_effect_reconciliation_ready()
         task_store.assert_terminal_reconciliation_ready()
+        task_store.assert_node_artifact_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         terminal_reconciliation_inventory = (

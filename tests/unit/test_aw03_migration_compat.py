@@ -342,9 +342,9 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] >= 101
-    assert upgraded.summary["applied_count"] >= 18
-    assert "0101_agent_workspace_authority" in {
+    assert upgraded.summary["current_version"] >= 102
+    assert upgraded.summary["applied_count"] >= 19
+    assert "0102_task_runtime_node_artifact" in {
         record.migration_id for record in upgraded.records
     }
     with sqlite3.connect(db_path) as conn:
@@ -474,8 +474,8 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     replayed = runner.apply_migrations(request_id="0094-receipt-replay", ts_ms=24)
 
     assert replayed.success is True, replayed.as_dict()
-    assert replayed.summary["current_version"] >= 101
-    assert "0101_agent_workspace_authority" in {
+    assert replayed.summary["current_version"] >= 102
+    assert "0102_task_runtime_node_artifact" in {
         record.migration_id for record in replayed.records
     }
     with sqlite3.connect(db_path) as conn:
@@ -512,8 +512,8 @@ def test_0095_fresh_schema_freezes_revision_column_guards_and_delivery_index(
     )
 
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] >= 101
-    assert "0101_agent_workspace_authority" in {
+    assert result.summary["current_version"] >= 102
+    assert "0102_task_runtime_node_artifact" in {
         record.migration_id for record in result.records
     }
     with sqlite3.connect(db_path) as conn:
@@ -759,7 +759,7 @@ def test_0095_upgrade_backfills_only_exact_authority_then_unique_graph_fallback(
     )
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] >= 101
+    assert upgraded.summary["current_version"] >= 102
     with sqlite3.connect(db_path) as conn:
         revisions = dict(
             conn.execute(
@@ -1187,13 +1187,13 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] >= 101
-    assert upgraded.summary["applied_count"] >= 12
+    assert upgraded.summary["current_version"] >= 102
+    assert upgraded.summary["applied_count"] >= 13
     upgraded_ids = [record.migration_id for record in upgraded.records]
     start_0090 = upgraded_ids.index(
         "0090_task_runtime_parallel_settlement_decision"
     )
-    assert upgraded_ids[start_0090 : start_0090 + 12] == [
+    assert upgraded_ids[start_0090 : start_0090 + 13] == [
         "0090_task_runtime_parallel_settlement_decision",
         "0091_task_runtime_parallel_success_decision",
         "0092_task_runtime_graph_cancellation",
@@ -1206,6 +1206,7 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
         "0099_task_runtime_terminal_reconciliation",
         "0100_task_runtime_graph_revision_supersession",
         "0101_agent_workspace_authority",
+        "0102_task_runtime_node_artifact",
     ]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
@@ -1274,9 +1275,9 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
 
     assert upgraded.success is True, upgraded.as_dict()
-    assert upgraded.summary["current_version"] >= 101
-    assert upgraded.summary["applied_count"] >= 11
-    assert "0101_agent_workspace_authority" in {
+    assert upgraded.summary["current_version"] >= 102
+    assert upgraded.summary["applied_count"] >= 12
+    assert "0102_task_runtime_node_artifact" in {
         record.migration_id for record in upgraded.records
     }
     with sqlite3.connect(db_path) as conn:
@@ -1618,7 +1619,7 @@ def test_0097_fresh_schema_fences_node_grant_identity_and_duplicates(tmp_path) -
         ts_ms=60,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] >= 101
+    assert result.summary["current_version"] >= 102
 
     with sqlite3.connect(db_path) as conn:
         objects = {

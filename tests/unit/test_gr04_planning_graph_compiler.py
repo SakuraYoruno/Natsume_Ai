@@ -163,6 +163,20 @@ def test_gr04_compiler_rejects_legacy_retry_backoff_alias() -> None:
     assert "unsupported fields: backoff_ms" in error.value.detail
 
 
+def test_gr04_compiler_rejects_caller_supplied_task_result_authority() -> None:
+    candidate = _candidate(
+        "forged-result-ref",
+        input_refs=[
+            "artifact://task-result/other-graph/revisions/9/nodes/other-node"
+        ],
+    )
+
+    with pytest.raises(ContractViolation) as error:
+        PlanningGraphCompiler().compile(_result(candidate))
+
+    assert "compiler-owned task-result refs" in error.value.detail
+
+
 def test_gr04_explicit_candidate_dependencies_compile_parallel_dag() -> None:
     result = _result(
         _candidate("collect", depends_on_candidate_ids=[]),

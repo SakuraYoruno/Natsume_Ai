@@ -21,6 +21,7 @@ from .coordinator_records import (
     _attempt_id,
     _exception_reason,
     _mapping,
+    _node_output_contract,
     _record_evidence_refs,
     _required_record_text,
     _status,
@@ -191,6 +192,39 @@ class NodeExecutionProjection:
                 "acceptance-review graph lacks its committed operation receipt",
             )
         projection: Mapping[str, Any] | None = None
+        artifact_ref: str | None = None
+        if accepted and _node_output_contract(node):
+            try:
+                raw_artifact = await _maybe_await(
+                    self._store.get_node_artifact(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                        admitted.node_id,
+                    )
+                )
+            except Exception as exc:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "accepted TaskNode has no canonical durable output artifact",
+                ) from exc
+            if not isinstance(raw_artifact, Mapping):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "accepted TaskNode output artifact is invalid",
+                )
+            artifact = dict(raw_artifact)
+            artifact_ref = _required_record_text(artifact, "artifact_ref")
+            if (
+                _required_record_text(artifact, "graph_id") != admitted.graph_id
+                or int(artifact.get("graph_revision") or 0)
+                != admitted.graph_revision
+                or _required_record_text(artifact, "node_id") != admitted.node_id
+                or _required_record_text(artifact, "receipt_ref") != receipt_ref
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "accepted TaskNode output artifact lineage drifted",
+                )
         if accepted and receipt_ref and self._projection_reader is not None:
             loaded = await _maybe_await(self._projection_reader.load(receipt_ref))
             if not isinstance(loaded, Mapping):
@@ -245,6 +279,7 @@ class NodeExecutionProjection:
                         *_record_evidence_refs(node),
                         _text(latest.get("error_ref")),
                         receipt_ref,
+                        artifact_ref,
                         decision_ref,
                     )
                     if reference

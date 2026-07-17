@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
@@ -22,6 +22,7 @@ def build_checkpoint_execution_context(
     checkpoint: CommittedOperationCheckpoint,
     node_grant_ref: str | None,
     owner_id: str,
+    input_artifacts: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     if node_grant_ref is None:
         recovery_target_id = command.target_id
@@ -55,6 +56,7 @@ def build_checkpoint_execution_context(
         "parent_grant_ref": str(command.governor_grant_ref or "").strip(),
         "budget": budget.execution_payload(),
         "node_input_refs": list(_node_input_refs(node)),
+        "node_input_artifacts": [dict(item) for item in input_artifacts],
         "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
         "recovery": {
             "mode": "COMMITTED_CHECKPOINT_ONLINE_TAKEOVER",

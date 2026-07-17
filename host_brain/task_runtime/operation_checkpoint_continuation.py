@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.contracts.agent_runtime.node_artifact import (
+    is_task_result_artifact_ref,
+)
 
 from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .admission import AdmittedExecution
@@ -22,6 +25,8 @@ from .coordinator_records import (
     _evidence_refs,
     _exception_reason,
     _mapping,
+    _node_input_refs,
+    _node_output_contract,
     _record_positive_int,
     _required_record_text,
     _review_evidence_refs,
@@ -267,6 +272,25 @@ class CommittedCheckpointContinuation:
                 evidence_refs=evidence_refs,
             )
 
+        input_artifacts: list[dict[str, Any]] = []
+        if any(
+            is_task_result_artifact_ref(ref)
+            for ref in _node_input_refs(current_node)
+        ):
+            resolved = await _maybe_await(
+                self._store.resolve_node_input_artifacts(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                )
+            )
+            if not isinstance(resolved, Sequence) or isinstance(
+                resolved,
+                (str, bytes, bytearray),
+            ) or any(not isinstance(item, Mapping) for item in resolved):
+                self._blocked("committed checkpoint input artifacts are invalid")
+            input_artifacts = [dict(item) for item in resolved]
+
         execution_context = build_checkpoint_execution_context(
             admitted=admitted,
             command=command,
@@ -275,6 +299,7 @@ class CommittedCheckpointContinuation:
             checkpoint=checkpoint,
             node_grant_ref=node_grant_ref,
             owner_id=self._owner_id,
+            input_artifacts=input_artifacts,
         )
 
         if node_status == "RUNNING":
@@ -473,13 +498,24 @@ class CommittedCheckpointContinuation:
             )
             return
 
-        current_node = await self._node_lifecycle.transition_node(
-            admitted,
-            current_node,
-            "ACCEPTED",
-            evidence_refs=acceptance_refs,
-            acceptance_judgement=acceptance,
-        )
+        if _node_output_contract(current_node):
+            current_node = await self._node_lifecycle.accept_node_output(
+                admitted,
+                current_node,
+                attempt_id=attempt_id,
+                receipt_ref=receipt_ref,
+                worker_output=worker_commit,
+                evidence_refs=acceptance_refs,
+                acceptance_judgement=acceptance,
+            )
+        else:
+            current_node = await self._node_lifecycle.transition_node(
+                admitted,
+                current_node,
+                "ACCEPTED",
+                evidence_refs=acceptance_refs,
+                acceptance_judgement=acceptance,
+            )
         all_nodes_accepted = not defer_shared_terminal
         if all_nodes_accepted:
             for binding in admitted.nodes:

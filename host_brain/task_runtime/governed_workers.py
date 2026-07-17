@@ -16,6 +16,10 @@ from typing import Any, Protocol
 from urllib.parse import unquote
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.node_artifact import (
+    artifact_digest,
+    is_task_result_artifact_ref,
+)
 from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
 from host_brain.task_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
@@ -57,6 +61,7 @@ class FrozenNodeInput:
     objective: str
     input_refs: tuple[str, ...]
     _input_pack_json: str = field(repr=False)
+    _input_artifacts_json: str = field(repr=False)
     node_grant_ref: str
     parent_grant_ref: str
 
@@ -66,6 +71,13 @@ class FrozenNodeInput:
 
         loaded = json.loads(self._input_pack_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
+
+    @property
+    def input_artifacts(self) -> tuple[Mapping[str, Any], ...]:
+        """Return fresh immutable-by-copy predecessor output projections."""
+
+        loaded = json.loads(self._input_artifacts_json)
+        return tuple(dict(item) for item in loaded if isinstance(item, Mapping))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +99,7 @@ class FrozenNodeInput:
             "objective": self.objective,
             "input_refs": list(self.input_refs),
             "input_pack": dict(self.input_pack),
+            "input_artifacts": [dict(item) for item in self.input_artifacts],
             "node_grant_ref": self.node_grant_ref,
             "parent_grant_ref": self.parent_grant_ref,
         }
@@ -355,6 +368,49 @@ def _freeze_node_input(
             if str(value or "").strip()
         )
     )
+    raw_artifacts = context.get("node_input_artifacts", ())
+    if not isinstance(raw_artifacts, Sequence) or isinstance(
+        raw_artifacts,
+        (str, bytes, bytearray),
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "node_input_artifacts must be an array",
+        )
+    input_artifacts = [
+        _json_copy(item)
+        for item in raw_artifacts
+        if isinstance(item, Mapping)
+    ]
+    if len(input_artifacts) != len(raw_artifacts):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "node_input_artifacts must contain only objects",
+        )
+    expected_artifact_refs = {
+        ref for ref in input_refs if is_task_result_artifact_ref(ref)
+    }
+    actual_artifact_refs = {
+        str(item.get("artifact_ref") or "").strip()
+        for item in input_artifacts
+    }
+    if (
+        len(actual_artifact_refs) != len(input_artifacts)
+        or actual_artifact_refs != expected_artifact_refs
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "resolved node artifacts differ from frozen input_refs",
+        )
+    for artifact in input_artifacts:
+        payload = artifact.get("payload")
+        if not isinstance(payload, Mapping) or str(
+            artifact.get("payload_sha256") or ""
+        ) != artifact_digest(payload):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_INPUT_INVALID,
+                "resolved node artifact payload digest is invalid",
+            )
     return FrozenNodeInput(
         command_id=command.command_id,
         request_id=command.request_id,
@@ -375,6 +431,13 @@ def _freeze_node_input(
         input_refs=input_refs,
         _input_pack_json=json.dumps(
             _json_copy(work_order.input_pack),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
+        _input_artifacts_json=json.dumps(
+            input_artifacts,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

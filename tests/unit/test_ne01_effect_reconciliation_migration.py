@@ -63,7 +63,7 @@ def _apply_0098(store, *, request_id: str) -> None:
         ts_ms=NOW,
     )
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] >= 101
+    assert result.summary["current_version"] >= 102
     store._effect_reconciliation_schema_ready = False
     store.assert_effect_reconciliation_ready(force_revalidate=True)
 

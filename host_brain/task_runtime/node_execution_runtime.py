@@ -17,6 +17,9 @@ from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.contracts.agent_runtime.node_artifact import (
+    is_task_result_artifact_ref,
+)
 
 from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .admission import AdmittedExecution
@@ -35,6 +38,7 @@ from .coordinator_records import (
     _exception_reason,
     _mapping,
     _node_input_refs,
+    _node_output_contract,
     _record_non_negative_int,
     _record_positive_int,
     _required_record_text,
@@ -322,6 +326,26 @@ class DurableNodeExecutionRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 f"admission must expose CREATED/ACTIVE graph and READY node, got {graph_status}/{node_status}",
             )
+
+        node_input_refs = _node_input_refs(node)
+        input_artifacts: list[dict[str, Any]] = []
+        if any(is_task_result_artifact_ref(ref) for ref in node_input_refs):
+            resolved = await _maybe_await(
+                self._store.resolve_node_input_artifacts(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                )
+            )
+            if not isinstance(resolved, Sequence) or isinstance(
+                resolved,
+                (str, bytes, bytearray),
+            ) or any(not isinstance(item, Mapping) for item in resolved):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "TaskNode input artifact resolution is invalid",
+                )
+            input_artifacts = [dict(item) for item in resolved]
 
         if graph_status == "CREATED":
             if defer_shared_terminal:
@@ -821,7 +845,8 @@ class DurableNodeExecutionRuntime:
             "operation_fingerprint": admitted.operation_fingerprint,
             "parent_grant_ref": str(command.governor_grant_ref or "").strip(),
             "budget": budget.execution_payload(),
-            "node_input_refs": list(_node_input_refs(node)),
+            "node_input_refs": list(node_input_refs),
+            "node_input_artifacts": input_artifacts,
             "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
         }
         if node_grant_ref is not None:
@@ -1325,13 +1350,24 @@ class DurableNodeExecutionRuntime:
             yield terminal_event(receipt)
             return
 
-        node = await self._node_lifecycle.transition_node(
-            admitted,
-            node,
-            "ACCEPTED",
-            evidence_refs=acceptance_refs,
-            acceptance_judgement=acceptance,
-        )
+        if _node_output_contract(node):
+            node = await self._node_lifecycle.accept_node_output(
+                admitted,
+                node,
+                attempt_id=attempt_id,
+                receipt_ref=receipt_ref,
+                worker_output=worker_commit,
+                evidence_refs=acceptance_refs,
+                acceptance_judgement=acceptance,
+            )
+        else:
+            node = await self._node_lifecycle.transition_node(
+                admitted,
+                node,
+                "ACCEPTED",
+                evidence_refs=acceptance_refs,
+                acceptance_judgement=acceptance,
+            )
         all_nodes_accepted = not defer_shared_terminal
         if all_nodes_accepted:
             for binding in admitted.nodes:

@@ -42,6 +42,20 @@ class TaskStorePort(Protocol):
 
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
+    def get_node_artifact(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def resolve_node_input_artifacts(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
 
     def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
@@ -145,6 +159,20 @@ class TaskStorePort(Protocol):
         outbox: Any,
         verification_result: Mapping[str, Any] | Any | None = None,
         acceptance_judgement: Mapping[str, Any] | Any | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def transition_node_to_accepted_with_artifact(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
     ) -> Mapping[str, Any]: ...
 
     def transition_node_and_stage_acceptance_effects(

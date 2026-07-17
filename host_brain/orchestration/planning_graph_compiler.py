@@ -26,6 +26,10 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     TASK_GRAPH_INVALID,
     ContractViolation,
 )
+from host_brain.contracts.agent_runtime.node_artifact import (
+    build_task_result_artifact_ref,
+    is_task_result_artifact_ref,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphCompletionPolicy,
@@ -608,7 +612,16 @@ def _validate_node_payload(payload: Mapping[str, Any], *, index: int) -> None:
         field_name="acceptance_criteria",
         allow_empty=False,
     )
-    _required_text_list(payload.get("input_refs"), field_name="input_refs", allow_empty=True)
+    input_refs = _required_text_list(
+        payload.get("input_refs"),
+        field_name="input_refs",
+        allow_empty=True,
+    )
+    if any(is_task_result_artifact_ref(ref) for ref in input_refs):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"selected_path[{index}] cannot set compiler-owned task-result refs",
+        )
     _required_text_list(
         payload.get("capability_requirements"),
         field_name="capability_requirements",
@@ -1106,10 +1119,7 @@ def _planner_ref(
 
 
 def _dependency_result_ref(graph_id: str, revision: int, node_id: str) -> str:
-    return (
-        "artifact://task-result/"
-        f"{quote(graph_id, safe='')}/revisions/{revision}/nodes/{quote(node_id, safe='')}"
-    )
+    return build_task_result_artifact_ref(graph_id, revision, node_id)
 
 
 def _sha256_ref(payload: Mapping[str, Any]) -> str:
