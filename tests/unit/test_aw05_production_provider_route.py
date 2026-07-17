@@ -6,6 +6,7 @@ import pytest
 
 from host_brain.model_runtime import (
     OutputContract,
+    ModelBudgetGuard,
     ProductionProviderBinding,
     ProductionProviderConfigurationError,
     PromptRef,
@@ -14,6 +15,7 @@ from host_brain.model_runtime import (
     RouteNotConfiguredError,
     build_production_provider_registry,
     build_production_route_policy,
+    production_provider_payload,
     route_decision_from_graph_runtime,
 )
 from host_brain.model_runtime.production_route_policy import (
@@ -169,6 +171,44 @@ def test_injected_provider_callable_is_invoked_exactly_once() -> None:
     assert payloads[0]["messages"] == [{"role": "user", "content": "hello"}]
     assert "timeout_ms" not in payloads[0]
     assert "llm_api_key" not in payloads[0]
+
+
+def test_guarded_provider_payload_clamps_output_without_exposing_budget_authority() -> None:
+    target = route_decision_from_graph_runtime(
+        _runtime(agent_gen_params={"temperature": 0.2, "max_tokens": 64}),
+        scene_type="CHAT",
+        cognitive_tier="FAST",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-guarded-1",
+        attempt_id="attempt-guarded-1",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT",
+        cognitive_tier="FAST",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+        model_budget_guard=ModelBudgetGuard(
+            budget_id="budget://provider-route-test",
+            graph_id="graph-provider-route-test",
+            graph_revision=1,
+            node_id="node-provider-route-test",
+            attempt_id="attempt-provider-route-test",
+            deadline_ms=1000,
+            max_provider_attempts=1,
+            max_token_count=20,
+            max_output_tokens=17,
+            max_model_cost_micros=100,
+        ),
+    )
+
+    payload = production_provider_payload(request, stream=False)
+
+    assert payload["max_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in payload
+    assert "model_budget_guard" not in payload
+    assert "budget://provider-route-test" not in repr(payload)
 
 
 def test_provider_registry_requires_explicit_credential_status_without_leaking_secret() -> None:

@@ -10,6 +10,7 @@ from host_brain.model_runtime import (
     CachePolicy,
     CallableProviderAdapter,
     InMemoryAttemptAuditRepository,
+    ModelBudgetGuard,
     ModelAttemptRequest,
     ModelAttemptService,
     OutputContract,
@@ -55,6 +56,7 @@ def _request(
     max_attempts: int = 1,
     foreground: bool = True,
     retry_evaluator=None,
+    model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptRequest:
     return ModelAttemptRequest(
         request_id=request_id,
@@ -65,6 +67,28 @@ def _request(
         max_attempts=max_attempts,
         foreground=foreground,
         retry_evaluator=retry_evaluator,
+        model_budget_guard=model_budget_guard,
+    )
+
+
+def _model_budget_guard(
+    *,
+    max_provider_attempts: int = 1,
+    max_token_count: int = 100,
+    max_output_tokens: int = 40,
+    max_model_cost_micros: int = 1_000,
+) -> ModelBudgetGuard:
+    return ModelBudgetGuard(
+        budget_id="budget://model-attempt-test",
+        graph_id="graph-model-attempt-test",
+        graph_revision=1,
+        node_id="node-model-attempt-test",
+        attempt_id="attempt-model-attempt-test",
+        deadline_ms=1_000,
+        max_provider_attempts=max_provider_attempts,
+        max_token_count=max_token_count,
+        max_output_tokens=max_output_tokens,
+        max_model_cost_micros=max_model_cost_micros,
     )
 
 
@@ -116,6 +140,259 @@ async def test_complete_resolves_route_once_and_owns_semantic_retry_audit() -> N
         AttemptStatus.STARTED,
         AttemptStatus.SUCCEEDED,
     ]
+
+
+async def test_model_budget_guard_can_only_reduce_route_attempts() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-guarded-attempt-budget",
+            (ProviderTarget("fake", "provider", "model"),),
+            "guarded-attempt-budget-test",
+            max_attempts=2,
+        )
+    )
+    calls: list[int] = []
+
+    async def _complete(attempt):
+        calls.append(attempt.attempt_index)
+        return ProviderResponse(
+            content="retry me",
+            usage={
+                "total_tokens": 4,
+                "completion_tokens": 2,
+                "model_cost_micros": 3,
+            },
+        )
+
+    def _retry(_response, _attempt):
+        return RetryDirective(retry=True, reason="forced retry", reuse_target=True)
+
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=_complete)]
+        ),
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+
+    result = await service.complete(
+        _request(
+            max_attempts=1,
+            retry_evaluator=_retry,
+            model_budget_guard=_model_budget_guard(max_provider_attempts=1),
+        )
+    )
+
+    assert result.success is False
+    assert result.error_code == "ATTEMPT_BUDGET_EXHAUSTED"
+    assert calls == [1]
+    assert len(result.attempts) == 1
+    assert result.attempts[0].status is AttemptStatus.REJECTED
+
+
+async def test_model_budget_guard_rejects_missing_canonical_usage_without_fallback() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-guarded-usage",
+            (
+                ProviderTarget("first", "provider-a", "model-a"),
+                ProviderTarget("second", "provider-b", "model-b"),
+            ),
+            "guarded-usage-test",
+            max_attempts=2,
+        )
+    )
+    calls: list[str] = []
+
+    async def _first(_attempt):
+        calls.append("first")
+        return ProviderResponse(
+            content="unmetered cost",
+            usage={"total_tokens": 5, "completion_tokens": 2},
+        )
+
+    async def _second(_attempt):
+        calls.append("second")
+        return ProviderResponse(
+            content="must not run",
+            usage={
+                "total_tokens": 5,
+                "completion_tokens": 2,
+                "model_cost_micros": 1,
+            },
+        )
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [
+                CallableProviderAdapter("first", complete_fn=_first),
+                CallableProviderAdapter("second", complete_fn=_second),
+            ]
+        ),
+        audit_repository=audit,
+    )
+
+    result = await service.complete(
+        _request(model_budget_guard=_model_budget_guard(max_provider_attempts=2))
+    )
+
+    assert result.success is False
+    assert result.error_code == "MODEL_PROVIDER_USAGE_REQUIRED"
+    assert calls == ["first"]
+    assert [record.status for record in result.attempts] == [AttemptStatus.REJECTED]
+    assert [record.status for record in audit.records()] == [
+        AttemptStatus.STARTED,
+        AttemptStatus.REJECTED,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("usage", "guard", "error_code"),
+    [
+        (
+            {
+                "total_tokens": 8,
+                "completion_tokens": 6,
+                "model_cost_micros": 4,
+            },
+            {"max_output_tokens": 5},
+            "MODEL_OUTPUT_BUDGET_EXCEEDED",
+        ),
+        (
+            {
+                "total_tokens": 11,
+                "completion_tokens": 3,
+                "model_cost_micros": 4,
+            },
+            {"max_token_count": 10, "max_output_tokens": 10},
+            "MODEL_TOKEN_BUDGET_EXCEEDED",
+        ),
+        (
+            {
+                "total_tokens": 8,
+                "completion_tokens": 3,
+                "model_cost_micros": 12,
+            },
+            {"max_model_cost_micros": 11},
+            "MODEL_COST_BUDGET_EXCEEDED",
+        ),
+    ],
+)
+async def test_model_budget_guard_rejects_output_token_and_cost_overages(
+    usage,
+    guard,
+    error_code,
+) -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-guarded-limit",
+            (
+                ProviderTarget("first", "provider-a", "model-a"),
+                ProviderTarget("second", "provider-b", "model-b"),
+            ),
+            "guarded-limit-test",
+            max_attempts=2,
+        )
+    )
+    calls: list[str] = []
+
+    async def _first(_attempt):
+        calls.append("first")
+        return ProviderResponse(content="over limit", usage=usage)
+
+    async def _second(_attempt):
+        calls.append("second")
+        return ProviderResponse(
+            content="must not run",
+            usage={
+                "total_tokens": 1,
+                "completion_tokens": 1,
+                "model_cost_micros": 1,
+            },
+        )
+
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [
+                CallableProviderAdapter("first", complete_fn=_first),
+                CallableProviderAdapter("second", complete_fn=_second),
+            ]
+        ),
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+
+    result = await service.complete(
+        _request(model_budget_guard=_model_budget_guard(**guard))
+    )
+
+    assert result.success is False
+    assert result.error_code == error_code
+    assert calls == ["first"]
+    assert result.attempts[0].status is AttemptStatus.REJECTED
+
+
+async def test_model_budget_guard_applies_cost_cap_across_semantic_retries() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-guarded-cumulative-cost",
+            (ProviderTarget("fake", "provider", "model"),),
+            "guarded-cumulative-cost-test",
+            max_attempts=2,
+        )
+    )
+    calls: list[int] = []
+
+    async def _complete(attempt):
+        calls.append(attempt.attempt_index)
+        return ProviderResponse(
+            content=f"answer-{attempt.attempt_index}",
+            usage={
+                "total_tokens": 4,
+                "completion_tokens": 2,
+                "model_cost_micros": 6,
+            },
+        )
+
+    def _retry(_response, attempt):
+        if attempt.attempt_index == 1:
+            return RetryDirective(retry=True, reason="repair", reuse_target=True)
+        return RetryDirective.accept()
+
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=_complete)]
+        ),
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+
+    result = await service.complete(
+        _request(
+            retry_evaluator=_retry,
+            model_budget_guard=_model_budget_guard(
+                max_provider_attempts=2,
+                max_token_count=10,
+                max_output_tokens=4,
+                max_model_cost_micros=10,
+            ),
+        )
+    )
+
+    assert result.success is False
+    assert result.error_code == "MODEL_COST_BUDGET_EXCEEDED"
+    assert calls == [1, 2]
+    assert [record.status for record in result.attempts] == [
+        AttemptStatus.REJECTED,
+        AttemptStatus.REJECTED,
+    ]
+    assert result.attempts[1].error_code == "MODEL_COST_BUDGET_EXCEEDED"
 
 
 async def test_provider_failure_falls_through_route_with_one_global_budget() -> None:

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.17
+版本：v5.18
 核对日期：2026-07-18
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -26,6 +26,7 @@
 | Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
+| Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
 | Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
@@ -213,11 +214,15 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 `host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已在 Host 四路线、Scheduler 与 Internal Agent 执行预扣、计量和结算。真实计量覆盖时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数。
 
+D11 只收紧一条已 admission 的 Host `chat` 垂线：`FrozenNodeInput` 的 active Budget remaining 被投影为不可扩张的 node-bound `ModelBudgetGuard`，再由 `FrozenChatRouteExecutor → Surface main-chain → ModelAttemptService` 消费。该调用禁用 cache 和 streaming，按冻结剩余值限制 deadline、provider attempt、总 token、输出 token 与 `model_cost_micros`；provider 必须返回 `token_count / completion_tokens / model_cost_micros` 三项 canonical 整数。量测缺失、超限、timeout 或 provider 失败都会终止当前 guarded call，不再 retry/fallback；Surface 不会把它降级成 `APPROVE`，并跳过额外的 Spark judge。成功 trace 才会被投影为该 chat worker 的 budget observation。
+
+这不是全局模型成本预支或通用预算账本完成：Thalamus/Cortex 入场前模型、Delegate/子 Agent、其他模型调用、通用外部工具和跨 route 累计成本仍不在此 guard 内；没有 provider 报告 canonical `model_cost_micros` 时，D11 选择 fail closed，而不是推算价格或伪造已结算成本。
+
 同一 Reservation 的超限竞争现在有唯一 durable authority：8/16/32 线程及跨进程压力下，只有一个 rejected usage 是 `EXCEEDED` winner并拥有版本 transition/Outbox；其他 sibling 是引用该 Outbox 的 `ALREADY_EXCEEDED` observation，不推进版本，也不参与 terminal winner selection。0090 决策读/replay 会在同一 SQLite snapshot 中重新验证完整 authority，而不是只相信 selected usage ID。
 
 限制：
 
-- provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；
+- 非 D11 路径中 provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；D11 guarded Surface 调用则直接拒绝缺少 canonical token/cost 的结果；
 - concurrency 字段没有运行时 charge；
 - 超限后的 `DEGRADE`、`REVIEW` 尚未形成完整分支，当前核心路径主要阻断；
 - Scheduler 与 Internal Agent 已进入该主链；其 program-wide Budget 策略仍受本节其余限制。

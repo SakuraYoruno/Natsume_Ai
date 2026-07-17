@@ -107,6 +107,7 @@ async def run_surface_main_chain_for_surface_reply_input(
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainResult:
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    governed_model_budget = _governed_model_budget_guard(trace_stage_meta)
     surface_input = build_surface_main_chain_input_from_surface_reply_input(
         agent_input,
         ports=ports,
@@ -157,25 +158,48 @@ async def run_surface_main_chain_for_surface_reply_input(
             )
 
         generate_started = time.perf_counter()
+        model_deadline_ms = min(
+            governed_model_budget.deadline_ms,
+            max(
+                1,
+                min(
+                    120_000,
+                    _coerce_int(
+                        os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
+                        default=60_000,
+                    ),
+                ),
+            ),
+        ) if governed_model_budget is not None else max(
+            1_000,
+            min(
+                120_000,
+                _coerce_int(
+                    os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
+                    default=60_000,
+                ),
+            ),
+        )
+        if governed_model_budget is not None and model_deadline_ms <= 0:
+            raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
         result = await get_model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
                 scene_type="CHAT_SURFACE",
                 cognitive_tier="A",
                 prompt=PromptRef(prompt_id, {"messages": messages}),
-                deadline_ms=max(
-                    1_000,
-                    min(
-                        120_000,
-                        _coerce_int(
-                            os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
-                            default=60_000,
-                        ),
-                    ),
-                ),
+                deadline_ms=model_deadline_ms,
                 foreground=True,
                 retry_evaluator=_retry_evaluator,
-                metadata={"chain": "surface_main"},
+                metadata={
+                    "chain": "surface_main",
+                    **(
+                        {"model_node_id": governed_model_budget.node_id}
+                        if governed_model_budget is not None
+                        else {}
+                    ),
+                },
+                model_budget_guard=governed_model_budget,
             )
         )
         if isinstance(trace_stage_meta, dict):
@@ -278,6 +302,34 @@ async def surface_main_chain_sse_generator(
         )
     except Exception as exc:
         total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+        if _has_governed_model_budget(trace):
+            reason_code = _governed_model_budget_failure_reason(exc)
+            yield _sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": reason_code,
+                    "narrative": "受治理的模型预算未满足，当前节点已停止。",
+                    "request_id": request_id,
+                    "audit_refs": {
+                        "request_id": request_id,
+                        "path": "surface_reply:surface_main_chain",
+                        "latency_ms": total_latency_ms,
+                        "reason_code": reason_code,
+                        "timings_ms": _surface_timings_ms(
+                            total_latency_ms=total_latency_ms,
+                            llm_latency_ms=0,
+                        ),
+                        "trace_stage_meta": {
+                            **trace,
+                            "surface_main_chain_used": True,
+                            "reply_source": "surface_main_chain_budget_reject",
+                        },
+                    },
+                }
+            )
+            return
         fallback_text = _surface_failure_fallback_text(agent_input, exc=exc)
         if fallback_text:
             envelope = ReplyEnvelope(
@@ -370,21 +422,27 @@ async def surface_main_chain_sse_generator(
         narrative,
         agent_input=agent_input,
     )
-    try:
-        from host_brain.app.codex_spark_reply_judge import judge_surface_reply_with_codex_spark  # noqa: PLC0415
-
-        narrative, spark_judge = await judge_surface_reply_with_codex_spark(
-            agent_input=agent_input,
-            candidate_text=narrative,
-            trace_stage_meta=trace,
-        )
-        if spark_judge:
-            trace["codex_spark_reply_judge"] = spark_judge
-    except Exception as spark_exc:
+    if _has_governed_model_budget(trace):
         trace["codex_spark_reply_judge"] = {
-            "status": "DEGRADED",
-            "error": type(spark_exc).__name__,
+            "status": "SKIPPED",
+            "reason_code": "GOVERNED_MODEL_BUDGET_BOUNDARY",
         }
+    else:
+        try:
+            from host_brain.app.codex_spark_reply_judge import judge_surface_reply_with_codex_spark  # noqa: PLC0415
+
+            narrative, spark_judge = await judge_surface_reply_with_codex_spark(
+                agent_input=agent_input,
+                candidate_text=narrative,
+                trace_stage_meta=trace,
+            )
+            if spark_judge:
+                trace["codex_spark_reply_judge"] = spark_judge
+        except Exception as spark_exc:
+            trace["codex_spark_reply_judge"] = {
+                "status": "DEGRADED",
+                "error": type(spark_exc).__name__,
+            }
     narrative, sub_agent_result_guard = _apply_surface_sub_agent_result_guard(
         narrative,
         agent_input=agent_input,
@@ -536,6 +594,35 @@ async def surface_main_chain_sse_generator(
 
 def _sse(data: Mapping[str, Any]) -> str:
     return f"data: {json.dumps(dict(data), ensure_ascii=False)}\n\n"
+
+
+def _governed_model_budget_guard(
+    trace_stage_meta: Mapping[str, Any] | None,
+):
+    """Decode only the immutable guard inserted by the governed route worker."""
+
+    raw = _safe_mapping(trace_stage_meta).get("governed_model_budget")
+    if not raw:
+        return None
+    if not isinstance(raw, Mapping):
+        raise RuntimeError("MODEL_BUDGET_GUARD_INVALID")
+    from host_brain.model_runtime.contracts import ModelBudgetGuard  # noqa: PLC0415
+
+    try:
+        return ModelBudgetGuard.from_mapping(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("MODEL_BUDGET_GUARD_INVALID") from exc
+
+
+def _has_governed_model_budget(trace_stage_meta: Mapping[str, Any] | None) -> bool:
+    return bool(_safe_mapping(trace_stage_meta).get("governed_model_budget"))
+
+
+def _governed_model_budget_failure_reason(exc: BaseException) -> str:
+    candidate = str(exc).split(":", 1)[0].strip().upper()
+    if candidate.startswith("MODEL_"):
+        return candidate
+    return "MODEL_BUDGET_GUARD_REJECTED"
 
 
 def _surface_failure_fallback_text(agent_input: Any, *, exc: BaseException) -> str:

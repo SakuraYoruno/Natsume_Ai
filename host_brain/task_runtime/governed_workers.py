@@ -64,6 +64,7 @@ class FrozenNodeInput:
     _input_artifacts_json: str = field(repr=False)
     node_grant_ref: str
     parent_grant_ref: str
+    _budget_json: str = field(default="{}", repr=False)
 
     @property
     def input_pack(self) -> Mapping[str, Any]:
@@ -78,6 +79,13 @@ class FrozenNodeInput:
 
         loaded = json.loads(self._input_artifacts_json)
         return tuple(dict(item) for item in loaded if isinstance(item, Mapping))
+
+    @property
+    def budget(self) -> Mapping[str, Any]:
+        """Return the exact durable budget projection frozen for this node."""
+
+        loaded = json.loads(self._budget_json)
+        return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +110,7 @@ class FrozenNodeInput:
             "input_artifacts": [dict(item) for item in self.input_artifacts],
             "node_grant_ref": self.node_grant_ref,
             "parent_grant_ref": self.parent_grant_ref,
+            "budget": dict(self.budget),
         }
 
 
@@ -411,6 +420,7 @@ def _freeze_node_input(
                 GOVERNED_NODE_INPUT_INVALID,
                 "resolved node artifact payload digest is invalid",
             )
+    budget = _freeze_budget_payload(context.get("budget"))
     return FrozenNodeInput(
         command_id=command.command_id,
         request_id=command.request_id,
@@ -445,6 +455,13 @@ def _freeze_node_input(
         ),
         node_grant_ref=grant_ref,
         parent_grant_ref=parent_ref,
+        _budget_json=json.dumps(
+            budget,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
     )
 
 
@@ -460,6 +477,62 @@ def _node_binding(work_order: WorkOrderV3, *, node_id: str) -> dict[str, Any]:
             f"WorkOrder requires exactly one frozen binding for node {node_id}",
         )
     return matches[0]
+
+
+def _freeze_budget_payload(value: Any) -> dict[str, Any]:
+    """Freeze only budget dimensions that can constrain a model call.
+
+    ``execution_context`` is built by ``NodeExecutionRuntime`` after durable
+    precharge.  Requiring this exact projection prevents a worker input pack
+    from inventing a larger deadline, retry allowance, or output allowance.
+    """
+
+    raw = dict(value) if isinstance(value, Mapping) else {}
+    budget_id = _required(raw.get("budget_id"), "budget.budget_id")
+    status = str(raw.get("status") or "").strip().upper()
+    if status != "ACTIVE":
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status must be ACTIVE before worker execution",
+        )
+    try:
+        status_version = int(raw.get("status_version"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status_version must be a non-negative integer",
+        ) from exc
+    if status_version < 0:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status_version must be a non-negative integer",
+        )
+    remaining_raw = raw.get("remaining")
+    if not isinstance(remaining_raw, Mapping):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.remaining must be an object",
+        )
+    remaining: dict[str, int] = {}
+    for dimension in (
+        "token_count",
+        "time_ms",
+        "retry_count",
+        "model_cost_micros",
+    ):
+        value = remaining_raw.get(dimension)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_INPUT_INVALID,
+                f"budget.remaining.{dimension} must be a non-negative integer",
+            )
+        remaining[dimension] = int(value)
+    return {
+        "budget_id": budget_id,
+        "status": status,
+        "status_version": status_version,
+        "remaining": remaining,
+    }
 
 
 def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:

@@ -96,6 +96,37 @@ def test_stream_llm_chunks_raises_tiny_cap_for_native_gemini_pro(monkeypatch) ->
     assert captured["max_tokens"] == 1024
 
 
+def test_stream_llm_chunks_keeps_internal_hard_cap_for_native_gemini_pro(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def stream(self, _messages):  # noqa: ANN001
+            yield SimpleNamespace(content=[{"type": "text", "text": "你好"}])
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    chunks = list(
+        stream_llm_chunks(
+            provider_name="gemini",
+            model_id="gemini-3.1-pro-preview",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[{"role": "user", "content": "hello"}],
+            gen_params={
+                "max_output_tokens": 17,
+                "_natsume_hard_max_output_tokens": 17,
+            },
+        )
+    )
+
+    assert chunks == ["你好"]
+    assert captured["max_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in captured
+
+
 class _FakeStreamingHTTPResponse:
     def __init__(self, lines: list[str]) -> None:
         self._lines = [line.encode("utf-8") for line in lines]
@@ -302,6 +333,18 @@ def test_stream_llm_chunks_uses_minimax_standard_sse_for_m2_her(monkeypatch) -> 
         "top_p": 0.9,
         "max_completion_tokens": 1024,
     }
+
+
+def test_minimax_standard_payload_keeps_internal_hard_cap_and_hides_transport_key() -> None:
+    payload = llm_helpers._build_minimax_standard_payload(
+        model_id="M2-her",
+        messages=[{"role": "user", "content": "hello"}],
+        gen_params={"_natsume_hard_max_output_tokens": 17},
+        stream=False,
+    )
+
+    assert payload["max_completion_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in payload
 
 
 def test_stream_llm_chunks_minimax_standard_falls_back_to_final_message_when_no_delta(monkeypatch) -> None:

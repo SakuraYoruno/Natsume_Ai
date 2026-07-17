@@ -45,6 +45,32 @@
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
       ]
     },
+    "governed_chat_surface_model_budget": {
+      "status": "PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD",
+      "scope": [
+        "already-admitted governed Host chat TaskNode",
+        "FrozenNodeInput to Surface main-chain ModelAttempt"
+      ],
+      "implemented": "The frozen active Budget remaining values derive an immutable node-bound ModelBudgetGuard. The Surface main-chain call uses a fresh complete attempt only; it is capped by the frozen deadline, provider-attempt count, total tokens, output tokens, and model-cost micros. Canonical provider token_count/completion_tokens/model_cost_micros are mandatory. Missing or malformed measurement, provider failure, timeout, streaming, or any cap excess rejects the guarded attempt without retry/fallback; a guarded Surface model failure becomes a terminal REJECT and the secondary Spark judge is skipped.",
+      "settlement_boundary": "A successful guarded Surface trace is projected as worker budget observation for the admitted chat node. This is not a universal model-cost reservation, global pre-charge, provider-price catalog, or proof that every model/tool call in the process is budget-settled.",
+      "not_covered": [
+        "Thalamus or Cortex model work before Task admission",
+        "Delegate or sub-agent model calls",
+        "generic external tools and non-chat model callers",
+        "cross-route cumulative model cost authority",
+        "provider price derivation when canonical model_cost_micros is absent",
+        "guarded streaming"
+      ],
+      "evidence_refs": [
+        "host_brain/task_runtime/governed_workers.py",
+        "host_brain/app/governed_route_executors.py",
+        "host_brain/app/surface_main_chain_adapter.py",
+        "host_brain/model_runtime/model_attempt_service.py",
+        "host_brain/model_runtime/production_provider_adapters.py",
+        "tests/unit/test_aw05_model_attempt_service.py",
+        "tests/unit/test_aw05_production_provider_route.py"
+      ]
+    },
     "scheduler_governed_runtime": {
       "status": "WIRED",
       "scope": ["clock occurrence", "manual occurrence"],

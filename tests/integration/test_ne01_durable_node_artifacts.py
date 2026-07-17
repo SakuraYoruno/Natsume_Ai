@@ -867,9 +867,11 @@ class _ProjectionStore:
 class _ArtifactExecutor:
     def __init__(self) -> None:
         self.seen: tuple[dict[str, Any], ...] = ()
+        self.seen_budget: dict[str, Any] = {}
 
     async def execute_stream(self, frozen: Any):
         self.seen = tuple(dict(item) for item in frozen.input_artifacts)
+        self.seen_budget = dict(frozen.budget)
         yield {
             "phase": "COMMIT",
             "done": True,
@@ -918,7 +920,13 @@ async def test_frozen_successor_worker_receives_resolved_durable_artifact(
         graph_revision=graph.revision,
         budget_policy=BudgetPolicy(
             scope="artifact-worker-test",
-            limits=BudgetAmount(time_ms=1_000, concurrency=1),
+            limits=BudgetAmount(
+                token_count=80,
+                time_ms=1_000,
+                concurrency=1,
+                retry_count=1,
+                model_cost_micros=2_000,
+            ),
         ),
         business_idempotency_scope="artifact-worker-test",
         operation_fingerprint="sha256:" + "b" * 64,
@@ -949,6 +957,17 @@ async def test_frozen_successor_worker_receives_resolved_durable_artifact(
         node_grants=_GrantVerifier(),
         projections=_ProjectionStore(),
     )
+    durable_budget = {
+        "budget_id": "budget://artifact-worker/child",
+        "status": "ACTIVE",
+        "status_version": 2,
+        "remaining": {
+            "token_count": 80,
+            "time_ms": 1_000,
+            "retry_count": 1,
+            "model_cost_micros": 2_000,
+        },
+    }
     events = [
         event
         async for event in worker.execute_stream(
@@ -968,12 +987,16 @@ async def test_frozen_successor_worker_receives_resolved_durable_artifact(
                 "node_input_refs": [artifact_ref],
                 "node_input_artifacts": artifacts,
                 "node_grant_ref": "governor-grant://artifact/child",
+                "budget": durable_budget,
             },
         )
     ]
 
+    durable_budget["remaining"]["token_count"] = 1
     assert events[-1]["decision"] == "APPROVE"
     assert executor.seen[0]["payload"]["result"] == "root-result"
     assert executor.seen[0]["payload_sha256"] == artifact_digest(
         executor.seen[0]["payload"]
     )
+    assert executor.seen_budget["budget_id"] == "budget://artifact-worker/child"
+    assert executor.seen_budget["remaining"]["token_count"] == 80

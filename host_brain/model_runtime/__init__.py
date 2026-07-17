@@ -11,6 +11,7 @@ from host_brain.model_runtime.contracts import (
     AttemptStatus,
     CachePolicy,
     CacheScope,
+    ModelBudgetGuard,
     ModelAttemptRecord,
     ModelAttemptRequest,
     ModelAttemptResult,
@@ -28,6 +29,7 @@ from host_brain.model_runtime.contracts import (
 )
 from host_brain.model_runtime.model_attempt_service import (
     AttemptAuditError,
+    ModelBudgetGuardViolation,
     ModelAttemptService,
     ModelAttemptServiceError,
     ModelStreamInterruptedError,
@@ -207,6 +209,8 @@ __all__ = [
     "ModelAttemptRecord",
     "ModelAttemptRequest",
     "ModelAttemptResult",
+    "ModelBudgetGuard",
+    "ModelBudgetGuardViolation",
     "ModelAttemptService",
     "ModelAttemptServiceError",
     "ModelRuntimeComposition",
