@@ -13,26 +13,26 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.app import obs_routes_core
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes import router, set_ledger_provider
 from host_brain.app.obs_routes_trace import router as trace_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import QueryProjectionStore
 
 
-@pytest.fixture(autouse=True)
-def _projection_only_runtime(tmp_path, monkeypatch):
+@pytest.fixture
+def projection_store(tmp_path) -> QueryProjectionStore:
     db_path = tmp_path / "projection.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="trace-route-unit")
     assert migrated.success, migrated
-    store = QueryProjectionStore(db_path)
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_query_projection_store",
-        lambda: store,
-    )
+    return QueryProjectionStore(db_path)
 
 
-def _make_app(ledger):
+def _make_app(ledger, projection_store: QueryProjectionStore) -> FastAPI:
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_store,
+    )
     app.include_router(router)
     app.include_router(trace_router)
     set_ledger_provider(lambda: ledger)
@@ -77,7 +77,7 @@ def _minimal_trace_payload(request_id: str, *, degraded: bool) -> dict:
     }
 
 
-def test_trace_fallback_returns_ok():
+def test_trace_fallback_returns_ok(projection_store):
     gov_row = {
         "request_id": "req-fallback-01",
         "decision": "APPROVE",
@@ -86,7 +86,7 @@ def test_trace_fallback_returns_ok():
         "session_id": "sess-01",
     }
     ledger = _make_ledger_no_trace(gov_rows=[gov_row])
-    client = TestClient(_make_app(ledger))
+    client = TestClient(_make_app(ledger, projection_store))
 
     resp = client.get("/obs/trace/req-fallback-01")
     assert resp.status_code == 200
@@ -98,9 +98,9 @@ def test_trace_fallback_returns_ok():
     ledger.fetch_by_request_id.assert_not_called()
 
 
-def test_trace_fallback_not_found_returns_404():
+def test_trace_fallback_not_found_returns_404(projection_store):
     ledger = _make_ledger_no_trace(gov_rows=[])
-    client = TestClient(_make_app(ledger))
+    client = TestClient(_make_app(ledger, projection_store))
 
     resp = client.get("/obs/trace/nonexistent-req-xyz")
     assert resp.status_code == 200
@@ -109,7 +109,7 @@ def test_trace_fallback_not_found_returns_404():
     assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
 
 
-def test_trace_fallback_uses_method_not_attribute():
+def test_trace_fallback_uses_method_not_attribute(projection_store):
     gov_row = {
         "request_id": "req-fallback-03",
         "decision": "REJECT",
@@ -118,7 +118,7 @@ def test_trace_fallback_uses_method_not_attribute():
         "session_id": None,
     }
     ledger = _make_ledger_no_trace(gov_rows=[gov_row])
-    client = TestClient(_make_app(ledger))
+    client = TestClient(_make_app(ledger, projection_store))
 
     resp = client.get("/obs/trace/req-fallback-03")
     assert resp.status_code == 200
@@ -127,9 +127,9 @@ def test_trace_fallback_uses_method_not_attribute():
     ledger.fetch_by_request_id.assert_not_called()
 
 
-def test_trace_timeout_degrades_to_lightweight(monkeypatch):
+def test_trace_timeout_degrades_to_lightweight(monkeypatch, projection_store):
     ledger = _make_ledger_no_trace(gov_rows=[])
-    client = TestClient(_make_app(ledger))
+    client = TestClient(_make_app(ledger, projection_store))
 
     def _slow_build(_ledger, request_id):
         time.sleep(0.2)
@@ -152,9 +152,9 @@ def test_trace_timeout_degrades_to_lightweight(monkeypatch):
     assert data["projection"]["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
 
 
-def test_trace_error_degrades_to_lightweight(monkeypatch):
+def test_trace_error_degrades_to_lightweight(monkeypatch, projection_store):
     ledger = _make_ledger_no_trace(gov_rows=[])
-    client = TestClient(_make_app(ledger))
+    client = TestClient(_make_app(ledger, projection_store))
 
     def _raise_build(_ledger, _request_id):
         raise RuntimeError("simulated trace build failure")

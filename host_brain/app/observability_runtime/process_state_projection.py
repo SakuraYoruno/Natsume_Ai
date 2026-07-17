@@ -195,7 +195,12 @@ def refresh_digital_life_overview_projection() -> dict[str, int]:
     )
 
     window = int(DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES)
-    payload = asyncio.run(_build_digital_life_overview_snapshot_async(window))
+    payload = asyncio.run(
+        _build_digital_life_overview_snapshot_async(
+            window,
+            projection_store=_store(),
+        )
+    )
     cursor = _next_cursor(DIGITAL_LIFE_OVERVIEW_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         DIGITAL_LIFE_OVERVIEW_KIND,
@@ -240,7 +245,10 @@ def refresh_life_body_projection() -> dict[str, int]:
     )
 
     window = int(LIFE_BODY_PROJECTION_WINDOW_MINUTES)
-    payload = _build_life_body_payload(window)
+    payload = _build_life_body_payload(
+        window,
+        projection_store=_store(),
+    )
     cursor = _next_cursor(LIFE_BODY_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         LIFE_BODY_KIND,

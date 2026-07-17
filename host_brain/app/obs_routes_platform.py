@@ -21,6 +21,7 @@ from host_brain.app.observability_runtime.live_source_projection import (
     read_operator_live_projection,
 )
 from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.obs_route_ports import require_obs_route_ports
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -574,6 +575,14 @@ async def ws_health(websocket: WebSocket):
         )
         return
 
+    try:
+        projection_store = require_obs_route_ports(
+            websocket,
+        ).require_query_projection_store()
+    except HTTPException as exc:
+        await websocket.close(code=1011, reason=str(exc.detail))
+        return
+
     await websocket.accept()
     _ws_clients.append(websocket)
     logger.info("WebSocket health client connected (total: %d)", len(_ws_clients))
@@ -586,7 +595,7 @@ async def ws_health(websocket: WebSocket):
                 # Read the same durable, background-maintained projection as
                 # GET /obs/services/health.  A query connection never primes a
                 # cache, launches a probe, or scans the ledger.
-                health_data = _read_ws_health_projection()
+                health_data = _read_ws_health_projection(projection_store)
 
                 services = health_data.get("services", [])
                 current_statuses: Dict[str, str] = {}
@@ -643,8 +652,8 @@ async def ws_health(websocket: WebSocket):
         logger.info("WebSocket health client disconnected (remaining: %d)", len(_ws_clients))
 
 
-def _read_ws_health_projection() -> dict[str, Any]:
-    """Read only the durable service-health projection."""
+def _read_ws_health_projection(projection_store: Any) -> dict[str, Any]:
+    """Build a health snapshot from one explicitly supplied read port."""
     from host_brain.app.obs_routes_health import _read_query_projection
     from host_brain.app.observability_runtime.health_device_projection import (
         HEALTH_MAX_AGE_MS,
@@ -652,17 +661,12 @@ def _read_ws_health_projection() -> dict[str, Any]:
         SERVICE_HEALTH_KIND,
     )
 
-    try:
-        payload, meta = _read_query_projection(
-            kind=SERVICE_HEALTH_KIND,
-            key=SERVICE_HEALTH_KEY,
-            max_age_ms=HEALTH_MAX_AGE_MS,
-        )
-    except Exception:
-        payload, meta = None, {
-            "degraded_state": "SOURCE_UNAVAILABLE",
-            "reason_code": "OPERATOR_PROJECTION_UNAVAILABLE",
-        }
+    payload, meta = _read_query_projection(
+        projection_store,
+        kind=SERVICE_HEALTH_KIND,
+        key=SERVICE_HEALTH_KEY,
+        max_age_ms=HEALTH_MAX_AGE_MS,
+    )
     body = dict(payload or {})
     services = list(body.get("services") or [])
     counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}

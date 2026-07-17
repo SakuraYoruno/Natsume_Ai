@@ -22,6 +22,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_routes import router, set_ledger_provider
 from host_brain.app.obs_routes_health import router as health_router
 from host_brain.app.obs_fastapi_app import request_trace
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 from host_brain.app.observability_runtime.health_device_projection import (
     refresh_health_query_projections,
@@ -427,6 +428,10 @@ def client(ledger, projection_refresh: ProjectionRefresh):
     projection_refresh.gateway()
     projection_refresh.trace()
     app = FastAPI()
+    projection_store = get_process_service_container().query_projection_store
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_store,
+    )
     app.include_router(router)
     app.include_router(health_router)
     app.add_api_route("/observability/trace", request_trace, methods=["POST"])

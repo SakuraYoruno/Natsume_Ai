@@ -138,10 +138,17 @@ def load_health_projection_sources(
     *,
     now_ms: int | None = None,
     window_minutes: int = 60,
+    include_process_cache: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], int]:
     """Read only heartbeat cache and audit rows; never launch a probe."""
 
-    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+    heartbeat_cache_reader: Callable[[str], Mapping[str, Any] | None] | None = None
+    if include_process_cache:
+        from host_brain.app.observability_runtime import (
+            service_health_heartbeat as heartbeat,
+        )
+
+        heartbeat_cache_reader = heartbeat.get_cached
 
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
@@ -153,7 +160,11 @@ def load_health_projection_sources(
     services: list[dict[str, Any]] = []
     for service in ALL_SERVICES:
         service_id = service["service_id"]
-        cached = heartbeat.get_cached(service_id)
+        cached = (
+            heartbeat_cache_reader(service_id)
+            if heartbeat_cache_reader is not None
+            else None
+        )
         if cached is not None:
             health = {
                 "status": str(cached.get("status") or "UNKNOWN").upper(),
@@ -197,7 +208,11 @@ def load_health_projection_sources(
 
     nodes: list[dict[str, Any]] = []
     for node_id, meta in LLM_NODE_REGISTRY.items():
-        cached = heartbeat.get_cached(node_id)
+        cached = (
+            heartbeat_cache_reader(node_id)
+            if heartbeat_cache_reader is not None
+            else None
+        )
         if cached is not None:
             health = {
                 "status": str(cached.get("status") or "UNKNOWN").upper(),
@@ -327,12 +342,16 @@ def _observe_embodiment_receipt(
 
 def load_device_status_projection_sources(
     ledger: Any | None = None,
+    *,
+    include_process_cache: bool = True,
 ) -> dict[str, tuple[dict[str, Any], int]]:
-    with _receipt_lock:
-        sources = {
-            key: (dict(payload), int(cursor))
-            for key, (payload, cursor) in _latest_receipts.items()
-        }
+    sources: dict[str, tuple[dict[str, Any], int]] = {}
+    if include_process_cache:
+        with _receipt_lock:
+            sources = {
+                key: (dict(payload), int(cursor))
+                for key, (payload, cursor) in _latest_receipts.items()
+            }
     if ledger is None:
         return sources
     rows = _ledger_rows(

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.app.internal_tribe_routes import set_tribe_event_bus
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections, router
 from host_brain.tribe.event_bus import InMemoryTribeEventBus, new_tribe_event
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
@@ -20,9 +21,11 @@ def projection_runtime(tmp_path):
 
 
 def _build_client(projection_runtime) -> TestClient:
-    del projection_runtime  # enforce durable composition before materialization
     refresh_trace_query_projections()
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_runtime.store,
+    )
     app.include_router(router)
     return TestClient(app)
 

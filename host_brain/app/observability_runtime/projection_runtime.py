@@ -54,20 +54,35 @@ def projection_meta(
         }
     age = max(0, now - int(document.freshness_ts_ms))
     stale = age > max(0, int(max_age_ms))
+    durable_state = str(
+        getattr(document.degraded_state, "value", document.degraded_state)
+        or "HEALTHY"
+    ).upper()
+    effective_state = "STALE" if stale else durable_state
+    available = not stale and durable_state == "HEALTHY"
+    reason_code = None
+    if stale:
+        reason_code = "OPERATOR_PROJECTION_STALE"
+    elif durable_state == "SOURCE_UNAVAILABLE":
+        reason_code = "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE"
+    elif durable_state == "REBUILDING":
+        reason_code = "OPERATOR_PROJECTION_NOT_READY"
+    elif durable_state == "DIGEST_MISMATCH":
+        reason_code = "OPERATOR_PROJECTION_DIGEST_MISMATCH"
     return {
         "schema_version": document.schema_version,
         "kind": kind,
         "key": key,
-        "available": not stale,
+        "available": available,
         "projection_version": document.projection_version,
         "projection_cursor": document.projection_cursor,
         "source_cursor": document.source_cursor,
         "source_digest": document.source_digest,
         "freshness_ts_ms": document.freshness_ts_ms,
         "age_ms": age,
-        "degraded_state": "STALE" if stale else document.degraded_state.value,
+        "degraded_state": effective_state,
         "degraded_detail": document.degraded_detail,
-        "reason_code": "OPERATOR_PROJECTION_STALE" if stale else None,
+        "reason_code": reason_code,
     }
 
 

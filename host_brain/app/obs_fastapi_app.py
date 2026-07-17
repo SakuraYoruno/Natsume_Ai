@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -28,6 +29,10 @@ from host_brain.app.obs_routes_life_body import router as obs_life_body_router
 from host_brain.app.obs_routes_digital_life_soak import router as obs_digital_life_soak_router
 from host_brain.app.obs_routes_proactive_autonomy import router as obs_proactive_autonomy_router
 from host_brain.app.schemas import ObservabilityRequest, ObservabilityResponse
+from host_brain.app.obs_route_ports import (
+    ObsRoutePorts,
+    require_obs_query_projection_store,
+)
 from host_brain.observability.routes import build_obs_metrics_response
 from host_brain.observability.operator_query_gateway import (
     OperatorQueryGateway,
@@ -42,6 +47,7 @@ from host_brain.composition.obs_application import (
     ObsApplicationPorts,
     build_default_obs_application_ports,
 )
+from host_brain.composition.obs_projection_jobs import TYPED_UNAVAILABLE
 from host_brain.persistence.effect_reconciliation_query_repository import (
     EffectReconciliationQueryRepository,
 )
@@ -111,6 +117,55 @@ def _require_obs_container(request: Request) -> ObsApplicationContainer:
     return container
 
 
+async def request_trace(
+    request_body: ObservabilityRequest,
+    request: Request,
+) -> ObservabilityResponse:
+    """Read one trace through the application-local projection-store port."""
+
+    store = require_obs_query_projection_store(request)
+    ts_ms = int(time.time() * 1000)
+    request_id = str(request_body.request_id or "").strip()
+    if not request_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="request_id is required",
+        )
+    document = store.get(TRACE_KIND, request_id)
+    payload = dict(document.payload) if document is not None else {}
+    timeline = payload.get("timeline")
+    if not isinstance(timeline, list):
+        timeline = [
+            dict(row)
+            for row in payload.get("nodes", [])
+            if isinstance(row, dict)
+        ]
+    sources = payload.get("sources")
+    if not isinstance(sources, dict) or any(
+        not isinstance(value, int) for value in sources.values()
+    ):
+        source_counts: dict[str, int] = {}
+        for row in timeline:
+            source = str(
+                row.get("source")
+                or row.get("node_type")
+                or row.get("node_id")
+                or "trace"
+            )
+            source_counts[source] = source_counts.get(source, 0) + 1
+        sources = source_counts
+    return ObservabilityResponse(
+        request_id=request_id,
+        trace_status=str(
+            payload.get("trace_status") or payload.get("status") or "DEGRADED"
+        ),
+        timeline_total=len(timeline),
+        sources=sources,
+        timeline=timeline,
+        timestamp=ts_ms,
+    )
+
+
 def create_obs_app(
     *,
     ports: ObsApplicationPorts | None = None,
@@ -121,35 +176,113 @@ def create_obs_app(
     if ports is not None and ports_factory is not None:
         raise ValueError("provide ports or ports_factory, not both")
     resolve_ports = ports_factory or ((lambda: ports) if ports is not None else _default_ports_factory)
+    consumed_ports: list[ObsApplicationPorts] = []
+    ports_consumption_lock = threading.Lock()
+
+    def clear_application_state(application: FastAPI) -> None:
+        application.state.obs_application_container = None
+        application.state.obs_route_ports = None
+        application.state.life_snapshot_reader = None
+        application.state.task_effect_reconciliation_read_authority = None
+        application.state.task_terminal_reconciliation_read_authority = None
+
+    def reserve_ports(candidate: ObsApplicationPorts) -> None:
+        """Make every mutable application-port bundle single-use.
+
+        A factory may create a fresh bundle for every lifespan.  Reusing the
+        same bundle after its ledger has been closed would otherwise appear to
+        start successfully and fail later on the first query or projection.
+        """
+
+        with ports_consumption_lock:
+            if any(candidate is consumed for consumed in consumed_ports):
+                raise RuntimeError("OBS_APPLICATION_PORTS_ALREADY_CONSUMED")
+            consumed_ports.append(candidate)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        resolved_ports = resolve_ports()
-        if not isinstance(resolved_ports, ObsApplicationPorts):
-            raise TypeError("Obs ports factory must return ObsApplicationPorts")
-        container = ObsApplicationContainer.compose(resolved_ports)
-        canonical_db_path = str(
-            getattr(resolved_ports.ledger_query, "canonical_db_path", "") or ""
-        ).strip()
-        application.state.obs_application_container = container
-        application.state.life_snapshot_reader = resolved_ports.life_snapshot_reader
-        application.state.task_effect_reconciliation_read_authority = (
-            _build_effect_reconciliation_read_authority(canonical_db_path)
+        retained_container = getattr(
+            application.state,
+            "obs_application_container",
+            None,
         )
-        application.state.task_terminal_reconciliation_read_authority = (
-            _build_terminal_reconciliation_read_authority(canonical_db_path)
-        )
-        projection_status = container.start(interval_ms=5_000)
-        _logger.info("operator projection daemon startup: %s", projection_status)
+        retained_route_ports = getattr(application.state, "obs_route_ports", None)
+        if retained_container is not None or retained_route_ports is not None:
+            if (
+                isinstance(retained_container, ObsApplicationContainer)
+                and retained_container.closed
+            ):
+                # A caller successfully retried close through the retained
+                # handle.  Drop the stale references before composing a fresh
+                # factory-owned object graph.
+                clear_application_state(application)
+            else:
+                # Never overwrite a running app or a failed-close retry
+                # handle with another lifespan's object graph.
+                raise RuntimeError("OBS_APPLICATION_LIFECYCLE_RETRY_REQUIRED")
+
+        resolved_ports: ObsApplicationPorts | None = None
+        container: ObsApplicationContainer | None = None
+        resources_closed = False
         try:
-            yield
-        finally:
-            stop_status = container.close()
-            application.state.obs_application_container = None
-            application.state.life_snapshot_reader = None
+            candidate = resolve_ports()
+            if not isinstance(candidate, ObsApplicationPorts):
+                raise TypeError("Obs ports factory must return ObsApplicationPorts")
+            reserve_ports(candidate)
+            resolved_ports = candidate
+            container = ObsApplicationContainer.compose(resolved_ports)
+            route_ports = ObsRoutePorts(
+                query_projection_store_provider=(
+                    lambda: resolved_ports.query_projection_store
+                ),
+            )
+            # Publish the minimum retryable graph before constructing optional
+            # readers.  Routes cannot run until lifespan yields, while a
+            # startup rollback whose close also fails must retain the exact
+            # container and resource bundle for an operator/lifecycle retry.
+            application.state.obs_application_container = container
+            application.state.obs_route_ports = route_ports
+            application.state.life_snapshot_reader = resolved_ports.life_snapshot_reader
             application.state.task_effect_reconciliation_read_authority = None
             application.state.task_terminal_reconciliation_read_authority = None
-            _logger.info("operator projection daemon shutdown: %s", stop_status)
+            canonical_db_path = str(
+                getattr(resolved_ports.ledger_query, "canonical_db_path", "") or ""
+            ).strip()
+            effect_reader = _build_effect_reconciliation_read_authority(
+                canonical_db_path
+            )
+            application.state.task_effect_reconciliation_read_authority = effect_reader
+            terminal_reader = _build_terminal_reconciliation_read_authority(
+                canonical_db_path
+            )
+            application.state.task_terminal_reconciliation_read_authority = (
+                terminal_reader
+            )
+            projection_status = container.start(interval_ms=5_000)
+            _logger.info("operator projection daemon startup: %s", projection_status)
+            yield
+        finally:
+            try:
+                if container is not None:
+                    stop_status = container.close()
+                    resources_closed = True
+                    _logger.info(
+                        "operator projection daemon shutdown: %s",
+                        stop_status,
+                    )
+                elif resolved_ports is not None:
+                    close = resolved_ports.close_owned_resources
+                    if close is not None:
+                        close()
+                    resources_closed = True
+                else:
+                    resources_closed = True
+            finally:
+                # A stop timeout means callbacks may still own the SQLite
+                # source and leader lease. Keep the exact object graph
+                # reachable so a lifecycle/operator retry can close it.
+                if resources_closed:
+                    clear_application_state(application)
 
     application = FastAPI(
         title="Natsume AI Observability",
@@ -160,6 +293,7 @@ def create_obs_app(
         lifespan=lifespan,
     )
     application.state.obs_application_container = None
+    application.state.obs_route_ports = None
     application.state.life_snapshot_reader = None
     application.state.task_effect_reconciliation_read_authority = None
     application.state.task_terminal_reconciliation_read_authority = None
@@ -224,15 +358,45 @@ def create_obs_app(
             SERVICE_HEALTH_KEY,
         )
         missing_jobs = list(container.ports.missing_projection_jobs)
+        unavailable_jobs = [
+            {
+                "name": job.name,
+                "reason_code": job.unavailable_reason_code,
+            }
+            for job in container.ports.projection_jobs
+            if job.source_mode == TYPED_UNAVAILABLE
+        ]
+        declared_non_typed_unavailable_jobs = [
+            job.name
+            for job in container.ports.projection_jobs
+            if job.source_mode != TYPED_UNAVAILABLE
+        ]
         return {
-            "status": "DEGRADED" if missing_jobs else "OK",
+            "status": "DEGRADED" if missing_jobs or unavailable_jobs else "OK",
             "service": "obs",
             "composition": {
                 "projection_coverage": container.ports.projection_coverage,
-                "active_jobs": [
+                "count_semantics": (
+                    "producer_registration_and_declared_source_mode_"
+                    "not_runtime_success"
+                ),
+                "registered_jobs": [
                     job.name for job in container.ports.projection_jobs
                 ],
+                "registered_count": len(container.ports.projection_jobs),
+                "declared_non_typed_unavailable_jobs": (
+                    declared_non_typed_unavailable_jobs
+                ),
+                "declared_non_typed_unavailable_count": len(
+                    declared_non_typed_unavailable_jobs
+                ),
+                "typed_unavailable_job_count": len(unavailable_jobs),
                 "missing_jobs": missing_jobs,
+                "unavailable_jobs": unavailable_jobs,
+                "source_modes": {
+                    job.name: job.source_mode
+                    for job in container.ports.projection_jobs
+                },
             },
             "projection": projection_meta(
                 SERVICE_HEALTH_KIND,
@@ -258,52 +422,12 @@ def create_obs_app(
         payload["timestamp"] = ts_ms
         return payload
 
-    @application.post("/observability/trace", response_model=ObservabilityResponse)
-    async def request_trace(
-        request_body: ObservabilityRequest,
-        request: Request,
-    ) -> ObservabilityResponse:
-        container = _require_obs_container(request)
-        ts_ms = int(time.time() * 1000)
-        request_id = str(request_body.request_id or "").strip()
-        if not request_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="request_id is required",
-            )
-        document = container.ports.query_projection_store.get(TRACE_KIND, request_id)
-        payload = dict(document.payload) if document is not None else {}
-        timeline = payload.get("timeline")
-        if not isinstance(timeline, list):
-            timeline = [
-                dict(row)
-                for row in payload.get("nodes", [])
-                if isinstance(row, dict)
-            ]
-        sources = payload.get("sources")
-        if not isinstance(sources, dict) or any(
-            not isinstance(value, int) for value in sources.values()
-        ):
-            source_counts: dict[str, int] = {}
-            for row in timeline:
-                source = str(
-                    row.get("source")
-                    or row.get("node_type")
-                    or row.get("node_id")
-                    or "trace"
-                )
-                source_counts[source] = source_counts.get(source, 0) + 1
-            sources = source_counts
-        return ObservabilityResponse(
-            request_id=request_id,
-            trace_status=str(
-                payload.get("trace_status") or payload.get("status") or "DEGRADED"
-            ),
-            timeline_total=len(timeline),
-            sources=sources,
-            timeline=timeline,
-            timestamp=ts_ms,
-        )
+    application.add_api_route(
+        "/observability/trace",
+        request_trace,
+        methods=["POST"],
+        response_model=ObservabilityResponse,
+    )
 
     @application.get("/")
     async def root() -> RedirectResponse:
@@ -315,4 +439,4 @@ def create_obs_app(
 app = create_obs_app()
 
 
-__all__ = ["app", "create_obs_app"]
+__all__ = ["app", "create_obs_app", "request_trace"]

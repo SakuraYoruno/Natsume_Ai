@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from host_brain.app.obs_routes_trace import get_trace
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.observability_runtime.projection_runtime import ProjectionOperatorReadModelService
 from host_brain.observability.projection_store import (
@@ -28,6 +30,18 @@ def _store(tmp_path, *, clock=lambda: 1000) -> QueryProjectionStore:
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="aw07-unit")
     assert result.success, result
     return QueryProjectionStore(db_path, clock=clock)
+
+
+def _obs_request(store: QueryProjectionStore) -> SimpleNamespace:
+    ports = ObsRoutePorts(query_projection_store_provider=lambda: store)
+
+    class ObsRequest(SimpleNamespace):
+        async def is_disconnected(self) -> bool:
+            return False
+
+    return ObsRequest(
+        app=SimpleNamespace(state=SimpleNamespace(obs_route_ports=ports)),
+    )
 
 
 def test_generic_kind_key_store_tracks_version_cursor_freshness_and_degraded_state(tmp_path):
@@ -179,14 +193,11 @@ def test_task_session_and_trace_gets_never_call_source_loader(tmp_path, monkeypa
     ledger.fetch_by_time_range.assert_not_called()
 
     monkeypatch.setattr(
-        "host_brain.composition.process_services.get_query_projection_store",
-        lambda: store,
-    )
-    monkeypatch.setattr(
         "host_brain.app.obs_routes_trace._get_trace_builders",
         source_loader,
     )
-    trace_result = asyncio.run(get_trace("req-missing"))
+    request = _obs_request(store)
+    trace_result = asyncio.run(get_trace("req-missing", request))
     assert trace_result.status == "DEGRADED"
     assert trace_result.projection["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
     source_loader.assert_not_called()
@@ -213,18 +224,16 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     from host_brain.app import obs_routes_trace as trace
 
     store = _store(tmp_path)
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_query_projection_store",
-        lambda: store,
-    )
+    request = _obs_request(store)
     forbidden = Mock(side_effect=AssertionError("GET/SSE touched a source"))
     monkeypatch.setattr(trace, "_get_trace_builders", forbidden)
     monkeypatch.setattr(trace, "_get_ledger", forbidden)
     monkeypatch.setattr(sessions, "_get_ledger", forbidden)
 
-    stream = trace.get_trace_stream_events("req-empty")
+    stream = trace.get_trace_stream_events("req-empty", request)
     assert stream.events == []
     feed = trace.get_trace_live_feed_snapshot(
+        request=request,
         limit=6,
         window_minutes=60,
         active_within_ms=60_000,
@@ -232,6 +241,7 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     )
     assert feed.items == []
     tribe = trace.get_tribe_events(
+        request=request,
         limit=20,
         event_type=None,
         source_agent=None,
@@ -242,13 +252,9 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     )
     assert tribe.items == []
 
-    class Request:
-        async def is_disconnected(self):
-            return False
-
     response = asyncio.run(
         trace.stream_trace_live_feed(
-            Request(),
+            request,
             limit=6,
             window_minutes=60,
             active_within_ms=60_000,
@@ -265,6 +271,7 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     assert chunks and "snapshot" in str(chunks[0])
 
     export = sessions.export_sessions_csv(
+        request,
         status=None,
         window_minutes=60,
         keyword=None,

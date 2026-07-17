@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -470,7 +471,9 @@ def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.Mon
     assert disabled.value.status_code == 404
     assert disabled.value.detail["reason_code"] == "NLE_OPERATOR_VIEWS_DISABLED"
     with pytest.raises(HTTPException) as dependency_disabled:
-        _get_operator_read_model_service()
+        _get_operator_read_model_service(
+            SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+        )
     assert dependency_disabled.value.status_code == 404
 
     monkeypatch.setenv("HOST_NLE_OPERATOR_VIEWS_ENABLED", "true")

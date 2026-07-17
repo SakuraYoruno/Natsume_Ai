@@ -687,13 +687,18 @@ def _summarize_success_rate_samples(items: list[dict[str, Any]]) -> dict[str, An
     }
 
 
-def _get_recent_sessions_projection(window_minutes: int) -> dict[str, Any]:
-    from host_brain.app.obs_routes_sessions import get_sessions
+def _get_recent_sessions_projection(
+    window_minutes: int,
+    *,
+    projection_store: Any,
+) -> dict[str, Any]:
+    from host_brain.app.obs_routes_sessions import build_sessions_projection_response
 
     capped_window = max(1, min(int(window_minutes or 0) or 1, _LIFE_BODY_RECENT_SESSIONS_WINDOW_MINUTES))
     try:
         payload = _model_dump_compat(
-            get_sessions(
+            build_sessions_projection_response(
+                projection_store,
                 page=1,
                 page_size=_LIFE_BODY_RECENT_SESSIONS_LIMIT,
                 status=None,
@@ -1894,12 +1899,21 @@ def _build_diagnostic_guidance(
     return {"summary": summary, "actions": actions[:3]}
 
 
-def _build_life_body_payload(window_minutes: int) -> dict[str, Any]:
+def _build_life_body_payload(
+    window_minutes: int,
+    *,
+    projection_store: Any,
+) -> dict[str, Any]:
     from host_brain.app.lifecycle_runtime_composition import (
         build_lifecycle_runtime_application_ports,
     )
 
-    overview_payload = asyncio.run(_build_digital_life_overview_snapshot_async(window_minutes))
+    overview_payload = asyncio.run(
+        _build_digital_life_overview_snapshot_async(
+            window_minutes,
+            projection_store=projection_store,
+        )
+    )
     runtime_payload = _model_dump_compat(
         _build_runtime_snapshot_response(
             "",
@@ -1933,7 +1947,10 @@ def _build_life_body_payload(window_minutes: int) -> dict[str, Any]:
     absence_band = _format_absence_band(offline_state.get("absence_band"))
     non_live_slots = _get_non_live_slots(runtime_snapshot)
     growth_signals = _build_growth_signals(runtime_snapshot)
-    recent_sessions_projection = _get_recent_sessions_projection(window_minutes)
+    recent_sessions_projection = _get_recent_sessions_projection(
+        window_minutes,
+        projection_store=projection_store,
+    )
     recent_sessions = [_as_dict(item) for item in _as_list(recent_sessions_projection.get("items"))]
     trace_feed_projection = _get_trace_feed_projection()
     trace_feed_items = [_as_dict(item) for item in _as_list(trace_feed_projection.get("items"))]

@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -29,6 +29,7 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     response_meta,
 )
 from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -60,14 +61,12 @@ from .obs_routes_core import (
 # Ref #30: GET /obs/vts/stats  — VTS 通道统计
 # ---------------------------------------------------------------------------
 @router.get("/avatar/state", response_model=Dict[str, Any])
-async def get_avatar_state():
+async def get_avatar_state(request: Request):
     """Read the durable avatar projection without issuing a device command."""
     now = _now_ms()
     try:
-        from host_brain.composition.process_services import get_query_projection_store  # noqa: PLC0415
-
         payload, meta = read_projection_payload(
-            get_query_projection_store(),
+            require_obs_query_projection_store(request),
             kind=DEVICE_STATUS_KIND,
             key="avatar",
             max_age_ms=DEVICE_MAX_AGE_MS,

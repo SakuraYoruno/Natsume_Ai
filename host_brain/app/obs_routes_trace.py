@@ -48,6 +48,7 @@ from host_brain.app.observability_runtime.projection_runtime import (
     trace_source,
 )
 from host_brain.app.observability_runtime.projection_daemon import register_projection_job
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 logger = logging.getLogger("Natsume.obs")
@@ -185,12 +186,13 @@ def _get_trace_builders():
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}", response_model=TraceResponse)
-async def get_trace(request_id: str):
+async def get_trace(request_id: str, request: Request):
     """Read one durable Trace projection; this path never invokes source builders."""
 
-    from host_brain.composition.process_services import get_query_projection_store
-
-    document = get_query_projection_store().get(TRACE_KIND, request_id)
+    document = require_obs_query_projection_store(request).get(
+        TRACE_KIND,
+        request_id,
+    )
     meta = projection_meta(TRACE_KIND, request_id, document, max_age_ms=15000)
     if document is None or not meta["available"]:
         return TraceResponse(
@@ -212,13 +214,20 @@ async def get_trace(request_id: str):
     return TraceResponse(**payload)
 
 
-def refresh_trace_query_projections() -> dict[str, int]:
+def refresh_trace_query_projections(
+    *,
+    ledger: Any | None = None,
+    store: Any | None = None,
+    tribe_event_reader: Any | None = None,
+) -> dict[str, int]:
     """Background-only Trace journal scan and projection refresh."""
 
-    from host_brain.composition.process_services import get_query_projection_store
+    if ledger is None:
+        ledger = _get_ledger()
+    if store is None:
+        from host_brain.composition.process_services import get_query_projection_store
 
-    ledger = _get_ledger()
-    store = get_query_projection_store()
+        store = get_query_projection_store()
     build_full, _, build_feed, *_ = _get_trace_builders()
     now = _now_ms()
     since = now - 7 * 24 * 60 * 60 * 1000
@@ -359,9 +368,19 @@ def refresh_trace_query_projections() -> dict[str, int]:
             )
 
     try:
-        from host_brain.app.internal_tribe_routes import get_tribe_event_bus
+        if tribe_event_reader is None:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus
 
-        tribe_rows = [event.to_dict() for event in get_tribe_event_bus().recent(limit=200)]
+            tribe_rows = [
+                event.to_dict()
+                for event in get_tribe_event_bus().recent(limit=200)
+            ]
+        else:
+            tribe_rows = [
+                dict(event)
+                for event in list(tribe_event_reader() or [])
+                if isinstance(event, dict)
+            ]
         tribe_cursor = max((int(row.get("ts_ms") or 0) for row in tribe_rows), default=0)
         store.upsert(
             TRIBE_EVENTS_KIND,
@@ -389,12 +408,13 @@ register_projection_job("trace", refresh_trace_query_projections)
 # GET /obs/trace/{request_id}/stream_events
 # ---------------------------------------------------------------------------
 @router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
-def get_trace_stream_events(request_id: str):
+def get_trace_stream_events(request_id: str, request: Request):
     """Read the durable stream-event projection without EvidencePlane access."""
 
-    from host_brain.composition.process_services import get_query_projection_store
-
-    document = get_query_projection_store().get(TRACE_STREAM_KIND, request_id)
+    document = require_obs_query_projection_store(request).get(
+        TRACE_STREAM_KIND,
+        request_id,
+    )
     meta = projection_meta(TRACE_STREAM_KIND, request_id, document, max_age_ms=15000)
     rows = list(document.payload.get("events") or []) if document is not None and meta["available"] else []
     events = [StreamEventItem(**dict(row)) for row in rows if isinstance(row, dict)]
@@ -412,14 +432,16 @@ def get_trace_stream_events(request_id: str):
 # ---------------------------------------------------------------------------
 @router.get("/trace-feed/snapshot", response_model=TraceLiveFeedSnapshot)
 def get_trace_live_feed_snapshot(
+    request: Request,
     limit: int = Query(TRACE_FEED_DEFAULT_LIMIT, ge=1, le=12),
     window_minutes: int = Query(TRACE_FEED_DEFAULT_WINDOW_MINUTES, ge=1, le=10080),
     active_within_ms: int = Query(TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
     keyword: Optional[str] = Query(None),
 ):
-    from host_brain.composition.process_services import get_query_projection_store
-
-    document = get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
+    document = require_obs_query_projection_store(request).get(
+        TRACE_FEED_KIND,
+        TRACE_FEED_INDEX_KEY,
+    )
     meta = projection_meta(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY, document, max_age_ms=15000)
     if document is None or not meta["available"]:
         return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms(), projection=meta)
@@ -473,6 +495,7 @@ async def stream_trace_live_feed(
                 break
             try:
                 snapshot = get_trace_live_feed_snapshot(
+                    request=request,
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
@@ -528,6 +551,7 @@ async def stream_trace_live_feed(
 # ---------------------------------------------------------------------------
 @router.get("/tribe/events", response_model=TribeEventsResponse)
 def get_tribe_events(
+    request: Request,
     limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤"),
     source_agent: Optional[str] = Query(None, description="按 source_agent 过滤"),
@@ -538,9 +562,10 @@ def get_tribe_events(
 ):
     """Read and filter the durable Tribe-event projection."""
 
-    from host_brain.composition.process_services import get_query_projection_store
-
-    document = get_query_projection_store().get(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY)
+    document = require_obs_query_projection_store(request).get(
+        TRIBE_EVENTS_KIND,
+        TRIBE_EVENTS_INDEX_KEY,
+    )
     meta = projection_meta(TRIBE_EVENTS_KIND, TRIBE_EVENTS_INDEX_KEY, document, max_age_ms=15000)
     raw_items = list(document.payload.get("items") or []) if document is not None and meta["available"] else []
     filters = {

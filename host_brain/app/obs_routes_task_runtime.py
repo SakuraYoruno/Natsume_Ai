@@ -6,7 +6,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import Depends, HTTPException, Query, Request
 
@@ -18,6 +18,7 @@ from host_brain.persistence.task_repository import (
     TaskStoreError,
 )
 from host_brain.app.obs_routes_core import router
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
 from host_brain.app.observability_runtime.projection_runtime import (
@@ -35,9 +36,6 @@ from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationService,
 )
 
-
-_service_provider: Callable[[], OperatorReadModelService] | None = None
-_projection_service: ProjectionOperatorReadModelService | None = None
 
 _EFFECT_CASE_FIELDS = (
     "schema_version",
@@ -193,28 +191,13 @@ def _canonical_db_path() -> Path:
     return Path(get_persistence_settings().canonical_db_path).expanduser()
 
 
-def set_operator_read_model_service_provider(
-    provider: Callable[[], OperatorReadModelService] | None,
-) -> None:
-    """Install a test/composition provider without changing the read contract."""
+def _get_operator_read_model_service(request: Request) -> OperatorReadModelService:
+    """Build the read facade from this Obs application's projection store."""
 
-    global _projection_service, _service_provider
-    _service_provider = provider
-    _projection_service = None
-
-
-def _get_operator_read_model_service() -> OperatorReadModelService:
-    global _projection_service
     _require_operator_views_enabled()
-    if _service_provider is not None:
-        return _service_provider()
-    if _projection_service is None:
-        from host_brain.composition.process_services import get_query_projection_store
-
-        _projection_service = ProjectionOperatorReadModelService(
-            store=get_query_projection_store(),
-        )
-    return _projection_service  # type: ignore[return-value]
+    return ProjectionOperatorReadModelService(
+        store=require_obs_query_projection_store(request),
+    )
 
 
 def _get_effect_reconciliation_store(request: Request) -> Any:
@@ -730,5 +713,4 @@ __all__ = [
     "list_task_terminal_reconciliation_candidates",
     "list_task_terminal_reconciliation_cases",
     "list_task_runtime_executions",
-    "set_operator_read_model_service_provider",
 ]

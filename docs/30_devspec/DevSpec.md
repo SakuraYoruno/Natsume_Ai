@@ -43,8 +43,9 @@ Composition
 - Composition 是唯一允许绑定具体实现的位置。
 - 禁止模块级可变 service registry、业务层 `get_*()` locator 和依赖 test reset 的单例。
 - 独立 Obs ASGI 必须由 `create_obs_app(ports|ports_factory)` 构造；ledger query、projection store、metrics、Life reader、projection jobs 和资源关闭器归属单个 `ObsApplicationContainer`。导入模块不得配置 Host application ports，也不得 install/clear Host 的 Life provider。
-- 每个 Obs app 必须拥有独立 daemon、thread、stop event、leader lease 与 resource lifecycle。关闭一方不得影响另一 app；projection thread 未在超时内静止时必须保留 lease/resources 并让 shutdown 失败，禁止在线程仍可能访问 SQLite 时伪报 closed。
-- 未迁移到显式 ports 的 projection job 不得静默借用 locator。当前 D2 默认只启用 ledger/life 两个显式 job，`/health` 必须返回 `DEGRADED` 并列出 15 个 missing jobs；`obs_routes_*` 的 24 处 locator 仍是后续缺口，不能把 app factory/lifecycle 隔离写成完整 Obs Composition 完成。
+- 每个 Obs app 必须拥有独立 daemon、thread、stop event、leader lease 与 resource lifecycle。Daemon start/run 必须 single-flight，stop 必须阻止新 wave 并等待 background/manual in-flight；超时不得关闭 lease/SQLite或清空 app-local container/ports/readers，必须保留 retry handles 并让 shutdown 失败。每个 `ObsApplicationPorts` 实例只能消费一次，重复 lifespan 必须 fail closed；需要重建时，`ports_factory` 必须返回全新实例。关闭一方不得影响另一 app，sessions response cache/single-flight 也必须是 app-owned。
+- Producer registration 与 source availability 必须分开表达。当前 D3 默认注册 19 个 callback（2 core + 17），source-mode 声明为 `DURABLE_READ=5 / STATIC_READ=3 / DURABLE_READ_PARTIAL=3 / TYPED_UNAVAILABLE=8`；11/8 不是运行成功/失败率。Host-owned source 未注入时必须写 durable typed `SOURCE_UNAVAILABLE`，不得以空结果冒充当前事实；因此 `missing_jobs=[]` 时 `/health` 仍必须为 `DEGRADED`。其余 11 个 producer 必须只读 durable/static/app-owned source；standalone `health-passive/device-status` 必须以 `include_process_cache=false` 排除同进程模块缓存。
+- D3 有 17 个生产端点（16 HTTP + 1 WebSocket）使用 app-local QueryProjectionStore，另有 6 个 reconciliation 端点使用 app.state 的显式 repository authority；这不等于完整 Query Plane。仍有 19 个生产 GET 经 `read_process_projection → peek_query_projection_store` 间接借全局 store，`obs_routes*.py` 的 15 个 `process_services` 词法边界只是源码边界数而非 route 数，legacy `_default_daemon` 也仍存在；不得把 producer registration 或选定 route 隔离写成完整 Obs Composition 完成。
 
 ## 2. Host、Chat 与 Ingress 合同
 

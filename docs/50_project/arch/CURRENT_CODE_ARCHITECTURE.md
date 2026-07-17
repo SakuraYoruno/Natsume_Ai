@@ -28,7 +28,7 @@
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE / D2_OBS_APP_SCOPE_PARTIAL` | D1 HostRoutePorts 保留；D2 将独立 Obs factory、core endpoints、reconciliation readers 与 daemon/thread/lease/resource lifecycle 收入 app-local Container，多 app 关闭隔离且 shutdown 未静止时 fail closed。默认 projection coverage 仅 2/17，health 明示 DEGRADED；`obs_routes_*` 仍有 24 处 locator，全局 53 个可变引用仍在 |
+| Composition | `INCOMPLETE / D3_OBS_PRODUCER_REGISTRATION_SELECTED_ROUTES_PARTIAL` | D1/D2 app scope 保留；D3 将 19 个 producer registration、17 个生产端点与 sessions cache 收入 app-local ports，daemon single-flight/in-flight shutdown 及失败重试 handle 已测。11/8 只是 source-mode，8 个 typed-unavailable 使 health DEGRADED；其余 11 个 producer 已排除同进程模块缓存，19 个 GET 仍走间接 locator，15 个直接词法边界不是 route 数，legacy daemon和全局 53 个可变引用仍在 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -312,9 +312,11 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 D1 已先关闭路由级最直接的多 app 串扰：`HostRoutePorts` 是每个 FastAPI app 捕获的 frozen provider bundle，Canon/Tool/Bond 均由 `create_*_router(ports)` 构造；原 module setter/global provider 和 Tool fallback 到 `process_services` 已删除。同一 bundle 还经 Security composition 传入 Canon/Tool/Bond 的 OBS command adapter。双/三 Host app 交错请求、构造和关闭均只命中自己的 fake service。这个结论仅覆盖三类路由；OBS 的 Capability Forge、Scheduler/Review runtime lookup、Life/Tribe 与其余 process locator 仍在。
 
-D2 又把独立 Obs 的 `create_obs_app()`、`ObsApplicationPorts` 和 `ObsApplicationContainer` 变成显式应用级 scope。每个 app 独占 projection daemon、thread、stop event、leader lease 和 owned resource close；health/metrics/trace 直接消费当前 app ports，Effect/terminal reconciliation reader 存在 app state，导入/lifespan 不再配置 Host ports或 install/clear Host Life provider。关闭一方不改变另一 Obs/Host；线程未在超时内静止时 Container 不释放 lease、不关 SQLite、不伪报 closed。
+D2 把独立 Obs 的 `create_obs_app()`、`ObsApplicationPorts` 和 `ObsApplicationContainer` 变成显式应用级 scope。D3 在此基础上注册 19 个 producer callback（2 core + 17），并把 17 个生产端点（16 HTTP + 1 WebSocket）与 sessions response cache 接入 app-local QueryProjectionStore；6 个 reconciliation 端点另从 app.state 使用显式 repository authority。每个 app 独占 daemon、thread、stop event、leader lease、cache 与 owned resource close；双 app 相同 sessions query 不会共享结果或 single-flight。
 
-该切片以可见降级换取不再偷偷借 Host locator：production default 仅运行 ledger-stats 与 life-evolution 两个显式 job，`/health` 返回 `DEGRADED / EXPLICIT_CORE_ONLY` 并列出其余 15 个 missing jobs。静态扫描仍发现 `obs_routes_*` 24 处 `process_services` 引用，legacy query/routes 与完整 projection producer 尚未迁移。因此 D2 是 lifecycle/core endpoint 隔离，不是完整 Obs 功能或 Composition 封板。
+Projection daemon 的 start/run 是 single-flight，stop 先阻止新 wave再等待后台和手工 in-flight；启动任意阶段失败会关闭 owned resources，stop timeout 则保留 app-local container/ports/readers、lease 与 SQLite 供后续重试，不伪报 closed。每个 `ObsApplicationPorts` 实例只消费一次，重复 lifespan 以 `OBS_APPLICATION_PORTS_ALREADY_CONSUMED` fail closed；可重复启动必须由 factory 每次构造新实例。19 只表示 producer registration：source-mode 声明为 `DURABLE_READ=5 / STATIC_READ=3 / DURABLE_READ_PARTIAL=3 / TYPED_UNAVAILABLE=8`，11/8 不是实时成功/失败率。8 个 Host-owned source 写 durable `SOURCE_UNAVAILABLE`，所以 missing=0 时 `/health` 仍为 `DEGRADED`。所有 callback 执行路径均不调用 `process_services`；standalone `health-passive` 与 `device-status` 又以 `include_process_cache=false` 排除同进程模块缓存，因此 11 个非 unavailable producer 均为 pure durable/static/app-owned source。
+
+静态扫描现有 `obs_routes*.py` 的 `process_services` 直接词法边界 15 个（分布于 7 文件），它不是 route 数也不是全部 locator。19 个生产 GET 仍可经 `read_process_projection → peek_query_projection_store` 间接读取全局 store，legacy `_default_daemon/register_projection_job` 兼容链也仍存在。因此 D3 只是 producer registration 与 selected-route 隔离，不是完整 Query Plane、完整 source coverage 或 Composition 封板。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
 

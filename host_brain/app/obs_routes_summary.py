@@ -27,7 +27,7 @@ from host_brain.app.obs_routes_stats_input_humanoid import (
     get_input_humanoid_loop_trend,
 )
 from host_brain.app.obs_routes_stats_system import get_llm_call_stats, get_qa_stats, get_vts_stats
-from host_brain.app.obs_routes_health import get_services_health
+from host_brain.app.obs_routes_health import build_services_health_response
 from host_brain.app.observability_runtime.process_state_projection import (
     DIGITAL_LIFE_MAX_AGE_MS,
     DIGITAL_LIFE_OVERVIEW_KIND,
@@ -118,9 +118,17 @@ def _build_insights_summary_snapshot_sync(window_minutes: int) -> dict[str, Any]
     return payload.model_dump()
 
 
-async def _build_digital_life_overview_snapshot_async(window_minutes: int) -> dict[str, Any]:
+async def _build_digital_life_overview_snapshot_async(
+    window_minutes: int,
+    *,
+    projection_store: Any,
+) -> dict[str, Any]:
     trend_interval_minutes = _interval_minutes(window_minutes)
-    services_data = await get_services_health(window_minutes=window_minutes)
+    services_data = build_services_health_response(
+        projection_store,
+        window_minutes=window_minutes,
+        side=None,
+    )
     source_correlation = await get_input_humanoid_loop_source_correlation(
         window_minutes=window_minutes,
         interval_minutes=trend_interval_minutes,

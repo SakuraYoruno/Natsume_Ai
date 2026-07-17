@@ -154,7 +154,7 @@ def _install_fakes(monkeypatch):  # noqa: ANN001
     monkeypatch.setattr(
         composition_module,
         "build_default_obs_domain_command_registry",
-        lambda: registry,
+        lambda **_kwargs: registry,
     )
     return registry
 

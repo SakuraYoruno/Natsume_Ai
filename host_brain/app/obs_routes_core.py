@@ -23,6 +23,10 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from host_brain.app.obs_route_ports import (
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -1880,6 +1884,7 @@ def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional
 def _build_sessions_response(
     ledger: SQLiteLedger | None,
     *,
+    projection_store: Any | None = None,
     page: int,
     page_size: int,
     status: Optional[str],
@@ -1887,11 +1892,14 @@ def _build_sessions_response(
     keyword: Optional[str],
 ) -> SessionsResponse:
     if ledger is None:
-        from host_brain.composition.process_services import get_query_projection_store
-
-        svc = SessionQueryService(None, projection_store=get_query_projection_store())
+        if projection_store is None:
+            raise RuntimeError("explicit query projection store is required")
+        svc = SessionQueryService(None, projection_store=projection_store)
     else:
-        svc = SessionQueryService(ledger)
+        # A caller that already supplied a ledger is an explicit background
+        # source adapter.  It must not re-enter the process locator merely
+        # because the ledger exposes a canonical path.
+        svc = SessionQueryService(ledger, source_only=True)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -2868,6 +2876,7 @@ def _build_probe_registry(ledger, since_ms: int):
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionsResponse)
 def get_sessions(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
@@ -2875,7 +2884,8 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
-    return _get_obs_route_cached_response(
+    route_ports = require_obs_route_ports(request)
+    return route_ports.response_cache.get_or_build(
         cache_name="obs_sessions",
         cache_key={
             "page": int(page),
@@ -2885,8 +2895,10 @@ def get_sessions(
             "keyword": keyword or "",
         },
         ttl_ms=_OBS_SESSIONS_CACHE_TTL_MS,
+        wait_timeout_s=_OBS_CACHE_WAIT_TIMEOUT_SEC,
         builder=lambda: _build_sessions_response(
             None,
+            projection_store=route_ports.require_query_projection_store(),
             page=page,
             page_size=page_size,
             status=status,
@@ -2938,6 +2950,7 @@ def get_tribe_events(
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
 def export_sessions_csv(
+    request: Request,
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
     keyword: Optional[str] = Query(None),
@@ -2953,6 +2966,7 @@ def export_sessions_csv(
 
     sessions_response = _build_sessions_response(
         None,
+        projection_store=require_obs_query_projection_store(request),
         page=1,
         page_size=max_rows,
         status=status,
@@ -2996,17 +3010,6 @@ def export_sessions_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}
-# ---------------------------------------------------------------------------
-async def get_trace(request_id: str):
-    """Compatibility route delegated to the durable projection-only reader."""
-
-    from host_brain.app.obs_routes_trace import get_trace as get_projected_trace
-
-    return await get_projected_trace(request_id)
 
 
 # ---------------------------------------------------------------------------

@@ -28,9 +28,14 @@ from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.persistence.life_command_repository import LifeCommandRepository
+from host_brain.composition.obs_projection_jobs import (
+    DURABLE_READ,
+    TYPED_UNAVAILABLE,
+    build_explicit_obs_projection_callbacks,
+)
 
 
-LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS = (
+OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "bio-ops-metadata",
     "capability-forge-operator",
     "device-status",
@@ -46,6 +51,14 @@ LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS = (
     "security-immune",
     "sessions",
     "skill-pack-catalog",
+    "task-runtime",
+    "trace",
+)
+
+# Compatibility name retained for tests and extensions written during the D2
+# transition.  The jobs are no longer pending after D3.
+LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS = (
+    OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS
 )
 
 
@@ -55,12 +68,25 @@ class ObsProjectionJob:
 
     name: str
     callback: Callable[[], object]
+    source_mode: str = "CALLER_DEFINED"
+    min_interval_ms: int = 0
+    unavailable_reason_code: str | None = None
 
     def __post_init__(self) -> None:
         if not str(self.name or "").strip():
             raise ValueError("projection job name is required")
         if not callable(self.callback):
             raise TypeError("projection job callback must be callable")
+        if not str(self.source_mode or "").strip():
+            raise ValueError("projection job source_mode is required")
+        if int(self.min_interval_ms) < 0:
+            raise ValueError("projection job min_interval_ms must be non-negative")
+        if self.source_mode == TYPED_UNAVAILABLE and not str(
+            self.unavailable_reason_code or ""
+        ).strip():
+            raise ValueError(
+                "typed unavailable projection job requires unavailable_reason_code"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +135,11 @@ class ObsApplicationContainer:
     def compose(cls, ports: ObsApplicationPorts) -> "ObsApplicationContainer":
         daemon = ProjectionJobDaemon()
         for job in ports.projection_jobs:
-            daemon.register(job.name, job.callback)
+            daemon.register(
+                job.name,
+                job.callback,
+                min_interval_ms=job.min_interval_ms,
+            )
         return cls(ports=ports, projection_daemon=daemon)
 
     def start(self, *, interval_ms: int = 5_000) -> dict[str, object]:
@@ -158,42 +188,63 @@ def build_default_obs_application_ports(
         check_same_thread=False,
         initialize_schema=False,
     )
-    store = QueryProjectionStore(db_path)
-    metrics = MetricsCollector(ledger=ledger)
-    life_reader = LifeSnapshotReader(LifeCommandRepository.from_ledger(ledger))
+    try:
+        store = QueryProjectionStore(db_path)
+        metrics = MetricsCollector(ledger=ledger)
+        life_reader = LifeSnapshotReader(LifeCommandRepository.from_ledger(ledger))
 
-    def life_snapshot(person_id: str) -> Mapping[str, Any]:
-        return read_life_snapshot(person_id, reader=life_reader)
+        def life_snapshot(person_id: str) -> Mapping[str, Any]:
+            return read_life_snapshot(person_id, reader=life_reader)
 
-    jobs = (
-        ObsProjectionJob(
-            "ledger-stats",
-            lambda: refresh_ledger_stats_projection(ledger=ledger, store=store),
-        ),
-        ObsProjectionJob(
-            "life-evolution",
-            lambda: refresh_life_evolution_projection(
-                snapshot_reader=life_snapshot,
-                store=store,
+        jobs = (
+            ObsProjectionJob(
+                "ledger-stats",
+                lambda: refresh_ledger_stats_projection(ledger=ledger, store=store),
+                source_mode=DURABLE_READ,
+                min_interval_ms=30_000,
             ),
-        ),
-    )
-    return ObsApplicationPorts(
-        ledger_query=ledger,
-        query_projection_store=store,
-        metrics_reader=metrics,
-        life_snapshot_reader=life_snapshot,
-        projection_jobs=jobs,
-        close_owned_resources=ledger.close,
-        projection_coverage="EXPLICIT_CORE_ONLY",
-        missing_projection_jobs=(
-            LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS
-        ),
-    )
+            ObsProjectionJob(
+                "life-evolution",
+                lambda: refresh_life_evolution_projection(
+                    snapshot_reader=life_snapshot,
+                    store=store,
+                ),
+                source_mode=DURABLE_READ,
+                min_interval_ms=5_000,
+            ),
+            *(
+                ObsProjectionJob(
+                    definition.name,
+                    definition.callback,
+                    source_mode=definition.source_mode,
+                    min_interval_ms=definition.min_interval_ms,
+                    unavailable_reason_code=definition.unavailable_reason_code,
+                )
+                for definition in build_explicit_obs_projection_callbacks(
+                    ledger=ledger,
+                    store=store,
+                    canonical_db_path=db_path,
+                )
+            ),
+        )
+        return ObsApplicationPorts(
+            ledger_query=ledger,
+            query_projection_store=store,
+            metrics_reader=metrics,
+            life_snapshot_reader=life_snapshot,
+            projection_jobs=jobs,
+            close_owned_resources=ledger.close,
+            projection_coverage="REGISTERED_19_OF_19",
+            missing_projection_jobs=(),
+        )
+    except BaseException:
+        ledger.close()
+        raise
 
 
 __all__ = [
     "LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS",
+    "OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS",
     "ObsApplicationContainer",
     "ObsApplicationPorts",
     "ObsProjectionJob",
