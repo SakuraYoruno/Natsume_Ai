@@ -259,13 +259,21 @@ def _load_table_rows(ledger: Any, table: str, *, now_ms: int) -> tuple[list[dict
     return rows, truncated, f"{last_ts}:{last_digest}"
 
 
-def refresh_ledger_stats_projection() -> dict[str, int]:
+def refresh_ledger_stats_projection(
+    *,
+    ledger: Any | None = None,
+    store: QueryProjectionStore | None = None,
+) -> dict[str, int]:
     """Background source job; never call from an HTTP or WebSocket handler."""
 
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
+    if ledger is None or store is None:
+        from host_brain.composition.process_services import (  # noqa: PLC0415
+            get_ledger,
+            get_query_projection_store,
+        )
 
-    ledger = get_ledger()
-    store = get_query_projection_store()
+        ledger = ledger or get_ledger()
+        store = store or get_query_projection_store()
     now_ms = int(time.time() * 1000)
     counts: dict[str, int] = {}
     for table in sorted(LEDGER_STATS_TABLE_FIELDS):

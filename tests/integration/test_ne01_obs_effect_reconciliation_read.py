@@ -12,11 +12,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
-from host_brain.app.obs_fastapi_app import app
+from host_brain.app.obs_fastapi_app import create_obs_app
 from host_brain.app.obs_routes_task_runtime import (
     get_task_effect_reconciliation_challenge,
 )
 from host_brain.app.settings.core import get_core_settings
+from host_brain.composition.obs_application import ObsApplicationPorts
+from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.operator_query_gateway import (
     DigestOperatorQueryAuthenticator,
     OPERATOR_QUERY_AUTH_BINDINGS_ENV,
@@ -67,14 +69,23 @@ def test_dedicated_obs_app_reads_effect_reconciliation_from_canonical_db_read_on
         ),
     )
     get_core_settings.cache_clear()
-    previous_gateway = app.state.operator_query_gateway
-    app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
     try:
         with compose_durable_obs_projection_runtime(
             tmp_path,
             request_id="obs-effect-reconciliation-read",
         ) as runtime:
-            with TestClient(app) as client:
+            isolated_app = create_obs_app(
+                ports=ObsApplicationPorts(
+                    ledger_query=runtime.ledger,
+                    query_projection_store=runtime.store,
+                    metrics_reader=MetricsCollector(ledger=runtime.ledger),
+                    life_snapshot_reader=lambda person_id: {
+                        "person_id": person_id,
+                        "state": {},
+                    },
+                )
+            )
+            with TestClient(isolated_app) as client:
                 path = "/obs/task-runtime/effect-reconciliation/cases"
                 denied = client.get(
                     path,
@@ -107,7 +118,7 @@ def test_dedicated_obs_app_reads_effect_reconciliation_from_canonical_db_read_on
                     == "TASK_STORE_NOT_FOUND"
                 )
 
-                reader = app.state.task_effect_reconciliation_read_authority
+                reader = isolated_app.state.task_effect_reconciliation_read_authority
                 assert reader.canonical_db_path == Path(
                     runtime.ledger.canonical_db_path
                 ).resolve()
@@ -121,7 +132,6 @@ def test_dedicated_obs_app_reads_effect_reconciliation_from_canonical_db_read_on
                 finally:
                     conn.close()
     finally:
-        app.state.operator_query_gateway = previous_gateway
         get_core_settings.cache_clear()
 
 

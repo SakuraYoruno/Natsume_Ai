@@ -1,0 +1,201 @@
+"""Explicit, application-scoped composition for the standalone Obs app.
+
+The observability process is a query/projection sidecar.  It must not install
+Host application ports or borrow Host-owned mutable providers merely because
+both ASGI applications happen to run in one interpreter.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from host_brain.app.observability_runtime.domain_state_projection import (
+    refresh_life_evolution_projection,
+)
+from host_brain.app.observability_runtime.projection_daemon import (
+    ProjectionJobDaemon,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    refresh_ledger_stats_projection,
+)
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.digital_life.application_boundary import read_life_snapshot
+from host_brain.digital_life.reader import LifeSnapshotReader
+from host_brain.observability.metrics import MetricsCollector
+from host_brain.observability.projection_store import QueryProjectionStore
+from host_brain.persistence.life_command_repository import LifeCommandRepository
+
+
+LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS = (
+    "bio-ops-metadata",
+    "capability-forge-operator",
+    "device-status",
+    "digital-life-overview",
+    "health-passive",
+    "insights-summary",
+    "life-body",
+    "operator-live-state",
+    "organ-tribe",
+    "remaining-operator-queries",
+    "resource-manager",
+    "runtime-snapshot",
+    "security-immune",
+    "sessions",
+    "skill-pack-catalog",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ObsProjectionJob:
+    """One explicitly injected projection callback."""
+
+    name: str
+    callback: Callable[[], object]
+
+    def __post_init__(self) -> None:
+        if not str(self.name or "").strip():
+            raise ValueError("projection job name is required")
+        if not callable(self.callback):
+            raise TypeError("projection job callback must be callable")
+
+
+@dataclass(frozen=True, slots=True)
+class ObsApplicationPorts:
+    """Narrow query/projection ports consumed by one Obs application."""
+
+    ledger_query: Any
+    query_projection_store: QueryProjectionStore
+    metrics_reader: MetricsCollector
+    life_snapshot_reader: Callable[[str], Mapping[str, Any]]
+    projection_jobs: tuple[ObsProjectionJob, ...] = ()
+    close_owned_resources: Callable[[], None] | None = None
+    projection_coverage: str = "CALLER_DEFINED"
+    missing_projection_jobs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        canonical_db_path = str(
+            getattr(self.ledger_query, "canonical_db_path", "") or ""
+        ).strip()
+        projection_db_path = str(
+            getattr(self.query_projection_store, "db_path", "") or ""
+        ).strip()
+        if not canonical_db_path or canonical_db_path == ":memory:":
+            raise ValueError("Obs ledger query port requires a durable canonical database")
+        if Path(canonical_db_path).expanduser().resolve() != Path(
+            projection_db_path
+        ).expanduser().resolve():
+            raise ValueError("Obs query and projection ports must share one canonical database")
+        if not callable(self.life_snapshot_reader):
+            raise TypeError("life_snapshot_reader must be callable")
+        if not str(self.projection_coverage or "").strip():
+            raise ValueError("projection_coverage is required")
+        if any(not str(name or "").strip() for name in self.missing_projection_jobs):
+            raise ValueError("missing projection job names must be non-empty")
+
+
+@dataclass(slots=True)
+class ObsApplicationContainer:
+    """All mutable lifecycle state owned by one FastAPI app instance."""
+
+    ports: ObsApplicationPorts
+    projection_daemon: ProjectionJobDaemon
+    closed: bool = False
+
+    @classmethod
+    def compose(cls, ports: ObsApplicationPorts) -> "ObsApplicationContainer":
+        daemon = ProjectionJobDaemon()
+        for job in ports.projection_jobs:
+            daemon.register(job.name, job.callback)
+        return cls(ports=ports, projection_daemon=daemon)
+
+    def start(self, *, interval_ms: int = 5_000) -> dict[str, object]:
+        if self.closed:
+            raise RuntimeError("OBS_APPLICATION_CONTAINER_CLOSED")
+        return self.projection_daemon.start(
+            store=self.ports.query_projection_store,
+            interval_ms=interval_ms,
+        )
+
+    def close(self) -> dict[str, object]:
+        if self.closed:
+            return {"running": False, "closed": True}
+        status = self.projection_daemon.stop()
+        if bool(status.get("running")):
+            raise RuntimeError(
+                str(status.get("reason_code") or "OBS_PROJECTION_STOP_FAILED")
+            )
+        close = self.ports.close_owned_resources
+        if close is not None:
+            close()
+        self.closed = True
+        return {**status, "closed": True}
+
+
+def build_default_obs_application_ports(
+    *,
+    canonical_db_path: str | Path,
+) -> ObsApplicationPorts:
+    """Build the standalone sidecar without touching Host process globals."""
+
+    raw_path = str(canonical_db_path or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        raise ValueError("standalone Obs requires a durable canonical database")
+    db_path = Path(raw_path).expanduser().resolve()
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="obs-application-startup",
+    )
+    if not migrated.success:
+        raise RuntimeError(
+            f"{migrated.reason_code or 'MIGRATION_EXEC_FAILED'}: {migrated.detail}"
+        )
+
+    ledger = SQLiteLedger(
+        db_path,
+        check_same_thread=False,
+        initialize_schema=False,
+    )
+    store = QueryProjectionStore(db_path)
+    metrics = MetricsCollector(ledger=ledger)
+    life_reader = LifeSnapshotReader(LifeCommandRepository.from_ledger(ledger))
+
+    def life_snapshot(person_id: str) -> Mapping[str, Any]:
+        return read_life_snapshot(person_id, reader=life_reader)
+
+    jobs = (
+        ObsProjectionJob(
+            "ledger-stats",
+            lambda: refresh_ledger_stats_projection(ledger=ledger, store=store),
+        ),
+        ObsProjectionJob(
+            "life-evolution",
+            lambda: refresh_life_evolution_projection(
+                snapshot_reader=life_snapshot,
+                store=store,
+            ),
+        ),
+    )
+    return ObsApplicationPorts(
+        ledger_query=ledger,
+        query_projection_store=store,
+        metrics_reader=metrics,
+        life_snapshot_reader=life_snapshot,
+        projection_jobs=jobs,
+        close_owned_resources=ledger.close,
+        projection_coverage="EXPLICIT_CORE_ONLY",
+        missing_projection_jobs=(
+            LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS
+        ),
+    )
+
+
+__all__ = [
+    "LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS",
+    "ObsApplicationContainer",
+    "ObsApplicationPorts",
+    "ObsProjectionJob",
+    "build_default_obs_application_ports",
+]

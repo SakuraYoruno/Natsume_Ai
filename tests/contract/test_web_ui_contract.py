@@ -34,14 +34,14 @@ pytestmark = pytest.mark.skipif(not HAS_FASTAPI, reason="FastAPI not installed")
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     """The historical trace contract now enters through operator auth."""
 
     from host_brain.observability.operator_query_gateway import (
         OPERATOR_QUERY_AUTH_BINDINGS_ENV,
-        OperatorQueryGateway,
     )
-    from host_brain.app import obs_fastapi_app
+    from host_brain.app.obs_fastapi_app import create_obs_app
+    from host_brain.composition.obs_application import build_default_obs_application_ports
 
     token = "web-ui-contract-operator"
     monkeypatch.setenv(
@@ -56,17 +56,16 @@ def client(monkeypatch):
             ]
         ),
     )
-    previous_gateway = app.state.operator_query_gateway
-    app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
-    monkeypatch.setattr(
-        obs_fastapi_app,
-        "get_query_projection_store",
-        lambda: type("EmptyProjectionStore", (), {"get": lambda _self, _kind, _key: None})(),
+    obs_app = create_obs_app(
+        ports_factory=lambda: build_default_obs_application_ports(
+            canonical_db_path=tmp_path / "web-ui-contract.sqlite3",
+        )
     )
-    try:
-        yield TestClient(app, headers={"Authorization": f"Bearer {token}"})
-    finally:
-        app.state.operator_query_gateway = previous_gateway
+    with TestClient(
+        obs_app,
+        headers={"Authorization": f"Bearer {token}"},
+    ) as test_client:
+        yield test_client
 
 
 # ---------------------------------------------------------------------------

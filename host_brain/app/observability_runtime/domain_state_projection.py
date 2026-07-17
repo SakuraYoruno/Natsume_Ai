@@ -279,9 +279,31 @@ def _upsert(kind: str, key: str, payload: Mapping[str, Any], cursor: int, source
     )
 
 
-def refresh_life_evolution_projection() -> dict[str, int]:
-    payload, cursor = load_life_evolution_projection_source()
-    _upsert(LIFE_EVOLUTION_KIND, LIFE_DEFAULT_KEY, payload, cursor, "canonical-life-background-worker")
+def refresh_life_evolution_projection(
+    *,
+    snapshot_reader: Callable[[str], Mapping[str, Any]] | None = None,
+    store: QueryProjectionStore | None = None,
+) -> dict[str, int]:
+    payload, cursor = load_life_evolution_projection_source(
+        snapshot_reader=snapshot_reader,
+    )
+    if store is None:
+        _upsert(
+            LIFE_EVOLUTION_KIND,
+            LIFE_DEFAULT_KEY,
+            payload,
+            cursor,
+            "canonical-life-background-worker",
+        )
+    else:
+        store.upsert(
+            LIFE_EVOLUTION_KIND,
+            LIFE_DEFAULT_KEY,
+            payload,
+            source_cursor=cursor,
+            source_digest=digest_json(payload),
+            source_ref="canonical-life-background-worker",
+        )
     return {"document_count": 1}
 
 

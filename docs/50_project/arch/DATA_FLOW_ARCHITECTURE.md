@@ -341,6 +341,8 @@ Obs 读取不借用 Host 进程内 Task container：`obs_fastapi_app` 仅在 `HO
 
 0099 terminal reconciliation 在主 Host 与独立 Obs 都提供 `candidates/cases/challenge` 三条 GET，并要求 `obs:task-runtime:read`；两处都只构造同 canonical SQLite 的 `mode=ro + query_only=ON` reader，禁止 fallback 到完整 `DurableTaskStore`。Cases 只给最小摘要，subject snapshot 不出库。Challenge 从 OperatorQueryGateway request context 取得认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`，在 authority 已绑定 key ID 时拒绝不一致请求；权威 builder 用 case、current subject 与确定性 Graph/Budget Outbox 生成 Store 实际验证的 final canonical bytes和 `command_request`。HTTP → 真实 Ed25519 → Store round-trip 已通过，但外部 key lifecycle/canary 未验证。
 
+D2 后独立 Obs 的核心数据流是 `create_obs_app → ObsApplicationPorts → app-local Container → app-local daemon/leader lease → QueryProjectionStore`；health/metrics/trace 与 reconciliation readers 不再经模块 provider 或 Host Life slot。关闭必须先让 daemon thread 静止，再释放 lease/SQLite；超时则 shutdown 失败并保留资源。当前默认只注入 `ledger-stats` 与 `life-evolution`，所以 `/health` 明确返回 `DEGRADED / EXPLICIT_CORE_ONLY` 并列出 15 个缺失 projection jobs。`obs_routes_*` 仍有 24 个 locator 引用，完整 Query Plane producer/route 数据流尚未迁移。
+
 ```text
 conversation.user_turn
   → life.foreground_completed

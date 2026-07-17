@@ -42,6 +42,9 @@ Composition
 - Adapter 实现网络、数据库、模型、设备和 UI 边界。
 - Composition 是唯一允许绑定具体实现的位置。
 - 禁止模块级可变 service registry、业务层 `get_*()` locator 和依赖 test reset 的单例。
+- 独立 Obs ASGI 必须由 `create_obs_app(ports|ports_factory)` 构造；ledger query、projection store、metrics、Life reader、projection jobs 和资源关闭器归属单个 `ObsApplicationContainer`。导入模块不得配置 Host application ports，也不得 install/clear Host 的 Life provider。
+- 每个 Obs app 必须拥有独立 daemon、thread、stop event、leader lease 与 resource lifecycle。关闭一方不得影响另一 app；projection thread 未在超时内静止时必须保留 lease/resources 并让 shutdown 失败，禁止在线程仍可能访问 SQLite 时伪报 closed。
+- 未迁移到显式 ports 的 projection job 不得静默借用 locator。当前 D2 默认只启用 ledger/life 两个显式 job，`/health` 必须返回 `DEGRADED` 并列出 15 个 missing jobs；`obs_routes_*` 的 24 处 locator 仍是后续缺口，不能把 app factory/lifecycle 隔离写成完整 Obs Composition 完成。
 
 ## 2. Host、Chat 与 Ingress 合同
 

@@ -40,7 +40,7 @@
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
 | Pentest L3 | shadow、非 durable 校准、不能生成 capability-unlocking 后继 |
 | Code/Research | 只有 synthetic benchmark，不是生产收益 |
-| Composition | typed Task container 可复用；全局 locator 未删除 |
+| Composition | `D2_OBS_APP_SCOPE_PARTIAL`：Task container 与 D1 Host route ports 可复用；Obs app factory/core endpoints/lifecycle 已 app-local，但默认 projection coverage 仅 2/17 并显式 DEGRADED，`obs_routes_*` 仍有 24 处 locator；全局 locator 未删除 |
 | Evolution abilities | 多为 partial/placeholder/missing |
 
 任何 PR 或报告若把上述 `PARTIAL/BROKEN/SHADOW` 写成 `DONE/PASS`，该交付自动失败。
@@ -128,7 +128,7 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
 - Executive 生产入口、legacy SkillDag 执行和进程内任务 registry 已删除，`task_progress/recent_turn` 改为 durable projection/read route。
 - Workspace D0/W0 路径围栏与写入熔断继续生效。W1 以 0101、`WorkspaceRepository` 和配置根 `WorkspaceAllocator` 新增 durable authority：精确绑定 root WorkOrder、graph revision、owner、逻辑 root ref、isolation mode 和 canonical allow-list；租约响应丢失可精确重放，过期接管推进单调 fence，旧 fence 在文件回调前失败。WorkOrder 只含逻辑 `workspace_id`，raw token 由服务端 provider 注入。生产 composition 尚未注入 allocator/provider，故默认仍 fail closed；可信清理 continuation、heartbeat、worktree/container、OS/tenant 与 handle-level TOCTOU 仍未完成；
-- Composition 两个安全清理切片累计删除 6 个生产零消费者全局槽位和 4 个死 accessor；第二刀额外收掉 7 个宽泛 façade 重导出及 `retrieval_pipeline` 的测试 reset 残留。D1 per-app route scope 新增 frozen `HostRoutePorts`，Canon/Tool/Bond HTTP 与对应 OBS command adapters 只捕获当前 app ports，删除 module setter/provider 与三类 `process_services` fallback；双/三 app 交错构造、请求、关闭已证明互不污染。排除 6 个 lock 与 `application_ports` 端口束后的全局 container 可变服务引用仍为 53，Capability Forge、Scheduler/Review、Life/Tribe 等 locator 未删除。
+- Composition D1 的 frozen `HostRoutePorts` 继续隔离 Canon/Tool/Bond HTTP 与对应 OBS command adapters。D2 新增 `ObsApplicationPorts/Container`：factory、health/metrics/trace、reconciliation reader、daemon/thread/stop/lease/resource lifecycle 都归属单个 app；Host+Obs/双 Obs 交错构造与关闭互不污染，projection thread 未静止时资源关闭 fail closed。导入和 lifespan 不再配置 Host application ports或修改 `PROCESS_LIFE_PROVIDER`。当前只启用 ledger/life 两个显式 projection job，health 明示 `DEGRADED + 15 missing`；`obs_routes_*` 仍有 24 处 locator。全局 container 的 53 个可变服务引用与 Capability Forge/Scheduler/Review/Life/Tribe 等 locator 未删除。
 
 Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。B4/0090 与 B5A/B5B/0091 语义继续有效；B5C 已有 0092～0099 分范围 durable authority。Budget 高竞争唯一 winner、单节点 post-budget 检查点接管与 0099 窄历史终态 reconciliation 已有证据，但不构成通用恢复。0094 本身不复制 0092 业务状态；Operation、Effect 与 terminal reconciliation 均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。外部生产库存尚未盘点，general/batch/pre-budget recovery、部署密钥/凭据、完整 key lifecycle 与真实 canary尚未完成，atomic、bounded、cancellation均为 `PRODUCTION_OFF`。现实 resolver 分类仍未闭环。Lane D 的 Workspace 已推进到 `W1_WIRED_NOT_PRODUCTION_INJECTED`，仍缺生产注入、可信清理与真正隔离；Composition 也未完成。因此 Lane B、NE-01 和完整架构都不得封板。
 
@@ -175,6 +175,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - D1 已完成 Canon/Tool/Bond 及其 OBS adapter 的 app-local ports；不得把该局部结果写成整个 OBS 或 ProcessServiceContainer 已去 locator；
+- D2 已完成独立 Obs factory/core endpoint/lifecycle scope，并以 DEGRADED health 暴露未迁移的 15 个 projection jobs；下一刀必须迁移 24 处 route locator 和缺失 jobs，恢复完整 projection coverage 后才可提升状态；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；
 - 每个 Task/Experiment 绑定 workspace owner、root、isolation mode 与 cleanup receipt；
 - Code shadow 使用隔离 worktree，禁止污染主工作区。

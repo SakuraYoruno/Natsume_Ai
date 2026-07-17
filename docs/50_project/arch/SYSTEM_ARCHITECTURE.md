@@ -271,6 +271,10 @@ host_brain.__main__
 
 D1 route scope 另将 Canon/Tool/Bond 从模块全局 provider 迁到每个 app 的 frozen `HostRoutePorts`。`app_factory`/`router_registry` 用 `create_canon_router/create_tool_router/create_bond_router` 闭包注册，Security→OBS composition 把同一个 ports bundle 传给三类 command adapters；构造或关闭另一个 Host app 不会覆盖已有 app。该切片没有删除 Capability Forge、Scheduler/Review、Life、Tribe 或其余 `process_services` locator。
 
+D2 为独立 Obs 增加 `create_obs_app()` 与 app-local `ObsApplicationPorts/Container`。每个 app 独占 daemon/thread/stop/leader lease/resources；health/metrics/trace 与 Effect/terminal reconciliation readers 使用本 app state，导入和 lifespan 不配置 Host application ports或修改 Host Life provider。关闭顺序先 join daemon，再释放 lease/SQLite；join 超时会保留资源并让 shutdown 失败。双 Obs 与 Host+Obs 的构造/关闭隔离已有测试。
+
+当前 projection coverage 被有意显式化为 `EXPLICIT_CORE_ONLY`：只运行 ledger/life 两个不借 Host locator 的 job，health 返回 DEGRADED 并列出 15 个 missing jobs。`obs_routes_*` 仍有 24 处 process-service locator；完整 projection producers、routes、Host/Worker composition 与全局 53 个可变 service refs 仍待迁移。因此 D2 不是完整 Obs 功能封板。
+
 Workspace W1 已新增独立的 0101 authority、`WorkspaceRepository` 与配置根 `WorkspaceAllocator`：数据库只保存逻辑 root ref，并把 workspace 绑定到 exact graph revision/root WorkOrder/owner/allow-list；服务端租约持久化 token digest、expiry 与单调 fence。`WorkspacePolicy` 要求 allocator 和 server-side lease provider 同时显式注入，WorkOrder 只携带逻辑 `workspace_id`。当前 Host composition 尚未完成这项注入，因此生产路径仍按 W0 fail closed；也尚无可信 cleanup continuation、heartbeat、worktree/container 或 OS/tenant 隔离。
 
 它的启动门禁已固定为 migration → TaskStore 0093/0094/0095/0098/0099/0102 与 Review 0096 readiness → `task_store.recover_startup` → 0099 bounded terminal inventory → 可选且默认关闭的 exact system auto → publisher/worker → surface activation → continuation workers；恢复异常会终止容器构造并阻止路由开放。0102 在 recovery 前阻断 active legacy 缺 artifact，0099 继续负责窄 terminal inventory。配置中的逻辑 owner 会派生为 construction/recovery-scoped execution owner。Operation/Effect/terminal services 仍由独立默认关闭开关控制，外部 deployment inventory、凭据、key lifecycle、remediation 与 canary 未知时不宣称生产就绪。

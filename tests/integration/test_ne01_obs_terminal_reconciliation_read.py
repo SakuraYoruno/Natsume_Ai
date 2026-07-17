@@ -11,11 +11,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
-from host_brain.app.obs_fastapi_app import app
+from host_brain.app.obs_fastapi_app import create_obs_app
 from host_brain.app.settings.core import get_core_settings
+from host_brain.composition.obs_application import ObsApplicationPorts
+from host_brain.observability.metrics import MetricsCollector
 from host_brain.observability.operator_query_gateway import (
     OPERATOR_QUERY_AUTH_BINDINGS_ENV,
-    OperatorQueryGateway,
 )
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.persistence.reconciliation_proof_verifier import (
@@ -67,14 +68,23 @@ def test_dedicated_obs_app_reads_terminal_reconciliation_query_only(
         ),
     )
     get_core_settings.cache_clear()
-    previous_gateway = app.state.operator_query_gateway
-    app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
     try:
         with compose_durable_obs_projection_runtime(
             tmp_path,
             request_id="obs-terminal-reconciliation-read",
         ) as runtime:
-            with TestClient(app) as client:
+            isolated_app = create_obs_app(
+                ports=ObsApplicationPorts(
+                    ledger_query=runtime.ledger,
+                    query_projection_store=runtime.store,
+                    metrics_reader=MetricsCollector(ledger=runtime.ledger),
+                    life_snapshot_reader=lambda person_id: {
+                        "person_id": person_id,
+                        "state": {},
+                    },
+                )
+            )
+            with TestClient(isolated_app) as client:
                 path = "/obs/task-runtime/terminal-reconciliation/cases"
                 denied = client.get(
                     path,
@@ -114,7 +124,7 @@ def test_dedicated_obs_app_reads_terminal_reconciliation_query_only(
                     == "TASK_STORE_NOT_FOUND"
                 )
 
-                reader = app.state.task_terminal_reconciliation_read_authority
+                reader = isolated_app.state.task_terminal_reconciliation_read_authority
                 assert reader.canonical_db_path == Path(
                     runtime.ledger.canonical_db_path
                 ).resolve()
@@ -127,9 +137,8 @@ def test_dedicated_obs_app_reads_terminal_reconciliation_query_only(
                         )
                 finally:
                     conn.close()
-            assert app.state.task_terminal_reconciliation_read_authority is None
+            assert isolated_app.state.task_terminal_reconciliation_read_authority is None
     finally:
-        app.state.operator_query_gateway = previous_gateway
         get_core_settings.cache_clear()
 
 
@@ -169,8 +178,6 @@ def test_http_challenge_bytes_round_trip_through_signed_terminal_repair(
         ),
     )
     get_core_settings.cache_clear()
-    previous_gateway = app.state.operator_query_gateway
-    app.state.operator_query_gateway = OperatorQueryGateway.from_environment()
     try:
         with compose_durable_obs_projection_runtime(
             tmp_path,
@@ -229,7 +236,18 @@ def test_http_challenge_bytes_round_trip_through_signed_terminal_repair(
             attestation_ref = "attestation://terminal-reconciliation/http-round-trip"
             issued_ts_ms = NOW + 300
 
-            with TestClient(app) as client:
+            isolated_app = create_obs_app(
+                ports=ObsApplicationPorts(
+                    ledger_query=runtime.ledger,
+                    query_projection_store=runtime.store,
+                    metrics_reader=MetricsCollector(ledger=runtime.ledger),
+                    life_snapshot_reader=lambda person_id: {
+                        "person_id": person_id,
+                        "state": {},
+                    },
+                )
+            )
+            with TestClient(isolated_app) as client:
                 response = client.get(
                     "/obs/task-runtime/terminal-reconciliation/challenge",
                     params={
@@ -279,5 +297,4 @@ def test_http_challenge_bytes_round_trip_through_signed_terminal_repair(
                 "signing_material"
             ]["payload_sha256"]
     finally:
-        app.state.operator_query_gateway = previous_gateway
         get_core_settings.cache_clear()

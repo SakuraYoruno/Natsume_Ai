@@ -19,7 +19,7 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from .projection_runtime import projection_meta
 from host_brain.canon.application import CanonApplicationService
-from host_brain.observability.projection_store import digest_json
+from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
 
 AGENT_LOOP_KIND = "agent_loop_summary"
@@ -468,13 +468,19 @@ def _startup_snapshot_payload() -> tuple[dict[str, Any] | None, int]:
 def refresh_remaining_query_projections(
     *,
     canon_service: CanonApplicationService,
+    ledger: Any | None = None,
+    store: QueryProjectionStore | None = None,
 ) -> dict[str, int]:
     """Independent source job; never call this function from a GET handler."""
 
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
+    if ledger is None or store is None:
+        from host_brain.composition.process_services import (  # noqa: PLC0415
+            get_ledger,
+            get_query_projection_store,
+        )
 
-    ledger = get_ledger()
-    store = get_query_projection_store()
+        ledger = ledger or get_ledger()
+        store = store or get_query_projection_store()
     agent_payload, agent_cursor = _agent_loop_payload(ledger)
     store.upsert(
         AGENT_LOOP_KIND,

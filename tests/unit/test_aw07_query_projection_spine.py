@@ -120,8 +120,8 @@ def test_two_store_instances_compete_on_durable_lease_and_stale_fence_cannot_wri
     assert accepted.payload == {"value": "fresh"}
 
 
-def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_path, monkeypatch):
-    from host_brain.app.observability_runtime import projection_daemon
+def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_path):
+    from host_brain.app.observability_runtime.projection_daemon import ProjectionJobDaemon
 
     now = [1000]
     db_path = tmp_path / "projection-daemon.sqlite3"
@@ -130,16 +130,14 @@ def test_projection_daemon_skips_jobs_without_cross_process_leader_lease(tmp_pat
     first_store = QueryProjectionStore(db_path, clock=lambda: now[0])
     second_store = QueryProjectionStore(db_path, clock=lambda: now[0])
     calls: list[str] = []
-    monkeypatch.setattr(projection_daemon, "_jobs", {"job": lambda: calls.append("ran")})
-    monkeypatch.setattr(projection_daemon, "_active_store", None)
-    monkeypatch.setattr(projection_daemon, "_active_lease", None)
+    daemon = ProjectionJobDaemon(owner_id="process-a")
+    daemon.register("job", lambda: calls.append("ran"))
 
-    assert projection_daemon.run_projection_jobs_once(
+    assert daemon.run_once(
         store=first_store,
-        owner_id="process-a",
         lease_ms=100,
     ) == {"job": "OK"}
-    assert projection_daemon.run_projection_jobs_once(
+    assert daemon.run_once(
         store=second_store,
         owner_id="process-b",
         lease_ms=100,

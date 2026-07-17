@@ -68,7 +68,7 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
-| 显式 Composition Root | `PARTIAL_D1_ROUTE_SCOPE` | `ProcessTaskRuntimeContainer`、`HostRoutePorts`、Canon/Tool/Bond router factories、multi-app isolation tests | Task container 良好；Canon/Tool/Bond HTTP 与对应 OBS adapters 已 app-local，无 module setter/fallback。Capability Forge、Scheduler/Review、Life/Tribe 及其余 Host/Obs/Worker 对象图仍有全局 registry | NE-01 |
+| 显式 Composition Root | `PARTIAL_D2_OBS_APP_SCOPE` | Task container、HostRoutePorts、`ObsApplicationPorts/Container`、Host/Obs multi-app lifecycle tests | D1 routes 与 D2 Obs factory/core endpoints/daemon/lease/resources 已 app-local，shutdown 非静止 fail closed。默认只启用 2/17 explicit projections并明示 DEGRADED；`obs_routes_*` 仍有 24 locator，全局 53 个可变 refs及 Host/Worker 对象图未迁移 | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
 | 执行巨石拆分 | `PARTIAL_GATE_RED` | `dag_scheduling_runtime.py`、focused Budget/Operation/Effect Store modules、`coordinator.py` | `task_repository.py` 当前 4,145 行；新 Budget/Operation/finalizer modules 均 <1,500且无第二 Store authority。全仓仍有 3 个既存未分类 >1,500 行违规，因此不能写 green | NE-01 Lane D 未决 |
 | Host/Obs/Worker scope 隔离 | `PARTIAL_D1` | 独立 ASGI、`HostRoutePorts`、部分 typed ports、Effect/terminal query-only repositories | Canon/Tool/Bond 的 Host+OBS adapter 已共享同一 app-local ports，多 app 生命周期隔离已测；其余 OBS handlers、lifecycle/provider 与 Worker/Tribe 仍跨全局对象图共享 | NE-01 |
