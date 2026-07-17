@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.16
+版本：v5.17
 核对日期：2026-07-18
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -17,7 +17,7 @@
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在 |
-| Host `chat/skill/delegate/plan` | `OUTER_ROUTE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed。D9 已冻结认证 ingress→Governor→HostCommand lineage；Delegate 内部 dispatcher 仍未消费 node grant/Attempt |
+| Host `chat/skill/delegate/plan` | `PENTEST_READONLY_DELEGATE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed。D9 已冻结认证 ingress→Governor→HostCommand lineage；D10 仅让 `pentest_agent` 消费带完整 node grant/Attempt/Lease/Fence 的 invocation，并在调用前重验 node grant；其他 Delegate target 在 admission 前 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
@@ -65,12 +65,13 @@ Chat / Host Input / Gateway
   → durable dispatcher / receipt / read-only projection
 ```
 
-认证 Host Input/Gateway 在 Governor 前将 Secure Ingress principal 冻结为 command principal；`GovernedHostRuntime` 对 direct `chat/skill/delegate` 与 approved-plan 统一冻结 `surface / principal_id / ingress_claim_ref / ingress_audit_ref / input_sha256`。Plan 在首次 repository admission 前以 base request/session/principal 只读预检 parent Governor binding，direct route 也先预检，child grant 派生再复验；因此 principal 漂移不会留下不可执行的初始 Plan 图。同时具有成对 ingress ref 且 Gateway source 才是 `GATEWAY`，其他认证输入为 `HOST_INPUT`，无 ingress 为 `CHAT`；半绑定 ref 或畸形 SHA-256 失败关闭。该范围止于 admission，不覆盖 Delegate 内部 dispatcher 的 node grant/Attempt，也没有把已批准步骤的拓扑排序变成候选规划搜索。
+认证 Host Input/Gateway 在 Governor 前将 Secure Ingress principal 冻结为 command principal；`GovernedHostRuntime` 对 direct `chat/skill/delegate` 与 approved-plan 统一冻结 `surface / principal_id / ingress_claim_ref / ingress_audit_ref / input_sha256`。Plan 在首次 repository admission 前以 base request/session/principal 只读预检 parent Governor binding，direct route 也先预检，child grant 派生再复验；因此 principal 漂移不会留下不可执行的初始 Plan 图。同时具有成对 ingress ref 且 Gateway source 才是 `GATEWAY`，其他认证输入为 `HOST_INPUT`，无 ingress 为 `CHAT`；半绑定 ref 或畸形 SHA-256 失败关闭。D10 为 `pentest_agent` 建立唯一启用的 inner delegate adapter：不可变 invocation 带 command、graph/revision/node、attempt、lease/owner/fence、parent/node grant，调用前重验 durable grant，handler 只产生无副作用 Domain Pack/SecureRun handoff，也不写 legacy `skill_exec_log`。其它 target 在 direct/plan admission 前拒绝；这不是通用子 Agent 平台，也没有把已批准步骤的拓扑排序变成候选规划搜索。
 
 关键实现：
 
 - `host_brain/agent_runtime/cortex_runtime.py`
 - `host_brain/app/governed_task_adapter.py`
+- `host_brain/app/governed_delegate_dispatch.py`
 - `host_brain/app/governed_task_authority.py`
 - `host_brain/orchestration/governed_command.py`
 - `host_brain/secure_ingress/graph_cancellation_authority.py`

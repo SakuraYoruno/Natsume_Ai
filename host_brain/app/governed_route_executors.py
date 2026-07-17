@@ -86,6 +86,7 @@ class FrozenDelegateRouteExecutor:
 
         dispatched = self._dispatch(
             ports=self._ports,
+            frozen=frozen,
             request_id=frozen.request_id,
             session_id=frozen.session_id,
             person_id=frozen.principal_id,

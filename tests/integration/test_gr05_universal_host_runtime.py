@@ -168,7 +168,6 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
     monkeypatch,
 ) -> None:
     chat_calls: list[dict] = []
-    delegate_calls: list[dict] = []
     skill_calls: list[str] = []
     delivered_replies: list[dict] = []
 
@@ -184,24 +183,9 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             "target_id": "surface_reply",
         }
 
-    async def frozen_delegate(**kwargs):  # noqa: ANN003
-        delegate_calls.append(dict(kwargs))
-        return SimpleNamespace(
-            route_type="delegate",
-            target_id=kwargs["target_id"],
-            success=True,
-            result_text=f"delegate:{kwargs['task_text']}",
-            error_text="",
-            payload={"audit_refs": {"fake_delegate": True}},
-        )
-
     monkeypatch.setattr(
         "host_brain.app.route_execution_ports.stream_governed_chat_with_context",
         frozen_chat,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.route_execution_ports.dispatch_governed_delegate",
-        frozen_delegate,
     )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
@@ -296,8 +280,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             session_id="session-gr05-universal",
             seq=2,
             route="delegate",
-            target_id="intent_agent",
-            task="delegate through governed runtime",
+            target_id="pentest_agent",
+            task="prepare a read-only threat model for example.test",
         )
         plan = _intent(
             request_id="request-gr05-plan",
@@ -324,8 +308,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                     "candidate_id": "research",
                     "step_index": 2,
                     "route": "delegate",
-                    "target_id": "intent_agent",
-                    "task_description": "research the curated result",
+                    "target_id": "pentest_agent",
+                    "task_description": "prepare a read-only security plan for example.test",
                     "dependencies": ["curate"],
                 },
                 {
@@ -448,7 +432,6 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             results["plan"][-1]["execution_receipt"]["command_id"]
         )
         assert len(chat_calls) == 2
-        assert len(delegate_calls) == 2
         assert skill_calls == ["agent_memory_curator"]
         assert len(delivered_replies) == 1
         assert delivered_replies[0]["request_id"] == chat["request_id"]
@@ -470,6 +453,14 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             ).fetchone()[0]
             projections = conn.execute(
                 "SELECT COUNT(*) FROM task_runtime_worker_projection"
+            ).fetchone()[0]
+            legacy_delegate_logs = conn.execute(
+                """
+                SELECT COUNT(*) FROM skill_exec_log
+                WHERE request_id IN (?, ?)
+                  AND skill_name LIKE 'sub_agent:%'
+                """,
+                (delegate["request_id"], plan["request_id"]),
             ).fetchone()[0]
             acceptance_effects = conn.execute(
                 """
@@ -499,6 +490,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         # node now does so as well, giving every accepted route the same B5
         # result-authority journal.
         assert projections == 5
+        assert legacy_delegate_logs == 0
         assert acceptance_effects == [
             ("conversation.user_turn", "GRAPH", "COMMITTED", 3),
             ("life.foreground_completed", "GRAPH", "COMMITTED", 3),

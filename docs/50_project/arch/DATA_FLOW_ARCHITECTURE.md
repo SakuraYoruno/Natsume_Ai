@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.3
+版本：v2.4
 
 核对日期：2026-07-18
 
@@ -41,7 +41,7 @@ flowchart TD
     Cortex --> Route{"route"}
     Route -->|chat| Chat["Frozen Chat node"]
     Route -->|skill| Skill["Frozen Skill node"]
-    Route -->|delegate| Delegate["Frozen Delegate node\nouter authority only"]
+    Route -->|delegate| Delegate["Frozen Delegate node\n仅 pentest_agent 有内层授权"]
     Route -->|plan| Plan["已批准 steps 的拓扑合法化"]
 
     Chat --> Compile["HostCommand + WorkOrderV3 + TaskGraph"]
@@ -125,7 +125,7 @@ flowchart TD
 
 上图的核心结论是：
 
-- Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行；这只证明 outer admission。Delegate 内部 dispatcher 尚未消费 TaskNode grant/Attempt，故四路的通用执行闭环仍不完整。
+- Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。D10 已让 `pentest_agent` Delegate 带着冻结的 command/graph/node/attempt/lease/fence/parent+node grant invocation 执行；真正调用前重验 node grant，Attempt/Lease/Fence 仍由外层 durable worker 保持。该 handler 仅生成无副作用的 Domain Pack/SecureRun handoff，且不写 legacy `skill_exec_log`。`intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 与未注册 target 均在 HostCommand/TaskGraph admission 前拒绝，因此 Delegate 通用平台仍未完成。
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
 - Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Budget 高竞争唯一 winner、single-node post-budget checkpoint continuation、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation 已有证据；general/multi-node/pre-budget recovery、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle 和真实 canary仍缺，atomic/bounded/cancellation 均保持 OFF。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
@@ -160,7 +160,7 @@ Gateway 不直接调用 Host worker。它先完成签名验证、规范化与 du
 
 Gateway 的 intake ack 只表示“已持久接收”。Gateway 只在 Host 返回可验证的 Host input receipt 后才把 inbox 标记为完成。该回执要绑定 source、body digest 和 idempotency digest，不仅检查 HTTP 200。
 
-受认证 Host Input/Gateway 在 Governor 前冻结 Secure Ingress principal，并在 direct `chat/skill/delegate` 与 approved-plan admission 中保留同一 `surface / principal / claim_ref / audit_ref / body SHA-256`。Plan 在首次 HostCommand/TaskGraph admission 前以 base request/session/principal 只读预检 parent Governor binding，direct route 也先预检，child grant 派生再复验。只有成对 ref 与 Gateway source 同时存在时 surface 为 `GATEWAY`；其他认证输入为 `HOST_INPUT`，无 ingress 才是 `CHAT`。半绑定 ref、畸形摘要或 parent binding 漂移会失败关闭。该边界止于 admission，未授予 Delegate 内部 dispatcher node grant/Attempt，也未让 Plan 生成候选方案。
+受认证 Host Input/Gateway 在 Governor 前冻结 Secure Ingress principal，并在 direct `chat/skill/delegate` 与 approved-plan admission 中保留同一 `surface / principal / claim_ref / audit_ref / body SHA-256`。Plan 在首次 HostCommand/TaskGraph admission 前以 base request/session/principal 只读预检 parent Governor binding，direct route 也先预检，child grant 派生再复验。只有成对 ref 与 Gateway source 同时存在时 surface 为 `GATEWAY`；其他认证输入为 `HOST_INPUT`，无 ingress 才是 `CHAT`。半绑定 ref、畸形摘要或 parent binding 漂移会失败关闭。D10 只把这个 authority 继续传给 `pentest_agent` 的内层 immutable invocation；其余 Delegate target 在 admission 前失败关闭，Plan 也仍不会生成候选方案。
 
 Host 内的 Canon/Tool/Bond HTTP 与对应 OBS command adapter 现在从同一个 app-local frozen `HostRoutePorts` 解析依赖；router factory 在 app 构造时闭包绑定，运行期不再通过 module setter 或 `process_services` fallback 改写三类 provider。因此同解释器多 Host app 的请求不会因后构造 app 而串到另一对象图。该数据流边界仅覆盖三类 route；其余 OBS/Scheduler/Review/Life/Tribe locator 尚未迁移。
 
@@ -208,9 +208,9 @@ Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加�
 
 ### 4.3 Delegate
 
-Delegate worker 仅接受冻结的 `target_id`。[route_execution_ports.py](../../../host_brain/app/route_execution_ports.py) 会拒绝上下文中企图带入的 route/planning authority，并在 dispatcher 返回后再次校验 target。
+Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_dispatch.py](../../../host_brain/app/governed_delegate_dispatch.py) 只注册 `pentest_agent`，将 command/request/session/principal、root WorkOrder、graph/revision/node、attempt、lease/owner/fence、parent/node grant、objective 与 input reference 冻结为一次 invocation；调用前重新校验 node grant，并只投影无副作用的 Domain Pack/SecureRun handoff。它不经过旧 `SubAgentDispatcher`、全局 Agent gateway 或独立 `skill_exec_log`。
 
-这保证了 worker 执行的是上游冻结决定，不是在 worker 内部重新选择 agent。它不代表 child agent 内部的所有工作也已转换为同一 TaskGraph。
+`intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 以及未注册 target 会在 direct/Plan admission 前失败关闭。故该实现保证已启用目标执行的是上游冻结决定，而不是 worker 内重新选择 agent；它不代表 child agent 的全部工作已迁入同一 TaskGraph，也不代表一般 Delegate 平台已经完成。
 
 ### 4.4 Plan
 

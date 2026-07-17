@@ -33,7 +33,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     }
     assert report.missing_route_controls == {
         "delegate": (
-            "node_bound_grant",
             "budget_enforcement",
             "review_resume",
             "verification",

@@ -10,6 +10,7 @@ from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 import host_brain.app.governed_task_adapter as governed_task_adapter
 from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_AUTHORITY_INVALID,
+    GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
     GOVERNED_HOST_RUNTIME_INACTIVE,
     GovernedHostAdapterError,
     GovernedHostRuntime,
@@ -146,6 +147,7 @@ async def test_chat_and_delegate_exact_replay_use_route_aware_authority_validati
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
+        delegate_target_validator=lambda _target: None,
     )
     await runtime.activate()
     intent = {
@@ -226,6 +228,7 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
+        delegate_target_validator=lambda _target: None,
     )
     intent = {
         "schema_version": "Natsume.intent.v1",
@@ -274,6 +277,38 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
         assert command.ingress_claim_ref == authority["claim_ref"]
         assert command.ingress_audit_ref == authority["audit_ref"]
         assert command.input_sha256 == "sha256:" + authority["body_sha256"]
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_direct_delegate_rejects_unenabled_target_before_application_admission() -> None:
+    repository = _ReplayCommandRepository()
+    application = _CapturingApplication(repository)
+
+    def reject(_target: str) -> None:
+        raise RuntimeError("delegate target not enabled")
+
+    runtime = GovernedHostRuntime(
+        application=application,
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=repository,
+        supported_routes=frozenset({"delegate"}),
+        delegate_target_validator=reject,
+    )
+    request = _request()
+    request["intent_draft"] = {
+        **request["intent_draft"],
+        "route": "delegate",
+        "target_id": "repair_agent",
+    }
+    await runtime.activate()
+    try:
+        with pytest.raises(GovernedHostAdapterError) as raised:
+            await _collect(runtime.execute_stream(**request))
+        assert raised.value.reason_code == GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE
+        assert application.calls == 0
+        assert repository.record is None
     finally:
         await runtime.aclose()
 

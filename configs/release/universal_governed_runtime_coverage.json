@@ -3,7 +3,7 @@
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
   "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT",
-  "route_control_scope": "Route PASS means the actual worker path consumes the control, not merely that an outer admitted graph has it. It does not prove program-wide Budget coverage, production feature enablement, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "route_control_scope": "Route PASS means the actual enabled worker path consumes the control, not merely that an outer admitted graph has it. Delegate is intentionally narrower: D10 proves the read-only pentest_agent adapter only; every other delegate target is rejected before HostCommand/TaskGraph admission. It does not prove program-wide Budget coverage, production feature enablement, a general delegate platform, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
@@ -69,16 +69,19 @@
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
+        "host_brain/app/governed_delegate_dispatch.py",
         "host_brain/app/governed_route_executors.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
+        "tests/unit/test_ne01_governed_delegate_dispatch.py",
         "tests/integration/test_gr05_universal_host_runtime.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
       ],
+      "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant; its node grant is revalidated before an effect-free Domain Pack/SecureRun handoff while the outer durable worker retains Attempt/Lease/Fence checks. intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
         "durable_attempt_lease": "PASS",
-        "node_bound_grant": "MISSING",
+        "node_bound_grant": "PASS",
         "budget_enforcement": "PARTIAL",
         "review_resume": "PARTIAL",
         "verification": "PARTIAL",
@@ -93,6 +96,8 @@
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
         "host_brain/app/governed_task_adapter.py",
+        "host_brain/app/governed_delegate_dispatch.py",
+        "tests/unit/test_ne01_governed_delegate_dispatch.py",
         "tests/integration/test_gr04_planning_replan_sqlite.py",
         "tests/integration/test_gr05_universal_host_runtime.py",
         "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"

@@ -17,6 +17,13 @@ from dataclasses import dataclass
 import time
 from typing import Any, Protocol
 
+from host_brain.app.governed_delegate_dispatch import (
+    GovernedDelegateDispatchError,
+    GovernedDelegateInvocation,
+    GovernedDelegateOutcome,
+)
+from host_brain.task_runtime.governed_workers import FrozenNodeInput
+
 
 class SurfaceReplyStream(Protocol):
     def __call__(self, value: Any) -> AsyncIterator[str]: ...
@@ -29,9 +36,7 @@ class GovernedRouteExecutionPorts:
     surface_reply_input_factory: Callable[..., Any]
     resolve_surface_reply_llm_runtime: Callable[..., Any]
     surface_reply_sse_generator: SurfaceReplyStream
-    sub_agent_request_factory: Callable[..., Any]
-    get_sub_agent_dispatcher: Callable[[], Any]
-    subagent_dispatch_timeout_ms: int
+    governed_delegate_dispatcher: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,15 +57,19 @@ class RouteExecutionBoundaryError(RuntimeError):
     """Raised when authority is smuggled into a frozen execution port."""
 
 
-def build_governed_route_execution_ports() -> GovernedRouteExecutionPorts:
+def build_governed_route_execution_ports(
+    *,
+    governed_delegate_dispatcher: Any,
+) -> GovernedRouteExecutionPorts:
     """Compose only collaborators needed to execute an already-frozen node."""
+
+    if not callable(getattr(governed_delegate_dispatcher, "dispatch", None)):
+        raise RouteExecutionBoundaryError(
+            "governed_delegate_dispatcher.dispatch is required"
+        )
 
     from host_brain.app.graph_config_builder import (  # noqa: PLC0415
         resolve_surface_reply_llm_runtime,
-    )
-    from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
-        SubAgentRequest,
-        get_sub_agent_dispatcher,
     )
     from host_brain.app.surface_reply_preprocessor import (  # noqa: PLC0415
         SurfaceReplyInput,
@@ -68,20 +77,11 @@ def build_governed_route_execution_ports() -> GovernedRouteExecutionPorts:
     from host_brain.app.surface_reply_runtime import (  # noqa: PLC0415
         surface_reply_sse_generator,
     )
-    from host_brain.core.orchestration_settings import (  # noqa: PLC0415
-        get_orchestration_settings,
-    )
-
-    timeout_ms = int(get_orchestration_settings().subagent_dispatch_timeout_ms)
-    if timeout_ms <= 0:
-        raise RouteExecutionBoundaryError("sub-agent dispatch timeout must be positive")
     return GovernedRouteExecutionPorts(
         surface_reply_input_factory=SurfaceReplyInput,
         resolve_surface_reply_llm_runtime=resolve_surface_reply_llm_runtime,
         surface_reply_sse_generator=surface_reply_sse_generator,
-        sub_agent_request_factory=SubAgentRequest,
-        get_sub_agent_dispatcher=get_sub_agent_dispatcher,
-        subagent_dispatch_timeout_ms=timeout_ms,
+        governed_delegate_dispatcher=governed_delegate_dispatcher,
     )
 
 
@@ -277,6 +277,7 @@ def _build_chat_input(
 async def dispatch_governed_delegate(
     *,
     ports: GovernedRouteExecutionPorts | Any,
+    frozen: FrozenNodeInput,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -284,13 +285,23 @@ async def dispatch_governed_delegate(
     task_text: str,
     user_message: str,
     context: dict[str, Any] | None = None,
-    timeout_ms: int | None = None,
 ) -> RouteExecutionOutcome:
-    """Dispatch exactly one already-selected delegate target."""
+    """Dispatch one frozen delegate node through the typed inner boundary."""
 
-    _ = person_id  # identity is already bound by the admitted node/grant
     target = _required_text(target_id, field_name="target_id")
     task = _required_text(task_text, field_name="task_text")
+    if not isinstance(frozen, FrozenNodeInput):
+        raise RouteExecutionBoundaryError("delegate dispatch requires FrozenNodeInput")
+    if (
+        str(frozen.request_id or "").strip() != _required_text(request_id, field_name="request_id")
+        or str(frozen.session_id or "").strip() != _required_text(session_id, field_name="session_id")
+        or str(frozen.principal_id or "").strip() != _required_text(person_id, field_name="person_id")
+        or str(frozen.target_id or "").strip() != target
+        or str(frozen.objective or "").strip() != task
+    ):
+        raise RouteExecutionBoundaryError(
+            "delegate call arguments drifted from the frozen TaskNode"
+        )
     safe_context = dict(context or {})
     forbidden = {
         "route",
@@ -307,42 +318,38 @@ async def dispatch_governed_delegate(
             f"delegate context contains route/planning authority: {', '.join(leaked)}"
         )
 
-    resolved_timeout = int(
-        timeout_ms
-        if timeout_ms is not None
-        else getattr(ports, "subagent_dispatch_timeout_ms", 0)
-    )
-    if resolved_timeout <= 0:
-        raise RouteExecutionBoundaryError("sub-agent dispatch timeout must be positive")
-
     started = time.perf_counter()
-    response = await ports.get_sub_agent_dispatcher().dispatch(
-        ports.sub_agent_request_factory(
-            agent_id=target,
-            task=task,
+    try:
+        invocation = GovernedDelegateInvocation.from_frozen(
+            frozen=frozen,
             user_message=str(user_message or "").strip(),
-            request_id=_required_text(request_id, field_name="request_id"),
-            session_id=_required_text(session_id, field_name="session_id"),
             context=safe_context,
-            timeout_ms=resolved_timeout,
         )
-    )
+        response = ports.governed_delegate_dispatcher.dispatch(invocation)
+        if hasattr(response, "__await__"):
+            response = await response
+    except GovernedDelegateDispatchError as exc:
+        raise RouteExecutionBoundaryError(str(exc)) from exc
     measured_latency_ms = int((time.perf_counter() - started) * 1000)
-    response_agent_id = _text(getattr(response, "agent_id", ""))
-    if response_agent_id and response_agent_id != target:
+    if not isinstance(response, GovernedDelegateOutcome):
         raise RouteExecutionBoundaryError(
-            "sub-agent response target differs from the frozen delegate target"
+            "governed delegate dispatcher returned an invalid outcome"
+        )
+    response_agent_id = _text(response.target_id)
+    if response_agent_id != target:
+        raise RouteExecutionBoundaryError(
+            "governed delegate outcome target differs from the frozen delegate target"
         )
     return RouteExecutionOutcome(
         route_type="delegate",
         target_id=target,
         skill_family=_text(safe_context.get("skill_family")) or "general",
-        success=bool(getattr(response, "success", False)),
-        result_text=_text(getattr(response, "result", "")),
-        error_text=_text(getattr(response, "error", "")),
-        latency_ms=max(measured_latency_ms, int(getattr(response, "latency_ms", 0) or 0)),
+        success=bool(response.success),
+        result_text=_text(response.result_text),
+        error_text=_text(response.error_text),
+        latency_ms=measured_latency_ms,
         payload={
-            "audit_refs": dict(getattr(response, "audit_refs", {}) or {}),
+            "audit_refs": dict(response.audit_refs or {}),
             "agent_id": response_agent_id or target,
         },
     )

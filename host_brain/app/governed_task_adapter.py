@@ -64,6 +64,9 @@ from host_brain.app.governed_route_executors import (
     FrozenChatRouteExecutor,
     FrozenDelegateRouteExecutor,
 )
+from host_brain.app.governed_delegate_dispatch import (
+    GovernedDelegateDispatchError,
+)
 from host_brain.app.governed_task_authority import (
     GOVERNED_HOST_AUTHORITY_INVALID,
     GovernedHostAdapterError,
@@ -106,6 +109,9 @@ GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
 )
 GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE = (
     "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE"
+)
+GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE = (
+    "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE"
 )
 GOVERNED_HOST_WORKER_ROUTE = "skill"
 
@@ -623,6 +629,7 @@ class GovernedHostRuntime:
         supported_routes: frozenset[str] = frozenset({"skill"}),
         planning_enabled: bool = False,
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
+        delegate_target_validator: Callable[[str], Any] | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -634,6 +641,7 @@ class GovernedHostRuntime:
         )
         self._planning_enabled = bool(planning_enabled)
         self._acceptance_effect_dispatcher = acceptance_effect_dispatcher
+        self._delegate_target_validator = delegate_target_validator
         self._acceptance_effect_stop = asyncio.Event()
         self._acceptance_effect_task: asyncio.Task[None] | None = None
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
@@ -876,6 +884,8 @@ class GovernedHostRuntime:
                     frozen_context=frozen_context,
                 )
             else:
+                if route == "delegate":
+                    self._validate_delegate_target(intent_draft)
                 authority = dict(command_authority or {})
                 surface = _resolve_host_command_surface(
                     request_body=request_body,
@@ -1068,6 +1078,7 @@ class GovernedHostRuntime:
                 runtime_router=self._runtime_router,
             ),
             command_application=self._application,
+            delegate_target_validator=self._delegate_target_validator,
         )
         replan = failure_replan_reference_from_intent(intent_draft)
         if replan is None:
@@ -1094,6 +1105,41 @@ class GovernedHostRuntime:
             )
         async for event in service.execute_stream(prepared):
             yield await self._dispatch_accepted_effects(event)
+
+    def _validate_delegate_target(self, intent_draft: Mapping[str, Any]) -> None:
+        validator = self._delegate_target_validator
+        target_id = str(
+            intent_draft.get("target_id")
+            or intent_draft.get("agent_id")
+            or ""
+        ).strip()
+        if not target_id:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate route has no target_id",
+            )
+        if validator is None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target registry is not composed",
+            )
+        try:
+            result = validator(target_id)
+        except GovernedDelegateDispatchError as exc:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                exc.detail,
+            ) from exc
+        except Exception as exc:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target validation failed",
+            ) from exc
+        if inspect.isawaitable(result):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target validator must be synchronous before admission",
+            )
 
     async def _dispatch_accepted_effects(
         self,
@@ -1148,6 +1194,9 @@ def build_governed_host_runtime(
         dispatch_governed_delegate,
         stream_governed_chat_with_context,
     )
+    from host_brain.app.governed_delegate_dispatch import (  # noqa: PLC0415
+        build_governed_delegate_dispatcher,
+    )
 
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
@@ -1157,6 +1206,9 @@ def build_governed_host_runtime(
     node_grant_verifier = DurableNodeGrantVerifier(
         ledger=ledger,
         review_store=task_runtime_container.review_continuation_store,
+    )
+    delegate_dispatcher = build_governed_delegate_dispatcher(
+        node_grants=node_grant_verifier,
     )
     skill_execution_ports = build_governed_skill_execution_ports(
         skill_registry=skill_registry,
@@ -1177,7 +1229,9 @@ def build_governed_host_runtime(
     chat_worker = None
     delegate_worker = None
     if projection_store is not None:
-        route_execution_ports = build_governed_route_execution_ports()
+        route_execution_ports = build_governed_route_execution_ports(
+            governed_delegate_dispatcher=delegate_dispatcher,
+        )
         chat_worker = GovernedFrozenNodeWorker(
             route_kind="chat",
             executor=FrozenChatRouteExecutor(
@@ -1265,6 +1319,7 @@ def build_governed_host_runtime(
         ),
         planning_enabled=projection_store is not None,
         acceptance_effect_dispatcher=effect_dispatcher,
+        delegate_target_validator=delegate_dispatcher.require_target,
     )
 
 
@@ -1750,6 +1805,7 @@ async def _review_continuation_result(
 
 __all__ = [
     "GOVERNED_HOST_AUTHORITY_INVALID",
+    "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE",
     "GOVERNED_HOST_GOVERNOR_GRANT_MISSING",
     "GOVERNED_HOST_ROUTE_UNSUPPORTED",
     "GOVERNED_HOST_RUNTIME_INACTIVE",

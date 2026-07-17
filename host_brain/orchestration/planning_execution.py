@@ -9,7 +9,7 @@ lineage.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 import inspect
 from typing import Any
@@ -24,6 +24,7 @@ from host_brain.orchestration.planning_graph_compiler import (
     PlanningGraphCompiler,
 )
 from host_brain.planning_search.contracts import SearchRequest, SearchResult, SearchStatus
+from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
 from host_brain.planning_search.service import PlanningSearchService
 from natsume_contracts.task import HostCommandSurface
 
@@ -31,6 +32,9 @@ from natsume_contracts.task import HostCommandSurface
 PLANNING_EXECUTION_INVALID = "PLANNING_EXECUTION_INVALID"
 PLANNING_EXECUTION_SEARCH_FAILED = "PLANNING_EXECUTION_SEARCH_FAILED"
 PLANNING_EXECUTION_REVISION_CONFLICT = "PLANNING_EXECUTION_REVISION_CONFLICT"
+PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE = (
+    "PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE"
+)
 
 
 class PlanningExecutionError(RuntimeError):
@@ -128,6 +132,7 @@ class GovernedPlanningExecutionService:
         compiler: PlanningGraphCompiler,
         admission: GovernedPlanningAdmissionService,
         command_application: Any,
+        delegate_target_validator: Callable[[str], Any] | None = None,
     ) -> None:
         if not callable(getattr(command_application, "execute_stream", None)):
             raise ValueError("command_application.execute_stream is required")
@@ -141,6 +146,7 @@ class GovernedPlanningExecutionService:
         self._compiler = compiler
         self._admission = admission
         self._application = command_application
+        self._delegate_target_validator = delegate_target_validator
 
     async def prepare_initial(
         self,
@@ -259,6 +265,7 @@ class GovernedPlanningExecutionService:
         authority: PlanningExecutionAuthority,
     ) -> PreparedPlanningExecution:
         graph = compiled.task_graph
+        self._validate_delegate_targets(graph)
         # Planning admission owns the first HostCommand/TaskGraph write. Its
         # parent authority must be checked here, not only in execute_stream.
         # Replans bind the original Governor request rather than their
@@ -292,10 +299,38 @@ class GovernedPlanningExecutionService:
         prepared.validate()
         return prepared
 
+    def _validate_delegate_targets(self, graph: TaskGraph) -> None:
+        validator = self._delegate_target_validator
+        if validator is None:
+            return
+        for node in graph.nodes:
+            try:
+                route = GovernedWorkerRoute.parse(node.route)
+            except Exception as exc:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    f"compiled TaskNode route is invalid: {node.node_id}",
+                ) from exc
+            if route.kind != "delegate" or route.target_id is None:
+                continue
+            try:
+                verdict = validator(route.target_id)
+            except Exception as exc:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE,
+                    "compiled delegate target is not enabled: " + route.target_id,
+                ) from exc
+            if inspect.isawaitable(verdict):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "delegate target validator must be synchronous before admission",
+                )
+
 
 __all__ = [
     "GovernedPlanningExecutionService",
     "PLANNING_EXECUTION_INVALID",
+    "PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE",
     "PLANNING_EXECUTION_REVISION_CONFLICT",
     "PLANNING_EXECUTION_SEARCH_FAILED",
     "PlanningExecutionAuthority",
