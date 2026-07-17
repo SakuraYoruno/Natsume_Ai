@@ -11,9 +11,20 @@ from .calibration import (
     CalibrationRecord,
     CalibrationRepository,
 )
+from .benchmarking import (
+    DOMAIN_BENCHMARK_MODE,
+    DOMAIN_BENCHMARK_SCHEMA,
+    BenchmarkArm,
+    BenchmarkArmOutcome,
+    DomainBenchmarkContractError,
+    DomainBenchmarkPort,
+    DomainBenchmarkReport,
+    DomainBenchmarkWorkload,
+)
 from .contracts import (
     CandidateScore,
     MCTSMode,
+    PlanningGoal,
     RankedCandidate,
     SearchBudget,
     SearchCandidate,
@@ -22,12 +33,15 @@ from .contracts import (
     SearchResult,
     SearchStatus,
     SearchTraceEvent,
+    VIRTUAL_STATE_SNAPSHOT_SCHEMA,
+    VirtualStateSnapshot,
 )
 from .ports import (
     CandidateExpansionPort,
     CognitiveRankingPort,
     MCTSConditionPort,
     RewardModelPort,
+    SuccessorCatalogPort,
     VirtualTransitionPort,
 )
 from .service import PlanningSearchService
@@ -36,6 +50,10 @@ __all__ = [
     "CALIBRATION_MODE_SHADOW_ONLY",
     "CALIBRATION_OUTCOME_SCHEMA",
     "CALIBRATION_PREDICTION_SCHEMA",
+    "DOMAIN_BENCHMARK_MODE",
+    "DOMAIN_BENCHMARK_SCHEMA",
+    "BenchmarkArm",
+    "BenchmarkArmOutcome",
     "CandidateExpansionPort",
     "CandidateScore",
     "CalibrationContractError",
@@ -45,8 +63,13 @@ __all__ = [
     "CalibrationRecord",
     "CalibrationRepository",
     "CognitiveRankingPort",
+    "DomainBenchmarkContractError",
+    "DomainBenchmarkPort",
+    "DomainBenchmarkReport",
+    "DomainBenchmarkWorkload",
     "MCTSConditionPort",
     "MCTSMode",
+    "PlanningGoal",
     "PlanningSearchService",
     "RankedCandidate",
     "RewardModelPort",
@@ -57,5 +80,8 @@ __all__ = [
     "SearchResult",
     "SearchStatus",
     "SearchTraceEvent",
+    "SuccessorCatalogPort",
+    "VIRTUAL_STATE_SNAPSHOT_SCHEMA",
+    "VirtualStateSnapshot",
     "VirtualTransitionPort",
 ]

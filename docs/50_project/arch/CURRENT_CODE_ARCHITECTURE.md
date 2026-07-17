@@ -21,7 +21,7 @@
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
-| 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
+| 通用 PlanningSearch | `PARTIAL_D14_GOAL_PLANNING_FOUNDATION` | 公共 L1/L2/L3 内核之外，新增不可变 Goal/VirtualStateSnapshot、动态 SuccessorCatalog 语义、纯 GoalPlanningService、shadow benchmark 合同，以及把图级 authority 从动态 candidate 移入 compiler context；尚无任何生产 domain cutover 或收益结论 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
@@ -251,13 +251,22 @@ Task Runtime Outbox 已由 0093 建立跨进程 durable claim/CAS，0095 则把 
 
 `host_brain/planning_search/` 已提供：
 
-- `SearchRequest`、`SearchCandidate`、`SearchBudget`、`SearchResult`；
-- Candidate Expansion、Cognitive Ranking、Virtual Transition、Reward、MCTS Condition ports；
+- `SearchRequest`、`SearchCandidate`、`SearchBudget`、`SearchResult`；`VirtualStateSnapshot` 会对 capability/fact/constraint/source refs 计算不可伪造 digest；
+- `PlanningGoal`、`SuccessorCatalogPort`、Cognitive Ranking、Virtual Transition、Reward、MCTS Condition ports；
 - UCB 选择、rollout、backpropagation、预算和确定性 trace；
 - `CalibrationPrediction` / `CalibrationOutcome` / `CalibrationRepository`：shadow-only、JSON-safe 的不可变 evidence 合同；
+- `DomainBenchmarkWorkload` / baseline 与 selected arm / verifier receipt / isolation / budget 的 `DomainBenchmarkPort` 合同；该合同强制 `SHADOW_ONLY` 与 `production_influence_enabled=false`；
 - 不包含工具执行、网络访问或状态写入端口。
 
 公共算法本身成立，但“算法存在”不等于“生产规划能力已成立”。
+
+### 5.1.1 D14 Goal Planning foundation
+
+`host_brain/orchestration/goal_planning.py` 现在可以把同一领域的 immutable `PlanningGoal + VirtualStateSnapshot + PlanningDomainPorts` 送入唯一的 `PlanningSearchService`。它只返回带 state schema/digest 的纯 `SearchResult`；不编译、准入、持久化、调 worker 或执行工具。失败重规划也只冻结 failure/accepted artifact refs 并产生新的纯 request，Task Runtime 仍必须通过已有的 durable recovery → `PlanningGraphCompiler.replan()` → admission 创建 revision `+1`。
+
+`PlanningGraphCompiler` 新增可选 `PlanningCompilationContext`：新 goal-driven catalog 只能产生 node-level descriptor，不能夹带 budget、approval/review、workspace、idempotency 或 graph metadata。compiler 把 governor-bound context 写入 immutable WorkOrder，并把 VirtualState digest 同时绑定到 selected-plan lineage、`planner_ref`、operation fingerprint、input pack、metadata 与 compilation digest。旧 `planned_steps` compatibility path 仍在，不能因此被误称为 Host 自主候选规划。
+
+这只是通用接口与 immutable compilation foundation：没有 Host chat/plan 生产入口使用 `GoalPlanningService`，没有 Code/Research/Pentest 动态 successor 的 production cutover，没有实际成对 verifier receipt，也没有 MCTS 对真实用户任务的 influence。
 
 ### 5.2 Host Plan
 
@@ -288,7 +297,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ### 5.4 Code / Research
 
-`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。当前证据没有真实仓库、真实 Research 来源、真实 model call 或真实 verifier。
+`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract，不是一个已运行的真实 benchmark；当前证据仍没有真实仓库、真实 Research 来源、真实 model call 或真实 verifier。
 
 ## 6. 状态与 authority
 
