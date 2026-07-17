@@ -58,13 +58,6 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "trace",
 )
 
-# Compatibility name retained for tests and extensions written during the D2
-# transition.  The jobs are no longer pending after D3.
-LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS = (
-    OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS
-)
-
-
 @dataclass(frozen=True, slots=True)
 class ObsProjectionJob:
     """One explicitly injected projection callback."""
@@ -248,7 +241,6 @@ def build_default_obs_application_ports(
 
 
 __all__ = [
-    "LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS",
     "OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS",
     "ObsApplicationContainer",
     "ObsApplicationPorts",

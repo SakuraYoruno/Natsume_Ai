@@ -10,6 +10,10 @@ import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+)
+
 logger = logging.getLogger("Natsume.obs.metrics")
 
 # 支持的 metric 类型
@@ -84,7 +88,9 @@ class MetricsTimeseriesService:
 
         # 拉取原始数据
         gov_rows   = self._safe_fetch("governor_log",      start_time, end_time)
-        attempt_rows = self._safe_fetch("model_attempt_log", start_time, end_time)
+        attempt_rows = latest_terminal_model_attempts(
+            self._safe_fetch("model_attempt_log", start_time, end_time)
+        )
 
         # 填充桶
         self._fill_buckets(buckets, gov_rows, attempt_rows, interval_ms, start_time)
@@ -144,7 +150,11 @@ class MetricsTimeseriesService:
     # ------------------------------------------------------------------
     def _safe_fetch(self, table: str, start_ms: int, end_ms: int) -> List[Dict]:
         try:
-            return self._ledger.fetch_by_time_range(table, start_ms, end_ms)
+            return self._ledger.fetch_by_time_range(
+                table,
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
         except Exception as exc:
             logger.warning("MetricsTS: 读取 %s 失败 — %s", table, exc)
             return []

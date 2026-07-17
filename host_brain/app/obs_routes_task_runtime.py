@@ -26,7 +26,6 @@ from host_brain.app.observability_runtime.projection_runtime import (
     get_query_projection_worker,
     refresh_task_projections,
 )
-from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.observability.projection_store import QueryProjectionError
 from host_brain.observability.operator_query_gateway import (
     get_operator_query_context,
@@ -422,9 +421,6 @@ def refresh_task_runtime_query_projections() -> dict[str, int]:
         event_store=RuntimeEventStore(canonical_db_path),
     )
     return refresh_task_projections(source, get_query_projection_worker())
-
-
-register_projection_job("task-runtime", refresh_task_runtime_query_projections)
 
 
 def _require_operator_views_enabled() -> None:

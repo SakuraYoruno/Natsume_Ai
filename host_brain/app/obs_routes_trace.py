@@ -47,7 +47,6 @@ from host_brain.app.observability_runtime.projection_runtime import (
     projection_meta,
     trace_source,
 )
-from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
@@ -83,11 +82,6 @@ TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS = 60_000
 # ---------------------------------------------------------------------------
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _get_ledger():
-    from host_brain.app.obs_routes_core import _get_ledger as _core_get_ledger
-    return _core_get_ledger()
 
 
 def _safe_json(text: Any) -> Any:
@@ -216,18 +210,11 @@ async def get_trace(request_id: str, request: Request):
 
 def refresh_trace_query_projections(
     *,
-    ledger: Any | None = None,
-    store: Any | None = None,
+    ledger: Any,
+    store: Any,
     tribe_event_reader: Any | None = None,
 ) -> dict[str, int]:
     """Background-only Trace journal scan and projection refresh."""
-
-    if ledger is None:
-        ledger = _get_ledger()
-    if store is None:
-        from host_brain.composition.process_services import get_query_projection_store
-
-        store = get_query_projection_store()
     build_full, _, build_feed, *_ = _get_trace_builders()
     now = _now_ms()
     since = now - 7 * 24 * 60 * 60 * 1000
@@ -399,9 +386,6 @@ def refresh_trace_query_projections(
                 detail=f"{type(exc).__name__}: {exc}",
             )
     return {"refreshed_count": refreshed, "failed_count": failed}
-
-
-register_projection_job("trace", refresh_trace_query_projections)
 
 
 # ---------------------------------------------------------------------------

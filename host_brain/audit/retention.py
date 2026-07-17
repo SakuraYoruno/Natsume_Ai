@@ -48,7 +48,6 @@ DEFAULT_KEEP_MS_BY_TABLE: dict[str, int] = {
     "graph_run_trace": 7 * MS_DAY,
     "llm_route_log": 7 * MS_DAY,
     "llm_route_config_log": 30 * MS_DAY,
-    "llm_node_call_log": 7 * MS_DAY,
     "model_attempt_log": 30 * MS_DAY,
     "llm_pool_call_log": 7 * MS_DAY,
     "llm_token_usage_log": 7 * MS_DAY,
@@ -59,7 +58,6 @@ DEFAULT_KEEP_MS_BY_TABLE: dict[str, int] = {
 DEFAULT_MAX_ROWS_BY_TABLE: dict[str, int] = {
     "error_log": 200_000,
     "service_health_log": 100_000,
-    "llm_node_call_log": 200_000,
     "model_attempt_log": 500_000,
     "llm_pool_call_log": 200_000,
     "llm_token_usage_log": 200_000,

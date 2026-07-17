@@ -16,9 +16,12 @@ from natsume_contracts.edge.embodiment_v1 import EmbodimentCommand, EmbodimentRe
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from host_brain.channels.embodiment import register_embodiment_receipt_observer
-from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
+)
 from host_brain.observability.service_registry import (
     ALL_SERVICES,
     EDGE_SERVICE_EVENT_PREFIXES,
@@ -170,9 +173,35 @@ def load_health_projection_sources(
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
     voice_rows = _ledger_rows(ledger, "voice_event_log", start_ms=since, end_ms=now)
-    llm_rows = _ledger_rows(ledger, "llm_node_call_log", start_ms=since, end_ms=now)
-    if not llm_rows:
-        llm_rows = _ledger_rows(ledger, "model_attempt_log", start_ms=since, end_ms=now)
+    model_attempt_rows = latest_terminal_model_attempts(
+        _ledger_rows(ledger, "model_attempt_log", start_ms=since, end_ms=now)
+    )
+    pool_rows = _ledger_rows(ledger, "llm_pool_call_log", start_ms=since, end_ms=now)
+    llm_gateway_rows: list[Mapping[str, Any]] = list(model_attempt_rows)
+    llm_gateway_rows.extend(
+        {
+            "status": "failed" if bool(row.get("pool_exhausted")) else "succeeded",
+            "latency_ms": row.get("total_latency_ms"),
+            "ts_ms": row.get("ts_ms"),
+            "request_id": row.get("request_id"),
+        }
+        for row in pool_rows
+    )
+    # Sources are loaded independently and therefore arrive in source-grouped
+    # order.  Health's rolling window must be chronological across both the
+    # canonical ModelAttempt path and the explicit legacy pool path; otherwise
+    # the second appended source wins regardless of recency.
+    llm_gateway_rows.sort(
+        key=lambda row: (
+            _safe_int(
+                row.get("ended_at_ms")
+                if row.get("ended_at_ms") is not None
+                else row.get("ts_ms")
+            ),
+            str(row.get("attempt_id") or row.get("request_id") or ""),
+            _safe_int(row.get("id")),
+        )
+    )
 
     services: list[dict[str, Any]] = []
     for service in ALL_SERVICES:
@@ -203,7 +232,7 @@ def load_health_projection_sources(
                 ]
             )
         elif service_id == "llm_gateway":
-            health = _compute_health(llm_rows)
+            health = _compute_health(llm_gateway_rows)
         elif service_id == "sqlite_ledger":
             health = {
                 "status": "UP",
@@ -241,12 +270,8 @@ def load_health_projection_sources(
         else:
             matching = [
                 row
-                for row in llm_rows
-                if str(row.get("node_id") or row.get("model_node_id") or "") == node_id
-                or (
-                    str(row.get("provider") or "").lower() == meta["provider"].lower()
-                    and str(row.get("model_id") or "") == meta["model_id"]
-                )
+                for row in model_attempt_rows
+                if model_attempt_node_id(row) == node_id
             ]
             health = _compute_health(matching)
         nodes.append({"node_id": node_id, **meta, **health})
@@ -709,9 +734,6 @@ def run_organ_tribe_projection_job() -> dict[str, int | bool]:
 
 
 register_embodiment_receipt_observer(_observe_embodiment_receipt)
-register_projection_job("health-passive", run_health_projection_job)
-register_projection_job("device-status", run_device_status_projection_job)
-register_projection_job("organ-tribe", run_organ_tribe_projection_job)
 
 
 __all__ = [

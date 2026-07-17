@@ -154,20 +154,23 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
 
     measured: dict[str, int] = {}
     has_total, total = _present_int("total_tokens", "totalTokenCount")
+    has_prompt, prompt = _present_int(
+        "prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount"
+    )
+    has_completion, completion = _present_int(
+        "completion_tokens",
+        "output_tokens",
+        "candidatesTokenCount",
+        "outputTokenCount",
+    )
+    if has_prompt:
+        measured["prompt_tokens"] = prompt
+    if has_completion:
+        measured["completion_tokens"] = completion
     if has_total:
         measured["token_count"] = total
-    else:
-        has_prompt, prompt = _present_int(
-            "prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount"
-        )
-        has_completion, completion = _present_int(
-            "completion_tokens",
-            "output_tokens",
-            "candidatesTokenCount",
-            "outputTokenCount",
-        )
-        if has_prompt and has_completion:
-            measured["token_count"] = prompt + completion
+    elif has_prompt and has_completion:
+        measured["token_count"] = prompt + completion
 
     # Cost is accepted only in the canonical integer micro-unit.  Currency
     # floats and provider-specific price estimates are deliberately ignored.
@@ -590,6 +593,16 @@ class ModelAttemptService:
             timeout_ms=max(1, timeout_ms),
             metadata=dict(request.metadata),
         )
+        audit_metadata: dict[str, Any] = {
+            "scene_type": request.scene_type,
+            "cognitive_tier": request.cognitive_tier,
+        }
+        # Model-node identity is a governed public dimension.  Preserve only
+        # this explicit key from caller metadata; arbitrary request metadata
+        # must never enter the durable audit journal.
+        model_node_id = str(request.metadata.get("model_node_id") or "").strip()
+        if model_node_id:
+            audit_metadata["model_node_id"] = model_node_id
         started = ModelAttemptRecord(
             attempt_id=attempt_id,
             request_id=request.request_id,
@@ -604,7 +617,7 @@ class ModelAttemptService:
             prompt_version=prompt.version,
             prompt_digest=prompt.digest,
             started_at_ms=self._wall_clock_ms(),
-            metadata={"scene_type": request.scene_type, "cognitive_tier": request.cognitive_tier},
+            metadata=audit_metadata,
         )
         return attempt_request, started, self._monotonic()
 

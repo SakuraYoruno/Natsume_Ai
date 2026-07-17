@@ -73,6 +73,10 @@ from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
 )
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -891,10 +895,13 @@ def _normalize_trace_status(raw_status: Any, *, default: str = "UNKNOWN") -> str
         return default
     return {
         "SUCCESS": "OK",
+        "SUCCEEDED": "OK",
         "HEALTHY": "OK",
         "ERROR": "FAIL",
         "FAILED": "FAIL",
         "REJECTED": "FAIL",
+        "TIMED_OUT": "FAIL",
+        "CANCELLED": "FAIL",
     }.get(normalized, normalized)
 
 
@@ -1542,6 +1549,64 @@ def _append_missing_trace_nodes(
     return appended
 
 
+def _canonical_llm_trace_rows(
+    model_attempt_rows: List[Dict[str, Any]],
+    pool_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in latest_terminal_model_attempts(model_attempt_rows):
+        attempt_id = str(row.get("attempt_id") or "").strip()
+        node_id = (
+            model_attempt_node_id(row)
+            or f"model_attempt:{attempt_id[:16]}"
+        )
+        rows.append(
+            {
+                **row,
+                "node_id": node_id,
+                "display_name": (_LLM_NODE_REGISTRY.get(node_id) or {}).get("role")
+                or "Model Attempt",
+                "reason_code": row.get("error_code"),
+                "input_data": {
+                    "prompt_id": row.get("prompt_id"),
+                    "prompt_version": row.get("prompt_version"),
+                    "attempt_index": row.get("attempt_index"),
+                    "retry_reason": row.get("retry_reason"),
+                },
+                "output_data": {
+                    "attempt_id": attempt_id,
+                    "output_digest": row.get("output_digest"),
+                },
+                "ts_ms": row.get("ended_at_ms") or row.get("ts_ms"),
+            }
+        )
+    for row in pool_rows:
+        scene = str(row.get("scene_type") or "CHAT").strip().upper() or "CHAT"
+        exhausted = bool(row.get("pool_exhausted"))
+        rows.append(
+            {
+                "node_id": f"llm_pool:{scene.lower()}",
+                "display_name": f"LLM Pool ({scene})",
+                "provider": row.get("final_provider"),
+                "model_id": row.get("final_model"),
+                "status": "failed" if exhausted else "succeeded",
+                "reason_code": "LLM_POOL_EXHAUSTED" if exhausted else None,
+                "latency_ms": row.get("total_latency_ms"),
+                "input_data": {
+                    "scene_type": scene,
+                    "cognitive_tier": row.get("cognitive_tier"),
+                },
+                "output_data": {
+                    "attempt_count": row.get("attempt_count"),
+                    "cached": bool(row.get("cached")),
+                    "pool_exhausted": exhausted,
+                },
+                "ts_ms": row.get("ts_ms"),
+            }
+        )
+    return rows
+
+
 def _build_llm_trace_nodes(
     llm_rows: List[Dict[str, Any]],
     summary: Dict[str, Any],
@@ -1553,15 +1618,17 @@ def _build_llm_trace_nodes(
             TraceNode(
                 node_id=str(row.get("node_id") or "llm_node"),
                 node_type="llm",
-                display_name=(registry_meta or {}).get("role") or str(row.get("node_id") or "LLM"),
+                display_name=row.get("display_name")
+                or (registry_meta or {}).get("role")
+                or str(row.get("node_id") or "LLM"),
                 side="host",
                 provider=row.get("provider"),
                 model_id=row.get("model_id"),
                 status=_normalize_trace_status(row.get("status"), default="OK"),
                 reason_code=row.get("reason_code"),
                 latency_ms=row.get("latency_ms"),
-                input_data={"input_digest": row.get("input_digest")},
-                output_data={"output_digest": row.get("output_digest")},
+                input_data=row.get("input_data"),
+                output_data=row.get("output_data"),
                 ts_ms=row.get("ts_ms"),
                 error=row.get("reason_code"),
             )
@@ -1806,7 +1873,19 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         return {"status": "UNKNOWN", "success_rate": None, "p95_ms": None, "last_call_ts": None}
     recent = rows[-window:]
     total = len(recent)
-    ok_count = sum(1 for r in recent if str(r.get("status", "")).upper() == "OK")
+    success_statuses = {
+        "OK",
+        "UP",
+        "SUCCESS",
+        "SUCCEEDED",
+        "COMPLETED",
+        "ACCEPTED",
+    }
+    ok_count = sum(
+        1
+        for row in recent
+        if str(row.get("status") or "").strip().upper() in success_statuses
+    )
     success_rate = round(ok_count / total * 100, 1) if total > 0 else 0.0
     latencies = [r["latency_ms"] for r in recent if r.get("latency_ms") is not None]
     p95_ms = None
@@ -2166,7 +2245,10 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    llm_rows = _canonical_llm_trace_rows(
+        _fetch_request_rows(ledger, "model_attempt_log", request_id),
+        _fetch_request_rows(ledger, "llm_pool_call_log", request_id),
+    )
     airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
     bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
@@ -2735,7 +2817,13 @@ def _build_probe_registry(ledger, since_ms: int):
     except Exception:
         voice_rows = []
     try:
-        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now_ms)
+        llm_rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=now_ms,
+            )
+        )
     except Exception:
         llm_rows = []
 
@@ -2749,8 +2837,13 @@ def _build_probe_registry(ledger, since_ms: int):
         except Exception:
             pass
         try:
-            llm_rows = ledger.fetch_by_time_range(
-                "llm_node_call_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
+            llm_rows = latest_terminal_model_attempts(
+                ledger.fetch_by_time_range(
+                    "model_attempt_log",
+                    start_ms=fallback_since_ms,
+                    end_ms=now_ms,
+                    limit=5000,
+                )
             )
         except Exception:
             pass
@@ -2867,7 +2960,7 @@ def _build_probe_registry(ledger, since_ms: int):
                 "call_count": 0,
             }
             continue
-        node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
+        node_rows = [r for r in llm_rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         _status = health["status"]
         _p95 = health["p95_ms"]
@@ -3261,13 +3354,19 @@ def get_llm_nodes(
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:
-        rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
+        rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=_now_ms(),
+            )
+        )
     except Exception:
         rows = []
 
     nodes = []
     for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in rows if r.get("node_id") == node_id]
+        node_rows = [r for r in rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         nodes.append(LlmNodeItem(
             node_id=node_id,

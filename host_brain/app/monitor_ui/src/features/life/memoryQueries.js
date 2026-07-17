@@ -10,6 +10,16 @@ import {
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
 import { OBS_QUERY_KEYS } from '../../shared/query/queryKeys.js'
 import useObservabilityQuery from '../../shared/query/useObservabilityQuery.js'
+import { settleObservabilityResources } from './observabilityResourceState.js'
+
+const MEMORY_RESOURCE_SPECS = Object.freeze([
+  { key: 'memoryData', source: 'memory_ops_log + life_memory_admission_receipt + scheduler_event_log + error_log' },
+  { key: 'episodicData', source: 'memory_ops_log + life_memory_admission_receipt' },
+  { key: 'distillData', source: 'error_log' },
+  { key: 'canonDocs', source: 'canon_document projection' },
+  { key: 'compressData', source: 'scheduler_event_log' },
+  { key: 'residentContext', source: 'resident memory projection' },
+])
 
 export function useMemoryOverviewQuery({
   windowMinutes = 360,
@@ -18,22 +28,27 @@ export function useMemoryOverviewQuery({
   pollingInterval = 30,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [memory, episodic, distill, canon, compress, resident] = await Promise.all([
-      fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
-      fetchEpisodicStoreStats({ window_minutes: windowMinutes }).catch(() => null),
-      fetchDistillationStats({ window_minutes: windowMinutes }).catch(() => null),
-      fetchCanonDocuments().catch(() => null),
-      fetchContextCompressorStats({ window_minutes: windowMinutes }).catch(() => null),
-      fetchResidentMemoryContext().catch(() => null),
-    ])
+    const requests = [
+      () => fetchMemoryStats({ window_minutes: windowMinutes }),
+      () => fetchEpisodicStoreStats({ window_minutes: windowMinutes }),
+      () => fetchDistillationStats({ window_minutes: windowMinutes }),
+      () => fetchCanonDocuments(),
+      () => fetchContextCompressorStats({ window_minutes: windowMinutes }),
+      () => fetchResidentMemoryContext(),
+    ]
+    const { resources, issues } = await settleObservabilityResources(
+      MEMORY_RESOURCE_SPECS.map((spec, index) => ({ ...spec, request: requests[index] })),
+    )
 
     return {
-      memoryData: memory,
-      episodicData: episodic,
-      distillData: distill,
-      canonDocs: canon,
-      compressData: compress,
-      residentContext: resident,
+      memoryData: resources.memoryData.data,
+      episodicData: resources.episodicData.data,
+      distillData: resources.distillData.data,
+      canonDocs: resources.canonDocs.data,
+      compressData: resources.compressData.data,
+      residentContext: resources.residentContext.data,
+      resourceStates: resources,
+      resourceIssues: issues,
     }
   }, [windowMinutes])
 
@@ -55,5 +70,7 @@ export function useMemoryOverviewQuery({
     canonDocs: query.data?.canonDocs ?? null,
     compressData: query.data?.compressData ?? null,
     residentContext: query.data?.residentContext ?? null,
+    resourceStates: query.data?.resourceStates ?? {},
+    resourceIssues: query.data?.resourceIssues ?? [],
   }
 }

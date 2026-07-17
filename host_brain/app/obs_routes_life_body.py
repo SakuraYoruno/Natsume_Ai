@@ -27,7 +27,6 @@ from host_brain.app.obs_routes_sysmode import (
     _build_runtime_snapshot_response,
 )
 from host_brain.app.obs_routes_trace import (
-    _get_ledger as _get_trace_ledger,
     _get_trace_builders,
 )
 from host_brain.app.observability_runtime.projection_runtime import (
@@ -725,12 +724,10 @@ def _get_recent_sessions_projection(
         }
 
 
-def _get_trace_feed_projection() -> dict[str, Any]:
+def _get_trace_feed_projection(projection_store: Any) -> dict[str, Any]:
     """Read the canonical durable trace-feed projection only."""
     try:
-        from host_brain.composition.process_services import get_query_projection_store
-
-        document = get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
+        document = projection_store.get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)
         meta = projection_meta(
             TRACE_FEED_KIND,
             TRACE_FEED_INDEX_KEY,
@@ -1364,7 +1361,7 @@ def _build_targeted_request_event(request_id: str) -> dict[str, Any] | None:
         (_, _build_trace_response_lightweight, *_) = _get_trace_builders()
         trace_payload = _model_dump_compat(
             _build_trace_response_lightweight(
-                _get_trace_ledger(),
+                _get_ledger(),
                 normalized_request_id,
                 reason="LIFE_TIMELINE_REQUEST_FALLBACK",
                 message="targeted request fallback for life timeline deep-link",
@@ -1974,7 +1971,7 @@ def _build_life_body_payload(
         projection_store=projection_store,
     )
     recent_sessions = [_as_dict(item) for item in _as_list(recent_sessions_projection.get("items"))]
-    trace_feed_projection = _get_trace_feed_projection()
+    trace_feed_projection = _get_trace_feed_projection(projection_store)
     trace_feed_items = [_as_dict(item) for item in _as_list(trace_feed_projection.get("items"))]
     memory_lineage_rows = _fetch_recent_ledger_rows(
         "memory_ops_log",

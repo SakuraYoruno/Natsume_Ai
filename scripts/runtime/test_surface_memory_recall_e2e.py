@@ -640,9 +640,18 @@ def _fetch_trace_snapshot(*, db_path: Path, request_id: str, timeout_sec: float)
                     dict(row)
                     for row in conn.execute(
                         """
-                        SELECT node_id, provider, model_id, status, reason_code, latency_ms, ts_ms
-                        FROM llm_node_call_log
+                        SELECT
+                            json_extract(metadata, '$.model_node_id') AS node_id,
+                            attempt_id,
+                            provider,
+                            model_id,
+                            status,
+                            error_code AS reason_code,
+                            latency_ms,
+                            ts_ms
+                        FROM model_attempt_log
                         WHERE request_id = ?
+                          AND status IN ('succeeded', 'failed', 'timed_out', 'rejected', 'cancelled')
                         ORDER BY id
                         """,
                         (request_id,),

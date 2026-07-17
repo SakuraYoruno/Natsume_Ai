@@ -18,7 +18,7 @@ from host_brain.app.observability_runtime.operator_live_sources import (
 )
 from host_brain.composition import process_services
 from host_brain.composition.obs_application import (
-    LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS,
+    OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS,
     ObsApplicationContainer,
     build_default_obs_application_ports,
 )
@@ -63,7 +63,7 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
         assert len(names) == 21
         assert len(set(names)) == 21
         assert names[:2] == ("ledger-stats", "life-evolution")
-        assert names[2:] == LEGACY_OBS_PROJECTION_JOBS_PENDING_EXPLICIT_PORTS
+        assert names[2:] == OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS
         assert ports.projection_coverage == "REGISTERED_21_OF_21"
         assert ports.missing_projection_jobs == ()
         assert all(job.source_mode != "CALLER_DEFINED" for job in ports.projection_jobs)
@@ -120,7 +120,7 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             path.read_text(encoding="utf-8-sig")
             for path in (ROOT / "host_brain" / "app").glob("obs_routes*.py")
         ]
-        assert sum(source.count("process_services") for source in route_sources) == 13
+        assert sum(source.count("process_services") for source in route_sources) == 5
         assert sum(
             source.count("get_projection_ledger_view") for source in route_sources
         ) == 0
@@ -163,7 +163,7 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             == "COMPATIBILITY_HELPERS_PRESENT_NO_OBS_ROUTE_CONSUMERS"
         )
         assert machine["obs_route_global_query_projection_helper_occurrences"] == 0
-        assert machine["obs_route_process_service_locator_occurrences"] == 13
+        assert machine["obs_route_process_service_locator_occurrences"] == 5
         assert machine["obs_other_global_query_projection_locator_modules"] == [
             "capability_stats_projection.py",
             "domain_state_projection.py",
@@ -517,10 +517,10 @@ def test_d3_projection_adapter_source_has_no_host_locator_fallback() -> None:
     assert "ProcessApplicationPorts" not in source
 
 
-def test_default_job_set_covers_every_legacy_registration_and_manual_job(
+def test_default_job_set_is_explicit_and_no_module_registers_global_jobs(
     tmp_path: Path,
 ) -> None:
-    legacy_registered: set[str] = set()
+    global_registrations: set[str] = set()
     for path in (ROOT / "host_brain" / "app").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         for node in ast.walk(tree):
@@ -539,22 +539,21 @@ def test_default_job_set_covers_every_legacy_registration_and_manual_job(
                 and isinstance(first, ast.Constant)
                 and isinstance(first.value, str)
             ):
-                legacy_registered.add(first.value)
-    legacy_registered.update(
-        {
-            "governance-snapshot",
-            "operator-live-state",
-            "remaining-operator-queries",
-            "semantic-recall-stats",
-        }
-    )
+                global_registrations.add(first.value)
+
+    assert global_registrations == set()
+    expected_jobs = {
+        "ledger-stats",
+        "life-evolution",
+        *OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS,
+    }
 
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-static-job-set.sqlite3",
     )
     try:
-        assert {job.name for job in ports.projection_jobs} == legacy_registered
-        assert len(legacy_registered) == 21
+        assert {job.name for job in ports.projection_jobs} == expected_jobs
+        assert len(expected_jobs) == 21
     finally:
         ports.close_owned_resources()
 

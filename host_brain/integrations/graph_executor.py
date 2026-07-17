@@ -602,7 +602,9 @@ class GraphExecutor:
             result = complete_compiled_prompt_sync(
                 attempt_service=self._model_attempt_service,
                 prompt_id=semantic.prompt_id,
-                request_id=f"{str(state.get('request_id') or '')}:graph:{model_node_id}",
+                # Keep the canonical request lineage intact.  The governed
+                # model-node identity is carried separately in metadata.
+                request_id=str(state.get("request_id") or ""),
                 scene_type=semantic.scene_type,
                 cognitive_tier=semantic.cognitive_tier,
                 deadline_ms=max(1, timeout_value),

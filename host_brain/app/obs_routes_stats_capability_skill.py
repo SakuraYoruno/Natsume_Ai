@@ -515,10 +515,13 @@ class MemoryGuardStatsResponse(BaseModel):
     passed_count: int
     blocked_count: int
     block_rate: Optional[float]
-    narrative_only_count: int
-    dream_blocked_count: int
-    distill_eligible_count: int
+    narrative_only_count: Optional[int]
+    dream_blocked_count: Optional[int]
+    distill_eligible_count: Optional[int]
     top_reject_reasons: List[MemoryGuardRejectItem]
+    source_table: str
+    scope: str
+    extended_measurement_available: bool
     timestamp: int
 
 
@@ -529,50 +532,76 @@ def get_memory_guard_stats(
     *,
     projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #59: MemoryGuard 宪法校验统计。"""
+    """Ref #59: Admission-time MemoryGuard durable receipt statistics."""
     ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "memory_guard_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
-    )
-    _mg_tags = {"MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "EPISODIC_WRITTEN", "EPISODIC_SKIPPED"}
-    mg_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _mg_tags)]
     try:
-        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
-        if mem_ops:
-            for row in mem_ops:
-                op_kind = str(row.get("op_kind") or "").upper()
-                status = str(row.get("status") or "").upper()
-                if op_kind == "WRITE" and status == "SUCCESS":
-                    mg_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
-                elif op_kind == "WRITE" and status == "SKIPPED":
-                    reason = str(row.get("reason_code") or "")
-                    mg_rows.append({**row, "audit_tag": "MEMORY_GUARD_FILTERED" if "MEMORY_GUARD" in reason.upper() else "EPISODIC_SKIPPED"})
+        rows = ledger.fetch_by_time_range(
+            "life_memory_admission_receipt",
+            start_ms=since_ms,
+            end_ms=now,
+        )
     except Exception:
-        pass
+        rows = []
+    mg_rows = [
+        row
+        for row in rows
+        if str(row.get("reason_code") or "").upper()
+        == "MEMORY_ADMISSION_ACCEPTED"
+        or str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    ]
     total = len(mg_rows)
-    passed_count = sum(1 for r in mg_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
-    blocked_count = sum(1 for r in mg_rows if any(t in str(r.get("audit_tag") or "").upper() for t in ("MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED")))
-    narrative_only_count = sum(1 for r in mg_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    dream_blocked_count = sum(1 for r in mg_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    distill_eligible_count = sum(1 for r in mg_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
+    passed_count = sum(
+        1
+        for row in mg_rows
+        if str(row.get("reason_code") or "").upper()
+        == "MEMORY_ADMISSION_ACCEPTED"
+    )
+    blocked_rows = [
+        row
+        for row in mg_rows
+        if str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    ]
+    blocked_count = len(blocked_rows)
     block_rate = round(blocked_count / total * 100, 1) if total > 0 else None
     reason_counter: Counter = Counter()
-    for r in mg_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        reason = str(detail.get("reason") or r.get("reason_code") or "UNKNOWN").upper()
+    for row in blocked_rows:
+        reason = str(row.get("reason_code") or "UNKNOWN").upper()
+        if ":" in reason:
+            reason = reason.split(":", 1)[1] or "UNKNOWN"
         if reason != "UNKNOWN":
             reason_counter[reason] += 1
-    return MemoryGuardStatsResponse(window_minutes=window_minutes, total_checks=total, passed_count=passed_count, blocked_count=blocked_count, block_rate=block_rate, narrative_only_count=narrative_only_count, dream_blocked_count=dream_blocked_count, distill_eligible_count=distill_eligible_count, top_reject_reasons=[MemoryGuardRejectItem(reason=r, count=c, pct=round(c / blocked_count * 100, 1) if blocked_count > 0 else 0.0) for r, c in reason_counter.most_common(10)], timestamp=now)
+    return MemoryGuardStatsResponse(
+        window_minutes=window_minutes,
+        total_checks=total,
+        passed_count=passed_count,
+        blocked_count=blocked_count,
+        block_rate=block_rate,
+        narrative_only_count=None,
+        dream_blocked_count=None,
+        distill_eligible_count=None,
+        top_reject_reasons=[
+            MemoryGuardRejectItem(
+                reason=reason,
+                count=count,
+                pct=(
+                    round(count / blocked_count * 100, 1)
+                    if blocked_count > 0
+                    else 0.0
+                ),
+            )
+            for reason, count in reason_counter.most_common(10)
+        ],
+        source_table="life_memory_admission_receipt",
+        scope="CHAT_LIFE_MEMORY_ADMISSION_GUARD_ONLY",
+        extended_measurement_available=False,
+        timestamp=now,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -644,14 +673,17 @@ def get_state_arbiter_stats(
 # ---------------------------------------------------------------------------
 class ContextCompressorStatsResponse(BaseModel):
     window_minutes: int
-    total_compressions: int
-    active_count: int
-    degraded_count: int
+    observed_pre_save_hooks: int
+    total_compressions: Optional[int]
+    active_count: Optional[int]
+    degraded_count: Optional[int]
     avg_compression_ratio: Optional[float]
     avg_token_saving: Optional[float]
-    total_tokens_saved: int
-    strategy_distribution: List[Dict[str, Any]]
-    summary_generated_count: int
+    total_tokens_saved: Optional[int]
+    strategy_distribution: Optional[List[Dict[str, Any]]]
+    summary_generated_count: Optional[int]
+    outcome_measurement_available: bool
+    source_table: str
     timestamp: int
 
 
@@ -662,47 +694,48 @@ def get_context_compressor_stats(
     *,
     projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #61: ContextCompressor 压缩效率统计。"""
+    """Ref #61: ContextCompressor public durable hook-event coverage.
+
+    ``COMPRESS_BEFORE_SAVE`` only proves that the pre-save hook was observed.
+    It does not carry a compression outcome, strategy, or before/after token
+    measurements, so all result metrics remain ``None``.
+    """
     ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "context_compressor_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
+    try:
+        rows = ledger.fetch_by_time_range(
+            "scheduler_event_log",
+            start_ms=since_ms,
+            end_ms=now,
+        )
+    except Exception:
+        rows = []
+    events = [
+        row
+        for row in rows
+        if str(row.get("task_id") or "").lower() == "context_compressor"
+        and "COMPRESS_BEFORE_SAVE"
+        in {
+            str(row.get("status") or "").upper(),
+            str(row.get("reason_code") or "").upper(),
+        }
+    ]
+    return ContextCompressorStatsResponse(
+        window_minutes=window_minutes,
+        observed_pre_save_hooks=len(events),
+        total_compressions=None,
+        active_count=None,
+        degraded_count=None,
+        avg_compression_ratio=None,
+        avg_token_saving=None,
+        total_tokens_saved=None,
+        strategy_distribution=None,
+        summary_generated_count=None,
+        outcome_measurement_available=False,
+        source_table="scheduler_event_log",
+        timestamp=now,
     )
-    cc_rows = [r for r in rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or r.get("stage") or "").upper() or "CONTEXT_COMPRESSOR" in str(r.get("stage") or r.get("reason_code") or "").upper()]
-    total = len(cc_rows)
-    active_count = sum(1 for r in cc_rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or "").upper())
-    degraded_count = sum(1 for r in cc_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
-    compression_ratios: list = []
-    token_savings: list = []
-    total_tokens_saved = 0
-    strategy_counter: Counter = Counter()
-    summary_generated_count = 0
-    for r in cc_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        input_turns = int(detail.get("input_turns") or r.get("input_turns") or 0)
-        output_turns = int(detail.get("output_turns") or r.get("output_turns") or 0)
-        strategy = str(detail.get("strategy") or r.get("strategy") or "unknown").lower()
-        has_summary = bool(detail.get("has_summary") or r.get("has_summary"))
-        if input_turns > 0 and output_turns > 0:
-            compression_ratios.append(round(output_turns / input_turns, 3))
-            saved = input_turns - output_turns
-            token_savings.append(saved)
-            total_tokens_saved += saved
-        if strategy and strategy != "unknown":
-            strategy_counter[strategy] += 1
-        if has_summary:
-            summary_generated_count += 1
-    total_strategies = sum(strategy_counter.values())
-    return ContextCompressorStatsResponse(window_minutes=window_minutes, total_compressions=total, active_count=active_count, degraded_count=degraded_count, avg_compression_ratio=round(sum(compression_ratios) / len(compression_ratios), 3) if compression_ratios else None, avg_token_saving=round(sum(token_savings) / len(token_savings), 1) if token_savings else None, total_tokens_saved=total_tokens_saved, strategy_distribution=[{"strategy": s, "count": c, "pct": round(c / total_strategies * 100, 1) if total_strategies > 0 else 0.0} for s, c in strategy_counter.most_common(5)], summary_generated_count=summary_generated_count, timestamp=now)
 
 
 # ---------------------------------------------------------------------------
@@ -869,10 +902,12 @@ class EpisodicStoreStatsResponse(BaseModel):
     skipped_count: int
     write_rate: Optional[float]
     memory_guard_blocked_count: int
-    dream_blocked_count: int
-    narrative_only_blocked_count: int
-    distill_eligible_count: int
+    dream_blocked_count: Optional[int]
+    narrative_only_blocked_count: Optional[int]
+    distill_eligible_count: Optional[int]
     avg_occurrence_count: Optional[float]
+    source_tables: List[str]
+    extended_guard_measurement_available: bool
     timestamp: int
 
 
@@ -883,47 +918,66 @@ def get_episodic_store_stats(
     *,
     projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #66: EpisodicStore 写入统计。"""
+    """Ref #66: Episodic write attempts plus admission-guard blocks."""
     ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = _fetch_first_available_rows(
-        ledger,
-        "episodic_store_log",
-        "audit_log",
-        "error_log",
-        start_ms=since_ms,
-        end_ms=now,
-    )
-    _ep_tags = {"EPISODIC_WRITTEN", "EPISODIC_SKIPPED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "SKIPPED_MEMORY_GUARD"}
-    ep_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _ep_tags)]
     try:
-        mem_ops = ledger.fetch_by_time_range("memory_ops_log", start_ms=since_ms, end_ms=now)
-        if mem_ops:
-            for row in mem_ops:
-                if str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SUCCESS":
-                    ep_rows.append({**row, "audit_tag": "EPISODIC_WRITTEN"})
-                elif str(row.get("op_kind") or "").upper() == "WRITE" and str(row.get("status") or "").upper() == "SKIPPED":
-                    ep_rows.append({**row, "audit_tag": "EPISODIC_SKIPPED"})
+        mem_ops = ledger.fetch_by_time_range(
+            "memory_ops_log",
+            start_ms=since_ms,
+            end_ms=now,
+        )
     except Exception:
-        pass
+        mem_ops = []
+    ep_rows = [
+        row
+        for row in mem_ops
+        if str(row.get("op_kind") or "").upper() == "WRITE"
+    ]
     total = len(ep_rows)
-    written_count = sum(1 for r in ep_rows if "EPISODIC_WRITTEN" in str(r.get("audit_tag") or "").upper())
-    skipped_count = sum(1 for r in ep_rows if any(t in str(r.get("audit_tag") or r.get("stage") or "").upper() for t in ("EPISODIC_SKIPPED", "SKIPPED_MEMORY_GUARD")))
-    memory_guard_blocked_count = sum(1 for r in ep_rows if any(t in str(r.get("audit_tag") or "").upper() for t in ("MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_FILTERED")))
-    dream_blocked_count = sum(1 for r in ep_rows if "DREAM_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    narrative_only_blocked_count = sum(1 for r in ep_rows if "NARRATIVE_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    distill_eligible_count = sum(1 for r in ep_rows if "DISTILL_ELIGIBLE" in str(r.get("audit_tag") or "").upper())
-    occurrence_counts: list = []
-    for r in ep_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        occ = int(detail.get("occurrence_count") or r.get("occurrence_count") or 0)
-        if occ > 0:
-            occurrence_counts.append(occ)
-    return EpisodicStoreStatsResponse(window_minutes=window_minutes, total_attempts=total, written_count=written_count, skipped_count=skipped_count, write_rate=round(written_count / total * 100, 1) if total > 0 else None, memory_guard_blocked_count=memory_guard_blocked_count, dream_blocked_count=dream_blocked_count, narrative_only_blocked_count=narrative_only_blocked_count, distill_eligible_count=distill_eligible_count, avg_occurrence_count=round(sum(occurrence_counts) / len(occurrence_counts), 1) if occurrence_counts else None, timestamp=now)
+    written_count = sum(
+        1
+        for row in ep_rows
+        if str(row.get("status") or "").upper() == "SUCCESS"
+    )
+    skipped_count = sum(
+        1
+        for row in ep_rows
+        if str(row.get("status") or "").upper() == "SKIPPED"
+    )
+    try:
+        admission_rows = ledger.fetch_by_time_range(
+            "life_memory_admission_receipt",
+            start_ms=since_ms,
+            end_ms=now,
+        )
+    except Exception:
+        admission_rows = []
+    memory_guard_blocked_count = sum(
+        1
+        for row in admission_rows
+        if str(row.get("reason_code") or "").upper().startswith(
+            "MEMORY_GUARD_LIGHT_ONLY"
+        )
+    )
+    return EpisodicStoreStatsResponse(
+        window_minutes=window_minutes,
+        total_attempts=total,
+        written_count=written_count,
+        skipped_count=skipped_count,
+        write_rate=(
+            round(written_count / total * 100, 1) if total > 0 else None
+        ),
+        memory_guard_blocked_count=memory_guard_blocked_count,
+        dream_blocked_count=None,
+        narrative_only_blocked_count=None,
+        distill_eligible_count=None,
+        avg_occurrence_count=None,
+        source_tables=["memory_ops_log", "life_memory_admission_receipt"],
+        extended_guard_measurement_available=False,
+        timestamp=now,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -13,25 +13,6 @@ class LedgerLogMixin:
     _conn: sqlite3.Connection
     _write_lock: threading.Lock
 
-    def log_llm_node_call(self, row: dict[str, Any]) -> None:
-        """记录单次 LLM 云节点调用（被动监控节点）。
-        必填字段：request_id / node_id / provider / model_id / status / ts_ms
-        可选字段：reason_code / latency_ms / input_digest / output_digest
-        """
-        payload = {
-            "request_id": str(row.get("request_id") or ""),
-            "node_id": str(row.get("node_id") or ""),
-            "provider": str(row.get("provider") or ""),
-            "model_id": str(row.get("model_id") or ""),
-            "status": str(row.get("status") or "OK"),
-            "reason_code": row.get("reason_code"),
-            "latency_ms": row.get("latency_ms"),
-            "input_digest": row.get("input_digest"),
-            "output_digest": row.get("output_digest"),
-            "ts_ms": int(row.get("ts_ms") or 0),
-        }
-        self._insert("llm_node_call_log", payload)  # type: ignore[attr-defined]
-
     def log_model_attempt(self, row: dict[str, Any]) -> None:
         """Append one canonical model attempt lifecycle record.
 

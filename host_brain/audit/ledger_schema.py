@@ -893,24 +893,6 @@ CREATE INDEX IF NOT EXISTS idx_capability_forge_status ON capability_forge_propo
 CREATE INDEX IF NOT EXISTS idx_capability_forge_stage ON capability_forge_proposal_log (stage);
 CREATE INDEX IF NOT EXISTS idx_capability_forge_ts ON capability_forge_proposal_log (ts_ms);
 
--- M18-A: LLM 云节点调用记录表
-CREATE TABLE IF NOT EXISTS llm_node_call_log (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id      TEXT NOT NULL,
-    node_id         TEXT NOT NULL,
-    provider        TEXT NOT NULL,
-    model_id        TEXT NOT NULL,
-    status          TEXT NOT NULL,
-    reason_code     TEXT,
-    latency_ms      INTEGER,
-    input_digest    TEXT,
-    output_digest   TEXT,
-    ts_ms           INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_request ON llm_node_call_log (request_id);
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_node_id ON llm_node_call_log (node_id);
-CREATE INDEX IF NOT EXISTS idx_llm_node_call_ts ON llm_node_call_log (ts_ms);
-
 -- AW05: canonical model attempt audit journal.  One attempt emits a STARTED
 -- record followed by exactly one terminal record; both are retained so route,
 -- retry and prompt provenance remain reconstructable without provider secrets.

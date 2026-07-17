@@ -1730,25 +1730,6 @@ def _log_llm_pool_call(
                     provider_usage=token_usage,
                 )
             )
-        if hasattr(ledger, "log_llm_node_call"):
-            normalized_scene = str(scene_type or "").strip().upper() or "CHAT"
-            node_suffix = normalized_scene.lower()
-            final_status = "DEGRADED" if pool_exhausted else "OK"
-            final_reason = "LLM_POOL_EXHAUSTED" if pool_exhausted else None
-            ledger.log_llm_node_call(
-                {
-                    "request_id": str(request_id or "").strip(),
-                    "node_id": f"llm_pool:{node_suffix}",
-                    "provider": str(final_provider or "").strip().lower(),
-                    "model_id": str(final_model or "").strip(),
-                    "status": final_status,
-                    "reason_code": final_reason,
-                    "latency_ms": int(total_latency_ms),
-                    "input_digest": f"scene={normalized_scene};tier={str(cognitive_tier or '').strip().upper() or 'B'};attempts={len(attempts_payload)}",
-                    "output_digest": attempts_json[:4000],
-                    "ts_ms": ts_value,
-                }
-            )
     except Exception as exc:
         _logger.debug("log_llm_pool_call skipped: %s", exc)
 

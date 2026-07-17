@@ -35,6 +35,11 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     read_from_store,
     response_meta,
 )
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
+    model_attempt_token_counts,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -198,47 +203,55 @@ def get_vts_stats(
     *,
     projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
+    """Ref #30: VTS Host 策略统计。
+
+    来源是后台物化的 ``avatar_action_log``。表情映射与 Talk Gate 共用该
+    durable authority，并按 ``stage`` 分组；Edge 物理回执属于设备状态投影，
+    不在这里重复计数。
+    """
     ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    # ── VTS 表情事件统计 ──────────────────────────────────────────────────
-    vts_rows = []
-    vts_table = _resolve_fetch_table(ledger, "vts_event_log")
-    if vts_table:
+    avatar_rows = []
+    avatar_table = _resolve_fetch_table(ledger, "avatar_action_log")
+    if avatar_table:
         try:
-            vts_rows = ledger.fetch_by_time_range(vts_table, start_ms=since_ms, end_ms=now)
+            avatar_rows = ledger.fetch_by_time_range(
+                avatar_table,
+                start_ms=since_ms,
+                end_ms=now,
+            )
         except Exception:
-            vts_rows = []
+            avatar_rows = []
 
-    # 补充从 voice_event_log 中过滤 VTS 相关事件
-    try:
-        voice_rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now)
-        vts_voice_rows = [
-            r for r in voice_rows
-            if str(r.get("event_type", "")).upper().startswith("VTS")
-        ]
-    except Exception:
-        vts_voice_rows = []
-
-    all_vts_rows = vts_rows + vts_voice_rows
-    total_events = len(all_vts_rows)
+    # 同表内按 stage 分离，避免 Talk Gate 被重复计入表情应用率。
+    expression_rows = [
+        row
+        for row in avatar_rows
+        if str(row.get("stage") or "").upper() == "S_AVATAR_EXPRESSION_MAP"
+    ]
+    talk_gate_rows = [
+        row
+        for row in avatar_rows
+        if str(row.get("stage") or "").upper() == "S_AVATAR_TALK_GATE"
+    ]
+    total_events = len(expression_rows)
 
     applied = sum(
-        1 for r in all_vts_rows
-        if str(r.get("status", "")).upper() in ("APPLIED", "OK", "SUCCESS")
-        or str(r.get("result", "")).upper() == "APPLIED"
+        1
+        for row in expression_rows
+        if str(row.get("status") or "").upper() == "APPLIED"
     )
     degraded = sum(
-        1 for r in all_vts_rows
-        if str(r.get("status", "")).upper() in ("DEGRADED", "FALLBACK")
-        or str(r.get("result", "")).upper() == "DEGRADED"
+        1
+        for row in expression_rows
+        if str(row.get("status") or "").upper() == "DEGRADED"
     )
     rejected = sum(
-        1 for r in all_vts_rows
-        if str(r.get("status", "")).upper() in ("REJECTED", "BLOCKED", "FAILED")
-        or str(r.get("result", "")).upper() == "REJECTED"
+        1
+        for row in expression_rows
+        if str(row.get("status") or "").upper() == "REJECTED"
     )
 
     apply_rate = round(applied / total_events * 100, 1) if total_events > 0 else None
@@ -248,8 +261,8 @@ def get_vts_stats(
     # Top 情感标签分布
     from collections import Counter
     emotion_counter = Counter(
-        str(r.get("emotion_tag") or r.get("expression") or "UNKNOWN").upper()
-        for r in all_vts_rows
+        str(row.get("emotion_tag") or "UNKNOWN").upper()
+        for row in expression_rows
     )
     top_emotions = [
         VtsEmotionItem(
@@ -260,19 +273,11 @@ def get_vts_stats(
         for tag, cnt in emotion_counter.most_common(8)
     ]
 
-    # ── Talk Gate 事件统计 ────────────────────────────────────────────────
-    talk_gate_rows = []
-    talk_gate_table = _resolve_fetch_table(ledger, "talk_gate_log")
-    if talk_gate_table:
-        try:
-            talk_gate_rows = ledger.fetch_by_time_range(talk_gate_table, start_ms=since_ms, end_ms=now)
-        except Exception:
-            talk_gate_rows = []
-
     talk_gate_total = len(talk_gate_rows)
     talk_gate_allowed = sum(
-        1 for r in talk_gate_rows
-        if str(r.get("decision", "")).upper() in ("ALLOW", "ALLOWED", "APPROVE", "OK")
+        1
+        for row in talk_gate_rows
+        if str(row.get("status") or "").upper() == "APPLIED"
     )
     talk_gate_blocked = talk_gate_total - talk_gate_allowed
 
@@ -298,23 +303,37 @@ def get_vts_stats(
 # ---------------------------------------------------------------------------
 class DistillationCycleItem(BaseModel):
     cycle_id: str
-    topics_processed: int
-    semantic_memories_created: int
-    proposals_submitted: int
-    proposals_skipped: int
-    error_count: int
+    status: str
+    topics_processed: Optional[int] = None
+    semantic_memories_created: Optional[int] = None
+    proposals_submitted: Optional[int] = None
+    proposals_skipped: Optional[int] = None
+    error_count: Optional[int] = None
     ts_ms: int
     detail: Optional[str] = None
 
+class DistillationTerminalEventItem(BaseModel):
+    stage: str
+    ts_ms: int
+
 class DistillationStatsResponse(BaseModel):
     window_minutes: int
-    total_cycles: int
-    success_cycles: int
-    failed_cycles: int
+    total_cycles: Optional[int]
+    success_cycles: Optional[int]
+    failed_cycles: Optional[int]
+    skipped_cycles: Optional[int]
     success_rate: Optional[float]
-    total_proposals_submitted: int
-    total_semantic_created: int
-    recent_cycles: List[DistillationCycleItem]
+    total_proposals_submitted: Optional[int]
+    total_semantic_created: Optional[int]
+    observed_terminal_events: int
+    observed_done_events: int
+    observed_skipped_events: int
+    observed_event_scope: str
+    cycle_measurement_available: bool
+    failure_measurement_available: bool
+    source_table: str
+    recent_cycles: Optional[List[DistillationCycleItem]]
+    recent_terminal_events: List[DistillationTerminalEventItem]
     timestamp: int
 
 @router.get("/distillation/stats", response_model=DistillationStatsResponse)
@@ -325,60 +344,77 @@ def get_distillation_stats(
     *,
     projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
-    """Ref #31: LongTermDistiller 蒸馏统计 — 循环次数、提案提交量、蒸馏成功率。"""
+    """Ref #31: DistillationEngine durable terminal-audit observations.
+
+    The ``DistillationEngine`` writer exposes ``DISTILL_DONE`` and
+    ``DISTILL_SKIPPED`` in ``error_log`` for both batch and single-item paths.
+    A batch can also emit item-level terminal events, so these rows are not a
+    complete ``LongTermMemoryDistiller`` cycle authority. Cycle and failure
+    counts that cannot be proved from that authority remain ``None``.
+    """
     ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
     try:
-        rows = ledger.fetch_by_time_range("distillation_cycle_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 补充从 distill_log 查询（兼容旧表名）
-    if not rows:
-        try:
-            rows = ledger.fetch_by_time_range("distill_log", start_ms=since_ms, end_ms=now)
-        except Exception:
-            rows = []
-
-    total_cycles = len(rows)
-    success_cycles = sum(
-        1 for r in rows
-        if (r.get("errors") in (None, [], "") or len(r.get("errors") or []) == 0)
-        and int(r.get("proposals_submitted") or 0) >= 0
-    )
-    failed_cycles = total_cycles - success_cycles
-    success_rate = round(success_cycles / total_cycles * 100, 1) if total_cycles > 0 else None
-
-    total_proposals = sum(int(r.get("proposals_submitted") or 0) for r in rows)
-    total_semantic = sum(int(r.get("semantic_memories_created") or 0) for r in rows)
-
-    # 最近 N 条（倒序）
-    recent_rows = sorted(rows, key=lambda r: r.get("ts_ms") or 0, reverse=True)[:limit]
-    recent_cycles = [
-        DistillationCycleItem(
-            cycle_id=str(r.get("cycle_id") or r.get("request_id") or ""),
-            topics_processed=int(r.get("topics_processed") or 0),
-            semantic_memories_created=int(r.get("semantic_memories_created") or 0),
-            proposals_submitted=int(r.get("proposals_submitted") or 0),
-            proposals_skipped=int(r.get("proposals_skipped") or 0),
-            error_count=len(r.get("errors") or []),
-            ts_ms=int(r.get("ts_ms") or 0),
-            detail=(r.get("detail") or "")[:200],
+        audit_rows = ledger.fetch_by_time_range(
+            "error_log",
+            start_ms=since_ms,
+            end_ms=now,
         )
-        for r in recent_rows
+    except Exception:
+        audit_rows = []
+
+    rows = [
+        row
+        for row in audit_rows
+        if str(row.get("stage") or "").upper()
+        in {"DISTILL_DONE", "DISTILL_SKIPPED"}
+    ]
+
+    observed_done_events = sum(
+        1
+        for row in rows
+        if str(row.get("stage") or "").upper() == "DISTILL_DONE"
+    )
+    observed_skipped_events = sum(
+        1
+        for row in rows
+        if str(row.get("stage") or "").upper() == "DISTILL_SKIPPED"
+    )
+
+    # Public audit 不含私有 cycle body，因此不补零伪装。
+    recent_rows = sorted(
+        rows,
+        key=lambda row: row.get("ts_ms") or 0,
+        reverse=True,
+    )[:limit]
+    recent_terminal_events = [
+        DistillationTerminalEventItem(
+            stage=str(row.get("stage") or "UNKNOWN").upper(),
+            ts_ms=int(row.get("ts_ms") or 0),
+        )
+        for row in recent_rows
     ]
 
     return DistillationStatsResponse(
         window_minutes=window_minutes,
-        total_cycles=total_cycles,
-        success_cycles=success_cycles,
-        failed_cycles=failed_cycles,
-        success_rate=success_rate,
-        total_proposals_submitted=total_proposals,
-        total_semantic_created=total_semantic,
-        recent_cycles=recent_cycles,
+        total_cycles=None,
+        success_cycles=None,
+        failed_cycles=None,
+        skipped_cycles=None,
+        success_rate=None,
+        total_proposals_submitted=None,
+        total_semantic_created=None,
+        observed_terminal_events=len(rows),
+        observed_done_events=observed_done_events,
+        observed_skipped_events=observed_skipped_events,
+        observed_event_scope="DISTILLATION_ENGINE_TERMINAL_AUDIT",
+        cycle_measurement_available=False,
+        failure_measurement_available=False,
+        source_table="error_log",
+        recent_cycles=None,
+        recent_terminal_events=recent_terminal_events,
         timestamp=now,
     )
 
@@ -758,24 +794,85 @@ class LlmModelCallItem(BaseModel):
     model_id: str
     node_id: Optional[str]
     call_count: int
-    total_prompt_tokens: int
-    total_completion_tokens: int
-    total_tokens: int
+    total_prompt_tokens: Optional[int]
+    total_completion_tokens: Optional[int]
+    total_tokens: Optional[int]
+    prompt_tokens_measured_calls: int
+    completion_tokens_measured_calls: int
+    total_tokens_measured_calls: int
+    total_prompt_tokens_is_lower_bound: bool
+    total_completion_tokens_is_lower_bound: bool
+    total_tokens_is_lower_bound: bool
     avg_latency_ms: Optional[float]
     p95_latency_ms: Optional[int]
+
 
 class LlmCallStatsResponse(BaseModel):
     window_minutes: int
     total_calls: int
-    total_prompt_tokens: int
-    total_completion_tokens: int
-    total_tokens: int
+    total_prompt_tokens: Optional[int]
+    total_completion_tokens: Optional[int]
+    total_tokens: Optional[int]
+    prompt_tokens_measured_calls: int
+    completion_tokens_measured_calls: int
+    total_tokens_measured_calls: int
+    total_prompt_tokens_is_lower_bound: bool
+    total_completion_tokens_is_lower_bound: bool
+    total_tokens_is_lower_bound: bool
     avg_latency_ms: Optional[float]
     models: List[LlmModelCallItem]
     timeseries_labels: List[str]
     timeseries_calls: List[int]
-    timeseries_tokens: List[int]
+    timeseries_tokens: List[Optional[int]]
+    timeseries_token_measured_calls: List[int]
+    timeseries_token_lower_bound_flags: List[bool]
     timestamp: int
+
+
+def _summarize_token_measurements(
+    rows: List[Mapping[str, Any]],
+) -> Dict[str, int | bool | None]:
+    """Aggregate measured values without turning absent dimensions into zero."""
+
+    call_count = len(rows)
+    result: Dict[str, int | bool | None] = {}
+    for source_field, total_field, measured_field, lower_bound_field in (
+        (
+            "prompt_tokens",
+            "total_prompt_tokens",
+            "prompt_tokens_measured_calls",
+            "total_prompt_tokens_is_lower_bound",
+        ),
+        (
+            "completion_tokens",
+            "total_completion_tokens",
+            "completion_tokens_measured_calls",
+            "total_completion_tokens_is_lower_bound",
+        ),
+        (
+            "total_tokens",
+            "total_tokens",
+            "total_tokens_measured_calls",
+            "total_tokens_is_lower_bound",
+        ),
+    ):
+        measured_values = [
+            int(row[source_field])
+            for row in rows
+            if row.get(source_field) is not None
+        ]
+        measured_calls = len(measured_values)
+        if call_count == 0:
+            aggregate: int | None = 0
+        elif measured_calls == 0:
+            aggregate = None
+        else:
+            aggregate = sum(measured_values)
+        result[total_field] = aggregate
+        result[measured_field] = measured_calls
+        result[lower_bound_field] = measured_calls < call_count
+    return result
+
 
 @router.get("/llm/call-stats", response_model=LlmCallStatsResponse)
 @fail_closed_projection_route
@@ -790,19 +887,69 @@ def get_llm_call_stats(
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    rows = []
-    llm_table = _resolve_fetch_table(ledger, "llm_call_log", "llm_node_call_log")
-    if llm_table:
+    def _fetch(table: str) -> list[dict[str, Any]]:
+        resolved = _resolve_fetch_table(ledger, table)
+        if not resolved:
+            return []
         try:
-            rows = ledger.fetch_by_time_range(llm_table, start_ms=since_ms, end_ms=now)
+            return [
+                dict(row)
+                for row in ledger.fetch_by_time_range(
+                    resolved,
+                    start_ms=since_ms,
+                    end_ms=now,
+                )
+                if isinstance(row, Mapping)
+            ]
         except Exception:
-            rows = []
+            return []
+
+    attempt_rows = latest_terminal_model_attempts(_fetch("model_attempt_log"))
+    token_rows = _fetch("llm_token_usage_log")
+    pool_rows = _fetch("llm_pool_call_log")
+    pool_latency = {
+        (
+            str(row.get("request_id") or ""),
+            int(row.get("ts_ms") or 0),
+        ): row.get("total_latency_ms")
+        for row in pool_rows
+    }
+    rows: list[dict[str, Any]] = []
+    for row in attempt_rows:
+        prompt_tokens, completion_tokens, total_tokens_value = (
+            model_attempt_token_counts(row)
+        )
+        rows.append(
+            {
+                **row,
+                "node_id": model_attempt_node_id(row),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens_value,
+            }
+        )
+    for row in token_rows:
+        request_id = str(row.get("request_id") or "")
+        ts_ms = int(row.get("ts_ms") or 0)
+        prompt_tokens, completion_tokens, total_tokens_value = (
+            model_attempt_token_counts(row)
+        )
+        rows.append(
+            {
+                **row,
+                "latency_ms": pool_latency.get((request_id, ts_ms)),
+                "node_id": None,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens_value,
+            }
+        )
 
     total_calls = len(rows)
-    total_prompt = sum(int(r.get("prompt_tokens") or 0) for r in rows)
-    total_completion = sum(int(r.get("completion_tokens") or 0) for r in rows)
-    total_tokens = total_prompt + total_completion
-    latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
+    token_summary = _summarize_token_measurements(rows)
+    latencies = [
+        r["latency_ms"] for r in rows if r.get("latency_ms") is not None
+    ]
     avg_latency = round(sum(latencies) / len(latencies), 1) if latencies else None
 
     # 按 model_id 分组
@@ -814,22 +961,31 @@ def get_llm_call_stats(
 
     models = []
     for mid, mrows in sorted(model_map.items()):
-        m_prompt = sum(int(r.get("prompt_tokens") or 0) for r in mrows)
-        m_completion = sum(int(r.get("completion_tokens") or 0) for r in mrows)
-        m_latencies = [r["latency_ms"] for r in mrows if r.get("latency_ms") is not None]
-        m_avg_lat = round(sum(m_latencies) / len(m_latencies), 1) if m_latencies else None
+        model_token_summary = _summarize_token_measurements(mrows)
+        m_latencies = [
+            r["latency_ms"] for r in mrows if r.get("latency_ms") is not None
+        ]
+        m_avg_lat = (
+            round(sum(m_latencies) / len(m_latencies), 1)
+            if m_latencies
+            else None
+        )
         m_p95 = None
         if m_latencies:
             sl = sorted(m_latencies)
             m_p95 = sl[max(0, int(len(sl) * 0.95) - 1)]
-        node_ids = list({str(r.get("node_id") or "") for r in mrows if r.get("node_id")})
+        node_ids = list(
+            {
+                str(r.get("node_id") or "")
+                for r in mrows
+                if r.get("node_id")
+            }
+        )
         models.append(LlmModelCallItem(
             model_id=mid,
             node_id=node_ids[0] if len(node_ids) == 1 else None,
             call_count=len(mrows),
-            total_prompt_tokens=m_prompt,
-            total_completion_tokens=m_completion,
-            total_tokens=m_prompt + m_completion,
+            **model_token_summary,
             avg_latency_ms=m_avg_lat,
             p95_latency_ms=m_p95,
         ))
@@ -838,13 +994,32 @@ def get_llm_call_stats(
     interval_ms = interval_minutes * 60 * 1000
     bucket_count = max(1, (window_minutes * 60 * 1000) // interval_ms)
     ts_calls = [0] * bucket_count
-    ts_tokens = [0] * bucket_count
+    ts_token_sums = [0] * bucket_count
+    ts_token_measured_calls = [0] * bucket_count
     for r in rows:
         ts = r.get("ts_ms") or 0
         idx = min(int((ts - since_ms) // interval_ms), bucket_count - 1)
         if 0 <= idx < bucket_count:
             ts_calls[idx] += 1
-            ts_tokens[idx] += int(r.get("prompt_tokens") or 0) + int(r.get("completion_tokens") or 0)
+            total_token_value = r.get("total_tokens")
+            if total_token_value is not None:
+                ts_token_sums[idx] += int(total_token_value)
+                ts_token_measured_calls[idx] += 1
+
+    ts_tokens: List[Optional[int]] = []
+    ts_token_lower_bound_flags: List[bool] = []
+    for calls, measured_calls, measured_sum in zip(
+        ts_calls,
+        ts_token_measured_calls,
+        ts_token_sums,
+    ):
+        if calls == 0:
+            ts_tokens.append(0)
+        elif measured_calls == 0:
+            ts_tokens.append(None)
+        else:
+            ts_tokens.append(measured_sum)
+        ts_token_lower_bound_flags.append(measured_calls < calls)
 
     labels = []
     for i in range(bucket_count):
@@ -860,14 +1035,14 @@ def get_llm_call_stats(
     return LlmCallStatsResponse(
         window_minutes=window_minutes,
         total_calls=total_calls,
-        total_prompt_tokens=total_prompt,
-        total_completion_tokens=total_completion,
-        total_tokens=total_tokens,
+        **token_summary,
         avg_latency_ms=avg_latency,
         models=models,
         timeseries_labels=labels,
         timeseries_calls=ts_calls,
         timeseries_tokens=ts_tokens,
+        timeseries_token_measured_calls=ts_token_measured_calls,
+        timeseries_token_lower_bound_flags=ts_token_lower_bound_flags,
         timestamp=now,
     )
 

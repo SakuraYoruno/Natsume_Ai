@@ -6,7 +6,6 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import digest_json
 
@@ -149,9 +148,6 @@ def refresh_capability_forge_projection() -> dict[str, int]:
         source_ref="capability-forge-background-worker",
     )
     return {"document_count": 1}
-
-
-register_projection_job("capability-forge-operator", refresh_capability_forge_projection)
 
 
 __all__ = [

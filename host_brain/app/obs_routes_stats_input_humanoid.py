@@ -22,6 +22,9 @@ from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
 from host_brain.app.observability_runtime.projection_ledger_view import (
     fail_closed_projection_route,
 )
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+)
 
 from host_brain.app.obs_routes_core import (
     router,
@@ -1404,14 +1407,10 @@ async def get_input_humanoid_loop_source_correlation(
         except Exception:
             llm_rows = []
         grouped: Dict[str, Dict[str, Any]] = {}
-        for row in [dict(item) for item in llm_rows if isinstance(item, dict)]:
+        for row in latest_terminal_model_attempts(
+            dict(item) for item in llm_rows if isinstance(item, dict)
+        ):
             attempt_status = str(row.get("status") or "").strip().upper()
-            if attempt_status == "STARTED":
-                continue
-            if attempt_status not in {
-                "SUCCEEDED", "FAILED", "TIMED_OUT", "REJECTED", "CANCELLED"
-            }:
-                continue
             service_id = (
                 str(row.get("adapter_id") or "").strip()
                 or str(row.get("model_id") or "").strip()

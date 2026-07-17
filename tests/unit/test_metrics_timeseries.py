@@ -13,7 +13,8 @@ from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 
 def _make_ledger(gov_rows=None, attempt_rows=None):
     ledger = MagicMock()
-    def fetch(table, start, end):
+    def fetch(table, *, start_ms, end_ms):
+        assert start_ms <= end_ms
         if table == "governor_log":
             return gov_rows or []
         if table == "model_attempt_log":
@@ -118,9 +119,33 @@ def test_timeseries_latency_uses_canonical_model_attempts():
     ledger = _make_ledger(
         _gov_rows(),
         [
-            {"attempt_id": "attempt-1", "status": "started", "ts_ms": now - 1_100, "latency_ms": None},
-            {"attempt_id": "attempt-1", "status": "succeeded", "ts_ms": now - 1_000, "latency_ms": 120},
-            {"attempt_id": "attempt-2", "status": "succeeded", "ts_ms": now - 500, "latency_ms": 240},
+            {
+                "attempt_id": "attempt-1",
+                "status": "started",
+                "ts_ms": now - 1_100,
+                "latency_ms": 999,
+            },
+            {
+                "attempt_id": "attempt-1",
+                "status": "failed",
+                "ended_at_ms": now - 1_050,
+                "ts_ms": now - 1_050,
+                "latency_ms": 500,
+            },
+            {
+                "attempt_id": "attempt-1",
+                "status": "succeeded",
+                "ended_at_ms": now - 1_000,
+                "ts_ms": now - 1_000,
+                "latency_ms": 120,
+            },
+            {
+                "attempt_id": "attempt-2",
+                "status": "succeeded",
+                "ended_at_ms": now - 500,
+                "ts_ms": now - 500,
+                "latency_ms": 240,
+            },
         ],
     )
 
@@ -129,3 +154,7 @@ def test_timeseries_latency_uses_canonical_model_attempts():
     assert result["latency"] == [{"service": "Overall", "p50": 120, "p95": 120}]
     requested_tables = [call.args[0] for call in ledger.fetch_by_time_range.call_args_list]
     assert requested_tables == ["governor_log", "model_attempt_log"]
+    assert all(
+        set(call.kwargs) == {"start_ms", "end_ms"}
+        for call in ledger.fetch_by_time_range.call_args_list
+    )

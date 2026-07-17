@@ -32,9 +32,13 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0099_task_runtime_terminal_reconciliation.sql"
+        "0103_retire_llm_node_call_log.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files
+    assert "host_brain/audit/migrations/0102_task_runtime_node_artifact.sql" in migration_files
+    assert "host_brain/audit/migrations/0101_agent_workspace_authority.sql" in migration_files
+    assert "host_brain/audit/migrations/0100_task_runtime_graph_revision_supersession.sql" in migration_files
     assert (
         "host_brain/audit/migrations/0099_task_runtime_terminal_reconciliation.sql"
         in migration_files

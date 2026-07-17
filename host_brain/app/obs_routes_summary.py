@@ -141,13 +141,12 @@ _SUBSYSTEM_LEDGER_TABLES = (
     "qa_violation_log",
 )
 _MEMORY_LEDGER_TABLES = (
-    "episodic_store_log",
-    "memory_guard_log",
+    "memory_ops_log",
+    "life_memory_admission_receipt",
     "error_log",
-    "context_compress_log",
-    "distillation_cycle_log",
+    "scheduler_event_log",
 )
-_VTS_LEDGER_TABLES = ("vts_event_log", "voice_event_log", "talk_gate_log")
+_VTS_LEDGER_TABLES = ("avatar_action_log",)
 _INSIGHTS_LEDGER_TABLES = tuple(
     dict.fromkeys(
         (
@@ -157,7 +156,9 @@ _INSIGHTS_LEDGER_TABLES = tuple(
             *_MEMORY_LEDGER_TABLES,
             *_VTS_LEDGER_TABLES,
             "qa_violation_log",
-            "llm_call_log",
+            "model_attempt_log",
+            "llm_token_usage_log",
+            "llm_pool_call_log",
         )
     )
 )

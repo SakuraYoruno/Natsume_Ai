@@ -101,24 +101,88 @@ def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
         def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
             if table == "voice_event_log":
                 return [{"event_type": "TTS_SENT", "status": "OK", "latency_ms": 8, "ts_ms": 800}]
-            if table == "llm_node_call_log":
+            if table == "model_attempt_log":
                 return [
                     {
-                        "node_id": "chat_direct_ja",
-                        "status": "OK",
+                        "attempt_id": "attempt-chat",
+                        "status": "started",
+                        "provider": "gemini",
+                        "model_id": "gemini-2.5-flash-lite",
+                        "metadata": {"model_node_id": "chat_direct_ja"},
+                        "ts_ms": 840,
+                    },
+                    {
+                        "attempt_id": "attempt-chat",
+                        "status": "succeeded",
+                        "provider": "gemini",
+                        "model_id": "gemini-2.5-flash-lite",
+                        "metadata": {"model_node_id": "chat_direct_ja"},
                         "latency_ms": 12,
                         "ts_ms": 850,
                     }
                 ]
+            if table == "llm_pool_call_log":
+                return []
             return []
 
     services, nodes, cursor = load_health_projection_sources(Ledger(), now_ms=1_000)
 
     edge_rpc = next(row for row in services["services"] if row["service_id"] == "edge_rpc")
     chat = next(row for row in nodes["nodes"] if row["node_id"] == "chat_direct_ja")
+    same_model_other_node = next(
+        row for row in nodes["nodes"] if row["node_id"] == "core_reasoner_secondary"
+    )
     assert edge_rpc["status"] == "UP"
     assert chat["status"] == "UP"
+    assert chat["call_count"] == 1
+    assert same_model_other_node["status"] == "UNKNOWN"
     assert cursor == 1_000
+
+
+def test_llm_gateway_health_merges_sources_by_event_time_before_windowing() -> None:
+    from host_brain.app.observability_runtime.health_device_projection import (
+        load_health_projection_sources,
+    )
+
+    class Ledger:
+        def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
+            if table == "model_attempt_log":
+                return [
+                    {
+                        "attempt_id": f"new-attempt-{index}",
+                        "status": "succeeded",
+                        "latency_ms": 10,
+                        "ended_at_ms": 800 + index,
+                        "ts_ms": 800 + index,
+                        "metadata": {},
+                    }
+                    for index in range(20)
+                ]
+            if table == "llm_pool_call_log":
+                return [
+                    {
+                        "request_id": f"old-pool-{index}",
+                        "pool_exhausted": 1,
+                        "total_latency_ms": 20,
+                        "ts_ms": 100 + index,
+                    }
+                    for index in range(20)
+                ]
+            return []
+
+    services, _nodes, _cursor = load_health_projection_sources(
+        Ledger(),
+        now_ms=1_000,
+        include_process_cache=False,
+    )
+
+    gateway = next(
+        row for row in services["services"] if row["service_id"] == "llm_gateway"
+    )
+    assert gateway["status"] == "UP"
+    assert gateway["success_rate"] == 100.0
+    assert gateway["call_count"] == 20
+    assert gateway["last_call_ts"] == 819
 
 
 def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:

@@ -24,7 +24,6 @@ from typing import Any, Callable
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
@@ -630,17 +629,6 @@ def run_resource_manager_projection_job() -> dict[str, int | bool]:
 
 def run_bio_ops_projection_job() -> dict[str, int | bool]:
     return _run_if_due("bio-ops-metadata", 30.0, refresh_bio_ops_projection)
-
-
-# Registration is import-driven, while source access remains callback-driven.
-register_projection_job("insights-summary", run_insights_summary_projection_job)
-register_projection_job(
-    "digital-life-overview", run_digital_life_overview_projection_job
-)
-register_projection_job("runtime-snapshot", run_runtime_snapshot_projection_job)
-register_projection_job("life-body", run_life_body_projection_job)
-register_projection_job("resource-manager", run_resource_manager_projection_job)
-register_projection_job("bio-ops-metadata", run_bio_ops_projection_job)
 
 
 __all__ = [

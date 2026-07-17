@@ -29,6 +29,26 @@ class LedgerFetchMixin:
     _table_name_cache: set[str] | None
     _write_lock: threading.Lock
 
+    def _time_column(self, table: str) -> str | None:
+        """Return the canonical public timestamp used by a durable table.
+
+        Newer immutable journals use ``created_at_ms`` or ``created_ts_ms``
+        instead of the legacy ``ts_ms`` convention.  Treating those tables as
+        timeless makes a bounded projection read the oldest rows first and can
+        silently omit recent facts once the row cap is reached.
+        """
+
+        for column in (
+            "ts_ms",
+            "created_at_ms",
+            "created_ts_ms",
+            "updated_ts_ms",
+            "committed_at_ms",
+        ):
+            if self._table_has_column(table, column):
+                return column
+        return None
+
     def _insert(self, table: str, payload: dict[str, Any]) -> None:
         keys = list(payload.keys())
         if not keys:
@@ -195,11 +215,7 @@ class LedgerFetchMixin:
 
     def fetch_by_request_id(self, table: str, request_id: str) -> list[dict[str, Any]]:
         """按 request_id 直接过滤查询（SQL 级，BUG-BE-002 修复）。"""
-        _obs_tables = frozenset({
-            "llm_node_call_log",
-            "graph_run_trace",
-        })
-        if table not in _ALLOWED_TABLES and table not in _obs_tables:
+        if table not in _ALLOWED_TABLES:
             raise ValueError(
                 f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
             )
@@ -217,8 +233,15 @@ class LedgerFetchMixin:
         end_ms: int | None = None,
         limit: int = 100,
         offset: int = 0,
+        descending: bool = False,
     ) -> list[dict[str, Any]]:
-        """Fetch rows from a table by optional ts_ms window with pagination."""
+        """Fetch rows from a time window with deterministic pagination.
+
+        ``descending=True`` is used by bounded projections that need the most
+        recent rows rather than the oldest rows in a large retention window.
+        A stable row identity is always included after the timestamp so rows
+        sharing one millisecond cannot move between pages nondeterministically.
+        """
         if table not in _ALLOWED_TABLES:
             logger.warning(
                 "Rejected fetch_by_time_range for invalid table name: %s (reason_code=%s)",
@@ -232,25 +255,37 @@ class LedgerFetchMixin:
         limit = max(1, min(limit, 10_000))
         offset = max(0, offset)
 
-        has_ts = self._table_has_column(table, "ts_ms")
+        time_column = self._time_column(table)
         has_id = self._table_has_column(table, "id")
+        direction = "DESC" if bool(descending) else "ASC"
 
-        if has_ts and (start_ms is not None or end_ms is not None):
+        def _order_clause() -> str:
+            identity_column = "id" if has_id else "rowid"
+            if time_column:
+                if identity_column == time_column:
+                    return f"{time_column} {direction}"
+                return (
+                    f"{time_column} {direction}, "
+                    f"{identity_column} {direction}"
+                )
+            return f"{identity_column} {direction}"
+
+        if time_column and (start_ms is not None or end_ms is not None):
             conditions: list[str] = []
             params: list[Any] = []
             if start_ms is not None:
-                conditions.append("ts_ms >= ?")
+                conditions.append(f"{time_column} >= ?")
                 params.append(int(start_ms))
             if end_ms is not None:
-                conditions.append("ts_ms <= ?")
+                conditions.append(f"{time_column} <= ?")
                 params.append(int(end_ms))
             where_clause = " AND ".join(conditions)
-            order = "ts_ms ASC" if has_ts else ("id ASC" if has_id else "rowid ASC")
+            order = _order_clause()
             sql = f"SELECT * FROM {table} WHERE {where_clause} ORDER BY {order} LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             rows = self._conn.execute(sql, params).fetchall()
         else:
-            order = "ts_ms ASC" if has_ts else ("id ASC" if has_id else "rowid ASC")
+            order = _order_clause()
             sql = f"SELECT * FROM {table} ORDER BY {order} LIMIT ? OFFSET ?"
             rows = self._conn.execute(sql, [limit, offset]).fetchall()
 
@@ -268,16 +303,19 @@ class LedgerFetchMixin:
             raise ValueError(
                 f"Invalid table name: {table!r} (reason_code={AUDIT_TABLE_NAME_INVALID})"
             )
+        time_column = self._time_column(table)
         if start_ms is None and end_ms is None:
             row = self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        elif time_column is None:
+            return 0
         else:
             conditions: list[str] = []
             params: list[Any] = []
             if start_ms is not None:
-                conditions.append("ts_ms >= ?")
+                conditions.append(f"{time_column} >= ?")
                 params.append(int(start_ms))
             if end_ms is not None:
-                conditions.append("ts_ms <= ?")
+                conditions.append(f"{time_column} <= ?")
                 params.append(int(end_ms))
             where_clause = " AND ".join(conditions)
             row = self._conn.execute(

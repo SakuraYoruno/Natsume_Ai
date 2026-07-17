@@ -16,6 +16,7 @@ from host_brain.model_runtime import (
     PromptRef,
     PromptRegistry,
     ProviderAdapterRegistry,
+    ProviderResponse,
     ProviderTarget,
     RetryDirective,
     RouteDecision,
@@ -192,6 +193,74 @@ async def test_provider_error_audit_redacts_credentials() -> None:
     assert "sk-super-secret-value" not in message
     assert "abcdefghijklmnop" not in message
     assert "[REDACTED]" in message
+
+
+async def test_terminal_audit_keeps_only_public_identity_and_provider_measurements() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-audit-metadata",
+            (ProviderTarget("fake", "provider", "model"),),
+            "audit-metadata-test",
+            max_attempts=1,
+        )
+    )
+
+    async def _complete(_attempt):
+        return ProviderResponse(
+            content="ok",
+            usage={
+                "prompt_tokens": 7,
+                "completion_tokens": 5,
+                "total_tokens": 12,
+                "model_cost_micros": 31,
+                "untrusted_estimate": 999,
+            },
+        )
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=_complete)]
+        ),
+        audit_repository=audit,
+    )
+    request = ModelAttemptRequest(
+        request_id="req-audit-metadata",
+        scene_type="chat",
+        cognitive_tier="a",
+        prompt=PromptRef("test.prompt", {"question": "hello"}),
+        deadline_ms=1000,
+        max_attempts=1,
+        metadata={
+            "model_node_id": "core_reasoner_primary",
+            "private_context": "must-not-enter-audit",
+        },
+    )
+
+    result = await service.complete(request)
+
+    assert result.success is True
+    started, terminal = audit.records()
+    assert started.metadata == {
+        "scene_type": "CHAT",
+        "cognitive_tier": "A",
+        "model_node_id": "core_reasoner_primary",
+    }
+    assert terminal.metadata == {
+        **started.metadata,
+        "provider_budget_measurements": {
+            "prompt_tokens": 7,
+            "completion_tokens": 5,
+            "token_count": 12,
+            "model_cost_micros": 31,
+        },
+    }
+    assert "private_context" not in terminal.metadata
+    assert "untrusted_estimate" not in terminal.metadata[
+        "provider_budget_measurements"
+    ]
 
 
 async def test_schema_repair_is_an_explicit_attempt_inside_the_same_route() -> None:

@@ -539,16 +539,6 @@ def _get_retrieval_runtime_sync(
             cfg_provider = str(getattr(route, "provider", "") or "").strip() or None
     episodic_write_model_id = cfg_model_id
     episodic_write_provider = cfg_provider
-    if not episodic_write_model_id or not episodic_write_provider:
-        try:
-            import host_brain.composition.process_services as _deps
-            episodic_store = _deps.get_episodic_store()
-            if not episodic_write_model_id:
-                episodic_write_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
-            if not episodic_write_provider:
-                episodic_write_provider = getattr(episodic_store, "embedding_provider_hint", None)
-        except Exception:
-            pass
     latest_embed_model = latest_item.embedding_model_id if latest_item is not None else None
     return RetrievalRuntimeResponse(
         suite_profile=(suite.profile_id if suite is not None else None),
@@ -685,31 +675,6 @@ class CapabilityForgePreviewRequest(BaseModel):
     canary_traffic_percent: int = Field(5, ge=1, le=100)
 
 
-class CapabilityForgeCreateRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, max_length=128)
-    proposer: str = Field(..., min_length=1, max_length=128)
-    candidate_key: Optional[str] = None
-    canary_traffic_percent: int = Field(5, ge=1, le=100)
-
-
-class CapabilityForgeApproveRequest(BaseModel):
-    approval_token_ref: str = Field(..., min_length=6, max_length=256)
-    approver: str = Field(..., min_length=1, max_length=128)
-    target_stage: str = Field("shadow", description="shadow/canary/full")
-
-
-class CapabilityForgeRollbackRequest(BaseModel):
-    operator: str = Field(..., min_length=1, max_length=128)
-    reason: Optional[str] = Field(None, max_length=200)
-
-
-class CapabilityForgeRuntimeMatchRequest(BaseModel):
-    request_id: str = Field(..., min_length=1, max_length=128)
-    suggested_family: str = Field(..., min_length=1, max_length=64)
-    missing_capability_tags: List[str] = Field(default_factory=list)
-    reason_code: Optional[str] = None
-
-
 class CapabilityForgePreviewResponse(BaseModel):
     timestamp: int
     candidate: Dict[str, Any]
@@ -726,11 +691,6 @@ class CapabilityForgeProposalListResponse(BaseModel):
     timestamp: int
     total: int
     items: List[Dict[str, Any]]
-
-
-class CapabilityForgeRuntimeMatchResponse(BaseModel):
-    timestamp: int
-    decision: Dict[str, Any]
 
 
 class CapabilityForgeRuntimeStatsResponse(BaseModel):
@@ -880,9 +840,26 @@ def get_capability_gap_forge_candidates(
 
 
 @router.post("/capability-gaps/forge-proposals/preview", response_model=CapabilityForgePreviewResponse)
-def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> CapabilityForgePreviewResponse:
-    from host_brain.composition.process_services import get_capability_forge_service
-    candidate = get_capability_forge_service().resolve_candidate(body.candidate_key)
+def preview_capability_forge_proposal(
+    body: CapabilityForgePreviewRequest,
+    projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],
+) -> CapabilityForgePreviewResponse:
+    projected = _require_capability_forge_projection(projection_store)
+    snapshot = dict(dict(projected or {}).get("gap") or {})
+    candidate_key = str(body.candidate_key or "").strip()
+    candidate = next(
+        (
+            dict(item)
+            for group in ("forge_candidates", "hotspots", "recent_events")
+            for item in list(snapshot.get(group) or [])
+            if isinstance(item, Mapping)
+            and (
+                not candidate_key
+                or str(item.get("candidate_key") or "").strip() == candidate_key
+            )
+        ),
+        None,
+    )
     if candidate is None:
         raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND", "detail": "No forge candidate or hotspot is currently available"})
     failure_rate = float(candidate.get("failure_rate") or 0.0)
@@ -890,19 +867,6 @@ def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> Ca
     impact_sessions = int(candidate.get("impact_sessions") or 0)
     recommendation = "forge_with_reliability_tests" if failure_rate >= 0.5 else ("forge_to_full_candidate_after_short_canary" if detected_count >= 6 and impact_sessions >= 3 else "forge_with_canary")
     return CapabilityForgePreviewResponse(timestamp=_now_ms(), candidate=dict(candidate), recommended_release_plan={"shadow": {"enabled": True}, "canary": {"enabled": True, "traffic_percent": int(body.canary_traffic_percent)}, "full": {"enabled": True}, "rollback": {"enabled": True, "observe_window_minutes": 30}}, recommendation=recommendation)
-
-
-def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.composition.process_services import get_capability_forge_service
-    try:
-        proposal = get_capability_forge_service().create_proposal(session_id=body.session_id, proposer=body.proposer, candidate_key=body.candidate_key, canary_traffic_percent=body.canary_traffic_percent)
-    except ValueError as exc:
-        if str(exc) == "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND":
-            raise HTTPException(status_code=404, detail={"reason_code": str(exc), "detail": "candidate not found"})
-        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
-    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
-
-
 @router.get("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalListResponse)
 def list_capability_forge_proposals(
     status: Optional[str] = Query(None),
@@ -941,41 +905,6 @@ def get_capability_forge_proposal(
     if proposal is None:
         raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_PROPOSAL_NOT_FOUND", "detail": f"proposal_id={proposal_id}"})
     return CapabilityForgeProposalResponse(timestamp=int(envelope.get("timestamp") or _now_ms()), proposal=proposal)
-
-
-def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApproveRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.composition.process_services import get_capability_forge_service
-    stage = str(body.target_stage or "").strip().lower()
-    if stage not in {"shadow", "canary", "full"}:
-        raise HTTPException(status_code=422, detail={"reason_code": "CAPABILITY_FORGE_INVALID_STAGE", "detail": "target_stage must be shadow/canary/full"})
-    try:
-        proposal = get_capability_forge_service().approve_and_promote(proposal_id=proposal_id, approval_token_ref=body.approval_token_ref, approver=body.approver, target_stage=stage)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail={"reason_code": str(exc), "detail": f"proposal_id={proposal_id}"})
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail={"reason_code": str(exc), "detail": "approval token validation failed"})
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
-    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
-
-
-def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRollbackRequest) -> CapabilityForgeProposalResponse:
-    from host_brain.composition.process_services import get_capability_forge_service
-    try:
-        proposal = get_capability_forge_service().rollback(proposal_id=proposal_id, operator=body.operator, reason=body.reason)
-    except KeyError:
-        raise HTTPException(status_code=404, detail={"reason_code": "CAPABILITY_FORGE_PROPOSAL_NOT_FOUND", "detail": f"proposal_id={proposal_id}"})
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
-    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
-
-
-def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> CapabilityForgeRuntimeMatchResponse:
-    from host_brain.composition.process_services import get_capability_forge_service
-    decision = get_capability_forge_service().get_runtime_route_override(request_id=body.request_id, suggested_family=body.suggested_family, missing_capability_tags=body.missing_capability_tags, reason_code=body.reason_code)
-    return CapabilityForgeRuntimeMatchResponse(timestamp=_now_ms(), decision=dict(decision))
-
-
 @router.get("/capability-gaps/forge-runtime/stats", response_model=CapabilityForgeRuntimeStatsResponse)
 def capability_forge_runtime_stats(
     projection_store: Annotated[Any, Depends(require_obs_query_projection_store)],

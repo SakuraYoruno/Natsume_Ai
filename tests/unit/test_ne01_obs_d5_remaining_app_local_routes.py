@@ -197,6 +197,65 @@ def test_unmaterialized_semantic_and_governance_views_fail_truthfully(
         get_core_settings.cache_clear()
 
 
+def test_forge_preview_reads_the_app_projection_without_live_forge_service(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from host_brain.app.obs_routes_stats_capability_agent import (
+        CapabilityForgePreviewRequest,
+        preview_capability_forge_proposal,
+    )
+    from host_brain.app.observability_runtime.capability_stats_projection import (
+        CAPABILITY_FORGE_OPERATOR_KEY,
+        CAPABILITY_FORGE_OPERATOR_KIND,
+    )
+    from host_brain.composition import process_services
+
+    monkeypatch.setattr(
+        process_services,
+        "get_capability_forge_service",
+        lambda: pytest.fail("preview must not discover the live Forge service"),
+    )
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "forge-preview.sqlite3"
+    )
+    now_ms = int(time.time() * 1000)
+    ports.query_projection_store.upsert(
+        CAPABILITY_FORGE_OPERATOR_KIND,
+        CAPABILITY_FORGE_OPERATOR_KEY,
+        {
+            "timestamp": now_ms,
+            "gap": {
+                "timestamp": now_ms,
+                "forge_candidates": [
+                    {
+                        "candidate_key": "candidate.projected",
+                        "failure_rate": 0.75,
+                        "detected_count": 8,
+                        "impact_sessions": 4,
+                    }
+                ],
+            },
+        },
+        source_cursor=now_ms,
+        freshness_ts_ms=now_ms,
+    )
+    try:
+        response = preview_capability_forge_proposal(
+            CapabilityForgePreviewRequest(
+                candidate_key="candidate.projected",
+                canary_traffic_percent=7,
+            ),
+            ports.query_projection_store,
+        )
+        assert response.candidate["candidate_key"] == "candidate.projected"
+        assert response.recommendation == "forge_with_reliability_tests"
+        assert response.recommended_release_plan["canary"]["traffic_percent"] == 7
+    finally:
+        assert ports.close_owned_resources is not None
+        ports.close_owned_resources()
+
+
 def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
     tmp_path: Path,
     monkeypatch,

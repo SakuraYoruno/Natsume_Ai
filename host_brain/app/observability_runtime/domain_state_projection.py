@@ -18,7 +18,6 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from host_brain.persona.life_evolution_view import build_life_evolution_view
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
@@ -416,11 +415,6 @@ def run_security_immune_projection_job() -> dict[str, int | bool]:
 
 def run_skill_pack_catalog_projection_job() -> dict[str, int | bool]:
     return _run_if_due("skill-pack-catalog", 60.0, refresh_skill_pack_catalog_projection)
-
-
-register_projection_job("life-evolution", run_life_projection_job)
-register_projection_job("security-immune", run_security_immune_projection_job)
-register_projection_job("skill-pack-catalog", run_skill_pack_catalog_projection_job)
 
 
 __all__ = [

@@ -7,6 +7,14 @@ import {
   toFixed,
 } from './organSystemCore.js'
 
+function observableCount(value) {
+  return value == null || Number.isNaN(Number(value)) ? '不可测' : String(value)
+}
+
+function observablePercent(value) {
+  return value == null || Number.isNaN(Number(value)) ? '不可测' : clampPercent(value)
+}
+
 export function buildLimbicOrganSystemModel({
   loadState,
   updatedAt,
@@ -27,6 +35,9 @@ export function buildLimbicOrganSystemModel({
 }) {
   const noData = loadState === LOAD_STATES.UNAVAILABLE || loadState === LOAD_STATES.LOADING
   const noSample = loadState === LOAD_STATES.NO_SAMPLE
+  const relationshipTemperatureLabel = relationshipTemperature == null
+    ? '不可测'
+    : `${(Math.max(0, Math.min(1, Number(relationshipTemperature))) * 100).toFixed(0)}°`
   const status = noData
     ? ORGAN_STATUS.PENDING
     : gateState === 'protective' || moodKey === 'critical'
@@ -49,19 +60,23 @@ export function buildLimbicOrganSystemModel({
       ? '等待情绪快照与表情聚合恢复后，再判断边缘系统是否稳定。'
       : `当前主情绪 ${emotionTagLabel || '--'}，关系阶段 ${bondStageLabel || '--'}，门控处于 ${gateLabel || '--'}。`,
     symptoms: [
-      sampleCount > 0 ? `近窗口累计 ${sampleCount} 个 VTS 情绪样本` : '当前窗口暂无足够表情样本',
-      `关系温度 ${(Math.max(0, Math.min(1, Number(relationshipTemperature || 0))) * 100).toFixed(0)}° · 事件 ${bondEventCount || 0} 次`,
-      `表情应用率 ${clampPercent(applyRate)} · 降级率 ${clampPercent(degradeRate)}`,
+      sampleCount == null
+        ? 'VTS 表情样本数不可测'
+        : sampleCount > 0
+          ? `近窗口累计 ${sampleCount} 个 VTS 情绪样本`
+          : '当前窗口无 VTS 表情样本',
+      `关系温度 ${relationshipTemperatureLabel} · 事件 ${observableCount(bondEventCount)} 次`,
+      `表情应用率 ${observablePercent(applyRate)} · 降级率 ${observablePercent(degradeRate)}`,
     ],
     downstreamImpacts: [
-      `对话放行 ${talkGateAllowed ?? 0} 次，边缘门控会直接改变回复姿态与亲密度表达。`,
+      `对话放行 ${observableCount(talkGateAllowed)} 次，边缘门控会直接改变回复姿态与亲密度表达。`,
       `cortisol ${toFixed(cortisolLevel)} · 情绪稳定度 ${emotionalStability == null ? '待判定' : clampPercent(emotionalStability)}`,
     ],
     metrics: [
       metric('当前情绪', emotionTagLabel || '待判定', moodLabel || '等待运行快照', 'text-pink-600'),
-      metric('关系阶段', bondStageLabel || '待判定', `事件 ${bondEventCount || 0} 次`, 'text-purple-600'),
-      metric('门控状态', gateLabel || '待判定', `降级率 ${clampPercent(degradeRate)}`, gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'),
-      metric('表情样本', String(sampleCount || 0), `放行 ${talkGateAllowed || 0}`, 'text-blue-600'),
+      metric('关系阶段', bondStageLabel || '待判定', `事件 ${observableCount(bondEventCount)} 次`, 'text-purple-600'),
+      metric('门控状态', gateLabel || '待判定', `降级率 ${observablePercent(degradeRate)}`, gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'),
+      metric('表情样本', observableCount(sampleCount), `放行 ${observableCount(talkGateAllowed)}`, 'text-blue-600'),
     ],
     drilldownPath: '/life/relationship',
     drilldownLabel: '查看关系与回复',
@@ -78,14 +93,16 @@ export function buildMemoryOrganSystemModel({
   configuredSubsystemCount,
   residentDocCount,
   promptContextAvailable,
-  distillCycles,
+  observedDistillTerminalEvents,
+  observedCompressionHooks,
   episodicWrites,
 }) {
+  const hasRateSamples = averageSuccessRate != null
   const status = !hasData || loadState === LOAD_STATES.UNAVAILABLE || loadState === LOAD_STATES.LOADING
     ? ORGAN_STATUS.PENDING
-    : hasSamples && Number(averageSuccessRate || 0) < 50
+    : hasRateSamples && Number(averageSuccessRate) < 50
       ? ORGAN_STATUS.CRITICAL
-      : !hasSamples || loadState === LOAD_STATES.NO_SAMPLE || Number(averageSuccessRate || 0) < 75
+      : !hasSamples || !hasRateSamples || loadState === LOAD_STATES.NO_SAMPLE || Number(averageSuccessRate) < 75
         ? ORGAN_STATUS.WARNING
         : ORGAN_STATUS.STABLE
 
@@ -96,16 +113,21 @@ export function buildMemoryOrganSystemModel({
     loadState,
     freshness: updatedAt,
     trend: hasSamples ? '有样本' : '待采样',
-    riskLevel: hasData ? (hasSamples ? `${averageSuccessRate}%` : '无样本') : '暂不可用',
+    riskLevel: hasData
+      ? hasRateSamples ? `${averageSuccessRate}%` : hasSamples ? '已观测，成功率不可测' : '无样本'
+      : '暂不可用',
     summary: !hasData
       ? '记忆链路当前没有返回可用统计，页面会保留中性空态。'
-      : hasSamples
+      : hasRateSamples
         ? `近窗口平均成功率 ${averageSuccessRate}% ，已有 ${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统产出样本。`
+        : hasSamples
+          ? '当前窗口已观测到记忆事件，但现有 durable authority 不足以计算完整成功率。'
         : '当前窗口还没有足够的记忆流量样本，记忆系统仍在待采样阶段。',
     symptoms: [
       hasSamples ? `${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统已采样` : '当前窗口暂无子系统样本',
-      `五路召回 · 常驻设定 ${residentDocCount || 0} 份`,
-      `情景写入 ${episodicWrites || 0} · 蒸馏循环 ${distillCycles || 0}`,
+      `五路召回 · 常驻设定 ${observableCount(residentDocCount)}${residentDocCount == null ? '' : ' 份'}`,
+      `情景写入 ${observableCount(episodicWrites)} · 蒸馏终态审计 ${observableCount(observedDistillTerminalEvents)}`,
+      `压缩预存钩子 ${observableCount(observedCompressionHooks)} · 压缩结果不可测`,
     ],
     downstreamImpacts: [
       promptContextAvailable
@@ -114,10 +136,10 @@ export function buildMemoryOrganSystemModel({
       '记忆系统会直接影响召回注入、人格延续和长期陪伴一致性。',
     ],
     metrics: [
-      metric('记忆成功率', hasSamples ? `${averageSuccessRate}%` : '无样本', `${sampledSubsystemCount}/${configuredSubsystemCount} 子系统`, hasSamples && Number(averageSuccessRate || 0) < 75 ? 'text-orange-500' : 'text-emerald-600'),
+      metric('记忆成功率', hasRateSamples ? `${averageSuccessRate}%` : hasSamples ? '不可测' : '无样本', `${sampledSubsystemCount}/${configuredSubsystemCount} 子系统`, !hasRateSamples || Number(averageSuccessRate) < 75 ? 'text-orange-500' : 'text-emerald-600'),
       metric('五路召回', '5', '固定检索骨架', 'text-blue-600'),
-      metric('常驻设定', String(residentDocCount || 0), promptContextAvailable ? '已进入 prompt context' : '等待动态上下文', 'text-indigo-600'),
-      metric('蒸馏/写入', `${distillCycles || 0}/${episodicWrites || 0}`, '蒸馏循环 / 情景写入', 'text-purple-600'),
+      metric('常驻设定', observableCount(residentDocCount), promptContextAvailable ? '已进入 prompt context' : residentDocCount == null ? '投影不可用' : '等待动态上下文', 'text-indigo-600'),
+      metric('终态审计/写入', `${observableCount(observedDistillTerminalEvents)}/${observableCount(episodicWrites)}`, '蒸馏终态审计事件 / 情景写入', 'text-purple-600'),
     ],
     drilldownPath: '/operations/canon',
     drilldownLabel: '查看设定与常驻',

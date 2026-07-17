@@ -366,9 +366,8 @@ def obs_runtime(tmp_path: Path, monkeypatch):
         ),
     )
 
-    # Model attempts are the migration-owned model health source.  The retired
-    # ``llm_node_call_log`` and ``graph_run_trace`` bootstrap tables are not
-    # recreated in a fresh canonical database.
+    # Model attempts are the migration-owned model health source.  Migration
+    # 0103 cold-migrates and removes the retired ``llm_node_call_log`` table.
     db.log_model_attempt({
         "attempt_id": "attempt-int-001",
         "request_id": "req-int-001",

@@ -313,7 +313,7 @@ def test_life_body_has_no_legacy_trace_feed_warm_read_model() -> None:
     source = inspect.getsource(obs_routes_life_body)
     assert "_get_warmed_trace_feed_snapshot" not in source
     assert "get_trace_feed_warm_status" not in source
-    assert "get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)" in source
+    assert "projection_store.get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)" in source
 
 
 def test_domain_routes_reference_only_durable_readers() -> None:

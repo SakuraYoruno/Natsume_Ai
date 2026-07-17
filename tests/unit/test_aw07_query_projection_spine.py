@@ -409,7 +409,6 @@ def test_stream_feed_tribe_sse_and_session_export_never_call_sources(tmp_path, m
     request = _obs_request(store)
     forbidden = Mock(side_effect=AssertionError("GET/SSE touched a source"))
     monkeypatch.setattr(trace, "_get_trace_builders", forbidden)
-    monkeypatch.setattr(trace, "_get_ledger", forbidden)
     monkeypatch.setattr(sessions, "_get_ledger", forbidden)
 
     stream = trace.get_trace_stream_events("req-empty", request)

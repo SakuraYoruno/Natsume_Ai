@@ -1,8 +1,4 @@
-"""Small background scheduler for projection refresh jobs.
-
-HTTP handlers never call these jobs.  Applications start the scheduler during
-router startup; tests and operators may call ``run_projection_jobs_once``.
-"""
+"""Application-owned background scheduler for projection refresh jobs."""
 
 from __future__ import annotations
 
@@ -268,61 +264,4 @@ class ProjectionJobDaemon:
             self._run_lock.release()
 
 
-_default_daemon = ProjectionJobDaemon()
-
-
-def register_projection_job(name: str, callback: Callable[[], object]) -> None:
-    """Compatibility registration for legacy Host-owned projection jobs."""
-
-    _default_daemon.register(name, callback)
-
-
-def _default_store() -> QueryProjectionStore:
-    from host_brain.composition.process_services import get_query_projection_store
-
-    return get_query_projection_store()
-
-
-def run_projection_jobs_once(
-    *,
-    store: QueryProjectionStore | None = None,
-    owner_id: str | None = None,
-    lease_ms: int = 30_000,
-) -> dict[str, str]:
-    """Run jobs only while this process holds the durable leader fence."""
-
-    projection_store = store or _default_store()
-    return _default_daemon.run_once(
-        store=projection_store,
-        owner_id=owner_id,
-        lease_ms=lease_ms,
-    )
-
-
-def start_projection_jobs(
-    *,
-    interval_ms: int = 1000,
-    store: QueryProjectionStore | None = None,
-    owner_id: str | None = None,
-    lease_ms: int = 30_000,
-) -> dict[str, object]:
-    projection_store = store or _default_store()
-    return _default_daemon.start(
-        store=projection_store,
-        owner_id=owner_id,
-        interval_ms=interval_ms,
-        lease_ms=lease_ms,
-    )
-
-
-def stop_projection_jobs() -> dict[str, object]:
-    return _default_daemon.stop()
-
-
-__all__ = [
-    "ProjectionJobDaemon",
-    "register_projection_job",
-    "run_projection_jobs_once",
-    "start_projection_jobs",
-    "stop_projection_jobs",
-]
+__all__ = ["ProjectionJobDaemon"]
