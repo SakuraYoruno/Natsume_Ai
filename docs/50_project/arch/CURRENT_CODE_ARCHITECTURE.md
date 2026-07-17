@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.18
+版本：v5.19
 核对日期：2026-07-18
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -21,13 +21,13 @@
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
-| 通用 PlanningSearch | `PARTIAL_D14_GOAL_PLANNING_FOUNDATION` | 公共 L1/L2/L3 内核之外，新增不可变 Goal/VirtualStateSnapshot、动态 SuccessorCatalog 语义、纯 GoalPlanningService、shadow benchmark 合同，以及把图级 authority 从动态 candidate 移入 compiler context；尚无任何生产 domain cutover 或收益结论 |
+| 通用 PlanningSearch | `PARTIAL_D16_DYNAMIC_CODE_SHADOW` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 额外落下 Code 的动态纯 shadow catalog，但尚无任何生产 domain cutover 或收益结论 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
-| Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
+| Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态纯 catalog 单测；没有真实 worktree、真实来源、模型/工具调用、verifier receipt 或成对收益证据 |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
-| Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。正向证据仅为端口身份单测，`agent_worker` 写入仍缺 WorkspaceGrant/WorkspaceRuntime，ReAct 也尚未受 `ModelBudgetGuard` 约束 |
+| Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。D16 的 `agent_worker` 只是 simulation-only graph descriptor，不能证明该端口实际调用；写入仍缺 WorkspaceGrant/WorkspaceRuntime，ReAct 也尚未受 `ModelBudgetGuard` 约束 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
 | Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
@@ -269,6 +269,14 @@ Task Runtime Outbox 已由 0093 建立跨进程 durable claim/CAS，0095 则把 
 
 这只是通用接口与 immutable compilation foundation：没有 Host chat/plan 生产入口使用 `GoalPlanningService`，没有 Code/Research/Pentest 动态 successor 的 production cutover，没有实际成对 verifier receipt，也没有 MCTS 对真实用户任务的 influence。
 
+### 5.1.2 D16 Code dynamic shadow catalog
+
+`host_brain/planning_search/code_domain_models.py` 把一个 Code 任务冻结为只含 opaque governed ref、digest、目标 artifact、失败测试 ref、预注册 patch 和验证 profile 的 `CodeTaskSnapshot`；`host_brain/planning_search/code_domain.py` 只保留动态 catalog、排序和编译绑定。`CodeSuccessorCatalog` 不读取 `planned_steps`：它从根状态生成 `inspect`，再从已检查状态生成预注册 `patch`，最后生成 `unit verify / rollback`。L2 是确定性虚拟证据排序；只有冻结 `virtual_model_ready=true` 时才向公共内核暴露 transition/reward，因而即使外部要求 `MCTSMode.ALWAYS`，未就绪快照也没有可运行的 L3 端口。编译绑定还会拒绝任意 `execute` root、真实 workspace 字段、未知 root action 或缺失的 `write_files/network` 禁令；唯一允许的 root 策略是 `inspect + generate_report + {strategy: temp_workspace}`。
+
+选择路径随后必须由 `bind_selected_code_inputs()` 再次逐段对照 catalog，才能把唯一的 `approved_candidate_inputs` 写进新的 `PlanningCompilationContext`。它拒绝 raw/file URI、超出 frozen target/test/change bound 的 patch、legacy `intent_draft` 覆盖、goal/state/objective 漂移，以及没有 durable predecessor lineage 的中间虚拟状态。`GovernedPlanningExecutionService`、显式 replan 和 recovery 也会透传该 context，并在搜索前要求 `approval_ref == parent governor grant`。
+
+这不是 Code 执行切流：不会打开 worktree、读取源码、调用模型/工具/测试/provider、admit TaskGraph 或写 workspace；`allowed_path_refs` / `forbidden_path_refs` 只是冻结证据，不是 live ACL。没有历史成对 A/B、独立 verifier receipt、0106 comparison ledger 或 promotion gate，所以仍不能声称 Code 收益或生产 influence。
+
 ### 5.2 Host Plan
 
 `host_brain/orchestration/plan_intent_search.py` 从 Governor 已批准的 `planned_steps/steps` 构造候选。搜索只能选择完整、合法的拓扑顺序，不能新增节点、改变工具组合或比较不同方案。
@@ -298,13 +306,13 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ### 5.4 Code / Research
 
-`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract，不是一个已运行的真实 benchmark；当前证据仍没有真实仓库、真实 Research 来源、真实 model call 或真实 verifier。
+`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract；D16 仅补了 Code 的动态 catalog 和编译单测，不是一个已运行的真实 benchmark。当前证据仍没有真实仓库、真实 Research 来源、真实 model call、真实 verifier 或每 arm 独立 receipt。
 
 ### 5.4.1 D15 governed Agent 模型端口桥
 
 此前 Host 的 `agent_worker → codex_runtime` Skill 路径虽然把 `ModelAttemptService` 放入 governed execution context，却直接构造裸 `AgentRuntimeExecutor`，所以会在首次模型调用前以 `AGENT_MODEL_RUNTIME_NOT_COMPOSED` 失败。D15 仅在 CapabilityBroker 已验证 sealed task authority 后，才由私有 executor adapter 读取 composition 提供的 `ModelAttemptService`，并从同一服务对象派生 `PromptRegistry`；调用方不能在 payload 中注入服务，缺 authority、模式或端口统一以 `AGENT_RUNTIME_PORTS_NOT_COMPOSED` 关闭。
 
-这不是 Code 写入切流。`agent_worker` 的默认 `runtime_repo` 写 WorkOrder 仍没有 task-bound `WorkspaceRuntime/WorkspaceGrant` 注入，会在 Workspace Policy 的模型调用前关闭；AgentExecutor 的 ReAct `ModelAttempt` 也没有接入 D11 的 `ModelBudgetGuard`。因此本切片的正向证据只覆盖 read-only `agent_inspect` 类端口接线，尚无真实模型调用、真实代码修复、预算 receipt 或生产 canary。
+这不是 Code 写入切流。D16 编译出的 `agent_worker` 节点仍只是 shadow-only descriptor；`agent_worker` 的默认 `runtime_repo` 写 WorkOrder 仍没有 task-bound `WorkspaceRuntime/WorkspaceGrant` 注入，会在 Workspace Policy 的模型调用前关闭；AgentExecutor 的 ReAct `ModelAttempt` 也没有接入 D11 的 `ModelBudgetGuard`。因此本切片的正向证据只覆盖 read-only `agent_inspect` 类端口接线与纯 Code catalog/compile 单测，尚无真实模型调用、真实代码修复、预算 receipt 或生产 canary。
 
 ## 6. 状态与 authority
 

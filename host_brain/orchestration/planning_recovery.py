@@ -21,6 +21,7 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionAuthority,
     PreparedPlanningExecution,
 )
+from host_brain.orchestration.planning_graph_compiler import PlanningCompilationContext
 from host_brain.persistence.task_repository import build_outbox_payload_ref
 from host_brain.planning_search.contracts import SearchRequest
 
@@ -222,6 +223,7 @@ class GovernedPlanningRecoveryService:
         graph_id: str,
         previous_revision: int,
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         """Admit revision ``previous + 1`` after an explicit recovery request.
 
@@ -248,6 +250,7 @@ class GovernedPlanningRecoveryService:
             previous_graph=failure.previous_graph,
             failure_evidence_refs=failure.failure_evidence_refs,
             created_at=created,
+            compilation_context=compilation_context,
         )
         prepared.validate()
         replacement = prepared.admission.graph

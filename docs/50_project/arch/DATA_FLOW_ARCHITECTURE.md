@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.4
+版本：v2.5
 
 核对日期：2026-07-18
 
@@ -240,6 +240,20 @@ L1/L2 baseline selection ──────────────────�
 ```
 
 prediction 固定 virtual state digest、baseline/executed/shadow path、trace、budget 与纯虚拟 counters；outcome 固定实际执行的 baseline candidate、规范化结果摘要和 verifier label。两表禁止 update/delete，重复只允许 exact replay，身份、candidate 或 outcome drift 一律拒绝；repository 会验证 table/index/FK/trigger 物理语义，防止 catalog-only replay 掩盖半残 schema。当前 runtime record 没有 durable Task/Run receipt，因此该 outcome 不能证明未执行的 L3 路径收益，也不能喂给 promotion；repository 未注入时仅保留兼容内存 ledger，注入库不可用时只记录 unavailable 事件而不阻断 baseline。
+
+### 4.6 Code 动态 pure-shadow flow
+
+```text
+frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
+  → CodeSuccessorCatalog: inspect → registered patch → unit/rollback
+  → pure L1/L2; L3 only if frozen virtual_model_ready=true
+  → selected path rechecked against the same catalog
+  → catalog-derived approved_candidate_inputs
+  → immutable PlanningCompilationContext
+  → optional compile / governed initial or replan preparation
+```
+
+该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
 ## 5. TaskGraph 状态流与回执
 

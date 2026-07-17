@@ -83,7 +83,7 @@
       "not_completed": [
         "agent_worker write execution still has no task-bound durable WorkspaceRuntime/WorkspaceGrant injection and remains fail-closed before model work",
         "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
-        "Code/Research planning domain adapters, isolated paired benchmark receipts, and production influence remain unimplemented",
+        "Code now has a pure dynamic shadow catalog only; isolated paired benchmark execution, model/tool/workspace authority, receipt-bound comparison and production influence remain unimplemented",
         "generic chat/delegate/runtime cutover remains incomplete"
       ],
       "evidence_refs": [
@@ -573,27 +573,46 @@
       ]
     },
     "planning_search_kernel": {
-      "status": "PARTIAL_D14_GOAL_PLANNING_FOUNDATION",
-      "scope": "Pure public PlanningSearch contracts and immutable compile binding only; no production domain cutover or benefit claim.",
+      "status": "PARTIAL_D16_DYNAMIC_CODE_SHADOW",
+      "scope": "Pure public PlanningSearch contracts, immutable compile binding, and one Code dynamic catalog only; no production domain cutover or benefit claim.",
       "evidence_refs": [
         "host_brain/planning_search/",
+        "host_brain/planning_search/code_domain.py",
+        "host_brain/planning_search/code_domain_models.py",
         "host_brain/orchestration/goal_planning.py",
         "host_brain/orchestration/planning_graph_compiler.py",
+        "host_brain/orchestration/planning_execution.py",
+        "host_brain/orchestration/planning_recovery.py",
         "tests/unit/test_d14_goal_planning.py",
-        "tests/unit/test_d14_domain_benchmark_contracts.py"
+        "tests/unit/test_d14_domain_benchmark_contracts.py",
+        "tests/unit/test_d16_code_planning_domain.py",
+        "tests/unit/test_d16_planning_execution_context.py"
       ]
     },
     "planning_search_goal_foundation": {
-      "status": "WIRED_SHADOW_ONLY_NO_DOMAIN_CUTOVER",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority.",
+      "status": "PARTIAL_D16_DYNAMIC_CODE_SHADOW_ONLY",
+      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network.",
       "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome contract captures fixed workload, baseline, verifier refs, budget and isolation but structurally forces SHADOW_ONLY and production_influence_enabled=false. No real paired workload receipt has been run.",
       "not_completed": [
         "Host chat or plan production cutover to GoalPlanningService",
         "Research dynamic successor adapter and real read-only source/verifier shadow",
-        "Code dynamic successor adapter and isolated historical-repository paired benchmark",
+        "Code isolated historical-repository paired benchmark, verifier receipt, actual model/tool execution and WorkspaceGrant-bound write path",
         "Pentest capability/fact-driven successor catalog",
         "receipt-bound baseline-versus-search comparison and promotion gate",
         "any production influence from MCTS"
+      ]
+    },
+    "code_shadow_planning_domain": {
+      "status": "PARTIAL_D16_DYNAMIC_CATALOG_SHADOW_ONLY",
+      "implemented": "CodeTaskSnapshot accepts only opaque governed refs plus frozen digests. CodeSuccessorCatalog dynamically expands inspect -> registered patch -> unit verification/rollback from that virtual state; affected artifacts, changed-file bound and test refs are constrained to the snapshot. virtual_model_ready is strict boolean state: when false the domain exposes no transition/reward ports, so even MCTSMode.ALWAYS cannot enable L3. Goal refs, state, plan objective, approval ref, selected candidates and approved Agent args are revalidated before immutable compilation; the root context must be inspect/generate_report/empty-temp-workspace and forbid write_files/network; initial/replan/recovery carry the same optional compilation context and reject a governor-grant mismatch.",
+      "boundary": "This is pure unit-proven shadow planning and immutable compilation only. It never opens a worktree, reads source, calls a model/tool/test/provider, admits a Code graph, writes a workspace, emits a receipt, or influences production. allowed_path_refs/forbidden_path_refs are frozen evidence, not a live workspace ACL. The compiler binding rejects a root execute mode, live workspace fields, unknown root actions, or missing write/network bans. Intermediate virtual states cannot be compiled because durable predecessor lineage for such a Code replan is not yet designed.",
+      "evidence_refs": [
+        "host_brain/planning_search/code_domain.py",
+        "host_brain/planning_search/code_domain_models.py",
+        "host_brain/orchestration/planning_execution.py",
+        "host_brain/orchestration/planning_recovery.py",
+        "tests/unit/test_d16_code_planning_domain.py",
+        "tests/unit/test_d16_planning_execution_context.py"
       ]
     },
     "host_candidate_plan_generation": {
@@ -618,7 +637,7 @@
     },
     "code_production_planning_benefit": {
       "status": "UNPROVEN",
-      "existing_evidence_level": "SIMULATION_SHADOW"
+      "existing_evidence_level": "PURE_DYNAMIC_CATALOG_UNIT_ONLY"
     },
     "budget_enforcement": {
       "status": "PARTIAL",

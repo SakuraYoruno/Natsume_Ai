@@ -3,8 +3,8 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v2.3
-核对日期：2026-07-17
+版本：v2.4
+核对日期：2026-07-18
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
@@ -45,12 +45,13 @@
 | 对话全副作用原子提交 | `PARTIAL` | Acceptance Effect intents | Acceptance 后 durable eventual；不是 user/assistant/delivery 单事务 | NE-01 |
 | 单一任务真相 | `WIRED` | Durable Task projection + registry absence contract | 进程内 registry 与 accessor 已删除；read route 不创建任务 | NE-01 已完成切片 |
 | Persona 演化单一 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 运行时拒绝、`T-PERSONA-FENCE-01` 全仓扫描、无副作用候选回归 | legacy writer 已归零；proposal、shadow、Review、版本激活与 rollback 替代链尚未实现 | NE-01 围栏已完成；NE-06 全量替换 |
-| 通用 PlanningSearch foundation | `PARTIAL_D14_GOAL_PLANNING_FOUNDATION` | `planning_search/`、`orchestration/goal_planning.py`、`planning_graph_compiler.py` | Goal/VirtualStateSnapshot、SuccessorCatalog、shadow benchmark 合同与 context-owned immutable compile 已落地；Host/Code/Research/Pentest 尚未完成生产 domain adapter、真实成对 verifier receipt 或收益证明 | NE-02 |
+| 通用 PlanningSearch foundation | `PARTIAL_D16_DYNAMIC_CODE_SHADOW` | `planning_search/`、`orchestration/goal_planning.py`、`planning_graph_compiler.py`、`planning_execution.py` | Goal/VirtualStateSnapshot、SuccessorCatalog、shadow benchmark 合同与 context-owned immutable compile 已落地；D16 已让 Code 从冻结状态动态生成纯 shadow successor，并把 context 贯通 initial/replan/recovery；Host/Research/Pentest 仍无生产 domain cutover、真实成对 verifier receipt 或收益证明 | NE-02 |
+| Code 动态 shadow 候选 | `PARTIAL_D16_DYNAMIC_CATALOG_SHADOW_ONLY` | `planning_search/code_domain_models.py`、`planning_search/code_domain.py`、D16 unit | 冻结 opaque ref/digest 后可动态产生 inspect→registered patch→unit/rollback；MCTS 仅在冻结 `virtual_model_ready` 时具备 simulation ports，catalog-derived inputs 才可进入 immutable compiler | 没有真实 worktree/ACL、source/model/tool/test/provider 调用、Task admission、历史 paired A/B、receipt 或 production influence；中间 state replan lineage 未设计 | NE-02 |
 | Host 候选方案生成 | `MISSING` | `plan_intent_search.py` | 只重排上游已批准步骤，不生成竞争路径 | NE-02 |
 | Pentest L1/L2 | `WIRED` | `pentest/agent/agent_loop.py` | 仍需与 durable outcome/calibration 对齐 | NE-02 |
 | Pentest Conditional MCTS | `SHADOW` | `planning_search_adapter.py`、virtual world | 根候选固定；不能生成 capability-unlocking 后继；校准非 durable | NE-02 |
 | Research 真实收益 | `MISSING` | 仅 synthetic fixture | 未跑真实来源、模型、verifier、成本/延迟对照 | NE-02 |
-| Code 真实收益 | `MISSING` | 仅 synthetic fixture | 未跑隔离 worktree、真实测试/verifier 和 baseline 对照 | NE-02 |
+| Code 真实收益 | `UNPROVEN` | D16 dynamic catalog unit + synthetic fixture | 未跑隔离 worktree、真实模型/工具、每 arm 独立测试/verifier receipt、baseline-versus-search comparison ledger 与 promotion gate | NE-02 |
 
 0094 lifecycle 已按 fail-closed 收紧：activation rollback 或 `aclose` quiescence 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，锁死 bind/activate 并只允许 `aclose` 重试。Coordinator admission close、drain、`aclose` 任一失败都不关 Store；只有 Coordinator 与 worker 均静默后才 drain Outbox/关 infrastructure。这改善了故障关闭正确性，不改变 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 定级。
 

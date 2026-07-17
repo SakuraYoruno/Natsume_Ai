@@ -3,8 +3,8 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.6
-核对日期：2026-07-16
+版本：v3.7
+核对日期：2026-07-18
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
 
@@ -68,7 +68,7 @@ flowchart LR
 | Host Plan | Governor 已批准的 `planned_steps/steps` | 只做合法拓扑选择，未生成竞争方案 |
 | Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only；0105 durable calibration 仅显式注入时写入，target 在 fingerprint 前收口，库故障只记 unavailable 事件，outcome 仍是未验证运行记录投影 |
 | Research | 冻结模拟 fixture | 没有真实来源、模型和 verifier 对照 |
-| Code | 冻结模拟 fixture | 没有真实 worktree、测试和成本对照 |
+| Code | D16 frozen opaque ref/digest + registered patch catalog | 动态 pure-shadow `inspect→patch→unit/rollback` 已有单测；`virtual_model_ready=false` 时 L3 无 simulation ports；没有真实 worktree、模型/工具/测试、receipt 或成本对照 |
 
 ## Scheduler/Internal 分界
 
@@ -107,9 +107,12 @@ stateDiagram-v2
 
 失败重规划必须保留旧 revision 和失败证据。修改原 graph、在 worker 内追加隐藏步骤、或让 Executive 另建一个无 lineage 的 plan 都会破坏审计。
 
+对 Code D16，只有根快照可以进入 catalog-bound compile；中间虚拟状态不能借用本图的 revision 箭头，因为其 durable predecessor lineage 尚未实现。compiler/recovery 的 context 透传和 parent-grant 对齐只防止 authority/input 漂移，不能把纯虚拟路径升级为可执行 Code replan。
+
 ## 代码锚点
 
 - 公共搜索：`host_brain/planning_search/`
+- Code pure-shadow frozen models / catalog：`host_brain/planning_search/code_domain_models.py`、`host_brain/planning_search/code_domain.py`
 - Host Plan adapter：`host_brain/orchestration/plan_intent_search.py`
 - Graph compiler：`host_brain/orchestration/planning_graph_compiler.py`
 - Replan/recovery：`host_brain/orchestration/planning_recovery.py`、`failure_replan_intent.py`

@@ -3,8 +3,8 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.7
-核对日期：2026-07-16
+版本：v2.8
+核对日期：2026-07-18
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
 
@@ -243,6 +243,8 @@ flowchart LR
 ```
 
 当前 Host Plan 不会新增步骤、发明工具组合或比较多套方案。搜索内核存在，但这里主要用于选择完整合法的拓扑顺序。
+
+Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。故不能把这条虚线准备能力画成 Host 已具备目标规划。
 
 ## 当前例外与缺口
 

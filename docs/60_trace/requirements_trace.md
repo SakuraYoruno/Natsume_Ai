@@ -3,8 +3,8 @@
 
 # 当前需求可追溯矩阵
 
-版本：v3.8
-核对日期：2026-07-16
+版本：v3.9
+核对日期：2026-07-18
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
@@ -59,12 +59,12 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |
 |---|---|---|---|---|---|---|
-| TRACE-PLAN-01 | FR-PLANNING、FR-ARCH-003、FR-ARCH-010 | 公共无副作用搜索内核 | `planning_search/` | GR-01 unit | `WIRED` | NE-02 |
+| TRACE-PLAN-01 | FR-PLANNING、FR-ARCH-003、FR-ARCH-010 | 公共无副作用搜索内核与 immutable compile boundary | `planning_search/`、`goal_planning.py`、`planning_graph_compiler.py`、`planning_execution.py` | GR-01、D14、D16 unit；state/context/grant lineage | `WIRED_FOUNDATION / DOMAIN_CUTOVER_INCOMPLETE` | NE-02 |
 | TRACE-PLAN-02 | FR-PLANNING、FR-ARCH-003 | Host 从目标生成竞争计划 | `plan_intent_search.py` | 代码审计；T-PLAN-PROD-01 | `MISSING` | NE-02 |
 | TRACE-PLAN-03 | FR-PENTEST | Pentest L1/L2 使用公共 service | Pentest adapter/AgentLoop | GR-01 pentest tests | `WIRED` | NE-02 |
 | TRACE-PLAN-04 | FR-PENTEST、FR-PLANNING | L3 能按虚拟状态生成后继并 durable 校准 | Pentest virtual world | tests 仅 root candidate/shadow；T-PLAN-CAL-01 | `SHADOW_UNCALIBRATED` | NE-02 |
 | TRACE-PLAN-05 | FR-PLANNING、FR-ARCH-010 | Research 真实收益 | synthetic fixture only | GR-02A report；T-PLAN-PROD-01 | `UNPROVEN` | NE-02 |
-| TRACE-PLAN-06 | FR-PLANNING、FR-ARCH-010 | Code 真实收益 | synthetic fixture only | GR-02A report；T-PLAN-PROD-01 | `UNPROVEN` | NE-02 |
+| TRACE-PLAN-06 | FR-PLANNING、FR-ARCH-010 | Code 动态 pure-shadow planning 与真实收益 | `planning_search/code_domain_models.py`、`planning_search/code_domain.py` | D16 dynamic catalog、forged-input/root-policy rejection、MCTS readiness gate、context/replan lineage unit；GR-02A 仅 synthetic | `UNPROVEN`：已证明 catalog/compile 纯度，未证明真实 worktree、paired A/B、model/tool/test/verifier receipt 或收益 | NE-02 |
 
 ## 5. Digital Life 与长期演化
 

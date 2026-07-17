@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.2
+版本：v2.3
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-16
+维护日期：2026-07-18
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -577,6 +577,8 @@ Transition 必须：
 - 对相同 state/candidate/seed 可重放；
 - 明确哪些效果是预测，哪些前置条件已由事实支持。
 
+对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。
+
 ### 10.4 规划收益必须以真实 shadow 证明
 
 算法测试只能证明算法行为，不能证明生产收益。可信校准需要：
@@ -602,6 +604,8 @@ Transition 必须：
 - graph revision 与 planning trace digest 绑定；
 - worker 看不到搜索器的可变内部状态；
 - 失败重规划生成 `revision + 1`，不覆盖旧图。
+
+若 compiler 将 selected path 转成 worker 输入，输入必须由已冻结 catalog 再生成，而不是复用早期 intent 草稿；图级 budget、review、workspace、approval 和 parent grant 仍属于 compiler/admission authority。尚未具备 durable predecessor lineage 的中间虚拟状态，不得伪装成可直接编译的重规划起点。
 
 当前相应边界位于 [PlanningGraphCompiler](../../host_brain/orchestration/planning_graph_compiler.py) 和 [planning execution](../../host_brain/orchestration/planning_execution.py)。
 
@@ -832,7 +836,7 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 | Canon | [Canon application](../../host_brain/canon/application.py)、[apply service](../../host_brain/memory/canon_apply_service.py) | proposal、apply、rollback、projection |
 | World | [WorldProjectionReadModel](../../host_brain/runtime/world_model.py) | 来源、置信度、TTL、冲突和只读边界 |
 | Governance | [Governor](../../host_brain/governor/decision.py)、[Action Arbiter](../../host_brain/governor/action_arbiter.py) | 决策、reason code、scope 与 restrict-only |
-| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、预算、不可变图 |
+| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[Code shadow adapter](../../host_brain/planning_search/code_domain.py)、[Code frozen models](../../host_brain/planning_search/code_domain_models.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、冻结证据、预算、不可变图 |
 | Execution | [HostCommand](../../natsume_contracts/task/v1.py)、[Task coordinator](../../host_brain/task_runtime/coordinator.py) | lineage、Attempt、Review、Verification、Acceptance |
 | Side effects | [acceptance compiler](../../host_brain/task_runtime/acceptance_effects.py)、[dispatcher](../../host_brain/task_runtime/acceptance_effect_dispatcher.py) | authority-free worker result 如何变成可信 effect |
 

@@ -21,6 +21,7 @@ from host_brain.orchestration.planning_admission import (
 )
 from host_brain.orchestration.planning_graph_compiler import (
     CompiledPlanningGraph,
+    PlanningCompilationContext,
     PlanningGraphCompiler,
 )
 from host_brain.planning_search.contracts import SearchRequest, SearchResult, SearchStatus
@@ -154,10 +155,19 @@ class GovernedPlanningExecutionService:
         *,
         authority: PlanningExecutionAuthority,
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         result = self._run_search(request)
-        compiled = self._compiler.compile(result, created_at=int(created_at))
+        compiled = self._compiler.compile(
+            result,
+            created_at=int(created_at),
+            compilation_context=compilation_context,
+        )
         if compiled.task_graph.revision != 1:
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -173,8 +183,13 @@ class GovernedPlanningExecutionService:
         previous_graph: TaskGraph,
         failure_evidence_refs: Sequence[str],
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         if not isinstance(previous_graph, TaskGraph):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -195,6 +210,7 @@ class GovernedPlanningExecutionService:
             previous_graph=previous_graph,
             failure_evidence_refs=evidence_refs,
             created_at=int(created_at),
+            compilation_context=compilation_context,
         )
         if previous_graph.to_dict() != previous_snapshot:
             raise PlanningExecutionError(
@@ -256,6 +272,33 @@ class GovernedPlanningExecutionService:
                 f"planning search did not select a side-effect-free path: {status}/{reason}",
             )
         return result
+
+    @staticmethod
+    def _validate_compilation_context_authority(
+        compilation_context: PlanningCompilationContext | None,
+        *,
+        authority: PlanningExecutionAuthority,
+    ) -> None:
+        """Keep root compilation authority bound to the admitted parent grant.
+
+        Search candidates remain authority-free, but a caller could otherwise
+        compile their selected path with a context approved by a different
+        governor request.  Legacy callers may omit the context until their
+        domain is migrated; supplied contexts must never cross that boundary.
+        """
+
+        if compilation_context is None:
+            return
+        if not isinstance(compilation_context, PlanningCompilationContext):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation_context must be PlanningCompilationContext",
+            )
+        if compilation_context.approval_ref != authority.governor_grant_ref:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation context approval_ref differs from governor grant",
+            )
 
     async def _admit(
         self,
