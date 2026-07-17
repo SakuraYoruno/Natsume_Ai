@@ -21,7 +21,6 @@ from host_brain.app.observability_runtime.projection_ledger_view import (
     ProjectionLedgerView,
     ProjectionLedgerViewUnavailable,
     _load_table_rows,
-    get_projection_ledger_view,
     refresh_ledger_stats_projection,
     sanitize_stats_row,
 )
@@ -371,20 +370,33 @@ def test_view_filters_parameterized_window_and_fails_closed_outside_retention() 
     assert view.last_degraded_reason == "PROJECTION_WINDOW_OUT_OF_RANGE"
 
 
-def test_get_factory_only_peeks_initialized_store(monkeypatch) -> None:
+def test_view_construction_uses_only_the_explicit_store(monkeypatch) -> None:
     from host_brain.composition import process_services as dependencies
 
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: None)
-    monkeypatch.setattr(
-        dependencies,
-        "get_ledger",
-        lambda: (_ for _ in ()).throw(AssertionError("GET opened canonical ledger")),
+    def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("explicit view touched a process locator")
+
+    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
+    monkeypatch.setattr(dependencies, "get_ledger", forbidden)
+    now = 2_000_000_000_000
+    view = ProjectionLedgerView(
+        _DocumentStore(
+            {
+                "table": "error_log",
+                "rows": [],
+                "retention_ms": LEDGER_STATS_RETENTION_MS,
+                "row_cap": LEDGER_STATS_ROW_CAP,
+                "truncated": False,
+                "stable_cursor": "empty",
+            },
+            freshness_ts_ms=now,
+        ),
+        clock=lambda: now,
     )
-    view = get_projection_ledger_view()
     assert view.fetch_by_time_range(
         "error_log",
-        start_ms=2_000_000_000_000 - 1_000,
-        end_ms=2_000_000_000_000,
+        start_ms=now - 1_000,
+        end_ms=now,
     ) == []
 
 

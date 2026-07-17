@@ -49,6 +49,7 @@ from host_brain.app.lifecycle_runtime_composition import (
 )
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_source_composition import (
     HostObsSourceEpoch,
     HostObsSourceRuntimePorts,
@@ -82,6 +83,7 @@ from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.core.ids import now_ms
+from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.app.security_services_composition import (
     ProcessSecurityServiceContainer,
     SecurityServiceContainerCloseError,
@@ -701,6 +703,11 @@ def _scheduler_handler_result(value: Any) -> dict[str, Any]:
 def create_app() -> FastAPI:
     from host_brain.app.tribe_composition import configure_tribe_application_ports
 
+    mode_transition_service: Any | None = None
+
+    def mode_transition_service_provider() -> Any | None:
+        return mode_transition_service
+
     configure_tribe_application_ports()
     configure_process_service_ports()
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports()
@@ -719,8 +726,8 @@ def create_app() -> FastAPI:
     task_review_command_service: TaskReviewCommandService | None = None
     internal_agent_ingress: InternalAgentIngress | None = None
     scheduler_container: ProcessSchedulerContainer | None = None
-    mode_transition_service: Any | None = None
     host_obs_ledger: Any | None = None
+    host_query_projection_store: QueryProjectionStore | None = None
     host_obs_capability_gap_telemetry: Any | None = None
     host_obs_capability_forge: Any | None = None
     host_obs_semantic_recaller: Any | None = None
@@ -781,6 +788,10 @@ def create_app() -> FastAPI:
         tool_catalog_provider=get_tool_catalog,
         bond_engine_provider=resolve_bond_engine,
         bond_writer_provider=get_bond_dynamics_writer,
+        mode_transition_service_provider=mode_transition_service_provider,
+    )
+    host_obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: host_query_projection_store,
     )
 
     host_obs_read_ports = build_host_obs_read_ports(
@@ -890,7 +901,8 @@ def create_app() -> FastAPI:
         nonlocal task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
         nonlocal mode_transition_service
-        nonlocal host_obs_ledger, host_obs_capability_gap_telemetry
+        nonlocal host_obs_ledger, host_query_projection_store
+        nonlocal host_obs_capability_gap_telemetry
         nonlocal host_obs_capability_forge, host_obs_semantic_recaller
         nonlocal host_obs_capability_scorecards
         nonlocal host_obs_degradation_state_provider
@@ -938,6 +950,9 @@ def create_app() -> FastAPI:
                 # Host source readers may observe these services, but never
                 # construct them from a GET request.
                 host_obs_ledger = ledger
+                host_query_projection_store = QueryProjectionStore(
+                    str(getattr(ledger, "canonical_db_path", "") or "")
+                )
                 host_obs_source_epoch = HostObsSourceEpoch.create()
                 host_obs_tribe_state_reader = (
                     require_process_tribe_runtime().state_registry.snapshot
@@ -1479,6 +1494,7 @@ def create_app() -> FastAPI:
                 host_obs_degradation_state_provider = lambda: None
                 host_obs_pentest_environment = {}
                 host_obs_ledger = None
+                host_query_projection_store = None
                 internal_agent_ingress = None
                 internal_agent_command_service = None
                 task_review_command_service = None
@@ -1595,6 +1611,7 @@ def create_app() -> FastAPI:
         host_obs_read_ports=host_obs_read_ports,
         canon_service_provider=canon_service_provider,
         route_ports=route_ports,
+        obs_route_ports=host_obs_route_ports,
         input_runtime_ports=input_runtime_ports,
     )
     application.state.security_service_container = None

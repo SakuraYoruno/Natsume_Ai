@@ -102,17 +102,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
-        obs_routes_sysmode = sys.modules.get("host_brain.app.obs_routes_sysmode")
-        obs_routes = sys.modules.get("host_brain.app.obs_routes")
-        if obs_routes_sysmode is not None:
-            obs_routes_sysmode._mode_transition_service = None
-        if obs_routes is not None and obs_routes_sysmode is not None:
-            obs_routes._mode_transition_lock = obs_routes_sysmode._mode_transition_lock
-            obs_routes._mode_transition_service = obs_routes_sysmode._mode_transition_service
-    except Exception:
-        pass
-
-    try:
         tribe_state = sys.modules.get("host_brain.tribe.tribe_state")
         if tribe_state is not None:
             tribe_state._GLOBAL_REGISTRY = None

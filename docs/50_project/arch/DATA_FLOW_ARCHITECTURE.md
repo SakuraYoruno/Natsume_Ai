@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.0
+版本：v2.1
 
 核对日期：2026-07-17
 
@@ -342,7 +342,7 @@ Obs 读取不借用 Host 进程内 Task container：`obs_fastapi_app` 仅在 `HO
 
 0099 terminal reconciliation 在主 Host 与独立 Obs 都提供 `candidates/cases/challenge` 三条 GET，并要求 `obs:task-runtime:read`；两处都只构造同 canonical SQLite 的 `mode=ro + query_only=ON` reader，禁止 fallback 到完整 `DurableTaskStore`。Cases 只给最小摘要，subject snapshot 不出库。Challenge 从 OperatorQueryGateway request context 取得认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`，在 authority 已绑定 key ID 时拒绝不一致请求；权威 builder 用 case、current subject 与确定性 Graph/Budget Outbox 生成 Store 实际验证的 final canonical bytes和 `command_request`。HTTP → 真实 Ed25519 → Store round-trip 已通过，但外部 key lifecycle/canary 未验证。
 
-D6 后独立 Obs 同时保留以下必须区分的数据流：
+D7 后独立 Obs 与主 Host 同时保留以下必须区分的数据流：
 
 ```text
 create_obs_app
@@ -364,6 +364,7 @@ and identified projection/stats queries / sessions + prompt cache
   → request.app.state.obs_route_ports
   → app-local QueryProjectionStore / ProjectionLedgerView / response single-flight
   → 0 Obs-route consumers of compatibility global query helpers
+  → 0 global locator/helper definitions in the four audited projection modules
 
 19 D4-migrated production GET routes
   → read_process_projection(explicit app-local store, ...)
@@ -377,6 +378,20 @@ and identified projection/stats queries / sessions + prompt cache
   → Security 3 + Skill 1 + Life 1 + Semantic 1 + Governance 1
   → require_obs_query_projection_store
   → current app-local QueryProjectionStore
+
+6 Host projection GET routes
+  → world 1 + canon/startup 2 + memory 3
+  → Host lifespan-owned ObsRoutePorts
+  → current canonical QueryProjectionStore
+
+Host sys-mode command adapters
+  → HostRoutePorts.mode_transition_service_provider
+  → missing provider fails closed
+
+Life action-preview
+  → ObsRoutePorts.life_action_context_provider + approval_token_validator
+  → missing/untrusted authority remains unavailable
+  → DRY_RUN only; no execution authority
 
 Host /internal/obs-sources/{mode,capability-forge,semantic-recall,governance,runtime}
   → dedicated HOST_OBS_READ_TOKEN
@@ -401,7 +416,9 @@ Capability v1 compatibility child provider failure
 
 21个producer callback执行路径不调用`process_services`。Host source endpoint不在GET时构造服务；ASGI lifespan预热并捕获provider、关闭时清空，但其底层Mode/Forge/ledger/Semantic/Governance/Scheduler/Tribe仍来自process authority。合同只递归约束`timestamp`、`*_ts_ms`、`*_at_ms`字段不晚于Host observed，不是“所有future字段”过滤器；Obs允许相对本地接收时钟最多5秒skew，正evidence最大年龄120秒，并把freshness写成`min(source evidence, local receive)`。五路径分别缓存，lineage以SQLite单事务CAS更新当前head并从immutable journal读取完整epoch历史。三层公共序列化与合同复验保护通用payload；Organ `key_metrics`另以逐agent显式数值/布尔allowlist阻断任意state标量。
 
-Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority；Life Body固定unavailable，真实Edge未证明。D6把Memory统计冷读切到`memory_ops_log`、`life_memory_admission_receipt`、`scheduler_event_log`、`error_log`的app-local durable projection，把VTS Host策略统计切到`avatar_action_log`；压缩率、蒸馏失败率与Edge物理回执覆盖仍明确不可测。迁移0103定义将遗留`llm_node_call_log`行隐私收敛地迁入terminal `model_attempt_log`后删表，运行时旧读写者归零，但迁移资产与测试不等于部署库已执行；`llm_call_log`仅归Graph Evidence，不再作为Obs统计源。模块级Projection daemon、导入期注册及进程locator fallback已删除，app-local `ProjectionJobDaemon`保留；5个直接词法边界、4个非路由兼容helper、Life Body、真实Edge、完整Host/Worker composition与全局Service Locator删除仍未完成，不能把部分source recovery写成完整Query Plane。
+Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
+
+D7把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports；没有挂载消费者的core ledger compatibility handlers已删除，不保留伪ledger route port。Host factory强制接收typed `ObsRoutePorts`，Process/Tribe全局ports不再捕获特定app closure。这个数据流收敛不改变底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition仍缺；Life Body仍固定typed-unavailable，真实Edge连接和物理回执仍未证明。因此Query Plane、Composition与NE-01继续为partial/in-progress。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 

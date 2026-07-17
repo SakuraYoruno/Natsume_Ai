@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.obs_routes_core import (
     _env_int,
-    _get_ledger,
     _get_obs_route_cached_response,
     _now_ms,
 )
@@ -541,12 +540,12 @@ def _extract_tick_id_from_event(item: dict[str, Any]) -> str:
 
 
 def _fetch_recent_ledger_rows(
+    ledger: Any,
     table: str,
     *,
     window_minutes: int,
     limit: int,
 ) -> list[dict[str, Any]]:
-    ledger = _get_ledger()
     now_ms = _now_ms()
     start_ms = now_ms - max(1, int(window_minutes or 0)) * 60 * 1000
     try:
@@ -563,12 +562,12 @@ def _fetch_recent_ledger_rows(
 
 
 def _fetch_recent_immune_rows(
+    ledger: Any,
     *,
     window_minutes: int,
     limit: int,
     scan_limit: int,
 ) -> list[dict[str, Any]]:
-    ledger = _get_ledger()
     now_ms = _now_ms()
     start_ms = now_ms - max(1, int(window_minutes or 0)) * 60 * 1000
     desired = max(1, int(limit))
@@ -1352,7 +1351,10 @@ def _build_active_trace_events(
     return []
 
 
-def _build_targeted_request_event(request_id: str) -> dict[str, Any] | None:
+def _build_targeted_request_event(
+    ledger: Any,
+    request_id: str,
+) -> dict[str, Any] | None:
     normalized_request_id = _as_text(request_id)
     if not normalized_request_id:
         return None
@@ -1361,7 +1363,7 @@ def _build_targeted_request_event(request_id: str) -> dict[str, Any] | None:
         (_, _build_trace_response_lightweight, *_) = _get_trace_builders()
         trace_payload = _model_dump_compat(
             _build_trace_response_lightweight(
-                _get_ledger(),
+                ledger,
                 normalized_request_id,
                 reason="LIFE_TIMELINE_REQUEST_FALLBACK",
                 message="targeted request fallback for life timeline deep-link",
@@ -1903,6 +1905,7 @@ def _build_diagnostic_guidance(
 def _build_life_body_payload(
     window_minutes: int,
     *,
+    ledger: Any,
     projection_store: Any,
 ) -> dict[str, Any]:
     from host_brain.app.observability_runtime.projection_ledger_view import (
@@ -1974,21 +1977,25 @@ def _build_life_body_payload(
     trace_feed_projection = _get_trace_feed_projection(projection_store)
     trace_feed_items = [_as_dict(item) for item in _as_list(trace_feed_projection.get("items"))]
     memory_lineage_rows = _fetch_recent_ledger_rows(
+        ledger,
         "memory_ops_log",
         window_minutes=window_minutes,
         limit=_LIFE_LINEAGE_MEMORY_LIMIT,
     )
     bond_lineage_rows = _fetch_recent_ledger_rows(
+        ledger,
         "bond_update_log",
         window_minutes=window_minutes,
         limit=_LIFE_LINEAGE_BOND_LIMIT,
     )
     scheduler_tick_rows = _fetch_recent_ledger_rows(
+        ledger,
         "scheduler_event_log",
         window_minutes=window_minutes,
         limit=_LIFE_LINEAGE_TICK_LIMIT,
     )
     immune_lineage_rows = _fetch_recent_immune_rows(
+        ledger,
         window_minutes=window_minutes,
         limit=_LIFE_LINEAGE_IMMUNE_LIMIT,
         scan_limit=_LIFE_LINEAGE_IMMUNE_SCAN_LIMIT,

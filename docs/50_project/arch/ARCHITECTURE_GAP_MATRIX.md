@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v2.1
+版本：v2.2
 核对日期：2026-07-17
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -68,10 +68,10 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
-| 显式 Composition Root | `PARTIAL_D6_QUERY_SOURCE_MIGRATION` | Task container、HostRoutePorts、Obs ports、HostObsReadPorts、版本合同、D3～D6 tests | 21个producer、36个既有端点、5个Web UI GET及补漏的7个实际GET app-local；source-mode为6/3/7/4-auth/1-unavailable。五合同有lifespan source instance、按合同revision和Obs SQLite CAS+完整历史lineage；5秒skew/120秒证据年龄、精确timestamp边界、三层公共序列化、Organ allowlist及transport总deadline已接。Forge/Semantic/Governance/Organ独立物化，Semantic/Governance有独立endpoint/cache/failure domain且不消费Capability v1兼容child；兼容child异常仅降级该字段，不反向拖垮有效的Forge source。D6删除模块级Projection daemon、导入期job注册及进程locator fallback，保留app-local `ProjectionJobDaemon`；ledger-stats稳定物化最新5000行，truncated声明旧尾部且空转刷新不增长journal，因此只证明最新有界窗口。Memory/VTS冷读durable projection，0103定义`llm_node_call_log`到terminal `model_attempt_log`的隐私收敛迁移，`llm_call_log`仅归Graph Evidence。Host provider虽按lifespan捕获/清空，底层process authority仍共享。Life Body、真实Edge、4个兼容helper、5个词法边界、全局53 refs、完整Host/Worker对象图与全局Service Locator删除仍未完成；不假定部署库已执行0103 | NE-01 |
+| 显式 Composition Root | `PARTIAL_D7_QUERY_ROUTE_PORT_CUTOVER` | Task container、HostRoutePorts、ObsRoutePorts、HostObsReadPorts、D3～D7 tests | D1～D6 的21 producer、app-local projection、Host五合同lineage、Memory/VTS冷读与0103边界继续有效。D7把Obs route的`process_services/_get_ledger`词法引用从5降为0，删除四个projection helper模块的全局locator，把Host六个GET切到lifespan store，并让mode和Life action-preview authority只经显式route ports解析；未挂载的core ledger兼容handler直接删除。Host factory强制typed ObsRoutePorts，Process/Tribe ports不再捕获某个app closure。底层process authority仍共享，约53个非锁可变引用、完整Host/Worker对象图、Life Body typed-unavailable、真实Edge和全局Service Locator删除仍未完成；不假定部署库已执行0103 | NE-01 |
 | 无全局 Service Locator | `MISSING_WITH_CLEANUP_PROGRESS` | process container/services + cleanup contract | 两批已删 6 个零消费者槽位、4 个死 accessor 和第二批 7 个宽泛重导出；仍有 60 个总字段/53 个可变服务引用及数十个 accessor/依赖文件 | NE-01 |
 | 执行巨石拆分 | `PARTIAL_GATE_RED` | `dag_scheduling_runtime.py`、focused Budget/Operation/Effect Store modules、`coordinator.py` | `task_repository.py` 当前 4,358 行；新 Budget/Operation/finalizer/workspace-fencing modules 均 <1,500且无第二 Store authority。全仓仍有 4 个既存未分类 >1,500 行违规，因此不能写 green | NE-01 Lane D 未决 |
-| Host/Obs/Worker scope 隔离 | `PARTIAL_D6_HOST_OBS_READ_BOUNDARY` | 独立 ASGI、route ports、query-only repositories、专用 token、真实 loopback、双 app/source tests | 36个既有投影端点、5个Web UI GET、7个其余实际GET、已识别stats查询与6个reconciliation端点已scoped；20个非unavailable producer中4个为认证Host job，7个仍partial。Obs按路径持久lineage并防同epoch回滚/退役epoch重放；模块级daemon已删除而app-local `ProjectionJobDaemon`保留。Host source provider仅lifespan局部，底层process authority及Worker对象图仍共享。Life Body、真实Edge、4个兼容helper定义、5个route词法边界、完整Host/Worker composition与全局Service Locator删除仍未闭环；Organ只投影allowlist内瞬态证据，不是Life authority | NE-01 |
+| Host/Obs/Worker scope 隔离 | `PARTIAL_D7_ROUTE_SCOPE_NO_GLOBAL_OBJECT_GRAPH` | 独立 ASGI、Host/Obs route ports、query-only repositories、专用 token、双 app/source tests、Host projection GET tests | 已识别Obs projection/stats routes、Host六个projection GET、mode/action-preview adapters都通过app-owned ports解析；四个兼容helper locator与Obs route的5个直接词法边界已归零，死ledger兼容handler已删除。Host source provider仍只在lifespan局部，底层process authority与Worker对象图仍共享；约53个非锁可变引用、Life Body typed-unavailable、真实Edge、完整Host/Worker composition与全局Service Locator删除未闭环 | NE-01 |
 | Workspace ownership | `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CLOSED` | 0101、`workspace_repository.py`、`workspace_operation_fencing.py`、`workspace_allocator.py`、`workspace_runtime.py`、`composition/agent_workspace.py`、Internal/ASGI/W0/W1/W2 tests | Exact graph epoch authority、服务端派生 ID、冻结 source commit、独立 Git worktree、实例/PID 租约、独占 scope、heartbeat、handoff/takeover、可信 cleanup receipt、启动同步 1 条+后台 pending retry 与失败关闭生命周期已接入认证 Internal Agent；focused fencing 模块只约束 provisioning/allocator/cleanup adapter 的外部 callback，用 workspace/source 跨进程锁、共享 deadline及前后短事务避免占用 SQLite writer，且未给大文件 Gate 增加例外。Agent tool 仅动作间取消，Verification 仅启动前验活；二者尚无逐操作 fence或强杀。缺稳定 HMAC secret 时写入关闭，canary 未跑。仍缺 promotion/abandon、accepted checkpoint HEAD、Domain Pack/Codex runtime、cleanup health、OS/container/tenant 与 handle-level TOCTOU | NE-01 |
 | 外部 Skill 安全接收 | `PARTIAL` | Signed Intake、Quarantine、Supply Chain | 只完成验证/隔离接收；staged activation/rollback 未闭环 | NE-05 |
 
@@ -82,7 +82,7 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 | World Model | `PARTIAL` | `runtime/world_model.py`、query repository | 只读事实投影，`write_api_available=false` 且 Life projection 默认未启用；不是预测/规划 world model，也未成为 canonical context resolver | NE-03 |
 | Scene Engine | `PARTIAL_DEFAULT_OFF` | `persona/scene_policy.py`、Surface/Proactive 消费接线 | `HOST_LIFE_PROJECTION_ENABLED` 生产默认关闭；缺统一 scene aggregate、transition journal、TTL/re-evaluation owner | NE-03 |
 | Intent Arbiter | `MISSING` | Governor + ActionArbiter 仅覆盖部分语义 | 没有统一合并 user/task/life/relationship/long-term goal 的仲裁层 | NE-03 |
-| Action Preview / Shadow | `PARTIAL` | `governor/action_preview.py`、Obs route | dry-run 合同存在；生产无 trusted authority provider，端点仅 eligibility、固定不执行；没有统一 shadow runner | NE-03 |
+| Action Preview / Shadow | `PARTIAL_EXPLICIT_PORT_FAIL_CLOSED` | `governor/action_preview.py`、`ObsRoutePorts.life_action_context_provider/approval_token_validator`、Obs route | trusted context与token validator已改为app-owned可选端口；缺失或不可信时失败关闭/标记unavailable，端点固定DRY_RUN且没有执行authority；生产trusted provider和统一shadow runner仍缺 | NE-03 |
 | Runtime Guardian | `PARTIAL` | health、degradation、heartbeat、service catalog | degradation/recovery evidence 真实；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与长期 SLO owner 不完整 | NE-03 |
 | Evolution Lab | `PLACEHOLDER` | `evolution_lab/policy.py` | 只有分支前缀校验，无 scenario/experiment store/runner/promotion | NE-04 |
 | Counterfactual | `MISSING` | Planning benchmark 不能替代 | 无替代路径 replay、decision comparator 与 outcome evidence | NE-04 |

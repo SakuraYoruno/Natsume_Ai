@@ -6,6 +6,8 @@ import inspect
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 
 class _EmptyProjectionStore:
     @staticmethod
@@ -27,9 +29,7 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
     def forbidden(*_args, **_kwargs):
         raise AssertionError("GET opened a canonical source")
 
-    monkeypatch.setattr(
-        dependencies, "peek_query_projection_store", lambda: _EmptyProjectionStore()
-    )
+    projection_store = _EmptyProjectionStore()
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
     monkeypatch.setattr(digital_life_routes, "get_ledger", forbidden)
     monkeypatch.setattr(health_routes, "get_ledger", forbidden)
@@ -37,11 +37,16 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
 
     world = asyncio.run(
         digital_life_routes.digital_life_world_snapshot(
-            person_id="default", session_id="session-1", fact_key=[]
+            person_id="default",
+            session_id="session-1",
+            fact_key=[],
+            projection_store=projection_store,
         )
     )
-    canon = asyncio.run(health_routes.canon_sync_health_check())
-    startup = asyncio.run(health_routes.startup_report())
+    canon = asyncio.run(
+        health_routes.canon_sync_health_check(projection_store=projection_store)
+    )
+    startup = asyncio.run(health_routes.startup_report(projection_store=projection_store))
     context = asyncio.run(
         memory_routes.memory_context_debug(
             session_id="session-1",
@@ -50,12 +55,22 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
             current_user_message="",
             limit=8,
             _authority=None,
+            projection_store=projection_store,
         )
     )
-    memory_health = asyncio.run(memory_routes.memory_health_route(person_id="default"))
+    memory_health = asyncio.run(
+        memory_routes.memory_health_route(
+            person_id="default",
+            projection_store=projection_store,
+        )
+    )
     events = asyncio.run(
         memory_routes.memory_events_recent(
-            person_id="default", session_id="", visibility="", limit=50
+            person_id="default",
+            session_id="",
+            visibility="",
+            limit=50,
+            projection_store=projection_store,
         )
     )
     now = datetime.now()
@@ -167,3 +182,22 @@ def test_memory_context_debug_is_bound_to_existing_operator_scope() -> None:
         )
         == "obs:memory:read"
     )
+
+
+def test_host_test_factory_composes_projection_ports_for_mounted_gets() -> None:
+    from tests.fakes.host_app import build_host_test_app
+
+    with TestClient(build_host_test_app()) as client:
+        startup = client.get("/startup")
+        canon = client.get("/health/canon_sync")
+        memory = client.get("/v1/memory/health")
+
+    assert startup.status_code == 200
+    assert canon.status_code == 200
+    assert memory.status_code == 200
+    startup_payload = startup.json()
+    canon_payload = canon.json()["details"]
+    memory_payload = memory.json()
+    for payload in (startup_payload, canon_payload, memory_payload):
+        assert payload["degraded_state"] == "REBUILDING"
+        assert int(payload["projection_version"]) == 0

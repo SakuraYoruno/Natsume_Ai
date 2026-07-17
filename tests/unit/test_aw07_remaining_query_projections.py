@@ -75,7 +75,9 @@ class _SourceLedger:
 def test_background_job_materializes_metadata_without_private_bodies(
     tmp_path, monkeypatch
 ) -> None:
-    from host_brain.composition import process_services as dependencies
+    from host_brain.composition.obs_projection_jobs import (
+        _remaining_queries_callback,
+    )
     from host_brain.memory import canon_world_store
     from host_brain.app.observability_runtime import remaining_query_projection as projection
 
@@ -130,9 +132,6 @@ def test_background_job_materializes_metadata_without_private_bodies(
             return [WorldDocument(), RelativeWorldDocument()]
 
     monkeypatch.setattr(canon_world_store, "WorldCanonStore", WorldStore)
-    monkeypatch.setattr(dependencies, "get_ledger", lambda: source_ledger)
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
-
     class CanonService:
         @staticmethod
         def preview_sync():
@@ -142,9 +141,11 @@ def test_background_job_materializes_metadata_without_private_bodies(
                 {"issues": (), "records": (), "removed_doc_ids": ()},
             )()
 
-    result = projection.refresh_remaining_query_projections(
-        canon_service=CanonService(),
-    )
+    result = _remaining_queries_callback(
+        source_ledger,
+        store,
+        CanonService(),
+    )()
 
     assert result["agent_loop_count"] == 1
     assert result["checkpoint_count"] == 1
@@ -280,13 +281,9 @@ def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
     assert response.degraded_state == "STALE"
 
 
-def test_read_all_from_store_is_explicit_and_legacy_read_all_is_a_thin_wrapper(
-    tmp_path,
-    monkeypatch,
-) -> None:
+def test_read_all_from_store_is_explicit(tmp_path) -> None:
     from host_brain.app.observability_runtime import remaining_query_projection as projection
     from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
-    from host_brain.composition import process_services
 
     store = _store(tmp_path)
     now_ms = int(time.time() * 1000)
@@ -319,26 +316,6 @@ def test_read_all_from_store_is_explicit_and_legacy_read_all_is_a_thin_wrapper(
         second.projection_version,
     )
     assert explicit_meta["source_cursor"] == 22
-
-    monkeypatch.setattr(process_services, "peek_query_projection_store", lambda: store)
-    compatibility_payloads, compatibility_meta = projection.read_all(TRACE_KIND)
-    assert compatibility_payloads == explicit_payloads
-    for field in (
-        "schema_version",
-        "kind",
-        "key",
-        "available",
-        "projection_version",
-        "projection_cursor",
-        "source_cursor",
-        "source_digest",
-        "freshness_ts_ms",
-        "degraded_state",
-        "degraded_detail",
-        "reason_code",
-    ):
-        assert compatibility_meta[field] == explicit_meta[field]
-    assert "read_all_from_store(" in inspect.getsource(projection.read_all)
 
 
 def test_remaining_get_handlers_are_projection_only_by_ast_contract() -> None:

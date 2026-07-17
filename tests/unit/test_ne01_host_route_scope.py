@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from host_brain.app.app_factory import create_host_fastapi_app
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
@@ -61,6 +62,13 @@ def _host_app(tool_id: str) -> tuple[object, dict[str, int], HostRoutePorts]:
         edge_events_endpoint=edge,
         root_endpoint=root,
         route_ports=route_ports,
+        obs_route_ports=ObsRoutePorts(
+            query_projection_store_provider=lambda: type(
+                "EmptyProjectionStore",
+                (),
+                {"get": lambda *_args, **_kwargs: None},
+            )(),
+        ),
         input_runtime_ports=build_input_runtime_application_ports(),
     )
     return app, calls, route_ports
@@ -98,3 +106,18 @@ def test_host_route_ports_are_immutable_and_scoped_per_app() -> None:
 
     assert calls_a["catalog"] > 0
     assert calls_b["catalog"] > calls_a["catalog"]
+
+
+def test_process_and_tribe_composition_do_not_capture_one_host_app_mode_closure() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "host_brain" / "app"
+    process_source = (root / "process_service_wiring.py").read_text(encoding="utf-8")
+    tribe_source = (root / "tribe_composition.py").read_text(encoding="utf-8")
+    asgi_source = (root / "asgi.py").read_text(encoding="utf-8")
+
+    assert "mode_transition_service_provider" not in process_source
+    assert "mode_transition_service_provider" not in tribe_source
+    assert "configure_process_service_ports()" in asgi_source
+    assert "configure_tribe_application_ports()" in asgi_source
+    assert "mode_transition_service_provider=mode_transition_service_provider" in asgi_source

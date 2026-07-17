@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import time
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from host_brain.composition.process_services import get_ledger
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
@@ -23,9 +23,10 @@ from host_brain.orchestration.governor_grant import (
 )
 from host_brain.app.observability_runtime.remaining_query_projection import (
     WORLD_SNAPSHOT_KIND,
-    read as read_query_projection,
+    read_from_store,
     response_meta,
 )
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 
 router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
@@ -343,11 +344,16 @@ async def digital_life_world_snapshot(
     person_id: str = Query("default"),
     session_id: str = Query(""),
     fact_key: list[str] | None = Query(None),
+    projection_store: Any = Depends(require_obs_query_projection_store),
 ) -> dict[str, Any]:
     """Read the background world projection without opening canonical stores."""
 
     resolved_person = str(person_id or "default")
-    payload, meta = read_query_projection(WORLD_SNAPSHOT_KIND, resolved_person)
+    payload, meta = read_from_store(
+        projection_store,
+        WORLD_SNAPSHOT_KIND,
+        resolved_person,
+    )
     requested_keys = {str(item) for item in list(fact_key or []) if str(item).strip()}
     facts = [
         dict(item)

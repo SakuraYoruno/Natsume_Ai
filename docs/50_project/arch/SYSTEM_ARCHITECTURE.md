@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.1
+版本：v2.2
 核对日期：2026-07-17
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -277,7 +277,11 @@ Host新增mode、capability-forge、semantic-recall、governance、runtime五条
 
 Capability v1的兼容child provider异常仅把该字段降级为带reason code的`SOURCE_UNAVAILABLE`；Forge自身authority有效时，capability-forge endpoint仍返200，不会被child反向拖垮。
 
-当前`REGISTERED_21_OF_21`只证明registration。source-mode为6 durable、3 static、7 partial、4 authenticated-host-read、1 unavailable；20/1与认证声明都不是成功率。Host source provider只在ASGI lifespan预热/捕获并在finally清空，但底层ledger、Forge、Semantic、Governance、Tribe等authority仍由process-global服务提供，因此Host/Worker composition未完成。缺token、Host或证据时仍写`SOURCE_UNAVAILABLE`；mode history只在当前进程内，Organ只反映allowlist内瞬态runtime，不是Life authority。真实uvicorn loopback只证明传输机制，不证明部署Host、真实Edge或长期健康。Life Body与真实Edge未闭环，health保持`DEGRADED`。Ledger-stats对每表稳定物化最新5000行；truncated只表明旧尾部不在物化窗口。只有起点严格晚于最老保留记录的窗口可继续服务；同毫秒边界、直接全表读取和未命中的request ID失败关闭。空转刷新复用source identity且不增长journal，来源不可用和超保留期也失败关闭，不能把最新窗口称为完整历史。D6把Memory统计冷读切到`memory_ops_log`、`life_memory_admission_receipt`、`scheduler_event_log`、`error_log`的app-local durable projection，把VTS Host策略统计切到`avatar_action_log`；压缩率、蒸馏失败率与Edge物理回执覆盖仍明确不可测。迁移0103定义把遗留`llm_node_call_log`隐私收敛地迁到terminal `model_attempt_log`后删表，运行时旧读写者归零；迁移资产与测试不等于部署库已执行。`llm_call_log`仅归Graph Evidence，不再作为Obs统计源。模块级Projection daemon、导入期注册与进程locator fallback已删除，app-local `ProjectionJobDaemon`保留；4个非路由兼容helper定义、5个直接词法边界、Life Body、真实Edge、Host/Worker composition、全局Service Locator删除与全局53 refs仍待迁移，不能封板。
+当前`REGISTERED_21_OF_21`只证明registration。source-mode为6 durable、3 static、7 partial、4 authenticated-host-read、1 unavailable；20/1与认证声明都不是成功率。Host source provider只在ASGI lifespan预热/捕获并在finally清空，但底层ledger、Forge、Semantic、Governance、Tribe等authority仍由process-global服务提供，因此Host/Worker composition未完成。缺token、Host或证据时仍写`SOURCE_UNAVAILABLE`；mode history只在当前进程内，Organ只反映allowlist内瞬态runtime，不是Life authority。真实uvicorn loopback只证明传输机制，不证明部署Host、真实Edge或长期健康。Life Body继续是typed-unavailable，health保持`DEGRADED`。Ledger-stats最新有界窗口、D6 Memory/VTS冷读、0103迁移与ModelAttempt测量边界继续有效。
+
+D7关闭了两个更窄的结构边界。第一，`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用均从5降到0，四个projection兼容模块的全局reader/factory/source fallback也已删除；显式reader和composition-owned source job保留。第二，Host world/canon-sync/startup/3个memory GET由lifespan Query Projection Store服务，sys-mode通过`HostRoutePorts.mode_transition_service_provider`，Life action-preview通过可选trusted context/token validator端口；缺端口全部失败关闭，preview仍只DRY_RUN。无挂载消费者的core ledger compatibility handlers已删除，不保留伪ledger route port；Host factory强制typed `ObsRoutePorts`，Process/Tribe全局ports不再捕获某个app closure。这个结果只证明已识别route/helper不再反向定位服务，不证明底层authority已脱离process-global对象图。
+
+因此剩余定级不变：`ProcessServiceContainer`仍有60个字段，排除6个锁和`application_ports`后约53个可变服务引用；`process_services.py`与`process_runtime_services.py`仍暴露大量accessor。完整Host/Worker typed composition、Life Body真实source、真实Edge进程/设备/物理回执和全局Service Locator删除均未完成，NE-01不能封板。
 
 Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED`。0101 authority、`WorkspaceRepository` 和配置根 allocator 继续持有 exact graph epoch/root WorkOrder/owner/allow-list；认证 Internal Agent admission 只携带服务端派生的逻辑 ID。显式配置稳定 HMAC secret 后，Host composition 冻结 source commit、创建独立 namespace Git worktree，并注入实例/PID 绑定 lease、独占 heartbeat scope、顺序 handoff/过期 takeover、cleanup receipt 与 pending cleanup worker；启动同步最多续清 1 条，其余 durable backlog 交 worker。Provisioning/allocator/cleanup adapter 的 Filesystem/Git callback 在 workspace→source 固定锁序下共享一个 monotonic deadline；SQLite 只承担前后 exact fence/status/expiry 验证和独立 CAS，长 callback 不占 writer，后验漂移不得成为成功结果。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者没有逐操作 fence或强杀。Workspace worker 必须先于 Task Store 静止；启动或关闭回滚失败会保留两者 handle并上抛 retry-required。缺 secret 时 Host 可降级在线但写入 fail closed。该切片没有 promotion/abandon、accepted checkpoint HEAD、Domain/Skill 接线、OS/container/tenant 或 handle-level TOCTOU 隔离，真实 canary 也未运行。
 

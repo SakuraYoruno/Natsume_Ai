@@ -39,7 +39,7 @@ from host_brain.composition.obs_projection_jobs import (
     _health_callback,
     _sessions_callback,
 )
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.persistence.capability_execution_repository import (
     CapabilityExecutionRepository,
 )
@@ -55,7 +55,7 @@ class ProjectionRefresh:
     ledger_stats: Callable[[], object]
     sessions: Callable[[], object]
     health: Callable[[], object]
-    runtime: Callable[[], object]
+    runtime: Callable[..., object]
     gateway: Callable[[], object]
     trace: Callable[[], object]
 
@@ -78,6 +78,19 @@ class EmptyLifeSnapshotReader:
             "state_digest": "",
             "updated_at_ms": 0,
         }
+
+
+class EmptyModeTransitionService:
+    """Explicit app-owned mode source used by the live projection fixture."""
+
+    @staticmethod
+    def get_current_status() -> dict[str, object]:
+        return {}
+
+    @staticmethod
+    def get_history(*, limit: int) -> list[dict[str, object]]:
+        del limit
+        return []
 
 
 @pytest.fixture
@@ -415,49 +428,23 @@ def projection_refresh(
     def _refresh_ledger_stats() -> object:
         return refresh_ledger_stats_projection(ledger=ledger, store=store)
 
-    def _upsert_live_source(
-        kind: str,
-        key: str,
-        payload,
-        *,
-        source_ref: str,
-    ) -> None:
-        now_ms = int(time.time() * 1000)
-        current = store.get(kind, key)
-        cursor = max(
-            now_ms,
-            int(current.source_cursor) + 1 if current is not None else now_ms,
+    def _refresh_runtime(mode_service: object) -> object:
+        return refresh_runtime_snapshot_projection(
+            lifecycle_ports=object(),
+            mode_transition_service=mode_service,
+            store=store,
         )
-        store.upsert(
-            kind,
-            key,
-            dict(payload),
-            source_cursor=cursor,
-            source_digest=digest_json(payload),
-            source_ref=source_ref,
-            freshness_ts_ms=now_ms,
-        )
-
-    monkeypatch.setattr(
-        "host_brain.app.observability_runtime.process_state_projection._store",
-        lambda: store,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.observability_runtime.live_source_projection.get_projection_ledger_view",
-        lambda: ProjectionLedgerView(store),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.observability_runtime.live_source_projection._upsert",
-        _upsert_live_source,
-    )
 
     return ProjectionRefresh(
         ledger_stats=_refresh_ledger_stats,
         sessions=_sessions_callback(ledger, store),
         health=_health_callback(ledger, store),
-        runtime=refresh_runtime_snapshot_projection,
+        runtime=_refresh_runtime,
         gateway=lambda: refresh_operator_live_state_projections(
             life_snapshot_reader=EmptyLifeSnapshotReader(),
+            ledger_view=ProjectionLedgerView(store),
+            mode_service=EmptyModeTransitionService(),
+            store=store,
         ),
         trace=lambda: refresh_trace_query_projections(
             ledger=ledger,
@@ -591,28 +578,25 @@ def test_runtime_snapshot_returns_unified_state(
             "timestamp": 1700000000000,
         },
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: type(
-            "_FakeModeService",
-            (),
-            {
-                "get_current_status": lambda self: {
-                    "sys_mode": "focus",
-                    "auto_rules": {"gaming_detect": True},
-                    "idle_ms": 120000,
-                    "idle_minutes": 2.0,
-                    "last_interaction_ts_ms": 1700000000000,
-                    "is_night_time": False,
-                    "valid_transitions": ["normal", "gaming"],
-                    "ts_ms": 1700000000000,
-                    "degraded": False,
-                    "degraded_reason": None,
-                }
-            },
-        )(),
-    )
-    projection_refresh.runtime()
+    mode_service = type(
+        "_FakeModeService",
+        (),
+        {
+            "get_current_status": lambda self: {
+                "sys_mode": "focus",
+                "auto_rules": {"gaming_detect": True},
+                "idle_ms": 120000,
+                "idle_minutes": 2.0,
+                "last_interaction_ts_ms": 1700000000000,
+                "is_night_time": False,
+                "valid_transitions": ["normal", "gaming"],
+                "ts_ms": 1700000000000,
+                "degraded": False,
+                "degraded_reason": None,
+            }
+        },
+    )()
+    projection_refresh.runtime(mode_service)
 
     resp = client.get("/obs/runtime-snapshot?current_topic=%E9%82%A3%E4%B8%AA%E9%A1%B9%E7%9B%AE")
 
@@ -667,15 +651,12 @@ def test_runtime_snapshot_accepts_nested_slot_privacy_metadata(
             "timestamp": 1700000000000,
         },
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: type(
-            "_FakeModeService",
-            (),
-            {"get_current_status": lambda self: {"sys_mode": "normal"}},
-        )(),
-    )
-    projection_refresh.runtime()
+    mode_service = type(
+        "_FakeModeService",
+        (),
+        {"get_current_status": lambda self: {"sys_mode": "normal"}},
+    )()
+    projection_refresh.runtime(mode_service)
 
     response = client.get("/obs/runtime-snapshot")
 
@@ -769,11 +750,7 @@ def test_runtime_snapshot_repeated_reads_do_not_rebuild(
         "host_brain.lifecycle_runtime.runtime_snapshot.build_digital_life_runtime_snapshot",
         _fake_snapshot,
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: _FakeModeService(),
-    )
-    projection_refresh.runtime()
+    projection_refresh.runtime(_FakeModeService())
 
     first = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
     second = client.get("/obs/runtime-snapshot?current_topic=cache-demo")

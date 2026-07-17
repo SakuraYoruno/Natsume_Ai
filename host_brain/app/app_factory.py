@@ -12,6 +12,7 @@ from host_brain.app.http_hooks import global_exception_handler as _global_except
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_read_routes import HostObsReadPorts
 from host_brain.app.pentest_secure_run_routes import PentestSecureRunCompositionProvider
 from host_brain.app.router_registry import register_host_routers
@@ -52,6 +53,7 @@ def create_host_fastapi_app(
     host_obs_read_ports: HostObsReadPorts | None = None,
     canon_service_provider: Callable[[], Any | None] | None = None,
     route_ports: HostRoutePorts | None = None,
+    obs_route_ports: ObsRoutePorts,
     input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
     del get_ledger  # Route adapters no longer resolve the process ledger.
@@ -70,6 +72,9 @@ def create_host_fastapi_app(
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+    if not isinstance(obs_route_ports, ObsRoutePorts):
+        raise TypeError("obs_route_ports must be ObsRoutePorts")
+    app.state.obs_route_ports = obs_route_ports
     register_host_routers(
         app,
         input_runtime_ports=input_runtime_ports,

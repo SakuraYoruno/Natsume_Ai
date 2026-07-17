@@ -29,6 +29,7 @@ from host_brain.app.host_obs_read_routes import (
     create_host_obs_read_router,
 )
 from host_brain.app import app_factory
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
@@ -287,6 +288,13 @@ def test_host_app_factory_forwards_the_read_ports_to_the_router_registry(
         edge_events_endpoint=lambda _body: None,
         root_endpoint=lambda: Response(),
         host_obs_read_ports=_ports(),
+        obs_route_ports=ObsRoutePorts(
+            query_projection_store_provider=lambda: type(
+                "EmptyProjectionStore",
+                (),
+                {"get": lambda *_args, **_kwargs: None},
+            )(),
+        ),
         input_runtime_ports=build_input_runtime_application_ports(),
     )
 

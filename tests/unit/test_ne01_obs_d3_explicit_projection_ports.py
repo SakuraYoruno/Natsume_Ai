@@ -120,7 +120,7 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             path.read_text(encoding="utf-8-sig")
             for path in (ROOT / "host_brain" / "app").glob("obs_routes*.py")
         ]
-        assert sum(source.count("process_services") for source in route_sources) == 5
+        assert sum(source.count("process_services") for source in route_sources) == 0
         assert sum(
             source.count("get_projection_ledger_view") for source in route_sources
         ) == 0
@@ -158,18 +158,32 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
             machine["obs_indirect_process_projection_locator"]
             == "REMOVED_EXPLICIT_STORE_PARAMETER"
         )
-        assert (
-            machine["obs_other_global_query_projection_locator_boundary"]
-            == "COMPATIBILITY_HELPERS_PRESENT_NO_OBS_ROUTE_CONSUMERS"
-        )
         assert machine["obs_route_global_query_projection_helper_occurrences"] == 0
-        assert machine["obs_route_process_service_locator_occurrences"] == 5
-        assert machine["obs_other_global_query_projection_locator_modules"] == [
-            "capability_stats_projection.py",
-            "domain_state_projection.py",
-            "projection_ledger_view.py",
-            "remaining_query_projection.py",
-        ]
+        assert machine["obs_route_process_service_locator_occurrences"] == 0
+
+        compatibility_modules = {
+            "capability_stats_projection.py": (
+                "read_capability_forge_projection",
+                "refresh_capability_forge_projection",
+            ),
+            "domain_state_projection.py": (
+                "read_domain_projection",
+                "refresh_security_immune_projection",
+                "refresh_skill_pack_catalog_projection",
+            ),
+            "projection_ledger_view.py": ("get_projection_ledger_view",),
+            "remaining_query_projection.py": (
+                "read",
+                "read_all",
+                "refresh_remaining_query_projections",
+            ),
+        }
+        runtime_root = ROOT / "host_brain" / "app" / "observability_runtime"
+        for module_name, removed_functions in compatibility_modules.items():
+            source = (runtime_root / module_name).read_text(encoding="utf-8")
+            assert "composition.process_services" not in source
+            for function_name in removed_functions:
+                assert f"def {function_name}(" not in source
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()

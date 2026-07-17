@@ -20,9 +20,10 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     MEMORY_CONTEXT_KIND,
     MEMORY_EVENTS_KIND,
     MEMORY_HEALTH_KIND,
-    read as read_query_projection,
+    read_from_store,
     response_meta,
 )
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 
 router = APIRouter(prefix="/v1/memory", tags=["memory"])
@@ -95,8 +96,13 @@ async def memory_context_debug(
     current_user_message: str = Query(""),
     limit: int = Query(8, ge=1, le=30),
     _authority: None = Depends(_require_memory_debug_scope),
+    projection_store: Any = Depends(require_obs_query_projection_store),
 ) -> dict[str, Any]:
-    payload, meta = read_query_projection(MEMORY_CONTEXT_KIND, str(person_id or "default"))
+    payload, meta = read_from_store(
+        projection_store,
+        MEMORY_CONTEXT_KIND,
+        str(person_id or "default"),
+    )
     return {
         "person_id": str(person_id or "default"),
         "session_id": str(session_id or ""),
@@ -113,8 +119,15 @@ async def memory_context_debug(
 
 
 @router.get("/health")
-async def memory_health_route(person_id: str = Query("default")) -> dict[str, Any]:
-    payload, meta = read_query_projection(MEMORY_HEALTH_KIND, str(person_id or "default"))
+async def memory_health_route(
+    person_id: str = Query("default"),
+    projection_store: Any = Depends(require_obs_query_projection_store),
+) -> dict[str, Any]:
+    payload, meta = read_from_store(
+        projection_store,
+        MEMORY_HEALTH_KIND,
+        str(person_id or "default"),
+    )
     return {
         **dict(payload or {}),
         "person_id": str(person_id or "default"),
@@ -128,8 +141,13 @@ async def memory_events_recent(
     session_id: str = Query(""),
     visibility: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
+    projection_store: Any = Depends(require_obs_query_projection_store),
 ) -> dict[str, Any]:
-    payload, meta = read_query_projection(MEMORY_EVENTS_KIND, str(person_id or "default"))
+    payload, meta = read_from_store(
+        projection_store,
+        MEMORY_EVENTS_KIND,
+        str(person_id or "default"),
+    )
     items = []
     for raw in list((payload or {}).get("items") or []):
         if not isinstance(raw, dict):

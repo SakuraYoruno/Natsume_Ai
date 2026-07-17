@@ -35,6 +35,7 @@ from host_brain.app.observability_runtime.domain_command_ports import (
     ObsDomainCommandError,
     build_default_obs_domain_command_registry,
 )
+from host_brain.app.host_route_ports import HostRoutePorts
 
 
 def _envelope(
@@ -67,8 +68,13 @@ def _envelope(
     )
 
 
-def _execute(command_id: str, payload: dict[str, object]):
-    registry = build_default_obs_domain_command_registry()
+def _execute(
+    command_id: str,
+    payload: dict[str, object],
+    *,
+    route_ports: HostRoutePorts | None = None,
+):
+    registry = build_default_obs_domain_command_registry(route_ports=route_ports)
     port = registry.resolve_port(command_id)
     assert port is not None
     return asyncio.run(port.execute(_envelope(command_id, payload)))
@@ -165,9 +171,7 @@ def test_avatar_adapter_awaits_async_edge_port(monkeypatch) -> None:
     assert result.result["output"]["event"] == {"behavior_id": "listening"}
 
 
-def test_sysmode_adapter_maps_service_and_rejects_fallback(monkeypatch) -> None:
-    from host_brain.app import obs_routes_sysmode as sysmode_routes
-
+def test_sysmode_adapter_maps_explicit_service_and_rejects_missing_port() -> None:
     captured: dict[str, object] = {}
 
     class _ModeService:
@@ -176,16 +180,16 @@ def test_sysmode_adapter_maps_service_and_rejects_fallback(monkeypatch) -> None:
             captured.update(target_mode=target_mode, **kwargs)
             return {"success": True, "from_mode": "normal", "to_mode": target_mode}
 
-    monkeypatch.setattr(sysmode_routes, "_get_mode_transition_service", lambda: _ModeService())
     result = _execute(
         "sys_mode.switch",
         {"target_mode": "focus", "reason": "work", "source": "manual"},
+        route_ports=HostRoutePorts(
+            mode_transition_service_provider=lambda: _ModeService(),
+        ),
     )
     assert captured["target_mode"] == "focus"
     assert result.result["output"]["to_mode"] == "focus"
 
-    fallback = sysmode_routes._FallbackModeService()
-    monkeypatch.setattr(sysmode_routes, "_get_mode_transition_service", lambda: fallback)
     with pytest.raises(ObsDomainCommandError, match="OBS_SYS_MODE_DOMAIN_UNAVAILABLE"):
         _execute("sys_mode.auto_rules.update", {"rules": {"gaming_detect": False}})
 

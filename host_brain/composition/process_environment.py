@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any
 
-from host_brain.composition.process_application_ports import require_process_application_ports
 from host_brain.composition.process_service_container import get_process_service_container
 
 _logger = logging.getLogger("Natsume.process_environment")
@@ -66,20 +65,13 @@ def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None 
 
         from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
 
-        mode_service = None
-        try:
-            mode_service = require_process_application_ports().mode_transition_service()
-        except Exception as exc:
-            _logger.warning("获取 ModeTransitionService 失败，改为本地初始化: %s", exc)
+        from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
 
-        if mode_service is None:
-            from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
-
-            mode_service = ModeTransitionService(
-                get_hard_state=get_hard_state,
-                set_sys_mode=set_sys_mode,
-                ledger=ledger if ledger is not None else _foundation().get_ledger(),
-            )
+        mode_service = ModeTransitionService(
+            get_hard_state=get_hard_state,
+            set_sys_mode=set_sys_mode,
+            ledger=ledger if ledger is not None else _foundation().get_ledger(),
+        )
 
         monitor = ActivityMonitor(mode_transition_service=mode_service)
         monitor.start()

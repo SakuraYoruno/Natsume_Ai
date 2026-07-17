@@ -94,6 +94,8 @@ class ObsRoutePorts:
     """Narrow provider bundle owned by one Obs FastAPI application."""
 
     query_projection_store_provider: Callable[[], Any]
+    life_action_context_provider: Callable[..., Any] | None = None
+    approval_token_validator: Callable[..., Any] | None = None
     response_cache: ObsRouteResponseCache = field(
         default_factory=ObsRouteResponseCache,
     )
@@ -101,6 +103,13 @@ class ObsRoutePorts:
     def __post_init__(self) -> None:
         if not callable(self.query_projection_store_provider):
             raise TypeError("query_projection_store_provider must be callable")
+        for field_name in (
+            "life_action_context_provider",
+            "approval_token_validator",
+        ):
+            provider = getattr(self, field_name)
+            if provider is not None and not callable(provider):
+                raise TypeError(f"{field_name} must be callable or None")
         if not isinstance(self.response_cache, ObsRouteResponseCache):
             raise TypeError("response_cache must be ObsRouteResponseCache")
 
@@ -112,7 +121,6 @@ class ObsRoutePorts:
                 detail="OBS_QUERY_PROJECTION_STORE_UNAVAILABLE",
             )
         return store
-
 
 def require_obs_route_ports(connection: HTTPConnection) -> ObsRoutePorts:
     ports = getattr(connection.app.state, "obs_route_ports", None)

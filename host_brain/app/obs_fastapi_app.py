@@ -238,6 +238,10 @@ def create_obs_app(
                 query_projection_store_provider=(
                     lambda: resolved_ports.query_projection_store
                 ),
+                life_action_context_provider=(
+                    resolved_ports.life_action_context_provider
+                ),
+                approval_token_validator=resolved_ports.approval_token_validator,
             )
             # Publish the minimum retryable graph before constructing optional
             # readers.  Routes cannot run until lifespan yields, while a

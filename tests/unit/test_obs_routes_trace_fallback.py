@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from host_brain.app import obs_routes_core
 from host_brain.app.obs_route_ports import ObsRoutePorts
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.app.obs_routes_trace import router as trace_router
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import QueryProjectionStore
@@ -35,7 +35,6 @@ def _make_app(ledger, projection_store: QueryProjectionStore) -> FastAPI:
     )
     app.include_router(router)
     app.include_router(trace_router)
-    set_ledger_provider(lambda: ledger)
     return app
 
 

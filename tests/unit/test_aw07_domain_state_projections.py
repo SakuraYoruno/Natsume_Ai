@@ -63,8 +63,6 @@ def test_life_get_reads_durable_projection_without_source_getter(tmp_path, monke
         raise AssertionError("Life GET must not call a source getter")
 
     monkeypatch.setattr(life_application_boundary, "read_life_snapshot", forbidden)
-    monkeypatch.setattr(routes, "_default_snapshot", forbidden)
-    routes.set_life_evolution_snapshot_provider(forbidden)
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
     get_core_settings.cache_clear()
     try:
@@ -72,7 +70,6 @@ def test_life_get_reads_durable_projection_without_source_getter(tmp_path, monke
             routes._get_life_evolution_snapshot(store, "default", "")
         )
     finally:
-        routes.set_life_evolution_snapshot_provider(None)
         get_core_settings.cache_clear()
 
     assert response["view_id"] == "projected-life"
@@ -242,7 +239,7 @@ def test_background_loaders_project_canonical_life_and_skill_pack_catalog() -> N
     assert catalog["domain_packs"][0]["pack_id"] == "pack.one"
 
 
-def test_life_background_loader_binds_the_composed_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
+def test_life_background_loader_requires_the_explicit_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
     from host_brain.composition import process_services
 
     calls: list[str] = []
@@ -259,9 +256,18 @@ def test_life_background_loader_binds_the_composed_snapshot_reader(monkeypatch) 
             }
 
     reader = Reader()
-    monkeypatch.setattr(process_services, "get_life_snapshot_reader", lambda: reader)
+    monkeypatch.setattr(
+        process_services,
+        "get_life_snapshot_reader",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("explicit loader must not discover a process reader")
+        ),
+    )
 
-    payload, cursor = load_life_evolution_projection_source("natsume")
+    payload, cursor = load_life_evolution_projection_source(
+        "natsume",
+        snapshot_reader=reader.get_snapshot,
+    )
 
     assert calls == ["natsume"]
     assert payload["person_id"] == "natsume"

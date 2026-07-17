@@ -313,17 +313,26 @@ async def _avatar_behavior(payload: Mapping[str, Any], request_id: str) -> Any:
     }
 
 
-def _sysmode_service() -> Any:
-    from host_brain.app import obs_routes_sysmode
-
-    service = obs_routes_sysmode._get_mode_transition_service()
-    if isinstance(service, obs_routes_sysmode._FallbackModeService):
+def _sysmode_service(route_ports: HostRoutePorts, *methods: str) -> Any:
+    provider = route_ports.mode_transition_service_provider
+    try:
+        service = provider() if provider is not None else None
+    except Exception as exc:
+        raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE") from exc
+    if service is None or any(
+        not callable(getattr(service, method, None)) for method in methods
+    ):
         raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE")
     return service
 
 
-def _sysmode_switch(payload: Mapping[str, Any], _request_id: str) -> Any:
-    service = _sysmode_service()
+def _sysmode_switch(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    service = _sysmode_service(route_ports, "switch_mode")
     source: Any = None
     try:
         from host_brain.core.mode_transition import TransitionSource
@@ -337,14 +346,26 @@ def _sysmode_switch(payload: Mapping[str, Any], _request_id: str) -> Any:
     return service.switch_mode(_required_text(payload, "target_mode"), **kwargs)
 
 
-def _sysmode_auto_rules(payload: Mapping[str, Any], _request_id: str) -> Any:
-    updated = _sysmode_service().update_auto_rules(dict(payload.get("rules") or {}))
+def _sysmode_auto_rules(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    updated = _sysmode_service(route_ports, "update_auto_rules").update_auto_rules(
+        dict(payload.get("rules") or {})
+    )
     return {"success": True, "auto_rules": updated}
 
 
-def _sysmode_event(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _sysmode_event(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     event_type = _required_text(payload, "event_type")
-    result = _sysmode_service().on_event(event_type)
+    result = _sysmode_service(route_ports, "on_event").on_event(event_type)
     return {
         "success": True,
         "triggered": result is not None,
@@ -862,6 +883,9 @@ _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
     "canon.proposal.rollback": _canon_rollback,
     "tool.execute": _tool_execute,
     "bond.event.submit": _bond_event,
+    "sys_mode.switch": _sysmode_switch,
+    "sys_mode.auto_rules.update": _sysmode_auto_rules,
+    "sys_mode.event.submit": _sysmode_event,
 }
 
 

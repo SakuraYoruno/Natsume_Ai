@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.13
+版本：v5.14
 核对日期：2026-07-17
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -28,7 +28,7 @@
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Review/Resume | `WIRED_0096_TASK_BOUND / CANARY_NOT_RUN` | task-bound Review 的批准、拒绝和过期与 continuation 原子提交；composition worker 按原 Host/Internal/Scheduler surface 自动重入。PRE 不制造伪 Attempt，POST 不重跑 worker；独立 `review:decide` policy 已接线，但 Operator credential/UI 和真实 canary未完成，一般 recoverable Attempt 仍未统一在线续跑 |
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL` | Acceptance 原子写 effect intents；user/assistant/delivery 实际应用不是一个全局事务 |
-| Composition | `INCOMPLETE / D6_QUERY_SOURCE_MIGRATION_PARTIAL` | 36个既有端点、5个 `/api/ui/*` GET及补漏的7个实际GET均app-local；21个producer为6 durable、3 static、7 partial、4 authenticated-host-read、1 unavailable。Host五合同已接lifespan source epoch、单调revision、Obs SQLite CAS+完整历史lineage/防回滚、精确时间边界、三层公共序列化与总deadline；Forge/Semantic/Governance/Organ独立物化且Semantic/Governance拥有独立故障域，sys-mode也可经认证来源读取。D6删除模块级Projection daemon、导入期job注册及进程locator fallback，保留app-local `ProjectionJobDaemon`；Memory/VTS冷读durable projection，0103定义`llm_node_call_log`到terminal `model_attempt_log`的隐私收敛迁移，`llm_call_log`仅归Graph Evidence。Host底层authority仍process-global；Life Body、真实Edge、5个词法边界、4个兼容helper、完整Host/Worker composition、全局Service Locator删除和全局53 refs仍未完成；不假定部署库已执行0103 |
+| Composition | `INCOMPLETE / D7_QUERY_ROUTE_PORT_CUTOVER_PARTIAL` | D1～D6 的app-local routes、21个producer、Host五合同lineage、Memory/VTS冷读与0103边界继续成立。D7把`obs_routes*.py`中的`process_services/_get_ledger`词法引用从5降到0，删除四个projection helper模块的全局locator，并把Host world/canon-sync/startup/3个memory GET切到lifespan store；mode与Life action-preview trusted authority经route ports显式解析，未挂载core ledger兼容handler已删除。Host factory强制typed ObsRoutePorts，Process/Tribe ports不再捕获单app closure。底层Host authority仍process-global，约53个非锁可变服务引用、完整Host/Worker composition、Life Body typed-unavailable、真实Edge和全局Service Locator删除仍未完成；NE-01不得封板 |
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
@@ -320,7 +320,9 @@ Host为每个lifespan生成一个五合同共享的`source_instance_id`，mode/c
 
 Host source closure只在ASGI lifespan内预热、捕获并在finally清空；它底层仍读取`get_ledger/get_capability_* / get_semantic_recaller/require_process_tribe_runtime`等process authority，所以不是多Host全对象图隔离。Capability Forge durable proposal由ledger直接执行newest-per-proposal查询。缺token、Host或有效证据时相关文档保持`SOURCE_UNAVAILABLE`；mode history只在当前Host进程内，Organ只是allowlist后的瞬态证据而非Life authority。Life Body仍固定unavailable，真实Edge未证明。Ledger-stats按公开时间列与durable行身份倒序读取最近5001行并物化最新5000行；`truncated`只标记更旧尾部，不再使高流量表永久503。截断时只服务起点严格晚于最老保留记录的窗口；同毫秒边界、直接全表读取和未命中的request ID失败关闭。空转轮询只更新freshness且不扩张immutable journal，来源不可用或超保留期也失败关闭。这是最新有界窗口，不是完整历史。D6把Memory统计切到`memory_ops_log`、`life_memory_admission_receipt`、`scheduler_event_log`、`error_log`的app-local durable projection，把VTS Host策略统计切到`avatar_action_log`；压缩率、蒸馏失败率和Edge物理回执覆盖仍明确不可测。0103定义把遗留`llm_node_call_log`行隐私收敛地迁到terminal `model_attempt_log`后删表，运行时旧读写者归零，但不能据此假定部署库已经执行；`llm_call_log`只保留给Graph Evidence，不再被统计消费。callback仍不得调用`process_services`。
 
-静态扫描现有 `obs_routes*.py` 的 `process_services` 直接词法边界为5个，它不是route数也不是全部locator。`read_process_projection`必须接收显式store；`capability_stats_projection`、`domain_state_projection`、`projection_ledger_view`、`remaining_query_projection`四个兼容全局helper的Obs route消费者为0，但helper定义和非路由兼容边界仍存在。模块级 `_default_daemon/register_projection_job`兼容链与导入期注册已删除，app-local `ProjectionJobDaemon`保留。因此这只是已识别route和source冷迁移的部分收敛，不是完整Query Plane、source coverage或Composition封板。
+D7 静态扫描现有 `obs_routes*.py` 时，`process_services` 与 `_get_ledger` 的直接词法引用均为0；这个数字只描述该文件集合，不是全仓Service Locator计数。`capability_stats_projection`、`domain_state_projection`、`projection_ledger_view`、`remaining_query_projection`已删除全局兼容reader/factory/source fallback，生产保留的是显式`*_from_store` reader和由composition传入store/ledger/source的job。Host的`/v1/digital-life/world/snapshot`、`/health/canon_sync`、`/startup`、`/v1/memory/context/debug`、`/v1/memory/health`、`/v1/memory/events/recent`从Host lifespan持有的Query Projection Store读取；mode service经`HostRoutePorts`，Life action-preview的trusted context/token validator经`ObsRoutePorts`注入，缺端口失败关闭，preview仍不执行动作。没有挂载消费者的core ledger compatibility handlers已删除，不保留伪route port。Host app factory强制接收typed `ObsRoutePorts`；Process/Tribe全局ports不再捕获特定app closure。模块级daemon与导入期注册继续保持删除，app-local `ProjectionJobDaemon`保留。
+
+该切片没有把底层process authority变成Host/Worker typed object graph。`ProcessServiceContainer`仍有60个字段，排除6个锁和`application_ports`后约53个可变服务引用；`process_services.py/process_runtime_services.py`的大量accessor仍在。Life Body继续是唯一typed-unavailable producer，真实Edge进程、设备和物理回执没有验收证据。因此D7只是route/helper边界收敛，不是完整Query Plane、Composition或NE-01完成。
 
 所以当前更准确的说法是“集中式 Service Locator”，不是“显式 Composition Root 已完成”。
 

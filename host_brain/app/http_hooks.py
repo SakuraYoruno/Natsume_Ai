@@ -489,17 +489,6 @@ def runtime_lifespan(
                 _activity_monitor.start()
                 set_activity_monitor(_activity_monitor)  # 注册到 dependencies 供消息链路调用
 
-                # 将 ModeTransitionService 实例注入到 obs_routes 模块，
-                # 确保 /obs/sys-mode API 端点和 ActivityMonitor 共享同一实例
-                # （避免历史记录/规则开关各自独立的问题）
-                try:
-                    import host_brain.app.obs_routes_sysmode as _obs_mod  # noqa: PLC0415
-                    with _obs_mod._mode_transition_lock:
-                        _obs_mod._mode_transition_service = _mode_service
-                    logger.info("ModeTransitionService 已注入 obs_routes（单例共享）")
-                except Exception as _inject_exc:
-                    logger.warning("ModeTransitionService 注入 obs_routes 失败（降级）: %s", _inject_exc)
-
                 new_module_statuses["activity_monitor"] = (
                     f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
                     f"idle_check={_activity_monitor._idle_interval}s)"

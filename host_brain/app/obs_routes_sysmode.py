@@ -4,16 +4,12 @@
 """
 from __future__ import annotations
 
-import json
-import logging
-import os
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import Query, Request
 from pydantic import BaseModel, Field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.obs_host_proxy import fetch_host_json
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.app.observability_runtime.live_source_projection import (
@@ -32,140 +28,14 @@ from host_brain.app.observability_runtime.process_state_projection import (
 )
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 
-logger = logging.getLogger("Natsume.obs")
-
-
 from typing import Literal
-import threading
 
-from .obs_routes_core import router, _get_ledger, _now_ms
-from .obs_routes_core import _env_int
+from .obs_routes_core import router, _now_ms
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 系统运行模式管理 — GET/POST /obs/sys-mode
 # ─────────────────────────────────────────────────────────────────────────────
-
-import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
-
-# 全局 ModeTransitionService 实例（延迟初始化）
-_mode_transition_service = None
-_mode_transition_lock = threading.Lock()
-_RUNTIME_SNAPSHOT_CACHE_TTL_MS = _env_int("OBS_RUNTIME_SNAPSHOT_CACHE_TTL_MS", 2500, minimum=0)
-
-
-def _sync_obs_routes_compat_handles() -> None:
-    """保持 obs_routes 兼容导出的句柄与本模块单例同步。"""
-    import sys
-
-    obs_routes_mod = sys.modules.get("host_brain.app.obs_routes")
-    if obs_routes_mod is None:
-        return
-    try:
-        setattr(obs_routes_mod, "_mode_transition_lock", _mode_transition_lock)
-        setattr(obs_routes_mod, "_mode_transition_service", _mode_transition_service)
-    except Exception:
-        pass
-
-
-def _get_mode_transition_service():
-    """获取或初始化 ModeTransitionService 单例。"""
-    global _mode_transition_service
-    if _mode_transition_service is not None:
-        return _mode_transition_service
-
-    with _mode_transition_lock:
-        if _mode_transition_service is not None:
-            return _mode_transition_service
-
-        try:
-            from host_brain.core.mode_transition import ModeTransitionService
-            from host_brain.composition.process_services import (
-                get_hard_state as _dep_get_hard_state,
-                set_sys_mode as _dep_set_sys_mode,
-            )
-            ledger = _get_ledger()
-            _mode_transition_service = ModeTransitionService(
-                get_hard_state=_dep_get_hard_state,
-                set_sys_mode=_dep_set_sys_mode,
-                ledger=ledger,
-            )
-        except Exception as exc:
-            logger.warning("ModeTransitionService init failed, using fallback: %s", exc)
-            # 降级：返回一个最小化的 fallback 服务
-            _mode_transition_service = _FallbackModeService()
-
-    _sync_obs_routes_compat_handles()
-    return _mode_transition_service
-
-
-class _FallbackModeService:
-    """ModeTransitionService 降级替代——当依赖不可用时提供基本功能。"""
-
-    def get_current_status(self):
-        import os
-        mode = os.environ.get("HOST_SYS_MODE", "normal").strip().lower()
-        return {
-            "sys_mode": mode,
-            "auto_rules": {
-                "gaming_detect": True,
-                "gaming_exit": True,
-                "idle_to_sleep": True,
-                "wakeup_on_msg": True,
-                "morning_wakeup": True,
-            },
-            "idle_ms": 0,
-            "idle_minutes": 0,
-            "last_interaction_ts_ms": _now_ms(),
-            "is_night_time": False,
-            "valid_transitions": [],
-            "ts_ms": _now_ms(),
-            "degraded": True,
-            "degraded_reason": "ModeTransitionService not available",
-        }
-
-    def switch_mode(self, target_mode, *, source=None, reason=""):
-        import os
-        from host_brain.core.metabolism import ALLOWED_SYS_MODES
-        target = str(target_mode).strip().lower()
-        if target not in ALLOWED_SYS_MODES:
-            return {"success": False, "error": f"invalid mode: {target}"}
-        # 优先通过 set_sys_mode 切换（保持 _hard_state 一致性）
-        try:
-            from host_brain.composition.process_services import set_sys_mode as _dep_set  # noqa: PLC0415
-            result = _dep_set(target)
-            return {
-                "success": True,
-                "from_mode": result.get("from_mode", "unknown"),
-                "to_mode": result.get("to_mode", target),
-                "source": "manual",
-                "reason": reason,
-                "ts_ms": _now_ms(),
-                "degraded": True,
-            }
-        except Exception:
-            pass
-        # 降级：直接写环境变量（_hard_state 可能不一致）
-        os.environ["HOST_SYS_MODE"] = target
-        return {
-            "success": True,
-            "from_mode": "unknown",
-            "to_mode": target,
-            "source": "manual",
-            "reason": reason,
-            "ts_ms": _now_ms(),
-            "degraded": True,
-        }
-
-    def get_history(self, limit=20):
-        return []
-
-    def update_auto_rules(self, rules):
-        return rules
-
-    def on_event(self, event_type, payload=None):
-        return None
-
 
 class SysModeStatusResponse(BaseModel):
     sys_mode: str
@@ -276,11 +146,11 @@ def _build_runtime_snapshot_response(
     current_topic: str,
     *,
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
+    mode_transition_service: Any | None = None,
 ) -> DigitalLifeRuntimeSnapshotResponse:
     from host_brain.lifecycle_runtime.background_projection import _build_background_runtime_snapshot  # noqa: PLC0415
     from host_brain.lifecycle_runtime.runtime_snapshot import build_digital_life_runtime_snapshot  # noqa: PLC0415
 
-    service = _get_mode_transition_service()
     payload = build_digital_life_runtime_snapshot(
         ports=lifecycle_ports,
         current_topic=current_topic,
@@ -298,7 +168,11 @@ def _build_runtime_snapshot_response(
             payload.setdefault("background_runtime", {})
             payload["background_runtime"]["host_scheduler_overlay_error"] = str(exc)[:160]
     try:
-        payload["sys_mode_status"] = dict(service.get_current_status() or {})
+        if mode_transition_service is None:
+            raise RuntimeError("MODE_TRANSITION_SERVICE_NOT_INJECTED")
+        payload["sys_mode_status"] = dict(
+            mode_transition_service.get_current_status() or {}
+        )
     except Exception as exc:
         payload.setdefault("sys_mode_status", {})
         payload["degraded"] = True
@@ -374,9 +248,22 @@ def get_digital_life_runtime_snapshot(
     return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
-def switch_sys_mode(body: SysModeSwitchRequest):
+def _require_mode_transition_service(service: Any, *methods: str) -> Any:
+    if service is None or any(not callable(getattr(service, name, None)) for name in methods):
+        raise RuntimeError("OBS_SYS_MODE_COMMAND_AUTHORITY_UNAVAILABLE")
+    return service
+
+
+def switch_sys_mode(
+    body: SysModeSwitchRequest,
+    *,
+    mode_transition_service: Any,
+):
     """切换系统运行模式（手动 / API 触发）。"""
-    service = _get_mode_transition_service()
+    service = _require_mode_transition_service(
+        mode_transition_service,
+        "switch_mode",
+    )
 
     # 映射 source 字符串到枚举
     try:
@@ -432,9 +319,16 @@ def get_sys_mode_history(
     )
 
 
-def update_auto_rules(body: AutoRulesUpdateRequest):
+def update_auto_rules(
+    body: AutoRulesUpdateRequest,
+    *,
+    mode_transition_service: Any,
+):
     """更新自动切换规则开关。"""
-    service = _get_mode_transition_service()
+    service = _require_mode_transition_service(
+        mode_transition_service,
+        "update_auto_rules",
+    )
     updated = service.update_auto_rules(body.rules)
     return {
         "auto_rules": updated,
@@ -444,6 +338,8 @@ def update_auto_rules(body: AutoRulesUpdateRequest):
 
 def post_sys_mode_event(
     event_type: str = Query(..., description="事件类型"),
+    *,
+    mode_transition_service: Any,
 ):
     """发送模式切换事件（供 Edge 端调用）。
 
@@ -454,7 +350,10 @@ def post_sys_mode_event(
     - idle_check: 空闲检查
     - morning_check: 早间唤醒检查
     """
-    service = _get_mode_transition_service()
+    service = _require_mode_transition_service(
+        mode_transition_service,
+        "on_event",
+    )
     result = service.on_event(event_type)
     if result is None:
         return {

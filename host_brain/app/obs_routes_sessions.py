@@ -40,11 +40,6 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _get_ledger():
-    from host_brain.app.obs_routes_core import _get_ledger as _core_get_ledger
-    return _core_get_ledger()
-
-
 def _normalize_session_preview(value: Optional[str]) -> str:
     return " ".join(str(value or "").strip().lower().split())
 

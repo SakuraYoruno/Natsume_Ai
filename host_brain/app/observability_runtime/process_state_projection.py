@@ -146,8 +146,10 @@ def _upsert(
     source_ref: str,
     degraded_state: ProjectionDegradedState = ProjectionDegradedState.HEALTHY,
     degraded_detail: str | None = None,
+    store: QueryProjectionStore | None = None,
 ) -> None:
-    _store().upsert(
+    target_store = store if store is not None else _store()
+    target_store.upsert(
         kind,
         key,
         payload,
@@ -223,17 +225,20 @@ def refresh_digital_life_overview_projection() -> dict[str, int]:
     return {"document_count": 1}
 
 
-def refresh_runtime_snapshot_projection() -> dict[str, int]:
+def refresh_runtime_snapshot_projection(
+    *,
+    lifecycle_ports: Any,
+    mode_transition_service: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int]:
     """Read process/runtime managers outside ``GET /runtime-snapshot``."""
 
     from host_brain.app.obs_routes_sysmode import _build_runtime_snapshot_response
-    from host_brain.app.lifecycle_runtime_composition import (
-        build_lifecycle_runtime_application_ports,
-    )
 
     value = _build_runtime_snapshot_response(
         "",
-        lifecycle_ports=build_lifecycle_runtime_application_ports(),
+        lifecycle_ports=lifecycle_ports,
+        mode_transition_service=mode_transition_service,
     )
     payload = value.model_dump() if hasattr(value, "model_dump") else value.dict()
     cursor = _next_cursor(RUNTIME_SNAPSHOT_KIND, int(payload.get("timestamp") or 0))
@@ -243,11 +248,16 @@ def refresh_runtime_snapshot_projection() -> dict[str, int]:
         payload,
         cursor=cursor,
         source_ref="runtime-snapshot-background-worker",
+        store=store,
     )
     return {"document_count": 1}
 
 
-def refresh_life_body_projection() -> dict[str, int]:
+def refresh_life_body_projection(
+    *,
+    ledger: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int]:
     """Build the heavy life aggregate outside all three life GET handlers."""
 
     from host_brain.app.obs_routes_life_body import (
@@ -258,7 +268,8 @@ def refresh_life_body_projection() -> dict[str, int]:
     window = int(LIFE_BODY_PROJECTION_WINDOW_MINUTES)
     payload = _build_life_body_payload(
         window,
-        projection_store=_store(),
+        ledger=ledger,
+        projection_store=store,
     )
     cursor = _next_cursor(LIFE_BODY_KIND, int(payload.get("timestamp") or 0))
     _upsert(
@@ -267,6 +278,7 @@ def refresh_life_body_projection() -> dict[str, int]:
         payload,
         cursor=cursor,
         source_ref="life-body-background-worker",
+        store=store,
     )
     return {"document_count": 1}
 
@@ -615,12 +627,33 @@ def run_digital_life_overview_projection_job() -> dict[str, int | bool]:
     )
 
 
-def run_runtime_snapshot_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("runtime-snapshot", 15.0, refresh_runtime_snapshot_projection)
+def run_runtime_snapshot_projection_job(
+    *,
+    lifecycle_ports: Any,
+    mode_transition_service: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int | bool]:
+    return _run_if_due(
+        "runtime-snapshot",
+        15.0,
+        lambda: refresh_runtime_snapshot_projection(
+            lifecycle_ports=lifecycle_ports,
+            mode_transition_service=mode_transition_service,
+            store=store,
+        ),
+    )
 
 
-def run_life_body_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("life-body", 30.0, refresh_life_body_projection)
+def run_life_body_projection_job(
+    *,
+    ledger: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int | bool]:
+    return _run_if_due(
+        "life-body",
+        30.0,
+        lambda: refresh_life_body_projection(ledger=ledger, store=store),
+    )
 
 
 def run_resource_manager_projection_job() -> dict[str, int | bool]:

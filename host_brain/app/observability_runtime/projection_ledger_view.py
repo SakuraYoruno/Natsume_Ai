@@ -352,19 +352,11 @@ def _load_table_rows(ledger: Any, table: str, *, now_ms: int) -> tuple[list[dict
 
 def refresh_ledger_stats_projection(
     *,
-    ledger: Any | None = None,
-    store: QueryProjectionStore | None = None,
+    ledger: Any,
+    store: QueryProjectionStore,
 ) -> dict[str, int]:
     """Background source job; never call from an HTTP or WebSocket handler."""
 
-    if ledger is None or store is None:
-        from host_brain.composition.process_services import (  # noqa: PLC0415
-            get_ledger,
-            get_query_projection_store,
-        )
-
-        ledger = ledger or get_ledger()
-        store = store or get_query_projection_store()
     now_ms = int(time.time() * 1000)
     counts: dict[str, int] = {}
     for table in sorted(LEDGER_STATS_TABLE_FIELDS):
@@ -600,14 +592,6 @@ def fail_closed_projection_route(handler: Any) -> Any:
     return wrapper
 
 
-def get_projection_ledger_view() -> ProjectionLedgerView:
-    """GET-safe factory: peek at the store without creating any dependency."""
-
-    from host_brain.composition.process_services import peek_query_projection_store
-
-    return ProjectionLedgerView(peek_query_projection_store())
-
-
 __all__ = [
     "LEDGER_STATS_KIND",
     "LEDGER_STATS_MAX_AGE_MS",
@@ -618,7 +602,6 @@ __all__ = [
     "ProjectionLedgerView",
     "ProjectionLedgerViewUnavailable",
     "fail_closed_projection_route",
-    "get_projection_ledger_view",
     "refresh_ledger_stats_projection",
     "sanitize_stats_row",
 ]

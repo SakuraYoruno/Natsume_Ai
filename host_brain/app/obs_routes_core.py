@@ -1,7 +1,6 @@
 """Observability REST API — M18 监控面板后端数据接口。
 
 提供 M17 React 前端所需的全套监控数据端点：
-  GET /obs/services/health     — 全服务健康聚合（边缘服务 + 9 个 LLM 云节点）
   GET /obs/sessions            — 会话列表（分页 + 过滤）
   GET /obs/trace/{request_id}  — 单次会话完整链路节点详情
   GET /obs/metrics/timeseries  — 多维度时序数据（请求量/拒绝/延迟）
@@ -43,8 +42,6 @@ from host_brain.observability.api_models import (
     LlmNodeItem,
     LlmNodesResponse,
     MetricsTimeseriesResponse,
-    ServiceHealthItem,
-    ServicesHealthResponse,
     SessionItem,
     SessionsResponse,
     StreamEventItem,
@@ -60,7 +57,6 @@ from host_brain.observability.api_models import (
     TribeEventItem,
     TribeEventsResponse,
 )
-from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
 from host_brain.app.observability_runtime.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 from host_brain.app.observability_runtime.process_state_projection import (
@@ -124,29 +120,12 @@ _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0,
 _OBS_CACHE_WAIT_TIMEOUT_SEC = _env_float("OBS_CACHE_WAIT_TIMEOUT_SEC", 10.0, minimum=1.0)
 _OBS_SESSIONS_CACHE_TTL_MS = _env_int("OBS_SESSIONS_CACHE_TTL_MS", 3000, minimum=0)
 
-# ---------------------------------------------------------------------------
-# 依赖注入
-# ---------------------------------------------------------------------------
-_ledger_provider = None
-
-def set_ledger_provider(provider) -> None:
-    global _ledger_provider
-    _ledger_provider = provider
-
-def _get_ledger() -> SQLiteLedger:
-    if _ledger_provider is not None:
-        return _ledger_provider()
-    # Fallback to shared dependency factory to avoid import-order/cycle issues.
-    from host_brain.composition.process_services import get_ledger as _deps_get_ledger
-    return _deps_get_ledger()
-
-
-def _get_graph_evidence_repository():
+def _get_graph_evidence_repository(ledger: SQLiteLedger):
     from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
         GraphEvidenceRepository,
     )
 
-    return GraphEvidenceRepository.from_ledger(_get_ledger())
+    return GraphEvidenceRepository.from_ledger(ledger)
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -429,9 +408,12 @@ def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
     return None
 
 
-def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_subgraphs(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        rows = _get_graph_evidence_repository().list_subgraph_summaries(
+        rows = _get_graph_evidence_repository(ledger).list_subgraph_summaries(
             request_id=request_id
         )
     except Exception as exc:
@@ -672,9 +654,12 @@ def _merge_trace_subgraphs(
     return merged
 
 
-def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_stream_events(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        rows = _get_graph_evidence_repository().list_stream_events(
+        rows = _get_graph_evidence_repository(ledger).list_stream_events(
             request_id=request_id
         )
     except Exception as exc:
@@ -2279,13 +2264,19 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     subgraphs = _load_optional_trace_payload(
         request_id,
         "subgraphs",
-        _build_trace_subgraphs,
+        lambda current_request_id: _build_trace_subgraphs(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     stream_events = _load_optional_trace_payload(
         request_id,
         "stream-events",
-        _build_trace_stream_events,
+        lambda current_request_id: _build_trace_stream_events(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     optional_ms = int((time.perf_counter() - optional_started) * 1000)
@@ -2748,59 +2739,6 @@ def _build_trace_live_feed_delta(
         timestamp=_now_ms(),
     )
 
-# ---------------------------------------------------------------------------
-# GET /obs/services/health
-# ---------------------------------------------------------------------------
-async def get_services_health(
-    window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
-    side: Optional[str] = Query(None, description="过滤端：host|edge"),
-):
-    """WARN-BE-001: 调用 ServiceHealthAggregator.aggregate() 而非内联聚合逻辑。"""
-    ledger = _get_ledger()
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-    try:
-        from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
-
-        if not heartbeat.has_fresh_core_service_cache():
-            await heartbeat.prime_core_service_cache_once()
-    except Exception:
-        pass
-
-    # 使用 ledger 数据构建探测函数注册表（被动监控）
-    probe_registry, extra_data = await asyncio.to_thread(_build_probe_registry, ledger, since_ms)
-    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
-    result = await aggregator.aggregate(side_filter=side)
-
-    # 将 ServiceHealthAggregator 返回的通用结构映射到 ServicesHealthResponse
-    services = []
-    for svc in result.get("services", []):
-        sid = svc["service_id"]
-        extra = extra_data.get(sid, {})
-        services.append(ServiceHealthItem(
-            service_id=sid,
-            service_type=svc.get("side", "edge"),
-            display_name=svc.get("name", sid),
-            role=extra.get("role"),
-            provider=extra.get("provider"),
-            model_id=extra.get("model_id"),
-            status=svc["status"],
-            success_rate=extra.get("success_rate"),
-            p95_ms=svc.get("latency_ms"),
-            last_call_ts=svc.get("last_check_ts"),
-            call_count=extra.get("call_count"),
-        ))
-
-    return ServicesHealthResponse(
-        total=result["total"],
-        up=result["up"],
-        degraded=result["degraded"],
-        down=result["down"],
-        unknown=result["unknown"],
-        services=services,
-        timestamp=_now_ms(),
-    )
-
-
 def _build_probe_registry(ledger, since_ms: int):
     """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
     若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
@@ -3118,118 +3056,6 @@ def export_sessions_csv(
         iter([output.getvalue()]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
-# ---------------------------------------------------------------------------
-async def stream_trace_live_feed(
-    request: Request,
-    limit: int = Query(6, ge=1, le=12),
-    window_minutes: int = Query(1440, ge=1, le=10080),
-    active_within_ms: int = Query(60000, ge=1000, le=3600000),
-    interval_ms: int = Query(1000, ge=250, le=10000),
-    keyword: Optional[str] = Query(None),
-    once: bool = Query(False),
-):
-    """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
-
-    async def _event_stream():
-        last_signature: Optional[str] = None
-        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
-        first_event = True
-        ledger = _get_ledger()
-        while True:
-            if await request.is_disconnected():
-                break
-
-            try:
-                snapshot = await asyncio.to_thread(
-                    _build_trace_live_feed_snapshot,
-                    ledger,
-                    limit=limit,
-                    window_minutes=window_minutes,
-                    keyword=keyword,
-                    active_within_ms=active_within_ms,
-                )
-                signature = _trace_live_feed_signature(snapshot)
-                if signature != last_signature:
-                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
-                    yield _format_sse_event(
-                        "snapshot",
-                        _model_dump_compat(snapshot),
-                        retry_ms=interval_ms if first_event else None,
-                    )
-                    if delta is not None:
-                        yield _format_sse_event(
-                            "delta",
-                            _model_dump_compat(delta),
-                        )
-                    last_signature = signature
-                    last_snapshot = snapshot
-                    first_event = False
-                else:
-                    yield _format_sse_event(
-                        "heartbeat",
-                        {
-                            "type": "heartbeat",
-                            "count": snapshot.count,
-                            "timestamp": _now_ms(),
-                        },
-                    )
-            except Exception as exc:
-                logger.warning("trace live feed push error: %s", exc)
-                yield _format_sse_event(
-                    "trace_error",
-                    {
-                        "type": "error",
-                        "detail": str(exc),
-                        "timestamp": _now_ms(),
-                    },
-                )
-
-            if once:
-                break
-            await asyncio.sleep(interval_ms / 1000)
-
-    return StreamingResponse(
-        _event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-def get_trace_stream_events(request_id: str):
-    """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
-    try:
-        rows = _get_graph_evidence_repository().list_stream_events(
-            request_id=request_id
-        )
-    except Exception as exc:
-        logger.debug("get_trace_stream_events: %s", exc)
-        rows = []
-    events = [
-        StreamEventItem(
-            request_id=str(r.get("request_id", "")),
-            graph_id=str(r.get("graph_id", "")),
-            phase=str(r.get("phase", "")),
-            event_type=str(r.get("event_type", "")),
-            node_id=r.get("node_id"),
-            chunk=r.get("chunk"),
-            ts_ms=int(r.get("ts_ms") or 0),
-        )
-        for r in rows
-    ]
-    return TraceStreamEventsResponse(
-        request_id=request_id,
-        events=events,
-        count=len(events),
-        timestamp=_now_ms(),
     )
 
 

@@ -169,10 +169,11 @@ def test_route_helpers_use_public_path_and_fail_soft(
                 raise AssertionError("route accessed ledger internals")
             raise AttributeError(name)
 
-    monkeypatch.setattr(routes, "_get_ledger", lambda: PublicLedger())
     monkeypatch.setattr(routes, "_now_ms", lambda: NOW)
+    ledger = PublicLedger()
 
     generic = routes._fetch_recent_ledger_rows(
+        ledger,
         "memory_ops_log",
         window_minutes=60,
         limit=2,
@@ -180,6 +181,7 @@ def test_route_helpers_use_public_path_and_fail_soft(
     assert [row["operation"] for row in generic] == ["third", "second"]
 
     immune = routes._fetch_recent_immune_rows(
+        ledger,
         window_minutes=60,
         limit=2,
         scan_limit=3,
@@ -189,6 +191,7 @@ def test_route_helpers_use_public_path_and_fail_soft(
         "INPUT_VOICE",
     ]
     assert routes._fetch_recent_ledger_rows(
+        ledger,
         "not_allowlisted",
         window_minutes=60,
         limit=2,
