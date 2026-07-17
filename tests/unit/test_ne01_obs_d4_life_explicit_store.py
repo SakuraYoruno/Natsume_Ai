@@ -107,4 +107,3 @@ def test_life_get_routes_use_only_their_app_local_projection_store(
     expected_calls = [(LIFE_BODY_KIND, window_key(360))] * 3
     assert first_store.calls == expected_calls
     assert second_store.calls == expected_calls
-

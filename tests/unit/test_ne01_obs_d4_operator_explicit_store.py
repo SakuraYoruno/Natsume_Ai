@@ -183,4 +183,3 @@ def test_four_operator_gets_isolate_projection_store_per_obs_app() -> None:
     }
     assert len(first.calls) == 4
     assert len(second.calls) == 4
-
