@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Protocol, Sequence
 from urllib.parse import urlparse
 
 from host_brain.observability.service_registry import (
@@ -26,6 +26,16 @@ from host_brain.observability.service_registry import (
 )
 
 logger = logging.getLogger("Natsume.obs.heartbeat")
+
+
+class DegradationObserver(Protocol):
+    def __call__(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        source_ref: str,
+        observed_at_ms: int,
+    ) -> Sequence[Mapping[str, Any]] | None: ...
 
 # 缓存：service_id -> { "status", "latency_ms", "last_check_ts", "name", "side" }
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -66,6 +76,7 @@ _EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
 _http_client: Optional[Any] = None
 _http_client_lock = threading.Lock()
 _keepalive_task: Optional[asyncio.Task] = None
+_heartbeat_degradation_observer: DegradationObserver | None = None
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -690,12 +701,9 @@ def _reconcile_degradation_observations(
     edge_result: Mapping[str, Any],
     host_result: Mapping[str, Any],
     llm_results: Mapping[str, Mapping[str, Any]],
+    degradation_observer: DegradationObserver | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    """Project existing heartbeat signals into the shared state machine."""
-    from host_brain.observability.degradation_state import (  # noqa: PLC0415
-        reconcile_service_observations,
-    )
-
+    """Project heartbeat signals through an explicit observer when provided."""
     rows: list[dict[str, Any]] = []
     edge_sub_services = edge_result.get("sub_services")
     if isinstance(edge_sub_services, Mapping):
@@ -749,9 +757,24 @@ def _reconcile_degradation_observations(
             }
         )
 
+    source_ref = f"service-heartbeat://runtime/{int(now_ts)}"
+    if degradation_observer is not None:
+        result = degradation_observer(
+            rows,
+            source_ref=source_ref,
+            observed_at_ms=int(now_ts),
+        )
+        return tuple(result or ())
+
+    # Compatibility path until ASGI owns the RuntimeGuardian lifecycle.  An
+    # explicitly injected observer must never fall through to this singleton.
+    from host_brain.observability.degradation_state import (  # noqa: PLC0415
+        reconcile_service_observations,
+    )
+
     return reconcile_service_observations(
         rows,
-        source_ref=f"service-heartbeat://runtime/{int(now_ts)}",
+        source_ref=source_ref,
         now_ms=int(now_ts),
     )
 
@@ -783,7 +806,10 @@ def _resource_gate_llm_probe_decision() -> Dict[str, Any]:
         return {"allowed": True}
 
 
-async def run_once() -> None:
+async def run_once(
+    *,
+    degradation_observer: DegradationObserver | None = None,
+) -> None:
     """执行一轮心跳探测并更新缓存。
 
     Edge/Host 分别探测，任一侧失败也写入该侧缓存，避免单侧异常导致整轮不写缓存。
@@ -856,6 +882,7 @@ async def run_once() -> None:
             edge_result=edge_result,
             host_result=host_result,
             llm_results=llm_results,
+            degradation_observer=degradation_observer,
         )
     except Exception as exc:
         logger.warning("Heartbeat degradation projection skipped: %s", exc)
@@ -876,13 +903,17 @@ def get_cached(service_id: str) -> Optional[Dict[str, Any]]:
 # 首次探测前等待（秒），避免 lifespan 刚启动时 /health 尚未监听导致全部被标为 DOWN
 HEARTBEAT_INITIAL_DELAY_SEC = 8.0
 
-async def heartbeat_loop(interval_sec: float = 30.0) -> None:
+async def heartbeat_loop(
+    interval_sec: float = 30.0,
+    *,
+    degradation_observer: DegradationObserver | None = None,
+) -> None:
     """后台循环：每 interval_sec 执行一次 run_once()，直到任务被取消。"""
     logger.info("Service health heartbeat started (interval=%.0fs, initial_delay=%.0fs)", interval_sec, HEARTBEAT_INITIAL_DELAY_SEC)
     await asyncio.sleep(HEARTBEAT_INITIAL_DELAY_SEC)
     while True:
         try:
-            await run_once()
+            await run_once(degradation_observer=degradation_observer)
         except asyncio.CancelledError:
             logger.info("Service health heartbeat stopped")
             raise
@@ -919,14 +950,26 @@ async def local_ollama_keepalive_loop(interval_sec: float | None = None) -> None
         await asyncio.sleep(resolved_interval)
 
 
-def start_heartbeat(interval_sec: float = 30.0) -> asyncio.Task:
+def start_heartbeat(
+    interval_sec: float = 30.0,
+    *,
+    degradation_observer: DegradationObserver | None = None,
+) -> asyncio.Task:
     """启动观测心跳，并按需附带本地 Ollama 保活任务。"""
-    global _heartbeat_task, _keepalive_task
+    global _heartbeat_degradation_observer, _heartbeat_task, _keepalive_task
     if _heartbeat_task is not None and not _heartbeat_task.done():
+        if degradation_observer is not _heartbeat_degradation_observer:
+            raise RuntimeError("HEARTBEAT_DEGRADATION_OBSERVER_REBIND_FORBIDDEN")
         if _is_local_ollama_keepalive_enabled() and (_keepalive_task is None or _keepalive_task.done()):
             _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
         return _heartbeat_task
-    _heartbeat_task = asyncio.create_task(heartbeat_loop(interval_sec))
+    _heartbeat_degradation_observer = degradation_observer
+    _heartbeat_task = asyncio.create_task(
+        heartbeat_loop(
+            interval_sec,
+            degradation_observer=degradation_observer,
+        )
+    )
     if _is_local_ollama_keepalive_enabled():
         _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
     return _heartbeat_task
@@ -934,7 +977,7 @@ def start_heartbeat(interval_sec: float = 30.0) -> asyncio.Task:
 
 async def stop_heartbeat() -> None:
     """停止心跳任务并关闭 HTTP 客户端（shutdown 时调用）。"""
-    global _heartbeat_task, _keepalive_task
+    global _heartbeat_degradation_observer, _heartbeat_task, _keepalive_task
     if _keepalive_task is not None:
         _keepalive_task.cancel()
         try:
@@ -949,4 +992,5 @@ async def stop_heartbeat() -> None:
         except asyncio.CancelledError:
             pass
         _heartbeat_task = None
+    _heartbeat_degradation_observer = None
     await close_http_client()

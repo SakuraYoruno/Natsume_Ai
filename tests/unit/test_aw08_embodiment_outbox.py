@@ -16,6 +16,11 @@ from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
 from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
+from tests.action_preview_test_support import (
+    build_scheduler_action_preview,
+    issue_embodiment_action_preview,
+    terminal_preview_kwargs,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,8 +60,23 @@ def test_host_physical_command_is_durable_before_single_dispatch(tmp_path) -> No
         action="command",
         payload={"command": {"type": "reset"}},
         request_id="aw08-outbox-request",
+        authority_ref="authority://task-node/aw08-outbox-request",
+        grant_ref="governor-grant://preview-child/aw08-outbox",
     )
-    ack = queue_embodiment_command(command, runtime=runtime)
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="aw08-outbox",
+    )
+    preview = issue_embodiment_action_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        command=command,
+    )
+    ack = queue_embodiment_command(
+        command,
+        runtime=runtime,
+        **terminal_preview_kwargs(preview_service, preview),
+    )
     assert ack.status == "PENDING"
     assert delivered == []
     assert repository.get(ack.outbox_id)["status"] == "PENDING"
@@ -131,10 +151,26 @@ def test_two_host_runtimes_isolate_outboxes_receipts_and_shutdown(tmp_path) -> N
         receipt_observers=(lambda command, _receipt: audited_b.append(command.command_id),),
     )
 
-    command_a = build_host_embodiment_command(
-        kind="voice", action="speak", payload={"text": "A"}, request_id="host-a"
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="aw08-runtime-isolation",
     )
-    ack_a = runtime_a.enqueue(command_a)
+    command_a = build_host_embodiment_command(
+        kind="avatar",
+        action="set_expression",
+        payload={"emotion_tag": "HAPPY"},
+        request_id="host-a",
+        authority_ref="authority://task-node/host-a",
+        grant_ref="governor-grant://preview-child/aw08-runtime-isolation",
+        idempotency_key="host-a-expression",
+    )
+    preview_a = issue_embodiment_action_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        command=command_a,
+    )
+    proof_a = terminal_preview_kwargs(preview_service, preview_a)
+    ack_a = runtime_a.enqueue(command_a, **proof_a)
     assert repo_b.get(ack_a.outbox_id) is None
     assert asyncio.run(runtime_a.dispatch_pending_async()).applied == 1
     assert delivered_a == [command_a.command_id]
@@ -144,11 +180,25 @@ def test_two_host_runtimes_isolate_outboxes_receipts_and_shutdown(tmp_path) -> N
 
     runtime_a.close()
     with pytest.raises(RuntimeError, match="EMBODIMENT_RUNTIME_CLOSED"):
-        runtime_a.enqueue(command_a)
+        runtime_a.enqueue(command_a, **proof_a)
     command_b = build_host_embodiment_command(
-        kind="voice", action="speak", payload={"text": "B"}, request_id="host-b"
+        kind="mateengine",
+        action="command",
+        payload={"command": {"type": "reset"}},
+        request_id="host-b",
+        authority_ref="authority://task-node/host-b",
+        grant_ref="governor-grant://preview-child/aw08-runtime-isolation",
+        idempotency_key="host-b-mateengine",
     )
-    ack_b = runtime_b.enqueue(command_b)
+    preview_b = issue_embodiment_action_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        command=command_b,
+    )
+    ack_b = runtime_b.enqueue(
+        command_b,
+        **terminal_preview_kwargs(preview_service, preview_b),
+    )
     assert asyncio.run(runtime_b.dispatch_pending_async()).applied == 1
     assert repo_a.get(ack_b.outbox_id) is None
     assert delivered_b == [command_b.command_id]

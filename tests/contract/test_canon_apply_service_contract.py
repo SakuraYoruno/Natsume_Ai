@@ -40,6 +40,9 @@ from host_brain.observability.degradation_state import (
     set_global_degradation_state_machine,
 )
 from host_brain.pentest.knowledge_store import PentestKnowledgeEntry, PentestKnowledgeStore
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
 
 
 CANON_MIGRATION = (
@@ -137,6 +140,9 @@ class Harness:
             recovery_grace_ms=100,
             recovery_lease_ms=100,
             trusted_approval_keys={self.key_id: self.private_key.public_key()},
+            degradation_capability_port=(
+                LegacyModuleGlobalDegradationAdapter()
+            ),
             **kwargs,
         )
 
@@ -2075,6 +2081,7 @@ def test_t_nle_03_cross_db_promotion_is_explicitly_rejected(
         promotion_db_path=other_db,
         clock=harness.clock,
         trusted_approval_keys={harness.key_id: harness.private_key.public_key()},
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
     binding = {
         "operation": CANON_OPERATION_APPLY,
@@ -2276,6 +2283,7 @@ def test_t_nle_03_canon_and_db_paths_do_not_follow_later_cwd(
         world_root=(tmp_path / "world").resolve(),
         ledger=ledger,
         trusted_approval_keys={"key": key.public_key()},
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
     assert Path(service.db_path) == frozen
     with pytest.raises(ValueError, match="ABSOLUTE_PATH_REQUIRED"):

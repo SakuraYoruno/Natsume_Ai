@@ -6,10 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.channels.edge_transport import HttpEdgeTransportPort, submit_gateway_reply
+from host_brain.channels.edge_transport import (
+    _HttpEdgeTransportPort,
+    _submit_gateway_payload,
+    submit_gateway_reply,
+)
 from host_brain.channels.embodiment import (
     EdgeEmbodimentSessionConfig,
-    EdgeRpcEmbodimentCommandPort,
+    _EdgeRpcEmbodimentCommandPort,
     build_host_embodiment_command,
 )
 from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
@@ -40,7 +44,7 @@ def test_remote_cleartext_edge_rpc_is_rejected_before_http_client_creation(
     )
 
     result = asyncio.run(
-        HttpEdgeTransportPort(
+        _HttpEdgeTransportPort(
             base_url="http://192.0.2.44:17800",
             shared_key="d8-test-key",
         ).submit(
@@ -91,7 +95,7 @@ def test_loopback_cleartext_edge_rpc_remains_allowed(
         SimpleNamespace(AsyncClient=_LoopbackHttpClient),
     )
     result = asyncio.run(
-        HttpEdgeTransportPort(base_url=base_url, shared_key="d8-test-key").submit(
+        _HttpEdgeTransportPort(base_url=base_url, shared_key="d8-test-key").submit(
             path="/v1/edge/health",
             payload={"operation": "health"},
             request_id="d8-loopback-cleartext",
@@ -130,7 +134,17 @@ def test_remote_cleartext_gateway_reply_is_rejected_before_http_client_creation(
 
     assert result.success is False
     assert result.status == "REJECTED"
-    assert result.reason_code == "EDGE_GATEWAY_TLS_REQUIRED"
+    assert result.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert constructed == []
+
+    transport_result = asyncio.run(
+        _submit_gateway_payload(
+            path="/v1/gateway/reply",
+            payload={"request_id": "d8-gateway-cleartext"},
+            timeout_ms=1_000,
+        )
+    )
+    assert transport_result.reason_code == "EDGE_GATEWAY_TLS_REQUIRED"
     assert constructed == []
 
 
@@ -178,7 +192,18 @@ def test_loopback_cleartext_gateway_reply_remains_allowed(
         )
     )
 
-    assert result.success is True
+    assert result.success is False
+    assert result.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert calls == []
+
+    transport_result = asyncio.run(
+        _submit_gateway_payload(
+            path="/v1/gateway/reply",
+            payload={"request_id": "d8-gateway-loopback"},
+            timeout_ms=1_000,
+        )
+    )
+    assert transport_result.success is True
     assert calls == [f"{base_url}/v1/gateway/reply"]
 
 
@@ -270,7 +295,7 @@ def test_forged_or_mismatched_dispatch_receipt_stays_in_doubt_with_original_iden
         )
 
     receipt = asyncio.run(
-        EdgeRpcEmbodimentCommandPort(
+        _EdgeRpcEmbodimentCommandPort(
             post_to_edge=post_to_edge,
             session_config=EdgeEmbodimentSessionConfig(
                 session_id=lease.session_id,
@@ -323,7 +348,7 @@ def test_matching_dispatch_receipt_preserves_edge_settlement(
         )
 
     receipt = asyncio.run(
-        EdgeRpcEmbodimentCommandPort(
+        _EdgeRpcEmbodimentCommandPort(
             post_to_edge=post_to_edge,
             session_config=EdgeEmbodimentSessionConfig(
                 session_id=lease.session_id,

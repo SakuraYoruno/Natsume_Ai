@@ -285,6 +285,13 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
     guarded_budget = _governed_model_budget(frozen)
     if guarded_budget is not None:
         trace_stage_meta["governed_model_budget"] = guarded_budget
+    frozen_intent = _safe_mapping(input_pack.get("intent_draft"))
+    frozen_intent.update(
+        {
+            "scene_decision_v2": input_pack.get("scene_decision_v2"),
+            "scene_identity_v2": input_pack.get("scene_identity_v2"),
+        }
+    )
     return {
         "ports": ports,
         "request_body": request_body,
@@ -312,7 +319,7 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         ).strip() or "zh",
         "llm_runtime": _safe_mapping(input_pack.get("llm_runtime")) or None,
         "ts_ms": _non_negative_int(input_pack.get("ts_ms")),
-        "intent_draft": _safe_mapping(input_pack.get("intent_draft")),
+        "intent_draft": frozen_intent,
         "trace_stage_meta": trace_stage_meta,
         "sub_agent_context": None,
         "runtime_capability_payload": None,

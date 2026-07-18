@@ -410,6 +410,41 @@ class _Repository:
         }
 
 
+class _TracingRepository(_Repository):
+    def __init__(self, calls: list[str], *, replayed: bool = False) -> None:
+        super().__init__(replayed=replayed)
+        self.calls = calls
+
+    def admit(self, command: Any, work_order: Any, assignment: Any, graph: Any) -> dict[str, Any]:
+        self.calls.append("admit")
+        return super().admit(command, work_order, assignment, graph)
+
+
+class _IntentAdmissionVerifier:
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        error: BaseException | None = None,
+        prepared_set: bool = False,
+    ) -> None:
+        self.calls = calls
+        self.error = error
+        self.prepared_set = prepared_set
+
+    def has_prepared_intent_receipt_set(self, **kwargs: Any) -> bool:
+        del kwargs
+        self.calls.append("intent-prepared-proof")
+        return self.prepared_set
+
+    def verify_intent_admission(self, **kwargs: Any) -> tuple[dict[str, str], ...]:
+        self.calls.append("intent")
+        if self.error is not None:
+            raise self.error
+        graph = kwargs["graph"]
+        return tuple({"task_node_id": node.node_id} for node in graph.nodes)
+
+
 class _Worker:
     def __init__(self, name: str, calls: list[str]) -> None:
         self.name = name
@@ -592,6 +627,219 @@ def test_admitted_execution_preserves_explicit_result_authority() -> None:
 
     assert admitted.result_node_id == "node-one"
     assert admitted.for_node("node-one").result_node_id == "node-one"
+
+
+@pytest.mark.asyncio
+async def test_intent_admission_runs_after_durable_admit_and_before_worker() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_TracingRepository(calls),
+        coordinator=coordinator,
+        intent_admission_verifier=_IntentAdmissionVerifier(calls),
+    )
+
+    _ = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    assert calls[:2] == ["admit", "intent"]
+    assert calls.index("intent") < next(
+        index for index, value in enumerate(calls) if value.startswith("worker:")
+    )
+
+
+@pytest.mark.asyncio
+async def test_intent_block_fails_closed_before_worker_or_budget_mutation() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+
+    class _Blocked(RuntimeError):
+        reason_code = "INTENT_ADMISSION_BLOCKED"
+        detail = "canonical node is blocked"
+
+    app = GovernedCommandApplication(
+        command_repository=_TracingRepository(calls),
+        coordinator=coordinator,
+        intent_admission_verifier=_IntentAdmissionVerifier(
+            calls,
+            error=_Blocked(),
+        ),
+    )
+
+    with pytest.raises(GovernedRuntimeError) as blocked:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    assert blocked.value.reason_code == "INTENT_ADMISSION_BLOCKED"
+    assert calls == ["admit", "intent"]
+    assert store.budget is None
+
+
+@pytest.mark.asyncio
+async def test_exact_intent_receipt_replay_skips_expired_parent_preflight() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    grant_ref = "governor://request-governed-1/decision/frozen"
+    command = replace(command, governor_grant_ref=grant_ref)
+    work_order = replace(work_order, approval_ref=grant_ref)
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+
+    class _ExactReplayRepository(_TracingRepository):
+        def get(self, command_id: str) -> dict[str, Any] | None:
+            assert command_id == command.command_id
+            return {
+                "command": command,
+                "work_order": work_order,
+                "assignment": assignment,
+                "graph": graph,
+            }
+
+    class _ExpiredGrantService:
+        def validate_parent_binding(self, **kwargs: Any) -> None:
+            del kwargs
+            calls.append("parent-preflight")
+            raise RuntimeError("expired parent grant")
+
+    class _ReceiptBlocked(RuntimeError):
+        reason_code = "INTENT_ADMISSION_BLOCKED"
+        detail = "replayed durable receipt remains blocked"
+
+    app = GovernedCommandApplication(
+        command_repository=_ExactReplayRepository(calls, replayed=True),
+        coordinator=coordinator,
+        node_grant_service=_ExpiredGrantService(),
+        intent_admission_verifier=_IntentAdmissionVerifier(
+            calls,
+            error=_ReceiptBlocked(),
+            prepared_set=True,
+        ),
+    )
+
+    with pytest.raises(GovernedRuntimeError) as blocked:
+        await app.execute(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+
+    assert blocked.value.reason_code == "INTENT_ADMISSION_BLOCKED"
+    assert calls == ["intent-prepared-proof", "admit", "intent"]
+
+
+@pytest.mark.asyncio
+async def test_matching_command_without_prepared_intent_set_cannot_skip_preflight() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    grant_ref = "governor://request-governed-1/decision/frozen"
+    command = replace(command, governor_grant_ref=grant_ref)
+    work_order = replace(work_order, approval_ref=grant_ref)
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+
+    class _ExactReplayRepository(_TracingRepository):
+        def get(self, command_id: str) -> dict[str, Any] | None:
+            assert command_id == command.command_id
+            return {
+                "command": command,
+                "work_order": work_order,
+                "assignment": assignment,
+                "graph": graph,
+            }
+
+    class _GrantService:
+        def validate_parent_binding(self, **kwargs: Any) -> None:
+            del kwargs
+            calls.append("parent-preflight")
+
+    class _ReceiptBlocked(RuntimeError):
+        reason_code = "INTENT_ADMISSION_BLOCKED"
+        detail = "prepared set is intentionally absent"
+
+    app = GovernedCommandApplication(
+        command_repository=_ExactReplayRepository(calls, replayed=True),
+        coordinator=coordinator,
+        node_grant_service=_GrantService(),
+        intent_admission_verifier=_IntentAdmissionVerifier(
+            calls,
+            error=_ReceiptBlocked(),
+            prepared_set=False,
+        ),
+    )
+
+    with pytest.raises(GovernedRuntimeError):
+        await app.execute(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+
+    assert calls == [
+        "intent-prepared-proof",
+        "parent-preflight",
+        "admit",
+        "intent",
+    ]
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ def _record_accepted_user_turn(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
 
     value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
     result = AGENT_RUNTIME_PORTS.record_user_turn(
         request_id=str(value.get("request_id") or ""),
         session_id=str(value.get("session_id") or ""),
@@ -57,6 +58,7 @@ def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str,
     from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
 
     value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
     life = PROCESS_LIFE_PROVIDER.require()
     receipt = submit_life_command(
         service=life.command_service,
@@ -81,32 +83,42 @@ def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str,
 
 
 async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    from host_brain.app.input_runtime_composition import (  # noqa: PLC0415
-        build_input_runtime_application_ports,
-    )
-    from host_brain.input_runtime.gateway_delivery import (  # noqa: PLC0415
-        _deliver_gateway_reply,
+    from host_brain.channels.edge_transport import (  # noqa: PLC0415
+        submit_gateway_reply,
     )
 
     value = dict(payload or {})
+    terminal_proof = value.pop("_action_preview_terminal_proof", None)
+    if not isinstance(terminal_proof, Mapping):
+        raise ValueError("accepted delivery lacks terminal ActionPreview proof")
     channel = str(value.get("reply_channel") or "").strip()
     target = str(value.get("reply_target") or "").strip()
-    if not channel or not target:
-        raise ValueError("accepted delivery requires reply_channel and reply_target")
-    result = await _deliver_gateway_reply(
-        request_id=str(value.get("request_id") or ""),
-        payload={
-            "platform": channel,
-            "conversation_id": target,
-            "governed_acceptance_authority": dict(value.get("authority") or {}),
-        },
-        decision=str(value.get("decision") or "APPROVE"),
-        reason_code=None,
-        narrative=str(value.get("narrative") or ""),
-        ports=build_input_runtime_application_ports(),
+    request_id = str(value.get("request_id") or "").strip()
+    if not request_id or not channel or not target:
+        raise ValueError(
+            "accepted delivery requires request_id, reply_channel and reply_target"
+        )
+    # The Acceptance Effect binds one exact, visible text result.  Reply-form,
+    # voice, avatar, media and arbitrary ``raw_extra`` transforms require
+    # their own accepted effect/Preview receipts; allowing them here would
+    # turn an immutable Acceptance decision into a second planning surface.
+    result = await submit_gateway_reply(
+        platform=channel,
+        conversation_id=target,
+        content=str(value.get("narrative") or ""),
+        msg_type="text",
+        request_id=request_id,
+        wait_result=True,
+        action_preview_service=terminal_proof.get("service"),
+        action_preview_event_id=str(terminal_proof.get("event_id") or ""),
+        action_preview_boundary=dict(terminal_proof.get("boundary") or {}),
     )
-    projected = dict(result or {})
-    if projected.get("success") is False:
+    projected = (
+        dict(result.as_dict())
+        if hasattr(result, "as_dict")
+        else dict(result or {})
+    )
+    if projected.get("success") is not True:
         raise RuntimeError(
             str(projected.get("reason_code") or "SURFACE_REPLY_DELIVERY_FAILED")
             + ": "

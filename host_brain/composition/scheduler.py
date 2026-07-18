@@ -193,6 +193,8 @@ def build_process_scheduler_container(
     clock_batch_limit: int = 64,
     now_ms: Callable[[], int] | None = None,
     cancellation_authority_verifier: Any | None = None,
+    runtime_context_application: Any | None = None,
+    action_preview_service: Any | None = None,
 ) -> ProcessSchedulerContainer:
     definitions = getattr(
         task_runtime_container,
@@ -224,6 +226,8 @@ def build_process_scheduler_container(
         owner_id=owner_id,
         definition_repository=definitions,
         cancellation_authority_verifier=cancellation_authority_verifier,
+        runtime_context_application=runtime_context_application,
+        action_preview_service=action_preview_service,
     )
     service = SchedulerCommandService(
         runtime=runtime,

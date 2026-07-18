@@ -8,7 +8,18 @@ import time
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.app.governed_task_adapter import build_governed_host_runtime
+from host_brain.app.governed_task_adapter import (
+    build_governed_host_runtime as _build_governed_host_runtime,
+)
+from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+
+
+def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault(
+        "degradation_capability_port",
+        LegacyModuleGlobalDegradationAdapter(),
+    )
+    return _build_governed_host_runtime(**kwargs)
 from host_brain.composition import process_services as dependencies
 from host_brain.composition.life import (
     PROCESS_LIFE_PROVIDER,

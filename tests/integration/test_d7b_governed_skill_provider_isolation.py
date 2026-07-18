@@ -12,8 +12,17 @@ from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_RUNTIME_INACTIVE,
     GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
     GovernedHostAdapterError,
-    build_governed_host_runtime,
+    build_governed_host_runtime as _build_governed_host_runtime,
 )
+from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+
+
+def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault(
+        "degradation_capability_port",
+        LegacyModuleGlobalDegradationAdapter(),
+    )
+    return _build_governed_host_runtime(**kwargs)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.capability_plane.broker import CapabilityBroker
 from host_brain.capability_plane.policies import DescriptorCapabilityPolicy

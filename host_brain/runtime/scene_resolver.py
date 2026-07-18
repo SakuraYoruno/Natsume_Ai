@@ -17,6 +17,11 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.integrations.runtime_events import (
+    RuntimeEvent,
+    validate_runtime_event_record_envelope,
+)
+
 from .context_contracts import (
     ContextConstraintV1,
     SceneDecisionV2,
@@ -78,7 +83,10 @@ def _derive_scene(
     activity_state = context.activity_state
     user_state = context.user_state
 
-    if guardian_status == "MAINTENANCE" or task_kind in {
+    if guardian_status == "MAINTENANCE" or activity_state in {
+        "MAINTENANCE",
+        "LOCKED",
+    } or task_kind in {
         "DEPLOYMENT",
         "MAINTENANCE",
         "RELEASE",
@@ -92,6 +100,22 @@ def _derive_scene(
                 scene_id=scene_id,
                 reason="发布或维护期间的外部效果必须复核",
             )
+        ]
+    elif activity_state in {"SLEEP", "SLEEPING", "QUIET_HOURS"}:
+        scene_id = "scene.sleep-low-interruption"
+        derived = [
+            _policy_constraint(
+                "LOW_INTERRUPTION",
+                "RESTRICT",
+                scene_id=scene_id,
+                reason="休眠模式只允许低打扰交互",
+            ),
+            _policy_constraint(
+                "PROACTIVE_ACTION_BLOCKED",
+                "BLOCK",
+                scene_id=scene_id,
+                reason="休眠模式禁止主动动作",
+            ),
         ]
     elif activity_state in {"GAME", "GAMING", "GAME_LOW_INTERRUPTION"}:
         scene_id = "scene.game-low-interruption"
@@ -238,6 +262,9 @@ class SceneResolver:
         self._guardian_snapshot_provider = guardian_snapshot_provider
         self._lock = threading.RLock()
         self._latest: dict[tuple[str, str], tuple[str, SceneDecisionV2]] = {}
+        self._decisions: dict[
+            tuple[str, str], dict[int, SceneDecisionV2]
+        ] = {}
         self._history: dict[tuple[str, str], list[SceneTransitionV1]] = {}
         self._loaded: set[tuple[str, str]] = set()
         self._cursor: dict[tuple[str, str], int] = {}
@@ -338,7 +365,15 @@ class SceneResolver:
             if isinstance(exc, SceneResolverError):
                 raise
             raise SceneResolverError("scene transition journal unavailable") from exc
-        previous = self._latest.get(scope)
+        # Replay into isolated scratch state.  A corrupt record near the end of
+        # a fetched tail must not install its valid prefix while leaving the
+        # durable cursor behind.  Otherwise repairing the durable tail would
+        # make this same resolver re-read the prefix against an already
+        # advanced in-memory revision and fail forever.
+        scratch_latest = self._latest.get(scope)
+        scratch_decisions = dict(self._decisions.get(scope, {}))
+        scratch_history = list(self._history.get(scope, ()))
+        previous = scratch_latest
         previous_decision = previous[1] if previous is not None else None
         expected_revision = (
             previous_decision.revision + 1
@@ -433,6 +468,35 @@ class SceneResolver:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise SceneResolverError("scene transition journal contains invalid evidence") from exc
+            try:
+                validate_runtime_event_record_envelope(
+                    record,
+                    expected=RuntimeEvent.create(
+                        event_type=self._EVENT_TYPE,
+                        source_kind="SYSTEM",
+                        source_ref=f"runtime://scene-resolver/{aggregate_id}",
+                        aggregate_type=self._AGGREGATE_TYPE,
+                        aggregate_id=aggregate_id,
+                        aggregate_version=version,
+                        payload_ref=(
+                            f"scene://transition/{transition.transition_digest}"
+                        ),
+                        payload=payload,
+                        evidence_refs=(
+                            "world-snapshot://sha256/"
+                            f"{decision.world_snapshot_digest}",
+                            "scene-context://sha256/"
+                            f"{decision.context_digest}",
+                            "guardian-snapshot://sha256/"
+                            f"{decision.guardian_snapshot_digest}",
+                        ),
+                        ts_ms=transition.observed_at_ms,
+                    ),
+                )
+            except Exception as exc:
+                raise SceneResolverError(
+                    "scene RuntimeEvent envelope is invalid"
+                ) from exc
             if (
                 decision.workspace_id != workspace_id
                 or decision.subject_id != subject_id
@@ -458,13 +522,9 @@ class SceneResolver:
             expected_fingerprint = _fingerprint(decision)
             if not _DIGEST_RE.fullmatch(fingerprint) or fingerprint != expected_fingerprint:
                 raise SceneResolverError("scene transition fingerprint is invalid")
-            self._latest[scope] = (fingerprint, decision)
-            self._authority_head[scope] = (
-                str(authority["owner_id"]),
-                str(authority["lease_id"]),
-                int(authority["fencing_token"]),
-            )
-            self._history.setdefault(scope, []).append(transition)
+            scratch_latest = (fingerprint, decision)
+            scratch_decisions[decision.revision] = decision
+            scratch_history.append(transition)
             previous_decision = decision
             previous_owner = runtime_owner
             previous_lease = runtime_lease
@@ -479,6 +539,20 @@ class SceneResolver:
             )
         ):
             raise SceneResolverError("scene runtime owner is fenced by durable history")
+        # Install the complete validated tail and its cursor as one in-memory
+        # commit.  Nothing above this point mutates the live projection.
+        if scratch_latest is not None:
+            self._latest[scope] = scratch_latest
+        else:
+            self._latest.pop(scope, None)
+        if scratch_decisions:
+            self._decisions[scope] = scratch_decisions
+        else:
+            self._decisions.pop(scope, None)
+        if scratch_history:
+            self._history[scope] = scratch_history
+        else:
+            self._history.pop(scope, None)
         self._cursor[scope] = previous_cursor
         if previous_owner is not None and previous_lease is not None:
             self._authority_head[scope] = (
@@ -492,6 +566,7 @@ class SceneResolver:
         scope = (workspace_id, subject_id)
         self._loaded.discard(scope)
         self._latest.pop(scope, None)
+        self._decisions.pop(scope, None)
         self._history.pop(scope, None)
         self._cursor.pop(scope, None)
         self._authority_head.pop(scope, None)
@@ -507,8 +582,6 @@ class SceneResolver:
     ) -> tuple[SceneDecisionV2 | None, int | None]:
         if self._event_store is None:
             return None, None
-        from host_brain.integrations.runtime_events import RuntimeEvent  # noqa: PLC0415
-
         aggregate_id = _scope_id(decision.workspace_id, decision.subject_id)
         event = RuntimeEvent.create(
             event_type=self._EVENT_TYPE,
@@ -536,6 +609,7 @@ class SceneResolver:
         )
         try:
             record = self._event_store.append_event(event)
+            validate_runtime_event_record_envelope(record, expected=event)
             if (
                 int(record.get("aggregate_version") or 0) != decision.revision
                 or str(record.get("aggregate_id") or "") != aggregate_id
@@ -629,6 +703,7 @@ class SceneResolver:
             if winner is not None:
                 return winner
             self._latest[scope] = (fingerprint, decision)
+            self._decisions.setdefault(scope, {})[decision.revision] = decision
             self._history.setdefault(scope, []).append(transition)
             if durable_cursor is not None:
                 if durable_cursor <= self._cursor.get(scope, 0):
@@ -636,6 +711,54 @@ class SceneResolver:
                         "scene durable append cursor did not advance"
                     )
                 self._cursor[scope] = durable_cursor
+            return decision
+
+    def require_decision(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        scene_id: str,
+        revision: int,
+        decision_digest: str,
+    ) -> SceneDecisionV2:
+        """Resolve one exact durable Scene identity without selecting a new scene.
+
+        Task admission and downstream projections use this read boundary to
+        prove that a frozen Scene was emitted by this resolver.  It deliberately
+        accepts historical revisions so exact command replay does not drift when
+        a later observation advances the workspace Scene.
+        """
+
+        workspace = str(workspace_id or "").strip()
+        subject = str(subject_id or "").strip()
+        scene = str(scene_id or "").strip()
+        digest = str(decision_digest or "").strip().lower()
+        if (
+            not workspace
+            or not subject
+            or not scene
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+            or _DIGEST_RE.fullmatch(digest) is None
+        ):
+            raise SceneResolverError("scene identity lookup is invalid")
+        scope = (workspace, subject)
+        with self._lock:
+            if self._event_store is None:
+                self._restore_scope(workspace, subject)
+            else:
+                self._reload_scope(workspace, subject)
+            decision = self._decisions.get(scope, {}).get(revision)
+            if (
+                decision is None
+                or decision.scene_id != scene
+                or decision.decision_digest != digest
+            ):
+                raise SceneResolverError(
+                    "frozen Scene identity is absent or digest-drifted"
+                )
             return decision
 
     def transition_history(

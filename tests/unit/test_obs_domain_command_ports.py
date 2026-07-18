@@ -11,6 +11,7 @@ from host_brain.observability.command_ports import (
     ObsCommandAuthority,
     ObsCommandContractError,
     ObsCommandEnvelope,
+    ObsCommandPortExecutionError,
     bind_server_authority,
 )
 from host_brain.observability.operator_command_gateway import (
@@ -99,22 +100,20 @@ def test_bio_adapter_uses_bound_principal_not_caller_owner(monkeypatch) -> None:
         return {"ok": True, "decision": "OWNER_ACCEPTED"}
 
     monkeypatch.setattr(bio_routes, "accept_codex_bio_ops_adoption", _accept)
-    result = _execute(
-        "bio.adoption.accept",
-        {
-            "candidate_id": "candidate-1",
-            "run_id": "run-1",
-            "owner_organ": "caller-forged-owner",
-            "operator": "caller-forged-operator",
-            "reason": "reviewed",
-        },
-    )
-
-    assert captured["body"]["owner_organ"] == "principal.authenticated"
-    assert captured["body"]["operator"] == "principal.authenticated"
-    assert result.result["principal_id"] == "principal.authenticated"
-    assert result.result["schema_version"] == OBS_DOMAIN_RESULT_SCHEMA
-    assert result.result_ref.startswith("obs-command://result/bio/adoption/accept/")
+    with pytest.raises(ObsCommandPortExecutionError) as blocked:
+        _execute(
+            "bio.adoption.accept",
+            {
+                "candidate_id": "candidate-1",
+                "run_id": "run-1",
+                "owner_organ": "caller-forged-owner",
+                "operator": "caller-forged-operator",
+                "reason": "reviewed",
+            },
+        )
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
 
 def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
@@ -129,21 +128,21 @@ def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
             return {"proposal_id": "proposal-1", "status": "PENDING_APPROVAL"}
 
     monkeypatch.setattr(dependencies, "get_capability_forge_service", lambda: _Forge())
-    result = _execute(
-        "capability_forge.proposal.create",
-        {
-            "session_id": "session-1",
-            "candidate_key": "candidate-key",
-            "proposer": "caller-forged-proposer",
-        },
-    )
+    with pytest.raises(ObsCommandPortExecutionError) as blocked:
+        _execute(
+            "capability_forge.proposal.create",
+            {
+                "session_id": "session-1",
+                "candidate_key": "candidate-key",
+                "proposer": "caller-forged-proposer",
+            },
+        )
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
-    assert captured["proposer"] == "principal.authenticated"
-    assert captured["session_id"] == "session-1"
-    assert result.result["output"]["proposal_id"] == "proposal-1"
 
-
-def test_avatar_adapter_awaits_async_edge_port(monkeypatch) -> None:
+def test_avatar_adapter_fails_before_async_edge_port_without_task_preview(monkeypatch) -> None:
     from host_brain.channels import embodiment
 
     captured: dict[str, object] = {}
@@ -160,18 +159,17 @@ def test_avatar_adapter_awaits_async_edge_port(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(embodiment, "submit_avatar_behavior", _post_avatar_behavior)
-    result = _execute(
-        "avatar.behavior.apply",
-        {"behavior_id": "listening", "source": "owner-command"},
-    )
+    with pytest.raises(ObsCommandPortExecutionError) as blocked:
+        _execute(
+            "avatar.behavior.apply",
+            {"behavior_id": "listening", "source": "owner-command"},
+        )
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
-    assert captured["behavior_id"] == "listening"
-    assert str(captured["request_id"]).startswith("obs-command-")
-    assert result.success is True
-    assert result.result["output"]["event"] == {"behavior_id": "listening"}
 
-
-def test_sysmode_adapter_maps_explicit_service_and_rejects_missing_port() -> None:
+def test_sysmode_adapter_fails_closed_until_governed_operator_cutover() -> None:
     captured: dict[str, object] = {}
 
     class _ModeService:
@@ -180,28 +178,29 @@ def test_sysmode_adapter_maps_explicit_service_and_rejects_missing_port() -> Non
             captured.update(target_mode=target_mode, **kwargs)
             return {"success": True, "from_mode": "normal", "to_mode": target_mode}
 
-    result = _execute(
-        "sys_mode.switch",
-        {"target_mode": "focus", "reason": "work", "source": "manual"},
-        route_ports=HostRoutePorts(
-            mode_transition_service_provider=lambda: _ModeService(),
-        ),
-    )
-    assert captured["target_mode"] == "focus"
-    assert result.result["output"]["to_mode"] == "focus"
-
-    with pytest.raises(ObsDomainCommandError, match="OBS_SYS_MODE_DOMAIN_UNAVAILABLE"):
-        _execute("sys_mode.auto_rules.update", {"rules": {"gaming_detect": False}})
+    with pytest.raises(ObsCommandPortExecutionError) as blocked:
+        _execute(
+            "sys_mode.switch",
+            {"target_mode": "focus", "reason": "work", "source": "manual"},
+            route_ports=HostRoutePorts(
+                mode_transition_service_provider=lambda: _ModeService(),
+            ),
+        )
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert captured == {}
 
 
-def test_domain_exception_propagates_without_legacy_degraded_result(monkeypatch) -> None:
+def test_direct_avatar_exception_is_unreachable_without_task_preview(monkeypatch) -> None:
     from host_brain.channels import embodiment
 
     async def _fail(**_kwargs):  # noqa: ANN003
         raise RuntimeError("edge unavailable")
 
     monkeypatch.setattr(embodiment, "submit_avatar_behavior", _fail)
-    with pytest.raises(RuntimeError, match="edge unavailable"):
+    with pytest.raises(
+        ObsCommandPortExecutionError,
+        match="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+    ):
         _execute("avatar.behavior.apply", {"behavior_id": "thinking"})
 
 
@@ -278,39 +277,14 @@ def test_task_graph_cancel_passes_authenticated_authority_and_marks_pending_inte
         state,
         raw_body=b"different-untrusted-runtime-fallback",
     ):
-        result = asyncio.run(port.execute(envelope))
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(port.execute(envelope))
 
-    assert captured["graph_id"] == "graph-cancel-2"
-    assert captured["graph_revision"] == 7
-    assert captured["reason_code"] == "OPERATOR_REQUESTED"
-    assert set(captured) == {
-        "graph_id",
-        "graph_revision",
-        "reason_code",
-        "authority",
-    }
-    authority = captured["authority"]
-    assert isinstance(authority, dict)
-    assert authority == {
-        "allowed": True,
-        "audit_ref": "audit://obs-command/task_graph.cancel",
-        "body_sha256": authenticated_body_sha256,
-        "claim_ref": "secure-ingress://claim/task_graph.cancel",
-        "duplicate": False,
-        "principal_id": "principal.authenticated",
-        "tenant_id": "tenant-test",
-        "request_id": "request-task_graph.cancel",
-        "action": "obs:command:task_graph.cancel",
-        "required_scopes": ("obs:write", "task-runtime:cancel"),
-    }
-    assert result.success is True
-    assert result.side_effects_executed is True
-    assert result.result["principal_id"] == "principal.authenticated"
-    assert result.result["output"]["cancellation"] == {
-        "graph_id": "graph-cancel-2",
-        "graph_revision": 7,
-        "status": "PENDING",
-    }
+    assert envelope.payload["principal_id"] == "principal.authenticated"
+    assert envelope.body_sha256 == authenticated_body_sha256
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
 
 def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
@@ -338,7 +312,7 @@ def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
         with pytest.raises(ObsCommandRoutingError) as raised:
             asyncio.run(ObsCommandRouter(registry).route(envelope))
 
-    assert raised.value.reason_code == "GRAPH_CANCELLATION_REJECTED"
+    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
     assert raised.value.side_effects_may_have_run is False
 
 
@@ -376,22 +350,13 @@ def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> Non
         task_operation_reconciliation_command_service=_ReconciliationService(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-proof"):
-        result = asyncio.run(registry.resolve_port("task_operation.reconcile").execute(envelope))
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(registry.resolve_port("task_operation.reconcile").execute(envelope))
 
-    assert captured == {
-        "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
-        "reservation_id": "reservation-1",
-        "expected_version": 4,
-        "action": "RELEASE",
-        "reconciler_actor_id": "reconciler.authenticated",
-        "downstream_receipt_ref": None,
-        "attestation_ref": "reconciliation://operation/proof-1",
-        "attestation_key_id": "reconciler-v1",
-        "attestation_signature": "ed25519:" + "A" * 86 + "==",
-    }
-    assert result.success is True
-    assert result.side_effects_executed is True
-    assert result.result["output"]["reconciliation"]["status"] == "RELEASED"
+    assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
 
 def test_task_operation_reconcile_translates_only_nominal_certainty() -> None:
@@ -424,8 +389,8 @@ def test_task_operation_reconcile_translates_only_nominal_certainty() -> None:
         with pytest.raises(ObsCommandRoutingError) as raised:
             asyncio.run(ObsCommandRouter(registry).route(envelope))
 
-    assert raised.value.reason_code == "OPERATION_RECONCILIATION_UNCERTAIN"
-    assert raised.value.side_effects_may_have_run is True
+    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert raised.value.side_effects_may_have_run is False
 
 
 def test_task_effect_reconcile_binds_actor_and_forwards_exact_signed_snapshot() -> None:
@@ -468,29 +433,15 @@ def test_task_effect_reconcile_binds_actor_and_forwards_exact_signed_snapshot() 
         task_effect_reconciliation_command_service=_ReconciliationService(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-effect-proof"):
-        result = asyncio.run(
-            registry.resolve_port("task_effect.reconcile").execute(envelope)
-        )
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(registry.resolve_port("task_effect.reconcile").execute(envelope))
 
-    assert captured == {
-        "intent_ref": "taskcancel-intent://sha256/" + "c" * 64,
-        "effect_id": "acceptance-effect://sha256/" + "d" * 64,
-        "case_id": "taskcancel-effect-case://sha256/" + "e" * 64,
-        "expected_case_snapshot_sha256": case_digest,
-        "expected_subject_snapshot_sha256": subject_digest,
-        "purpose": "PENDING_CANCELLATION",
-        "outcome": "NO_SIDE_EFFECT",
-        "reconciler_actor_id": "reconciler.authenticated",
-        "issued_ts_ms": 1_800_000_000_000,
-        "downstream_receipt_ref": None,
-        "executor_quiescence_ref": None,
-        "attestation_ref": "reconciliation://effect/proof-1",
-        "attestation_key_id": "reconciler-v1",
-        "attestation_signature": "ed25519:" + "A" * 86 + "==",
-    }
-    assert result.success is True
-    assert result.side_effects_executed is True
-    assert result.result["output"]["reconciliation"]["status"] == "PROOF_RECORDED"
+    assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
+    assert envelope.payload["expected_case_snapshot_sha256"] == case_digest
+    assert envelope.payload["expected_subject_snapshot_sha256"] == subject_digest
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
 
 def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
@@ -527,8 +478,8 @@ def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
         with pytest.raises(ObsCommandRoutingError) as raised:
             asyncio.run(ObsCommandRouter(registry).route(envelope))
 
-    assert raised.value.reason_code == "EFFECT_RECONCILIATION_UNCERTAIN"
-    assert raised.value.side_effects_may_have_run is True
+    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert raised.value.side_effects_may_have_run is False
 
 
 def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> None:
@@ -569,26 +520,15 @@ def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> No
         task_terminal_reconciliation_command_service=_ReconciliationService(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-terminal-proof"):
-        result = asyncio.run(
-            registry.resolve_port("task_terminal.reconcile").execute(envelope)
-        )
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(registry.resolve_port("task_terminal.reconcile").execute(envelope))
 
-    assert captured == {
-        "case_id": "terminal-reconciliation://case/" + "a" * 64,
-        "expected_case_snapshot_sha256": "sha256:" + "b" * 64,
-        "expected_subject_snapshot_sha256": "sha256:" + "c" * 64,
-        "action": "FAIL_GRAPH_AND_RELEASE_BUDGET",
-        "target_graph_status": "FAILED",
-        "target_budget_status": "RELEASED",
-        "reconciler_actor_id": "reconciler.authenticated",
-        "issued_ts_ms": 1_800_000_000_000,
-        "attestation_ref": "terminal-reconciliation://attestation/proof-1",
-        "attestation_key_id": "reconciler-v1",
-        "attestation_signature": "ed25519:" + "A" * 86 + "==",
-    }
-    assert result.success is True
-    assert result.side_effects_executed is True
-    assert result.result["output"]["reconciliation"]["status"] == "RECONCILED"
+    assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
+    assert str(envelope.payload["target_graph_status"]).upper() == "FAILED"
+    assert str(envelope.payload["target_budget_status"]).upper() == "RELEASED"
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}
 
 
 def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
@@ -625,5 +565,5 @@ def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
                 ObsCommandRouter(registry).route(envelope)
             )
 
-    assert raised.value.reason_code == "TERMINAL_RECONCILIATION_UNCERTAIN"
-    assert raised.value.side_effects_may_have_run is True
+    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert raised.value.side_effects_may_have_run is False

@@ -555,7 +555,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。D8 另为每个 Host ASGI lifespan 建立显式具身 runtime；0104 以 canonical DB 派生 scope、durable runtime lease/fence 与持久 Edge reconnect credential 阻止同库双 writer，Edge 0002 冻结 command owner。child Edge 的 loopback TCP/HMAC/SQLite receipt query v2 与重启 exact replay 已测，但真实设备仍未测试；Life、reply-performance、Gateway voice 等已迁移路径也只 durable queue。这个收敛仍不改变Host source、Chat/Delegate、Acceptance Effect等底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition、剩余 direct embodiment adapter 和全局 locator 删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。D8 另为每个 Host ASGI lifespan 建立显式具身 runtime；0104 以 canonical DB 派生 scope、durable runtime lease/fence 与持久 Edge reconnect credential 阻止同库双 writer，Edge 0002 冻结 command owner。child Edge 的 loopback TCP/HMAC/SQLite receipt query v2 与重启 exact replay 已测，但真实设备仍未测试。NE-03 又在最终出站前强制重开 ActionPreview：只有 exact proof 路径可入队；旧 reply-performance、Gateway voice 等调用目前失败关闭，待 NE-01 正向迁移。这个收敛仍不改变Host source、Chat/Delegate等底层process authority共享：`ProcessServiceContainer`仍约53个非锁可变服务引用，完整Host/Worker composition、剩余 direct embodiment adapter 和全局 locator 删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -664,7 +664,7 @@ Host 只创建版本化 `EmbodimentCommand`，不导入设备 driver。[embodime
 
 | 阶段 | 当前流程 | 当前定级 |
 |---|---|---|
-| 选定 Host 路径入队 | MateEngine router、Life delivery、reply-performance、chat cue 与 Gateway voice 从 app runtime 入队，新命令响应为 `PENDING / DURABLY_QUEUED`；精确重复返回既有 durable 状态，只有既有 `APPLIED` receipt 才能令 `physical_effect_verified=true`；`voice_started/vts_started` 不得由 admission 置真 | `PARTIAL_APP_OWNED` |
+| 选定 Host 路径入队 | 持有 exact ActionPreview 的 Life VTS/MateEngine 与 Gateway/Edge 出站从 app runtime 入队，新命令响应为 `PENDING / DURABLY_QUEUED`；旧 reply-performance、Gateway voice、chat cue 等缺证明调用失败关闭。精确重复返回既有 durable 状态，只有既有 `APPLIED` receipt 才能令 `physical_effect_verified=true`；`voice_started/vts_started` 不得由 admission 置真 | `PARTIAL_APP_OWNED_PREVIEW_GATED` |
 | Host writer authority | 新行必须匹配 canonical DB 的 `runtime_scope_id`；enqueue、claim、过期、收口、对账与 Edge credential persistence 各自在同一 SQLite 写事务复验当前 durable runtime lease/fence，第二实例与旧 fence 失败关闭 | `WIRED_FOR_D8_SCOPE` |
 | 正常投递 | Host `PENDING → DISPATCHING`，取得 Edge session lease/fence 后 HMAC RPC；Edge 按 command/idempotency key 持久去重并写 durable receipt | `WIRED_FOR_D8_SCOPE` |
 | 不确定性 | 过期 claim 转 `IN_DOUBT`；Host 只发 receipt query，绝不 submit/retry。FOUND receipt 必须以 command/key identity 与 receipt digest CAS 收口；重复同 digest 不重复推进 observer/audit，`NOT_FOUND`、传输/校验失败保持 `IN_DOUBT` | `WIRED_FOR_D8_SCOPE` |
@@ -732,15 +732,21 @@ Graph Acceptance
 
 ### 9.4 Scene
 
-[world_observation_journal.py](../../../host_brain/persistence/world_observation_journal.py) 通过 0111 为每个 workspace/subject 维护原子 head，持久端而非 caller 分配连续 revision。每次 append 同时校验 canonical source event、Host runtime lease/fence、server time、active TTL target 和 authority lineage；future/non-monotonic batch、重复/伪造 expiry 与 expired digest reactivation 均在事务提交前拒绝。`WorldResolver` 捕获 exact head 后只读分页到该 revision，并核对 digest chain、物理列/JSON 与 terminal digest；超期事实缺少 expiry 时明确阻断。
+[world_observation_journal.py](../../../host_brain/persistence/world_observation_journal.py) 通过 0111 为每个 workspace/subject 维护原子 head，持久端而非 caller 分配连续 revision。Host lifespan 中的 [world_observation_application.py](../../../host_brain/runtime/world_observation_application.py) 只把 Secure Ingress principal、既有 Bond/Emotion 投影与 composition-owned environment 转为 canonical RuntimeEvent 和 observation batch；raw request body 不能提交 scene 或 constraints。每次 append 同时校验 source event、Host runtime lease/fence、server time、active TTL target 和 authority lineage，显式 expiry transition 而非读取负责推进 TTL。`WorldResolver` 捕获 exact head 后只读分页到该 revision，并核对 digest chain、物理列/JSON 与 terminal digest。
 
 [scene_resolver.py](../../../host_brain/runtime/scene_resolver.py) 是 NE-03 的 canonical、workspace/subject-scoped 场景解析边界。它只接受不可变 `WorldSnapshotV2` 与 typed `SceneResolutionInputV1`，Guardian status/digest 必须从 composition 注入的 `RuntimeGuardian.snapshot` 读取，caller 不能指定最终 scene、constraints 或伪造 `READY`。八类场景、fingerprint、digest chain、tail refresh 与 1001+ replay 已覆盖；0112 对 `SCENE_STATE/<scope digest>/<revision>` 建立唯一 CAS，并以 Host lease trigger 阻断旧进程追加。
 
-旧 [scene_policy.py](../../../host_brain/persona/scene_policy.py) 仍被部分 Surface/Proactive 路径消费，生产 feature flag `HOST_LIFE_PROJECTION_ENABLED` 默认为关闭；Task admission 尚未切到同一 resolver。因此当前定级是 `PARTIAL_NE03_CANONICAL_RESOLVER`，不是全局 Scene Engine。
+Host 请求经 [context_application.py](../../../host_brain/runtime/context_application.py) 将重开的 World 与 Scene 冻结进 `WorkOrderV3.input_pack`。Surface eligibility、proactive dispatch 和 Task admission 都要求完整且可重开的 `scene_identity_v2`，上下文漂移失败关闭。旧 [scene_policy.py](../../../host_brain/persona/scene_policy.py) 定义仍保留用于兼容，但已无这三处生产 `build_scene_decision()` 调用；这是三消费者切流，不是预测型 World/Scene 模型完成。
 
 ### 9.5 Intent 与 Runtime Guardian
 
-`IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；它必须经 `IntentAuthorityPort` 查询 canonical TaskGraph/node、ContextPack、Scene、action、Grant 和 composition-owned policy，取得 typed、短时效 attestation 后逐字段比较。过期、撤销、跨 principal Grant，遗漏/冲突约束或 detached arbitration 均 fail closed；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。`RuntimeGuardian` 由 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 注入，底层 degradation 只作为纯 reducer；0112 在 Guardian Runtime Event append 的同一 SQLite 事务校验现有 Host scope/owner/lease/fence。Health/Recovery replay 会在纯 reducer clone 中确定性重放并比较完整 next-state；响应丢失 exact reconcile，竞争 loser write-fenced，多 PREPARED Review 按 durable 顺序收口。
+`IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；生产 [production_intent_authority.py](../../../host_brain/runtime/production_intent_authority.py) 重开 canonical HostCommand、WorkOrder、TaskGraph/node、ContextPack、Scene、action、Grant 和 composition-owned policy。[Intent admission](../../../host_brain/runtime/intent_admission.py) 在 TaskGraph 已持久化、worker/child grant 执行前先仲裁所有节点，写入 node preparation、graph prepared marker、最终节点 receipt 与 graph complete marker；中途崩溃只能按 exact identity 修复。`BLOCK` 与无效 evidence 失败关闭，`REVIEW` 经 Task Runtime durable ReviewStore 和一次性 continuation 恢复；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。
+
+`RuntimeGuardian` 由 Host ASGI lifespan 中的 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 构造，并绑定同一 runtime scope/owner/lease/fence。Health/heartbeat 与已审计高风险前门通过 typed degradation port 消费 Guardian，进程结束时解绑共享 MCP broker；legacy global degradation 只能通过显式 compatibility adapter 使用。Guardian 先得到不可变 next-state、再持久化并替换本地投影，重放校验 RuntimeEvent envelope、revision/digest chain 和 from/to identity。
+
+[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和 37 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明安全封口，不代表这些功能已正向迁移。
+
+0113 [Service Catalog rollout authority](../../../host_brain/service_catalog/rollout_authority.py) 将 operation、receipt 和 head 写入同一 file-backed SQLite authority。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。Store 与 SQLite trigger 同时拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。部署多实例 canary 仍是未执行边界。
 
 ```mermaid
 flowchart LR
@@ -754,6 +760,7 @@ flowchart LR
     Decision --> Authority[IntentAuthorityPort attestation]
     Authority --> Intent[IntentArbiter]
     Intent --> Preview[restrict-only Preview / Grant gate]
+    Preview --> Terminal[exact Skill / Delegate / Proactive / Edge effect]
     Health[health probes] --> Guardian[RuntimeGuardian]
     Lease[Host runtime lease] --> Guardian
     Lease --> Obs
@@ -761,18 +768,21 @@ flowchart LR
     Source[Canonical observation source verifier] --> Obs
     Guardian --> Events[(0112 CAS Runtime Event ledger)]
     Scene --> Events
+    Catalog[0113 Catalog operation / receipt / head] --> Guardian
+    Catalog --> HostStart[real Uvicorn candidate]
 ```
 
-Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 全量消费一致的 scene revision/digest 仍是后续切流门槛。
+Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 已消费一致的 scene revision/digest。长周期目标尚无独立 durable owner，Bond 原始证据仍来自既有上游投影，因此空 `long_term_goal_refs` 不得被臆造值填充。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|
 | Memory | typed recall → compressed packet → Surface | Acceptance → Life projection → assistant/Memory | `WIRED_POST_ACCEPTANCE_EVENTUAL` |
 | Persona | Surface/relationship 等多处读 | legacy 写入中央拒绝；仅显式审计迁移可写 | `CENTRAL_FENCE_WIRED` |
-| Scene | SceneResolver → Surface/Proactive/Task context | resolver + app-local Guardian 推导 scene；仅追加 lease-bound 0112 transition | `PARTIAL_NE03_DERIVED_RESOLVER_NO_CALLER` |
-| Intent | IntentAuthorityPort → IntentArbiter → Preview/Grant gate | authority attested；仅输出限制；`execution_authorized=false` | `PARTIAL_NE03_ATTESTED_NO_PRODUCTION_ADAPTER` |
-| Runtime Guardian | health/degradation/maintenance/SLO → lease-bound Runtime Event | 只写 guardian/recovery evidence，不激活能力 | `PARTIAL_NE03_LEASE_BOUND_NO_LIFESPAN` |
-| World Model | 0111 ObservationPort → WorldResolver | lease/source authority 分配 revision/expiry；captured-head Resolver 纯读 | `PARTIAL_NE03_DURABLE_JOURNAL_NO_CALLER` |
+| Scene | RuntimeContextApplication → SceneResolver → Surface/Proactive/Task | resolver + app-local Guardian 推导 scene；仅追加 lease-bound 0112 transition | `PARTIAL_NE03_THREE_CONSUMERS_WIRED` |
+| Intent | ProductionIntentAuthority → IntentArbiter → durable Task admission/Review | authority attested；仅输出限制；`execution_authorized=false` | `PARTIAL_NE03_PRODUCTION_ADMISSION_WIRED` |
+| Action Preview | canonical authority reopen → RuntimeEvent receipt → execution-point reopen | receipt 不授予权限；旧任务/effect 与未 Governed Operator 直写失败关闭 | `PARTIAL_NE03_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` |
+| Runtime Guardian / Catalog | Host lifespan health/degradation/maintenance/SLO + 0113 五阶段 rollout | lease-bound Guardian event；Catalog operation/receipt/head append-only | `PARTIAL_NE03_ENFORCE_TARGET_WIRED_LOCAL_ACCEPTANCE_PASSED` |
+| World Model | server observation → 0111 ObservationPort → WorldResolver | lease/source authority 分配 revision/expiry；captured-head Resolver 纯读 | `PARTIAL_NE03_PRODUCTION_OBSERVATION_WIRED` |
 
 ## 10. 回执与证据分层
 
@@ -874,7 +884,7 @@ All Host external effects via one outbox    NOT YET TRUE
 Memory canonical write path                 WIRED_EVENTUAL
 Persona evolution authority                CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
 Workspace authority                        PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT FAIL CLOSED / STRONG ISOLATION MISSING
-Scene context                               PARTIAL_DEFAULT_OFF
+Scene context                               PARTIAL_THREE_CONSUMERS_WIRED
 Full Architecture                           INCOMPLETE
 ```
 

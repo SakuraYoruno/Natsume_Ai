@@ -70,11 +70,11 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 
 | Trace | FR | 目标合同 | 当前落点 | 当前状态 | 下一波 |
 |---|---|---|---|---|---|
-| TRACE-EVO-01 | FR-NLE-004 | World facts/provenance/TTL/conflict 进入 Context | `runtime/world_model.py` | `PARTIAL_READ_PROJECTION` | NE-03 |
-| TRACE-EVO-02 | FR-NLE-004 | Scene aggregate/transition/策略 | `persona/scene_policy.py` | `PARTIAL_DEFAULT_OFF` | NE-03 |
-| TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | #80 contract + Governor/ActionArbiter | `CONTRACT_ONLY_NO_PRODUCTION_CALLER` | NE-03 |
-| TRACE-EVO-04 | FR-NLE-004 | 高风险 action 统一 preview/shadow | action preview + Obs | `PARTIAL_ELIGIBILITY_ONLY` | NE-03 |
-| TRACE-EVO-05 | FR-NLE-005 | 统一 health/degradation/recovery/SLO | degradation/heartbeat/catalog | `PARTIAL` | NE-03 |
+| TRACE-EVO-01 | FR-NLE-004 | World facts/provenance/TTL/conflict 进入 Context | 0111、`RuntimeWorldObservationApplication`、`WorldResolver` | `PARTIAL_PRODUCTION_OBSERVATION_WIRED_NOT_PREDICTIVE` | NE-03 本地 Gate |
+| TRACE-EVO-02 | FR-NLE-004 | Scene aggregate/transition/策略 | 0112、`RuntimeContextApplicationService`、`SceneResolver` | `PARTIAL_THREE_CONSUMERS_PRODUCTION_WIRED` | NE-03 本地 Gate |
+| TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier` | `PARTIAL_PRODUCTION_ADMISSION_WIRED_RESTRICT_ONLY` | NE-03 本地 Gate；长周期 goal owner 后续 |
+| TRACE-EVO-04 | FR-NLE-004 | 高风险 action 统一 preview/shadow | `ProductionActionPreviewAuthorityResolver`、Action Preview RuntimeEvent、terminal transport gates | `PARTIAL_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` | Operator Governed route 属 NE-01 |
+| TRACE-EVO-05 | FR-NLE-005 | 统一 health/degradation/recovery/SLO 与 Catalog rollout | RuntimeGuardian、0112、0113、Host Service Catalog startup | `PARTIAL_HOST_LIFESPAN_AND_ENFORCE_TARGET_WIRED_LOCAL_ACCEPTANCE_PASSED` | Windows graceful stop 与部署 canary 后续 |
 | TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108 V1 ledger + self-attested runner | `SHADOW_UNTRUSTED_EVIDENCE` | NE-04 |
 | TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | V1 report contract | `CONTRACT_ONLY_NO_TRUSTED_RUNNER` | NE-04 |
 | TRACE-EVO-08 | FR-NLE-005、FR-ARCH-007 | Maturity 成为默认 restrict-only 门禁 | scorecard + disabled adapter | `PARTIAL` | NE-05 |

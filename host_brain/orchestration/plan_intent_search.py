@@ -792,6 +792,21 @@ def _graph_policy_fields(
             **_json_copy(frozen_context, field_name="frozen_context"),
             "request_id": request_id,
             "intent_id": intent_id,
+            "intent_draft": {
+                "route": "plan",
+                "target_id": "planning_search",
+                "task": _text(intent.get("task") or intent.get("objective"))
+                or nodes[0].objective,
+                "action": _required_identifier(
+                    intent.get("action") or intent.get("action_kind"),
+                    field_name="intent.action",
+                ),
+                "target": _required_identifier(
+                    intent.get("target") or intent.get("scope"),
+                    field_name="intent.target",
+                ).lower(),
+                "args": _mapping_copy(intent.get("args") or {}, field_name="intent.args"),
+            },
             "approved_candidate_inputs": candidate_inputs,
         },
         "metadata": {

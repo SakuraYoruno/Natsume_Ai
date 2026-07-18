@@ -30,6 +30,7 @@ from host_brain.persistence.review_continuation_store import (
 )
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import DurableTaskStore, TaskStoreError
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
     ReviewResumePhase,
@@ -47,6 +48,7 @@ from tests.integration.test_gr03a_governed_durable_dag import (
     _coordinator,
     _migrated_db,
     _runtime_outbox,
+    _DurableReviewWorker,
     _Worker,
 )
 
@@ -488,6 +490,7 @@ async def test_post_review_worker_resumes_acceptance_without_worker_reexecution(
     calls: list[str] = []
     reviews = ReviewStore(db_path, clock=lambda: NOW)
     node_grants = _NodeGrantService()
+    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
     application = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
         coordinator=_coordinator(
@@ -495,7 +498,10 @@ async def test_post_review_worker_resumes_acceptance_without_worker_reexecution(
             calls,
             review_runtime=TaskNodeReviewRuntime(reviews, clock=lambda: NOW),
             acceptance_decision="REVIEW",
-            worker_resolver=_GovernedResolver(calls),
+            worker_resolver=_ExactResolver(
+                _DurableReviewWorker(calls, projection_store)
+            ),
+            projection_reader=projection_store,
         ),
         node_grant_service=node_grants,
     )

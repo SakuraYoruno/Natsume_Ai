@@ -132,11 +132,10 @@ def test_gateway_delivery_uses_outbox_key_for_transport_idempotency(monkeypatch)
     )
 
     ledger = _Ledger()
-    result = asyncio.run(LifeDeliveryTransport(ledger=ledger)(message))
+    with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
+        asyncio.run(LifeDeliveryTransport(ledger=ledger)(message))
 
-    assert result == {"success": True}
-    assert captured["request_id"] == message.delivery_key
-    assert captured["delivery_id"] == message.delivery_key
+    assert captured == {}
     assert ledger.requests == [REQUEST_ID]
 
 
@@ -163,29 +162,21 @@ def test_embodiment_destinations_are_independent_outbox_operations(monkeypatch) 
         embodiment_runtime=object(),
     )
 
-    asyncio.run(
-        transport(
-            _message(
-                "vts.emotion",
-                {"emotion_context": {"emotion_tag": "HAPPY"}, "ts_ms": 1},
-                authorization=SURFACE_AUTHORIZATION,
+    for destination, payload in (
+        ("vts.emotion", {"emotion_context": {"emotion_tag": "HAPPY"}, "ts_ms": 1}),
+        ("mateengine.state", {"state": "idle", "emotion_tag": "HAPPY"}),
+    ):
+        with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
+            asyncio.run(
+                transport(
+                    _message(
+                        destination,
+                        payload,
+                        authorization=SURFACE_AUTHORIZATION,
+                    )
+                )
             )
-        )
-    )
-    asyncio.run(
-        transport(
-            _message(
-                "mateengine.state",
-                {"state": "idle", "emotion_tag": "HAPPY"},
-                authorization=SURFACE_AUTHORIZATION,
-            )
-        )
-    )
-
-    assert captured == [
-        ("vts", "delivery::vts.emotion"),
-        ("mate", "delivery::mateengine.state"),
-    ]
+    assert captured == []
 
 
 def test_unknown_delivery_destination_fails_closed() -> None:
@@ -198,19 +189,23 @@ def test_unknown_delivery_destination_fails_closed() -> None:
 
 
 def test_transport_level_failure_raises_for_outbox_retry(monkeypatch) -> None:
+    calls: list[dict] = []
+
     async def _post_proactive_push(**_kwargs):
+        calls.append(dict(_kwargs))
         return {"success": False, "reason_code": "EDGE_UNAVAILABLE"}
 
     monkeypatch.setattr(
         "host_brain.channels.edge_transport.submit_proactive_push",
         _post_proactive_push,
     )
-    with pytest.raises(RuntimeError, match="EDGE_UNAVAILABLE"):
+    with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
         asyncio.run(
             LifeDeliveryTransport(ledger=_Ledger())(
                 _message("edge.proactive", {"content": "hello"})
             )
         )
+    assert calls == []
 
 
 def test_invalid_durable_grant_fails_before_any_transport_side_effect(
@@ -301,9 +296,13 @@ def test_http_delivery_requires_exact_bound_payload_before_side_effect(monkeypat
     )
     transport = LifeDeliveryTransport(ledger=_Ledger(decision))
 
-    result = asyncio.run(transport(_message("proactive.gateway", payload, authorization=authorization)))
-    assert result == {"success": True}
-    assert len(calls) == 1
+    with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
+        asyncio.run(
+            transport(
+                _message("proactive.gateway", payload, authorization=authorization)
+            )
+        )
+    assert calls == []
 
     calls.clear()
     with pytest.raises(GovernorGrantError) as exc_info:
@@ -427,6 +426,6 @@ def test_real_scheduler_intent_binds_service_principal_and_life_person(monkeypat
         authorization=authorization,
     )
 
-    result = asyncio.run(LifeDeliveryTransport(ledger=ledger)(message))
-    assert result == {"success": True}
-    assert len(calls) == 1
+    with pytest.raises(ValueError, match="ACTION_PREVIEW_INVALID"):
+        asyncio.run(LifeDeliveryTransport(ledger=ledger)(message))
+    assert calls == []

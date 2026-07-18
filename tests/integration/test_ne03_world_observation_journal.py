@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+import hashlib
 from pathlib import Path
 import sqlite3
 
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.integrations.runtime_events import (
+    RuntimeEvent,
+    RuntimeEventError,
+    RuntimeEventStore,
+)
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
     WorldObservationJournalError,
@@ -15,6 +22,11 @@ from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
 from host_brain.runtime.context_contracts import WorldFactExpiryV1, WorldFactV2
+from host_brain.runtime.world_source_verifier import (
+    RuntimeEventWorldSourceVerifier,
+    world_observation_source_identity_digest,
+    world_observation_source_payload,
+)
 from host_brain.runtime.world_resolver import WorldResolver
 
 
@@ -52,7 +64,7 @@ def _journal(
             db_path,
             runtime_scope_id=runtime_scope_id,
             runtime_authority_provider=provider,
-            source_event_verifier=lambda _workspace, _subject, _ref, _digest: True,
+            source_event_verifier=lambda _workspace, _subject, _ref, _digest, _observed, _upserts, _expiries: True,
             clock=clock,
         ),
         provider,
@@ -147,7 +159,7 @@ def test_sqlite_world_journal_expiry_is_explicit_and_survives_restart(
         journal.db_path,
         runtime_scope_id="runtime-scope-world-ne03",
         runtime_authority_provider=provider,
-        source_event_verifier=lambda _workspace, _subject, _ref, _digest: True,
+        source_event_verifier=lambda _workspace, _subject, _ref, _digest, _observed, _upserts, _expiries: True,
         clock=lambda: NOW + 20,
     )
     snapshot = WorldResolver(observation_port=restarted).resolve(
@@ -173,7 +185,7 @@ def test_two_sqlite_world_writers_receive_distinct_monotonic_revisions(
         first_journal.db_path,
         runtime_scope_id="runtime-scope-world-ne03",
         runtime_authority_provider=provider,
-        source_event_verifier=lambda _workspace, _subject, _ref, _digest: True,
+        source_event_verifier=lambda _workspace, _subject, _ref, _digest, _observed, _upserts, _expiries: True,
         clock=lambda: NOW,
     )
 
@@ -270,7 +282,7 @@ def test_world_writer_requires_canonical_source_authority(tmp_path: Path) -> Non
         journal.db_path,
         runtime_scope_id="runtime-scope-world-ne03",
         runtime_authority_provider=provider,
-        source_event_verifier=lambda _workspace, _subject, _ref, _digest: False,
+        source_event_verifier=lambda _workspace, _subject, _ref, _digest, _observed, _upserts, _expiries: False,
         clock=lambda: NOW,
     )
     with pytest.raises(WorldObservationJournalError, match="SOURCE_AUTHORITY_REJECTED"):
@@ -282,3 +294,111 @@ def test_world_writer_requires_canonical_source_authority(tmp_path: Path) -> Non
             observed_at_ms=NOW,
             upserts=(_fact("observation://host/unverified", "bad"),),
         )
+
+
+def test_world_source_authority_reopens_exact_runtime_event_from_sqlite(
+    tmp_path: Path,
+) -> None:
+    journal, provider = _journal(tmp_path)
+    event_store = RuntimeEventStore(journal.db_path, clock=lambda: NOW)
+    pending = _fact("world-observation://pending/source", "ready")
+    identity = world_observation_source_identity_digest(
+        workspace_id="workspace-ne03",
+        subject_id="person-ne03",
+        observed_at_ms=NOW,
+        upserts=(pending,),
+    )
+    draft = RuntimeEvent.create(
+        event_type="WORLD_OBSERVATION_CAPTURED",
+        source_kind="SYSTEM",
+        source_ref=f"world-observation://source/{identity}",
+        aggregate_type="WORLD_OBSERVATION_SOURCE",
+        aggregate_id="world-scope-"
+        + hashlib.sha256(
+            b"workspace-ne03\x00person-ne03"
+        ).hexdigest(),
+        aggregate_version=NOW,
+        payload_ref="world-observation://transition/" + "0" * 64,
+        payload={"workspace_id": "workspace-ne03", "subject_id": "person-ne03"},
+        redaction_level="INTERNAL_REDACTED",
+        ts_ms=NOW,
+    )
+    fact = replace(pending, source_ref=str(draft.event_id))
+    payload = world_observation_source_payload(
+        workspace_id="workspace-ne03",
+        subject_id="person-ne03",
+        observed_at_ms=NOW,
+        upserts=(fact,),
+    )
+    source = event_store.append_event(
+        RuntimeEvent.create(
+            event_type=draft.event_type,
+            source_kind=draft.source_kind,
+            source_ref=draft.source_ref,
+            aggregate_type=draft.aggregate_type,
+            aggregate_id=draft.aggregate_id,
+            aggregate_version=draft.aggregate_version,
+            payload_ref="world-observation://transition/"
+            + payload["transition_digest"],
+            payload=payload,
+            dedupe_key=draft.dedupe_key,
+            event_id=draft.event_id,
+            redaction_level="INTERNAL_REDACTED",
+            ts_ms=NOW,
+        )
+    )
+
+    restarted_store = RuntimeEventStore(journal.db_path, clock=lambda: NOW)
+    verifier = RuntimeEventWorldSourceVerifier(restarted_store)
+    authoritative = SQLiteWorldObservationJournal(
+        journal.db_path,
+        runtime_scope_id="runtime-scope-world-ne03",
+        runtime_authority_provider=provider,
+        source_event_verifier=verifier,
+        clock=lambda: NOW,
+    )
+    digest = str(source["payload_digest"]).removeprefix("sha256:")
+    batch = authoritative.append_observation_batch(
+        workspace_id="workspace-ne03",
+        subject_id="person-ne03",
+        source_event_ref=str(source["event_id"]),
+        source_event_digest=digest,
+        observed_at_ms=NOW,
+        upserts=(fact,),
+    )
+
+    assert batch.source_event_ref == source["event_id"]
+    assert batch.source_event_digest == digest
+    assert restarted_store.get_event_by_id(event_id=str(source["event_id"])) == source
+    assert restarted_store.get_event_by_id(
+        event_id="runtimeevent://sha256/" + "0" * 64
+    ) is None
+    with pytest.raises(RuntimeEventError, match="exact canonical form"):
+        restarted_store.get_event_by_id(event_id=" " + str(source["event_id"]))
+    assert verifier(
+        "other-workspace",
+        "person-ne03",
+        str(source["event_id"]),
+        digest,
+        NOW,
+        (fact,),
+        (),
+    ) is False
+    assert verifier(
+        "workspace-ne03",
+        "other-person",
+        str(source["event_id"]),
+        digest,
+        NOW,
+        (fact,),
+        (),
+    ) is False
+    assert verifier(
+        "workspace-ne03",
+        "person-ne03",
+        str(source["event_id"]),
+        "0" * 64,
+        NOW,
+        (fact,),
+        (),
+    ) is False

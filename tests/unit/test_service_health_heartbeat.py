@@ -4,6 +4,8 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 
 class _MockResponse:
     def __init__(self, status_code: int = 200, payload: dict | None = None) -> None:
@@ -212,6 +214,117 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
         assert cached is not None
         assert cached["status"] == "DEFERRED"
         assert "RESOURCE_PRESSURE_HIGH" in str(cached.get("detail"))
+
+
+def test_run_once_uses_explicit_degradation_observer_without_global_machine(
+    monkeypatch,
+) -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+    from host_brain.observability import degradation_state
+
+    captured: dict[str, object] = {}
+
+    def observer(rows, *, source_ref, observed_at_ms):  # type: ignore[no-untyped-def]
+        captured.update(
+            {
+                "rows": list(rows),
+                "source_ref": source_ref,
+                "observed_at_ms": observed_at_ms,
+            }
+        )
+        return ({"guardian_revision": 1},)
+
+    def forbidden_global(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("explicit observer must not call global degradation state")
+
+    monkeypatch.setattr(
+        degradation_state,
+        "reconcile_service_observations",
+        forbidden_global,
+    )
+    monkeypatch.setattr(
+        heartbeat,
+        "_resource_gate_llm_probe_decision",
+        lambda: {"allowed": True},
+    )
+    with (
+        patch.object(
+            heartbeat,
+            "_probe_edge",
+            new=AsyncMock(
+                return_value={
+                    "status": "DEGRADED",
+                    "latency_ms": 1,
+                    "sub_services": {
+                        "vts": {"status": "DOWN", "detail": "unavailable"},
+                        "tts": {"status": "UP", "detail": "ready"},
+                    },
+                }
+            ),
+        ),
+        patch.object(
+            heartbeat,
+            "_probe_host",
+            new=AsyncMock(
+                return_value={
+                    "overall_status": "UP",
+                    "latency_ms": 1,
+                    "sub_services": {
+                        "llm_gateway": {"status": "UP", "detail": "ready"},
+                        "recall_fusion": {"status": "UP", "detail": "ready"},
+                    },
+                }
+            ),
+        ),
+        patch.object(
+            heartbeat,
+            "_probe_llm_nodes",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        asyncio.run(heartbeat.run_once(degradation_observer=observer))
+
+    source_ref = captured["source_ref"]
+    observed_at_ms = captured["observed_at_ms"]
+    rows = captured["rows"]
+    assert isinstance(source_ref, str)
+    assert isinstance(observed_at_ms, int)
+    assert isinstance(rows, list)
+    assert source_ref.startswith("service-heartbeat://runtime/")
+    assert observed_at_ms > 0
+    assert {row["service_id"] for row in rows} == {
+        "vts",
+        "tts",
+        "llm_gateway",
+        "recall_fusion",
+    }
+
+
+def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    def marker(_rows, *, source_ref, observed_at_ms):  # type: ignore[no-untyped-def]
+        del source_ref, observed_at_ms
+        return ()
+
+    captured: list[object] = []
+
+    async def one_iteration(*, degradation_observer=None):  # type: ignore[no-untyped-def]
+        captured.append(degradation_observer)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(heartbeat, "HEARTBEAT_INITIAL_DELAY_SEC", 0.0)
+    monkeypatch.setattr(heartbeat, "run_once", one_iteration)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            heartbeat.heartbeat_loop(
+                interval_sec=30.0,
+                degradation_observer=marker,
+            )
+        )
+
+    assert captured == [marker]
 
 
 def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signal() -> None:

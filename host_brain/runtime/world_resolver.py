@@ -62,6 +62,75 @@ class WorldResolver:
         subject_id: str,
         now_ms: int,
     ) -> WorldSnapshotV2:
+        return self._replay(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            now_ms=now_ms,
+            allow_overdue=False,
+            through_revision=None,
+        )
+
+    def require_snapshot(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        revision: int,
+        snapshot_digest: str,
+        observed_at_ms: int,
+    ) -> WorldSnapshotV2:
+        """Reopen one historical snapshot and reverify every source event."""
+
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise WorldResolverError("snapshot revision must be non-negative")
+        expected_digest = str(snapshot_digest or "").strip().lower()
+        snapshot = self._replay(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            now_ms=observed_at_ms,
+            allow_overdue=False,
+            through_revision=revision,
+        )
+        if snapshot.snapshot_digest != expected_digest:
+            raise WorldResolverError(
+                "World snapshot is absent or digest-drifted"
+            )
+        return snapshot
+
+    def due_expiry_facts(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        now_ms: int,
+    ) -> tuple[WorldFactV2, ...]:
+        """Return overdue active facts without mutating or renewing their TTL.
+
+        Only the World observation application may turn these candidates into
+        explicit, authority-bound expiry transitions.  Normal resolve remains
+        fail-closed while even one overdue fact is still active.
+        """
+
+        snapshot = self._replay(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            now_ms=now_ms,
+            allow_overdue=True,
+            through_revision=None,
+        )
+        return tuple(
+            item for item in snapshot.facts if now_ms >= item.expires_at_ms
+        )
+
+    def _replay(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        now_ms: int,
+        allow_overdue: bool,
+        through_revision: int | None,
+    ) -> WorldSnapshotV2:
         workspace = str(workspace_id or "").strip()
         if not workspace:
             raise WorldResolverError("workspace_id is required")
@@ -94,15 +163,22 @@ class WorldResolver:
             or head.subject_id != subject
         ):
             raise WorldResolverError("observation journal head scope is invalid")
-        while cursor < head.revision:
+        terminal_revision = head.revision
+        if through_revision is not None:
+            if through_revision > head.revision:
+                raise WorldResolverError(
+                    "observation journal does not contain requested revision"
+                )
+            terminal_revision = through_revision
+        while cursor < terminal_revision:
             try:
                 page = tuple(
                     self._observation_port.list_observation_batches(
                         workspace_id=workspace,
                         subject_id=subject,
                         after_revision=cursor,
-                        through_revision=head.revision,
-                        limit=min(self._PAGE_SIZE, head.revision - cursor),
+                        through_revision=terminal_revision,
+                        limit=min(self._PAGE_SIZE, terminal_revision - cursor),
                     )
                 )
             except Exception as exc:
@@ -194,7 +270,10 @@ class WorldResolver:
                 previous_fence = batch.fencing_token
                 cursor = batch.revision
                 expected_revision += 1
-        if cursor != head.revision or previous_digest != head.batch_digest:
+        if cursor != terminal_revision or (
+            terminal_revision == head.revision
+            and previous_digest != head.batch_digest
+        ):
             raise WorldResolverError("observation journal did not reach captured head")
 
         overdue = tuple(
@@ -204,7 +283,7 @@ class WorldResolver:
                 if now_ms >= fact.expires_at_ms
             )
         )
-        if overdue:
+        if overdue and not allow_overdue:
             raise WorldResolverError(
                 "WORLD_EXPIRY_TRANSITION_MISSING: active facts exceeded expires_at_ms"
             )

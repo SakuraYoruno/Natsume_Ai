@@ -10,6 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-03",
   "active_wave_status": "IN_PROGRESS",
+  "active_wave_detail": "PRODUCTION_CUTOVER_IMPLEMENTED_LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES",
   "next_wave": "NE-01",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -21,6 +22,52 @@
     "commit_subject_language": "CHINESE_REQUIRED",
     "feature_branch_merge_commits": "FORBIDDEN",
     "pull_request_body_transport": "MARKDOWN_BODY_FILE_REQUIRED"
+  },
+  "active_wave_local_validation": {
+    "status": "LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES",
+    "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
+    "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+    "test_batches": {
+      "ne03_wave_passed": 239,
+      "affected_legacy_regression_passed": 101,
+      "raw_transport_private_regression_passed": 36,
+      "service_catalog_closeout_regression_passed": 6,
+      "independent_guardian_catalog_audit_passed": 42,
+      "independent_action_preview_edge_audit_passed": 47
+    },
+    "production_cli_host_smoke": {
+      "environment": "ISOLATED_RUNTIME_ENV_FRESH_SQLITE",
+      "catalog_sequence": ["AUDIT", "SHADOW", "PREFLIGHT", "CANARY", "ENFORCE"],
+      "catalog_operation_count": 5,
+      "catalog_receipt_count": 15,
+      "health_http_status": 200,
+      "health_status": "OK",
+      "service_identity": "host.main/http",
+      "guardian_durability": "READY",
+      "guardian_fencing_token": 5,
+      "shutdown_process_and_port_cleared": true,
+      "coordinator_lease_released_normally": false,
+      "shutdown_is_graceful_pass": false,
+      "shutdown_boundary": "WINDOWS_CTRL_BREAK_TERMINATED_PROCESS_AND_CLEARED_LISTENER_WITHOUT_FABRICATING_LEASE_RELEASE",
+      "crash_recovery": {
+        "same_database_port_and_snapshot": true,
+        "expired_lease_takeover": true,
+        "catalog_stage": "ENFORCE",
+        "health_status": "OK",
+        "catalog_coordinator_fencing_token": 2,
+        "guardian_fencing_token": 6,
+        "cumulative_operation_count": 6,
+        "cumulative_receipt_count": 18
+      }
+    },
+    "still_required": [
+      "production multi-instance deployment canary"
+    ],
+    "known_boundaries": [
+      "WINDOWS_BACKGROUND_GRACEFUL_STOP_NOT_IMPLEMENTED_P1_CRASH_FENCE_FALLBACK_ONLY",
+      "LONG_TERM_GOAL_DURABLE_OWNER_MISSING",
+      "GOVERNED_OPERATOR_AND_BLOCKED_EMBODIMENT_POSITIVE_MIGRATION_DEFERRED_TO_NE01"
+    ]
   },
   "production_enablement": {
     "atomic_graph_success": "OFF",
@@ -798,14 +845,14 @@
       "host_runtime_authority": "ONE_DURABLE_RUNTIME_LEASE_AND_MONOTONIC_FENCING_TOKEN_PER_RUNTIME_SCOPE_ASGI_LIFESPAN_HEARTBEAT_RENEWS_INDEPENDENTLY_OF_THE_DEFAULT_OFF_GOVERNED_SCHEDULER_SECOND_INSTANCE_FOR_THE_SAME_CANONICAL_DB_FAILS_CLOSED_LEGACY_NULL_SCOPE_ROWS_ARE_NEVER_CLAIMED_EVERY_ENQUEUE_CLAIM_EXPIRE_COMPLETE_AND_RECONCILE_TRANSITION_REVALIDATES_EXACT_HOST_AUTHORITY_IN_ITS_OWN_SQLITE_WRITE_TRANSACTION",
       "durable_store_lease_identity": "NORMALIZED_CANONICAL_DB_PATH_SHA256_DERIVES_RUNTIME_SCOPE_SESSION_AND_OWNER_DIFFERENT_STORES_DO_NOT_CONTEND",
       "edge_reconnect_credential": "EXACT_EDGE_SESSION_OWNER_LEASE_AND_FENCING_TOKEN_PERSISTED_UNDER_THE_CURRENT_HOST_RUNTIME_FENCE_A_REPLACEMENT_RUNTIME_MUST_EXACT_RECONNECT_ROTATE_THE_LIVE_EDGE_FENCE_AND_VERIFY_NEW_LEASE_ID_PLUS_OLD_FENCE_PLUS_ONE_BEFORE_ROUTES_OPEN",
-      "selected_injected_paths": "ASGI_SCHEDULER_MATEENGINE_ROUTER_LIFE_DELIVERY_REPLY_PERFORMANCE_CHAT_CUES_AND_GATEWAY_VOICE_SELECTED_EFFECTS",
-      "durable_admission_truth": "SELECTED_LIFE_REPLY_PERFORMANCE_AND_GATEWAY_VOICE_NEW_COMMANDS_RETURN_PENDING_DURABLY_QUEUED_WITH_VOICE_STARTED_VTS_STARTED_AND_PHYSICAL_EFFECT_VERIFIED_FALSE_OR_UNKNOWN_EXACT_DUPLICATES_REPLAY_THEIR_EXISTING_DURABLE_STATUS_ONLY_AN_EXISTING_APPLIED_RECEIPT_VERIFIES_THE_PHYSICAL_EFFECT",
+      "selected_injected_paths": "APP_LOCAL_RUNTIME_INJECTION_EXISTS_BUT_TERMINAL_ACTION_PREVIEW_NOW_ALLOWS_ONLY_EXACT_PROOF_PATHS_LEGACY_REPLY_PERFORMANCE_GATEWAY_VOICE_CHAT_CUES_AND_OTHER_DIRECT_CALLS_FAIL_CLOSED",
+      "durable_admission_truth": "EXACT_ACTION_PREVIEW_LIFE_VTS_MATEENGINE_AND_GATEWAY_EDGE_PATHS_MAY_RETURN_PENDING_OR_DURABLY_QUEUED_LEGACY_REPLY_PERFORMANCE_AND_GATEWAY_VOICE_WITHOUT_ACCEPTANCE_TO_EMBODIMENT_DERIVATION_ARE_BLOCKED_EXACT_DUPLICATES_REPLAY_EXISTING_STATUS_ONLY_AN_EXISTING_APPLIED_RECEIPT_VERIFIES_THE_PHYSICAL_EFFECT",
       "receipt_query": "EDGE_V2_HMAC_NONCE_RPC_REQUIRES_OWNER_CURRENT_SESSION_LEASE_FENCING_TOKEN_AND_EXACT_COMMAND_ID_IDEMPOTENCY_KEY_BINDING_LEGACY_OWNERLESS_COMMAND_RETURNS_NOT_FOUND_FOUND_RETURNS_ONLY_THE_MATCHING_DURABLE_RECEIPT_AND_NEVER_EXECUTES_THE_COMMAND",
       "in_doubt_reconciliation": "EXPIRED_DISPATCHING_CLAIMS_BECOME_IN_DOUBT_HOST_RECONCILIATION_IS_READ_ONLY_FOUND_RECEIPTS_REQUIRE_IDENTITY_AND_RECEIPT_DIGEST_CAS_IDENTICAL_IN_DOUBT_DIGEST_IS_A_NO_OP_NOT_FOUND_OR_LOOKUP_FAILURE_PRESERVES_IN_DOUBT_AND_NEVER_REPLAYS_OR_RESUBMITS",
       "transport_security": "PLAINTEXT_HTTP_ALLOWED_ONLY_FOR_LOOPBACK_OR_LOCALHOST_NON_LOOPBACK_REQUIRES_HTTPS_AND_FAILS_BEFORE_HTTP_CLIENT_CREATION",
       "real_transport_smoke": "PROVEN_LOOPBACK_TCP_HMAC_EDGE_SQLITE_DURABLE_RECEIPT_QUERY_AND_RESTART_EXACT_REPLAY",
       "physical_effect": "NOT_TESTED_MINIMAL_RPC_PROFILE_EXPECTS_MATEENGINE_UNAVAILABLE_OR_DEGRADED_AND_DOES_NOT_PROVE_HARDWARE_OR_DEVICE_EFFECT",
-      "remaining_boundary": "REMAINING_LEGACY_DIRECT_EMBODIMENT_ADAPTERS_AND_FULL_APPLICATION_WIDE_RUNTIME_INJECTION_ARE_NOT_COMPLETE_THE_HOST_QUEUED_ACK_IS_NOT_A_PHYSICAL_SUCCESS",
+      "remaining_boundary": "REPLY_PERFORMANCE_GATEWAY_VOICE_CHAT_CUES_AND_REMAINING_LEGACY_DIRECT_EMBODIMENT_ADAPTERS_NEED_GOVERNED_TASKGRAPH_AND_EXACT_DERIVED_PREVIEW_MIGRATION_THE_HOST_QUEUED_ACK_IS_NOT_A_PHYSICAL_SUCCESS",
       "evidence_refs": [
         "host_brain/app/asgi.py",
         "host_brain/app/mateengine_routes.py",
@@ -1022,7 +1069,7 @@
       "obs_ports_lifecycle": "ONE_SHOT_INSTANCE_REUSE_FAILS_CLOSED_FRESH_FACTORY_CAN_REBUILD",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PROVEN_FOR_CANON_TOOL_BOND_OBS_LIFECYCLE_PROJECTION_STATS_5_WEB_UI_GETS_7_REMAINING_MOUNTED_GETS_LIFE_BODY_COLD_SOURCE_VIEW_AND_SELECTED_RESPONSE_CACHES",
-      "remaining_locator_boundary": "D6 removed the module-global projection daemon and import-time registration. D7a reduced direct process_services and _get_ledger lexical references in obs_routes*.py from five to zero, removed four audited projection helper locators, moved six Host projection GET routes to the lifespan store, and routed mode plus Life action-preview through app-owned ports. D7b moved Life Body to four same-app durable roots plus bounded canonical-ledger lineage and froze Direct Skill resource, episodic, and semantic instances at Host composition so its worker no longer resolves process services during execution. D8 makes the Task Runtime migration gate precede Life authority and Query Projection construction, then adds an explicit HostEmbodimentRuntime per ASGI lifespan without a module default. Migration 0104 binds new outbox rows to a canonical-DB-derived runtime scope with one durable runtime lease and monotonic fence. A second process for the same scope fails closed; legacy null-scope rows are not claimed. Every outbox mutation revalidates that fence in its own SQLite write transaction. The exact Edge session, owner, lease and fence are persisted under the live Host fence; a replacement runtime rotates a live Edge fence before routes open and validates the returned new lease/fence. Edge migration 0002 freezes command owner; HMAC/nonce receipt query v2 is owner/current-session/lease/fence and command/key bound, legacy ownerless commands return NOT_FOUND, and Host IN_DOUBT reconciliation is read-only, digest-idempotent, CAS-bound and never replays. Non-loopback HTTP is rejected and remote transport requires HTTPS. Selected Life, reply-performance and Gateway voice new admissions report PENDING/DURABLY_QUEUED; exact duplicates return only their existing durable status, and only an existing APPLIED receipt verifies an Edge effect. A loopback TCP/HMAC/SQLite receipt-query plus restart exact-replay smoke is proven. The smoke does not prove a deployed Edge, a physical device effect, or full application-wide injection of remaining legacy direct embodiment adapters. Life Body missing, invalid, stale, and ledger failures still persist typed SOURCE_UNAVAILABLE; 0 typed-unavailable is a producer declaration, not runtime success. Underlying Host sources, Chat/Delegate, Acceptance Effect, and most Worker authorities remain process-shared. ProcessServiceContainer still has 60 fields and approximately 53 mutable service references after excluding locks and application_ports; full Host/Worker typed composition and global Service Locator removal remain unproven. Source modes are 6 durable, 3 static, 8 partial, 4 authenticated-host-read, and 0 typed-unavailable; health remains DEGRADED. This slice does not complete NE-01 or the full architecture.",
+      "remaining_locator_boundary": "D6-D8 app-local projection, Direct Skill dependency snapshots and HostEmbodimentRuntime authority remain valid. NE-03 now requires an exact terminal ActionPreview: Life VTS/MateEngine and Gateway/Edge paths with canonical proof may reach the durable queue, while reply-performance, Gateway voice, chat cues and other legacy direct calls without Acceptance-to-Embodiment derivation fail closed pending NE-01. The loopback TCP/HMAC/SQLite receipt-query and restart replay do not prove a deployed Edge or physical effect. Underlying Host sources, Chat/Delegate and most Worker authorities remain process-shared. ProcessServiceContainer still has 60 fields and approximately 53 mutable service references after excluding locks and application_ports; full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. Life Body source failures remain typed SOURCE_UNAVAILABLE; health remains DEGRADED. This slice does not complete NE-01 or the full architecture.",
       "mixed_file_gate": "RED_4_EXISTING_UNCLASSIFIED_OVER_1500",
       "mixed_file_gate_findings": [
         "host_brain/app/governed_task_adapter.py:1539",
@@ -1087,23 +1134,26 @@
       ]
     },
     "world_model": {
-      "status": "PARTIAL_NE03_DURABLE_OBSERVATION_JOURNAL_NO_PRODUCTION_CALLER",
-      "runtime_projection_default": "DISABLED",
+      "status": "PARTIAL_NE03_PRODUCTION_OBSERVATION_WIRED_NOT_PREDICTIVE",
+      "runtime_projection_default": "HOST_LIFESPAN_COMPOSED",
       "write_api_available": true,
-      "reason": "Migration 0111 and SQLiteWorldObservationJournal assign atomic workspace/subject revisions and require an active Host lease plus canonical source verifier. The writer rejects future/non-monotonic time, forged or duplicate expiry and expired-digest reactivation before append; WorldResolver captures and verifies the exact head, physical row bindings and TTL transitions. Production observation adapters and consumers are not cut over, and this is not a predictive planning world model.",
+      "reason": "The Host lifespan composes RuntimeWorldObservationApplication with migration 0111, an active Host lease and canonical RuntimeEvent source verification. Server-owned principal, existing Bond/Emotion projections and composition-owned environment signals are appended and reopened through WorldResolver; the raw request body cannot select World or Scene. TTL advances through explicit expiry transitions and reads do not renew it. The upstream Bond raw-evidence owner is not replaced, long-term goals have no independent durable owner, and this remains a current-fact projection rather than a predictive planning world model.",
       "evidence_refs": [
         "host_brain/audit/migrations/0111_world_observation_journal.sql",
         "host_brain/persistence/world_observation_journal.py",
         "host_brain/runtime/context_contracts.py",
+        "host_brain/runtime/context_application.py",
+        "host_brain/runtime/world_observation_application.py",
         "host_brain/runtime/world_resolver.py",
+        "tests/integration/test_ne03_context_application.py",
         "tests/unit/test_ne03_world_resolver.py",
         "tests/integration/test_ne03_world_observation_journal.py"
       ]
     },
     "scene_engine": {
-      "status": "PARTIAL_NE03_DERIVED_DURABLE_KERNEL_NO_PRODUCTION_CALLER",
-      "production_default": "DISABLED",
-      "feature_flag": "HOST_LIFE_PROJECTION_ENABLED",
+      "status": "PARTIAL_NE03_THREE_CONSUMERS_PRODUCTION_WIRED_LOCAL_ACCEPTANCE_PASSED",
+      "production_default": "HOST_REQUEST_CONTEXT_WIRED",
+      "feature_flag": "NO_SCENE_AUTHORITY_FLAG",
       "implemented": [
         "workspace/subject-scoped SceneResolver",
         "digest-bound SceneDecisionV2 and SceneTransitionV1",
@@ -1113,40 +1163,92 @@
         "no-change transition suppression",
         "cursor tail refresh and 1001+ Runtime Event replay",
         "0112 unique aggregate revision CAS and Host lease trigger",
-        "checksum-bound runtime-context schema readiness"
+        "checksum-bound runtime-context schema readiness",
+        "single Host lifespan RuntimeContextApplicationService",
+        "same Scene revision and digest frozen for Surface, Proactive and Task admission",
+        "production callers cannot submit final Scene or constraints"
       ],
       "missing": [
-        "Surface/Proactive/Task admission production cutover",
-        "Host lifespan composition and trusted signal adapters",
-        "shared Surface/Proactive/Task scene identity"
+        "production multi-instance canary",
+        "predictive world simulation"
       ],
       "evidence_refs": [
         "host_brain/runtime/scene_resolver.py",
+        "host_brain/runtime/context_application.py",
+        "host_brain/runtime/scene_consumer_projection.py",
         "host_brain/runtime/context_authority_schema.py",
+        "host_brain/app/asgi.py",
         "host_brain/audit/migrations/0112_runtime_context_authority.sql",
         "tests/unit/test_ne03_scene_resolver.py",
+        "tests/unit/test_ne03_scene_consumer_cutover.py",
+        "tests/integration/test_ne03_context_application.py",
         "tests/integration/test_ne03_runtime_context_durability.py"
       ]
     },
     "intent_arbiter": {
-      "status": "AUTHORITY_ATTESTED_RESTRICT_ONLY_NO_PRODUCTION_ADAPTER",
-      "boundary": "IntentAuthorityPort must return a fresh typed attestation that exactly proves principal, goal, graph/node, ContextPack, Scene, action, active Grant, composition-owned policy and every constraint source. Drift, omission, conflict, expiry, revocation and detached arbitration fail closed. Production authority adapter, admission and Preview consumers are not wired yet.",
+      "status": "PARTIAL_NE03_PRODUCTION_ADMISSION_WIRED_RESTRICT_ONLY_LOCAL_ACCEPTANCE_PASSED",
+      "boundary": "ProductionIntentAuthorityPort reopens the canonical HostCommand, WorkOrder, TaskGraph/node, ContextPack, Scene, action, active Grant and composition-owned policy. DurableIntentAdmissionVerifier prepares every node, seals a graph prepared set, materializes exact node receipts and then seals the complete set before worker execution; BLOCK and invalid evidence fail closed, while REVIEW uses the Task Runtime durable ReviewStore and a one-time continuation. The result never grants execution. There is no independent durable long-term-goal owner; Action Preview production authority passed its commit-bound local gate but remains restrict-only.",
       "evidence_refs": [
         "host_brain/runtime/intent_authority.py",
         "host_brain/runtime/intent_arbiter.py",
+        "host_brain/runtime/production_intent_authority.py",
+        "host_brain/runtime/intent_admission.py",
+        "host_brain/orchestration/governed_command.py",
+        "host_brain/app/asgi.py",
+        "tests/unit/test_ne03_production_intent_authority.py",
         "tests/unit/test_ne03_intent_arbiter.py"
       ]
     },
     "action_preview": {
-      "status": "PARTIAL",
-      "production_authority_provider": "MISSING",
-      "production_endpoint_semantics": "ELIGIBILITY_ONLY",
-      "unified_shadow_runner": "MISSING"
+      "status": "PARTIAL_NE03_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED",
+      "production_authority_provider": "HOST_LIFESPAN_OWNED_CANONICAL_RESOLVER",
+      "production_endpoint_semantics": "REOPEN_EXISTING_AUTHORITY_RESTRICT_ONLY",
+      "authority_granted": false,
+      "implemented": [
+        "reopen HostCommand WorkOrder TaskGraph Attempt Lease parent and node Grant",
+        "reopen exact ContextPack Scene and RuntimeGuardian at issue and execution",
+        "reopen claimed Acceptance Effect successful Attempt accepted Node and artifact",
+        "internal 30 second maximum TTL and future issue rejection",
+        "direct origin event lookup and exact response-loss replay",
+        "typed derived EffectDescriptor exact scope and args projection",
+        "derived terminal recursively reopens the origin Task Attempt Lease and Grant before side effect",
+        "typed Scheduler Proactive proof and fixed request identity reach the terminal Edge push",
+        "EdgeCommandPusher construction and injection cannot disable the Preview gate",
+        "raw Edge HTTP transport and low-level embodiment command port are module-private and not exported",
+        "Acceptance surface Gateway and Scheduler-derived Life Edge Gateway VTS MateEngine terminal proof reopen",
+        "Acceptance surface permits only effect-bound minimal text and rejects raw_extra media secondary reply and content drift",
+        "public embodiment submit and enqueue require exact Preview while claimed durable outbox dispatch uses a private submitter",
+        "legacy WorkOrder and Acceptance Effect quarantine",
+        "all 37 direct Obs mutation commands fail closed before side effect"
+      ],
+      "missing": [
+        "Governed Operator TaskGraph replacement for 37 blocked commands",
+        "Acceptance-to-Embodiment derived Preview for reply-performance Gateway voice and chat cues",
+        "production deployment multi-instance canary"
+      ],
+      "evidence_refs": [
+        "host_brain/runtime/action_preview_authority.py",
+        "host_brain/runtime/action_preview_proof.py",
+        "host_brain/runtime/action_preview_resolver.py",
+        "host_brain/governor/action_preview.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/channels/edge_transport.py",
+        "host_brain/channels/embodiment.py",
+        "host_brain/lifecycle_runtime/proactive_dispatch.py",
+        "host_brain/app/vision/proactive_push_client.py",
+        "tests/integration/test_ne03_action_preview_authority.py",
+        "tests/unit/test_ne03_action_preview_front_doors.py"
+      ]
     },
     "runtime_guardian": {
-      "status": "PARTIAL_NE03_LEASE_BOUND_DURABLE_KERNEL_NO_HOST_LIFESPAN",
+      "status": "PARTIAL_NE03_HOST_LIFESPAN_AND_TYPED_FRONT_DOORS_WIRED_LOCAL_ACCEPTANCE_PASSED",
       "implemented": [
         "injected RuntimeGuardian without module-global singleton",
+        "single Host ASGI lifespan composition bound to runtime scope owner lease and fence",
+        "health and heartbeat consume the app-local Guardian",
+        "audited high-risk front doors consume an injected degradation capability port",
+        "shared MCP broker is unbound on lifespan shutdown",
         "0112 same-transaction Host runtime lease validation",
         "exact retry and commit response-loss reconciliation",
         "deterministic typed health and recovery reducer replay",
@@ -1154,21 +1256,42 @@
         "ordered multi-PREPARED consume-COMMITTED Review recovery saga",
         "maintenance and sleep journal",
         "durable SLO breach and acknowledgement journal",
-        "1001+ cursor-paged replay and semantic delta validation"
+        "1001+ cursor-paged replay and semantic delta validation",
+        "0113 stage-rank and terminal runtime-scope activation identity are physically constrained",
+        "Catalog pending reconciliation requires the exact operation snapshot stage and candidate listener identity",
+        "REGISTERED crash resumes the same operation while stop failure stays pending instead of fabricating rollback",
+        "explicit HostCatalogRuntime close attempts authority and reservation release even when candidate stop raises"
       ],
       "missing": [
-        "Host lifespan owner and removal of global degradation truth",
-        "production catalog startup composition",
-        "complete front-door coverage",
+        "removal of explicit legacy compatibility adapters",
+        "Windows background graceful stop and active coordinator lease release",
         "production multi-instance canary"
       ],
-      "catalog_default_mode": "AUDIT",
+      "production_cli_smoke": "FRESH_SQLITE_AUDIT_TO_ENFORCE_5_OPERATIONS_15_RECEIPTS_HEALTH_200_OK_GUARDIAN_READY_FENCE_5_THEN_EXPIRED_LEASE_SAME_DB_RESTART_TO_COORDINATOR_FENCE_2_GUARDIAN_FENCE_6_AND_6_OPERATIONS_18_RECEIPTS",
+      "shutdown_boundary": "PROCESS_AND_PORT_CLEARED_AFTER_WINDOWS_CTRL_BREAK_WITHOUT_FABRICATED_RELEASE_CRASH_RECOVERY_PROVEN_NOT_A_GRACEFUL_STOP_PASS_NE07_REMAINS",
+      "catalog_default_target_mode": "ENFORCE",
+      "catalog_fresh_database_sequence": [
+        "AUDIT",
+        "SHADOW",
+        "PREFLIGHT",
+        "CANARY",
+        "ENFORCE"
+      ],
       "evidence_refs": [
         "host_brain/runtime/runtime_guardian.py",
         "host_brain/runtime/production_composition.py",
+        "host_brain/runtime/degradation_authority.py",
+        "host_brain/app/asgi.py",
         "host_brain/audit/migrations/0112_runtime_context_authority.sql",
+        "host_brain/audit/migrations/0113_service_catalog_rollout_authority.sql",
+        "host_brain/service_catalog/host_startup.py",
+        "host_brain/service_catalog/rollout_authority.py",
+        "host_brain/service_catalog/rollout_runtime.py",
         "tests/unit/test_ne03_runtime_guardian.py",
-        "tests/integration/test_ne03_runtime_context_durability.py"
+        "tests/unit/test_ne03_service_catalog_rollout_authority.py",
+        "tests/unit/test_ne03_health_guardian_cutover.py",
+        "tests/integration/test_ne03_runtime_context_durability.py",
+        "tests/integration/test_ne03_service_catalog_host_socket_rollout.py"
       ]
     },
     "workspace_isolation": {
@@ -1337,6 +1460,22 @@
       ],
       "boundary": "PR #83 persists event-named V1 rows only. ACTIVE does not switch the IdentitySnapshot owner, ROLLED_BACK does not restore the exact previous snapshot/version, evidence refs are not resolved, and the transition identity cannot represent repeated releases safely."
     }
+  },
+  "full_stack_acceptance": {
+    "status": "NOT_RUN_NE07",
+    "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+    "local_mandatory_stack": [
+      "Docker Neo4j",
+      "Docker Chroma",
+      "Docker Redis",
+      "Host",
+      "Obs",
+      "Nginx Monitor",
+      "Edge",
+      "Unified Gateway"
+    ],
+    "evidence_receipt": "MISSING",
+    "boundary": "NE-07 has not started. No mock, fake store, port probe or scripted replay may promote this status. A future FullStackAcceptanceReceiptV1 must bind the exact commit, process/container identities, real database writes and restart reads, network roundtrips, failure recovery and performance evidence. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"

@@ -217,6 +217,12 @@ def test_runtime_context_composition_requires_real_schema_and_typed_ports(
         def list_observation_batches(self, **_kwargs):
             return ()
 
+        def append_observation_batch(self, **_kwargs):
+            raise AssertionError("composition construction must not write World")
+
+        def current_expiry_authority_ref(self):
+            return "runtime-authority://sha256/" + "1" * 64
+
     class IntentPort:
         def resolve_intent_authority(self, **_kwargs):
             raise AssertionError("composition construction must not fabricate authority")

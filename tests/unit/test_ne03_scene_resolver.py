@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 import pytest
+
+from host_brain.integrations.runtime_events import runtime_event_payload_digest
 
 from host_brain.runtime.context_contracts import (
     SceneResolutionInputV1,
@@ -25,14 +28,22 @@ class MemoryRuntimeEventStore:
         record = {
             "cursor": len(self.records) + 1,
             "event_id": event.event_id,
+            "schema_version": event.schema_version,
             "event_type": event.event_type,
+            "source_kind": event.source_kind,
             "source_ref": event.source_ref,
             "aggregate_type": event.aggregate_type,
             "aggregate_id": event.aggregate_id,
             "aggregate_version": event.aggregate_version,
+            "payload_ref": event.payload_ref,
             "payload": dict(event.payload),
+            "payload_digest": runtime_event_payload_digest(event.payload),
             "evidence_refs": list(event.evidence_refs),
+            "dedupe_key": event.dedupe_key,
+            "redaction_level": event.redaction_level,
             "ts_ms": event.ts_ms,
+            "created_ts_ms": event.ts_ms,
+            "published_ts_ms": event.ts_ms,
         }
         self.records.append(record)
         return record
@@ -188,6 +199,9 @@ def test_scene_replay_recomputes_fingerprint_and_digest_chain() -> None:
         context=_context(),
     )
     store.records[0]["payload"]["fingerprint"] = "f" * 64
+    store.records[0]["payload_digest"] = runtime_event_payload_digest(
+        store.records[0]["payload"]
+    )
 
     restored = _resolver(event_store=store, clock=lambda: 800)
     with pytest.raises(Exception, match="fingerprint"):
@@ -197,10 +211,50 @@ def test_scene_replay_recomputes_fingerprint_and_digest_chain() -> None:
         )
 
 
+def test_scene_incremental_replay_installs_tail_atomically_and_recovers_after_repair() -> None:
+    store = MemoryRuntimeEventStore()
+    writer = _resolver(event_store=store, clock=lambda: 700)
+    writer.resolve(snapshot=_snapshot("first"), context=_context())
+
+    reader = _resolver(event_store=store, clock=lambda: 800)
+    assert len(
+        reader.transition_history(
+            workspace_id="workspace-a",
+            subject_id="person-a",
+        )
+    ) == 1
+
+    writer.resolve(snapshot=_snapshot("second"), context=_context())
+    writer.resolve(snapshot=_snapshot("third"), context=_context())
+    durable_tail = deepcopy(store.records[-1])
+    store.records[-1]["payload"]["fingerprint"] = "f" * 64
+    store.records[-1]["payload_digest"] = runtime_event_payload_digest(
+        store.records[-1]["payload"]
+    )
+
+    with pytest.raises(Exception, match="fingerprint"):
+        reader.transition_history(
+            workspace_id="workspace-a",
+            subject_id="person-a",
+        )
+
+    # Repairing the durable tail must be sufficient.  The failed replay did
+    # not partially install revision 2 while retaining cursor 1.
+    store.records[-1] = durable_tail
+    repaired = reader.transition_history(
+        workspace_id="workspace-a",
+        subject_id="person-a",
+    )
+    assert len(repaired) == 3
+    assert [item["to_revision"] for item in repaired] == [1, 2, 3]
+
+
 @pytest.mark.parametrize(
     ("context", "expected_scene"),
     [
         (_context(task_kind="RELEASE"), "scene.release-maintenance"),
+        (_context(activity_state="MAINTENANCE"), "scene.release-maintenance"),
+        (_context(activity_state="SLEEP"), "scene.sleep-low-interruption"),
         (_context(activity_state="GAMING"), "scene.game-low-interruption"),
         (_context(local_hour=1), "scene.late-night"),
         (_context(user_state="FRUSTRATED"), "scene.user-frustrated"),
@@ -220,6 +274,46 @@ def test_scene_resolver_derives_eight_required_scenarios(
     )
 
     assert decision.scene_id == expected_scene
+
+
+def test_scene_sleep_activity_blocks_proactive_actions() -> None:
+    decision = _resolver(clock=lambda: 500).resolve(
+        snapshot=_snapshot(),
+        context=_context(activity_state="SLEEP"),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["LOW_INTERRUPTION"] == "RESTRICT"
+    assert constraints["PROACTIVE_ACTION_BLOCKED"] == "BLOCK"
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("source_kind", "TASK"),
+        ("source_ref", "runtime://scene-resolver/forged"),
+        ("payload_ref", "scene://transition/forged"),
+        ("redaction_level", "INTERNAL_REDACTED"),
+        ("evidence_refs", []),
+    ],
+)
+def test_scene_replay_rejects_outer_runtime_event_envelope_tamper(
+    field: str,
+    replacement: Any,
+) -> None:
+    store = MemoryRuntimeEventStore()
+    _resolver(event_store=store, clock=lambda: 700).resolve(
+        snapshot=_snapshot(),
+        context=_context(),
+    )
+    store.records[0][field] = replacement
+
+    restored = _resolver(event_store=store, clock=lambda: 800)
+    with pytest.raises(Exception, match="RuntimeEvent envelope"):
+        restored.transition_history(
+            workspace_id="workspace-a",
+            subject_id="person-a",
+        )
 
 
 def test_scene_resolver_does_not_accept_caller_selected_scene() -> None:

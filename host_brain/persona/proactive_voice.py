@@ -39,6 +39,10 @@ from host_brain.model_runtime.prompt_builder_utils import (
     _normalize_template_lang,
     _resolve_template_payload_with_mirror,
 )
+from host_brain.runtime.scene_consumer_projection import (
+    SceneConsumerProjectionError,
+    project_scene_decision_v2,
+)
 
 from host_brain.persona.offline_continuity import (
     classify_absence_band_from_duration_ms,
@@ -942,101 +946,15 @@ class PersonaProactiveVoice:
 
         return True, ""
 
-    @staticmethod
-    def _coerce_scene_awareness(ctx: dict[str, Any]) -> dict[str, Any]:
-        raw = ctx.get("scene_awareness")
-        if not isinstance(raw, dict):
-            return {"scene_tags": [], "current_activity": None, "companion_suitable": None}
-
-        values: list[str] = []
-        raw_tags = raw.get("scene_tags") or []
-        if isinstance(raw_tags, str):
-            raw_tags = [part.strip() for part in raw_tags.replace(";", ",").replace("|", ",").split(",")]
-        if isinstance(raw_tags, (list, tuple, set)):
-            for item in raw_tags:
-                normalized = str(item or "").strip().lower().replace("-", "_").replace(" ", "_")
-                normalized = normalized.strip("_")
-                if normalized and normalized not in values:
-                    values.append(normalized)
-
-        current_activity = str(raw.get("current_activity") or "").strip().lower().replace("-", "_").replace(" ", "_")
-        if current_activity and current_activity not in values:
-            values.append(current_activity)
-
-        alias_map = {
-            "focus": "focus_work",
-            "working": "focus_work",
-            "coding": "focus_work",
-            "editing": "focus_work",
-            "study": "focus_work",
-            "video": "fullscreen_video",
-            "fullscreen": "fullscreen_video",
-            "movie": "fullscreen_video",
-            "sleep": "sleeping_screen",
-            "lock_screen": "sleeping_screen",
-            "screensaver": "sleeping_screen",
-            "conference": "meeting",
-            "video_call": "meeting",
-            "game": "gaming",
-            "combat": "battle",
-        }
-
-        scene_tags: list[str] = []
-        for tag in values:
-            resolved = alias_map.get(tag, tag)
-            if resolved not in scene_tags:
-                scene_tags.append(resolved)
-            if resolved in {"battle", "lobby", "gameplay"} and "gaming" not in scene_tags:
-                scene_tags.insert(0, "gaming")
-
-        return {
-            "scene_tags": scene_tags,
-            "current_activity": str(raw.get("current_activity") or "").strip() or None,
-            "companion_suitable": raw.get("companion_suitable") if isinstance(raw.get("companion_suitable"), bool) else None,
-            "source_refs": raw.get("source_refs") or raw.get("source_ref"),
-            "observed_at_ms": raw.get("observed_at_ms", raw.get("source_observed_at_ms")),
-            "expires_at_ms": raw.get("expires_at_ms", raw.get("source_expires_at_ms")),
-            "confidence": raw.get("confidence"),
-            "epistemic_type": raw.get("epistemic_type"),
-            "conflict_state": raw.get("conflict_state"),
-        }
-
     def _scene_allows_scene(self, scene_type: str, ctx: dict[str, Any]) -> tuple[bool, str]:
-        scene = self._coerce_scene_awareness(ctx)
-        sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
-        from host_brain.persona.scene_policy import (  # noqa: PLC0415
-            build_scene_decision,
-            evaluate_proactive_scene,
-            life_projection_enabled,
-        )
-        decision_now_ms = ctx.get("now_ms", ctx.get("current_ts_ms"))
-
-        decision = build_scene_decision(
-            scene_awareness=scene,
-            task_mode=str(ctx.get("task_mode") or ctx.get("surface_task_mode") or ""),
-            sys_mode=sys_mode,
-            activity_monitor=activity_monitor,
-            user_goal_ref=str(ctx.get("user_goal_ref") or ""),
-            now_ms=decision_now_ms,
-            enabled=life_projection_enabled(),
-        )
-        if any(scene.get(key) for key in ("scene_tags", "current_activity", "source_ref", "source_refs", "observed_at_ms")):
-            try:
-                from host_brain.persona.life_evolution_observer import observe_scene_decision  # noqa: PLC0415
-
-                observe_scene_decision(
-                    decision,
-                    person_id=str(ctx.get("person_id") or ctx.get("user_id") or "default"),
-                    source_kind="proactive_voice",
-                    source_ref=str(ctx.get("user_goal_ref") or ""),
-                )
-            except Exception:
-                pass
-        return evaluate_proactive_scene(
-            decision,
-            proactive_scene_type=scene_type,
-            now_ms=decision_now_ms,
-        )
+        try:
+            projection = project_scene_decision_v2(
+                ctx.get("scene_decision_v2"),
+                expected_identity=ctx.get("scene_identity_v2"),
+            )
+        except SceneConsumerProjectionError as exc:
+            return False, f"{exc.reason_code}: proactive requires frozen SceneDecisionV2"
+        return projection.evaluate_proactive(scene_type)
 
     def _apply_mode_to_style(self, style: str, ctx: dict[str, Any]) -> str:
         sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)

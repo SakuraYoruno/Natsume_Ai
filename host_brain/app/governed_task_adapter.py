@@ -95,6 +95,12 @@ from host_brain.task_runtime.worker_budget_usage import (
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
+from host_brain.runtime.context_application import RuntimeContextApplicationService
+from host_brain.runtime.action_preview_authority import (
+    ActionPreviewAuthorityError,
+    context_pack_digest_from_work_order,
+)
+from host_brain.runtime.action_preview_resolver import build_node_authority_context
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
 
@@ -170,11 +176,13 @@ class _FrozenSkillWorker:
         execution_ports: GovernedSkillExecutionPorts,
         node_grant_verifier: DurableNodeGrantVerifier,
         projections: Any | None = None,
+        action_preview_service: Any | None = None,
     ) -> None:
         self._ledger = ledger
         self._execution_ports = execution_ports
         self._node_grant_verifier = node_grant_verifier
         self._projections = projections
+        self._action_preview_service = action_preview_service
 
     async def execute_stream(
         self,
@@ -264,6 +272,25 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "node grant child intent differs from its durable verifier projection",
             )
+        # Scene selection is owned by the app-local Runtime Context boundary,
+        # not by the legacy skill executor.  Enriching the already-verified
+        # child intent with the exact frozen projection does not change its
+        # Governor action binding (which covers canonical action fields), but
+        # lets the low-level compatibility gate consume the same Scene as Chat.
+        child_intent = {
+            **child_intent,
+            "scene_decision_v2": pack.get("scene_decision_v2"),
+            "scene_identity_v2": pack.get("scene_identity_v2"),
+        }
+        preview = self._preview_effectful_skill(
+            command=command,
+            work_order=work_order,
+            execution_context=execution_context,
+            target=target,
+            execution_args=execution_args,
+            governor_result=governor_result,
+            verified_grant=verified_grant.to_dict(),
+        )
         _require_frozen_skill_dependencies(
             ports=self._execution_ports,
             target=target,
@@ -345,6 +372,16 @@ class _FrozenSkillWorker:
                 "command_id": command.command_id,
                 "attempt_id": str(execution_context.get("attempt_id") or ""),
                 "skill_receipt_ref": receipt_ref,
+                "node_grant_ref": node_grant_ref,
+                "node_grant_digest": _sha256_json(verified_grant.to_dict()),
+                **(
+                    {
+                        "action_preview_receipt_ref": preview["receipt_ref"],
+                        "action_preview_event_id": preview["event_id"],
+                    }
+                    if preview is not None
+                    else {"action_preview_status": "LEGACY_CONTEXT_NOT_APPLICABLE"}
+                ),
             },
         }
         worker_budget = build_worker_budget_usage(
@@ -397,6 +434,73 @@ class _FrozenSkillWorker:
                 )
             commit["receipt_ref"] = projection_id
         yield commit
+
+    def _preview_effectful_skill(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        execution_context: Mapping[str, Any],
+        target: str,
+        execution_args: Mapping[str, Any],
+        governor_result: Mapping[str, Any],
+        verified_grant: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Require an exact receipt before the shared Skill executor runs."""
+
+        pack = dict(work_order.input_pack or {})
+        if pack.get("runtime_context_schema") != "natsume.runtime-context.request.v1":
+            if self._action_preview_service is not None:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "legacy WorkOrder is quarantined: effectful Skill has no "
+                    "canonical Runtime Context",
+                )
+            return None
+        service = self._action_preview_service
+        if service is None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "effectful governed Skill has no app-local ActionPreview authority",
+            )
+        try:
+            risk_level = int(execution_context.get("node_risk_level") or 0)
+            kwargs = {
+                "action_kind": target,
+                "action_scope": target,
+                "risk_level": risk_level,
+                "action_args": dict(execution_args),
+                "context_pack_digest": context_pack_digest_from_work_order(work_order),
+                "scene_identity": _mapping(pack.get("scene_identity_v2")),
+                "task_graph_id": str(execution_context.get("graph_id") or ""),
+                "graph_revision": int(execution_context.get("graph_revision") or 0),
+                "task_node_id": str(execution_context.get("node_id") or ""),
+                "parent_governor_grant_ref": command.governor_grant_ref,
+                "node_grant_ref": str(verified_grant.get("grant_ref") or ""),
+                "node_grant": dict(verified_grant),
+                "guardian_capability_id": target.lower(),
+                "authority_context": build_node_authority_context(
+                    command=command,
+                    execution_context=execution_context,
+                    purpose="skill.execute",
+                ),
+            }
+            issued = service.issue_receipt(**kwargs)
+            service.require_execution(event_id=issued["event_id"], **{
+                key: value
+                for key, value in kwargs.items()
+                if key
+                not in {
+                    "guardian_capability_id",
+                    "guardian_capability_id",
+                }
+            })
+        except ActionPreviewAuthorityError as exc:
+            raise GovernedHostAdapterError(
+                exc.reason_code,
+                exc.detail,
+            ) from exc
+        return dict(issued)
 
 
 def _require_frozen_skill_dependencies(
@@ -630,6 +734,7 @@ class GovernedHostRuntime:
         planning_enabled: bool = False,
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
         delegate_target_validator: Callable[[str], Any] | None = None,
+        runtime_context_application: RuntimeContextApplicationService | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -642,6 +747,14 @@ class GovernedHostRuntime:
         self._planning_enabled = bool(planning_enabled)
         self._acceptance_effect_dispatcher = acceptance_effect_dispatcher
         self._delegate_target_validator = delegate_target_validator
+        if runtime_context_application is not None and not isinstance(
+            runtime_context_application,
+            RuntimeContextApplicationService,
+        ):
+            raise TypeError(
+                "runtime_context_application must be RuntimeContextApplicationService"
+            )
+        self._runtime_context_application = runtime_context_application
         self._acceptance_effect_stop = asyncio.Event()
         self._acceptance_effect_task: asyncio.Task[None] | None = None
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
@@ -853,7 +966,81 @@ class GovernedHostRuntime:
                 motive_state=motive_state,
                 render_target_lang=render_target_lang,
             )
+            existing_request_id = request_id
+            replan_reference = (
+                failure_replan_reference_from_intent(intent_draft)
+                if route == "plan"
+                else None
+            )
+            if replan_reference is not None:
+                existing_request_id = (
+                    f"{request_id}.graph-revision-"
+                    f"{replan_reference.previous_revision + 1}"
+                )
+            surface = _resolve_host_command_surface(
+                request_body=request_body,
+                authority=dict(command_authority or {}),
+            )
+            existing_request = self._command_repository.get_by_request(
+                surface=surface.value,
+                request_id=existing_request_id,
+            )
+            context_application = self._runtime_context_application
+            if context_application is not None:
+                existing_order = (
+                    existing_request.get("work_order")
+                    if isinstance(existing_request, Mapping)
+                    else None
+                )
+                if isinstance(existing_order, WorkOrderV3):
+                    runtime_context = context_application.require_frozen(
+                        existing_order.input_pack
+                    )
+                else:
+                    runtime_context = context_application.freeze_request(
+                        request_body=request_body,
+                        person_id=person_id,
+                        ts_ms=int(ts_ms),
+                        intent_draft=intent_draft,
+                        governor_result=governor_result,
+                        command_authority=command_authority,
+                        emotion_context=emotion_context,
+                        emotion_snapshot=emotion_snapshot,
+                        bond_summary=bond_summary,
+                    )
+                overlap = sorted(set(frozen_context).intersection(runtime_context.payload))
+                if overlap:
+                    raise GovernedHostAdapterError(
+                        GOVERNED_HOST_AUTHORITY_INVALID,
+                        "runtime context overlaps frozen Host fields: "
+                        + ",".join(overlap),
+                    )
+                frozen_context.update(runtime_context.to_dict())
             if route == "plan":
+                if isinstance(existing_request, Mapping):
+                    _require_existing_plan_replay(
+                        existing_request,
+                        request_body=request_body,
+                        request_id=existing_request_id,
+                        session_id=session_id,
+                        person_id=person_id,
+                        sanitized_message=sanitized_message,
+                        governor_result=governor_result,
+                        command_authority=command_authority,
+                        expected_revision=(
+                            replan_reference.previous_revision + 1
+                            if replan_reference is not None
+                            else 1
+                        ),
+                    )
+                    async for event in self._application.execute_stream(
+                        command=existing_request["command"],
+                        work_order=existing_request["work_order"],
+                        assignment=existing_request["assignment"],
+                        graph=existing_request["graph"],
+                    ):
+                        yield await self._dispatch_accepted_effects(event)
+                    return
                 async for event in self._execute_plan_stream(
                     request_body=request_body,
                     request_id=request_id,
@@ -918,7 +1105,7 @@ class GovernedHostRuntime:
                 candidate_command = contracts.command
                 candidate_work_order = contracts.work_order
                 candidate_graph = contracts.graph
-            existing = self._command_repository.get_by_request(
+            existing = existing_request or self._command_repository.get_by_request(
                 surface=candidate_command.surface.value,
                 request_id=candidate_command.request_id,
             )
@@ -1190,6 +1377,10 @@ def build_governed_host_runtime(
     bounded_fanout_enabled: bool = False,
     atomic_graph_success_enabled: bool = False,
     allow_uncomposed_acceptance_effects: bool = False,
+    runtime_context_application: RuntimeContextApplicationService | None = None,
+    intent_admission_verifier: Any | None = None,
+    degradation_capability_port: Any | None = None,
+    action_preview_service: Any | None = None,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
         build_governed_route_execution_ports,
@@ -1220,13 +1411,21 @@ def build_governed_host_runtime(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
+        degradation_capability_port=degradation_capability_port,
     )
+    if action_preview_service is None and runtime_context_application is not None:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "runtime-context production requires the lifespan-owned "
+            "ActionPreviewService; a worker-local authority is forbidden",
+        )
     projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     canonical = _FrozenSkillWorker(
         ledger=ledger,
         execution_ports=skill_execution_ports,
         node_grant_verifier=node_grant_verifier,
         projections=projection_store,
+        action_preview_service=action_preview_service,
     )
     chat_worker = None
     delegate_worker = None
@@ -1251,6 +1450,7 @@ def build_governed_host_runtime(
             ),
             node_grants=node_grant_verifier,
             projections=projection_store,
+            action_preview_service=action_preview_service,
         )
     worker_registry = GovernedWorkerRegistry(
         chat=chat_worker,
@@ -1289,6 +1489,7 @@ def build_governed_host_runtime(
         coordinator=coordinator,
         node_grant_service=node_grant_service,
         cancellation_authority_verifier=cancellation_authority_verifier,
+        intent_admission_verifier=intent_admission_verifier,
     )
     effect_dispatcher = None
     try:
@@ -1302,6 +1503,7 @@ def build_governed_host_runtime(
             task_store=task_runtime_container.task_store,
             handlers=build_production_acceptance_effect_handlers(),
             owner_id=f"{owner_id}:acceptance-effects",
+            action_preview_service=action_preview_service,
         )
     except RuntimeError as exc:
         if str(exc) != "PROCESS_LIFE_AUTHORITY_NOT_COMPOSED":
@@ -1324,6 +1526,7 @@ def build_governed_host_runtime(
         planning_enabled=projection_store is not None,
         acceptance_effect_dispatcher=effect_dispatcher,
         delegate_target_validator=delegate_dispatcher.require_target,
+        runtime_context_application=runtime_context_application,
     )
 
 
@@ -1478,6 +1681,76 @@ def _resolve_host_input_sha256(
             "Secure Ingress body digest must be a sha256 hex digest",
         )
     return f"sha256:{digest}"
+
+
+def _require_existing_plan_replay(
+    record: Mapping[str, Any],
+    *,
+    request_body: Any,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    sanitized_message: str,
+    governor_result: Mapping[str, Any],
+    command_authority: Mapping[str, Any] | None,
+    expected_revision: int,
+) -> None:
+    """Reject a request-id collision before replaying a searched graph.
+
+    Planning compilation may depend on current observations and must not be
+    rerun merely to prove a duplicate request.  The durable command already
+    freezes the selected graph, so replay compares the complete ingress and
+    parent-authority identity then executes that exact revision.
+    """
+
+    durable = dict(record or {})
+    command = durable.get("command")
+    work_order = durable.get("work_order")
+    assignment = durable.get("assignment")
+    graph = durable.get("graph")
+    authority = dict(command_authority or {})
+    expected_surface = _resolve_host_command_surface(
+        request_body=request_body,
+        authority=authority,
+    )
+    expected = {
+        "surface": expected_surface,
+        "request_id": str(request_id or "").strip(),
+        "session_id": _identifier_or_digest(session_id, prefix="session"),
+        "principal_id": _resolve_host_command_principal(
+            person_id=person_id,
+            authority=authority,
+        ),
+        "input_sha256": _resolve_host_input_sha256(
+            sanitized_message=sanitized_message,
+            authority=authority,
+        ),
+        "governor_grant_ref": governor_grant_ref(
+            str(request_id or "").split(".graph-revision-", 1)[0],
+            governor_result,
+        ),
+        "graph_revision": int(expected_revision),
+        "route_type": "plan",
+        "target_id": "planning_search",
+    }
+    if (
+        not isinstance(command, HostCommand)
+        or not isinstance(work_order, WorkOrderV3)
+        or not isinstance(graph, TaskGraph)
+        or assignment is None
+        or any(getattr(command, key) != value for key, value in expected.items())
+        or command.graph_id != graph.graph_id
+        or command.graph_revision != graph.revision
+        or work_order.task_graph_id != graph.graph_id
+        or work_order.graph_revision != graph.revision
+        or work_order.approval_ref != command.governor_grant_ref
+    ):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "durable planning replay differs from current ingress or authority",
+        )
+    work_order.validate()
+    graph.validate()
 
 
 def _build_contracts(

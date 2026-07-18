@@ -1761,15 +1761,22 @@ def run_isolated_fault_injection_matrix(
 def _observation_evidence_ref(
     *, source_ref: str, dependency_id: str, rows: Sequence[Mapping[str, Any]]
 ) -> str:
-    safe_rows = [
-        {
-            "service_id": str(row.get("service_id") or row.get("name") or "").strip(),
-            "status": _status(row.get("status")),
-            "last_check_ts": row.get("last_check_ts") or row.get("ts_ms"),
-            "side": str(row.get("side") or row.get("owner") or "").strip(),
-        }
-        for row in rows
-    ]
+    safe_rows = sorted(
+        [
+            {
+                "service_id": str(
+                    row.get("service_id") or row.get("name") or ""
+                ).strip(),
+                "status": _status(row.get("status")),
+                "last_check_ts": row.get("last_check_ts") or row.get("ts_ms"),
+                "side": str(
+                    row.get("side") or row.get("owner") or ""
+                ).strip(),
+            }
+            for row in rows
+        ],
+        key=_canonical_json,
+    )
     digest = _digest(
         {
             "dependency_id": dependency_id,
@@ -1778,6 +1785,135 @@ def _observation_evidence_ref(
         }
     )
     return f"health-observation://sha256/{digest}"
+
+
+def _observation_time(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "degradation observation time must be a non-negative integer",
+        )
+    return value
+
+
+def normalize_service_observations(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_ref: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], ...]:
+    """Normalize probe rows without reading or mutating runtime state.
+
+    The result is deterministic for the same logical row set.  It can be fed
+    to either the legacy reducer adapter or the app-local ``RuntimeGuardian``;
+    this function itself owns no clock, repository, singleton or policy flag.
+    Unknown/deferred signals are deliberately omitted and therefore can never
+    release an existing degradation latch.
+    """
+
+    if isinstance(rows, (str, bytes, bytearray)) or not isinstance(rows, Sequence):
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "service observations must be a sequence of mappings",
+        )
+    observed = _observation_time(now_ms)
+    canonical_source_ref = _durable_ref(
+        source_ref,
+        namespace="degradation-source",
+    )
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for raw_row in rows:
+        if not isinstance(raw_row, Mapping):
+            raise DegradationStateError(
+                DEGRADATION_HEALTH_EVIDENCE_INVALID,
+                "each service observation must be a mapping",
+            )
+        row = dict(raw_row)
+        service_id = str(
+            row.get("service_id") or row.get("name") or ""
+        ).strip().lower()
+        dependency = _SERVICE_TO_DEPENDENCY.get(service_id)
+        if not dependency:
+            continue
+        normalized_status = _status(row.get("status"))
+        detail = str(row.get("detail") or "").strip().lower()
+        if normalized_status in _IGNORED_STATUSES:
+            continue
+        if normalized_status in _HEALTHY_STATUSES and any(
+            marker in detail for marker in _NON_HEALTHY_SUCCESS_MARKERS
+        ):
+            continue
+        grouped.setdefault(dependency, []).append(row)
+
+    observations: list[dict[str, Any]] = []
+    for dependency in sorted(grouped):
+        dependency_rows = grouped[dependency]
+        statuses = [_status(row.get("status")) for row in dependency_rows]
+        if any(status in _FAILURE_STATUSES for status in statuses):
+            resolved_status = "DOWN" if "DOWN" in statuses else "DEGRADED"
+        elif statuses and all(status in _HEALTHY_STATUSES for status in statuses):
+            resolved_status = "UP"
+        else:
+            continue
+        observations.append(
+            {
+                "dependency_id": dependency,
+                "status": resolved_status,
+                "evidence_refs": (
+                    _observation_evidence_ref(
+                        source_ref=canonical_source_ref,
+                        dependency_id=dependency,
+                        rows=dependency_rows,
+                    ),
+                ),
+                "source_ref": canonical_source_ref,
+                "observed_at_ms": observed,
+                "detail": f"service observation count={len(dependency_rows)}",
+            }
+        )
+    return tuple(observations)
+
+
+def normalize_startup_observations(
+    statuses: Mapping[str, Any],
+    *,
+    source_ref: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], ...]:
+    """Normalize startup results into dependency observations, without I/O."""
+
+    if not isinstance(statuses, Mapping):
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "startup statuses must be a mapping",
+        )
+    rows: list[dict[str, Any]] = []
+    for module_name, raw_status in dict(statuses).items():
+        dependency = _STARTUP_MODULE_TO_DEPENDENCY.get(
+            str(module_name).strip().lower()
+        )
+        if not dependency:
+            continue
+        text = str(raw_status or "").strip()
+        token = text.split(":", 1)[0].split(" ", 1)[0].strip().upper()
+        if token.startswith("DEGRADED") or token.startswith("FAILED"):
+            resolved = "DEGRADED"
+        elif token == "OK":
+            resolved = "UP"
+        else:
+            continue
+        rows.append(
+            {
+                "service_id": FAULT_POLICIES[dependency].service_ids[0],
+                "status": resolved,
+                "name": str(module_name),
+            }
+        )
+    return normalize_service_observations(
+        rows,
+        source_ref=source_ref,
+        now_ms=now_ms,
+    )
 
 
 def reconcile_service_observations(
@@ -1794,46 +1930,20 @@ def reconcile_service_observations(
     policy_enabled = degradation_policy_enabled() if enabled is None else bool(enabled)
     if not policy_enabled:
         return ()
-    grouped: dict[str, list[Mapping[str, Any]]] = {}
-    for raw_row in rows:
-        row = dict(raw_row or {})
-        service_id = str(row.get("service_id") or row.get("name") or "").strip().lower()
-        dependency = _SERVICE_TO_DEPENDENCY.get(service_id)
-        if not dependency:
-            continue
-        normalized_status = _status(row.get("status"))
-        detail = str(row.get("detail") or "").strip().lower()
-        if normalized_status in _IGNORED_STATUSES:
-            continue
-        if normalized_status in _HEALTHY_STATUSES and any(
-            marker in detail for marker in _NON_HEALTHY_SUCCESS_MARKERS
-        ):
-            continue
-        grouped.setdefault(dependency, []).append(row)
-
     observed = int(now_ms if now_ms is not None else time.time() * 1000)
     transitions: list[dict[str, Any]] = []
-    for dependency in sorted(grouped):
-        dependency_rows = grouped[dependency]
-        statuses = [_status(row.get("status")) for row in dependency_rows]
-        if any(status in _FAILURE_STATUSES for status in statuses):
-            resolved_status = "DOWN" if "DOWN" in statuses else "DEGRADED"
-        elif statuses and all(status in _HEALTHY_STATUSES for status in statuses):
-            resolved_status = "UP"
-        else:
-            continue
-        evidence_ref = _observation_evidence_ref(
-            source_ref=source_ref,
-            dependency_id=dependency,
-            rows=dependency_rows,
-        )
+    for observation in normalize_service_observations(
+        rows,
+        source_ref=source_ref,
+        now_ms=observed,
+    ):
         transition = target.observe(
-            dependency_id=dependency,
-            status=resolved_status,
-            evidence_refs=(evidence_ref,),
-            source_ref=source_ref,
-            now_ms=observed,
-            detail=f"service observation count={len(dependency_rows)}",
+            dependency_id=str(observation["dependency_id"]),
+            status=str(observation["status"]),
+            evidence_refs=tuple(observation["evidence_refs"]),
+            source_ref=str(observation["source_ref"]),
+            now_ms=int(observation["observed_at_ms"]),
+            detail=str(observation["detail"]),
             injected=injected,
         )
         if transition:
@@ -1849,33 +1959,28 @@ def reconcile_startup_statuses(
     now_ms: int | None = None,
     enabled: bool | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    rows: list[dict[str, Any]] = []
-    for module_name, raw_status in dict(statuses or {}).items():
-        dependency = _STARTUP_MODULE_TO_DEPENDENCY.get(str(module_name).strip().lower())
-        if not dependency:
-            continue
-        text = str(raw_status or "").strip()
-        token = text.split(":", 1)[0].split(" ", 1)[0].strip().upper()
-        if token.startswith("DEGRADED") or token.startswith("FAILED"):
-            resolved = "DEGRADED"
-        elif token == "OK":
-            resolved = "UP"
-        else:
-            continue
-        rows.append(
-            {
-                "service_id": FAULT_POLICIES[dependency].service_ids[0],
-                "status": resolved,
-                "name": module_name,
-            }
-        )
-    return reconcile_service_observations(
-        rows,
-        machine=machine,
+    target = machine or get_degradation_state_machine()
+    policy_enabled = degradation_policy_enabled() if enabled is None else bool(enabled)
+    if not policy_enabled:
+        return ()
+    observed = int(now_ms if now_ms is not None else time.time() * 1000)
+    transitions: list[dict[str, Any]] = []
+    for observation in normalize_startup_observations(
+        statuses,
         source_ref=source_ref,
-        now_ms=now_ms,
-        enabled=enabled,
-    )
+        now_ms=observed,
+    ):
+        transition = target.observe(
+            dependency_id=str(observation["dependency_id"]),
+            status=str(observation["status"]),
+            evidence_refs=tuple(observation["evidence_refs"]),
+            source_ref=str(observation["source_ref"]),
+            now_ms=int(observation["observed_at_ms"]),
+            detail=str(observation["detail"]),
+        )
+        if transition:
+            transitions.append(transition.as_dict())
+    return tuple(transitions)
 
 
 __all__ = [
@@ -1914,6 +2019,8 @@ __all__ = [
     "get_degradation_state",
     "get_degradation_state_machine",
     "infer_degradation_capability",
+    "normalize_service_observations",
+    "normalize_startup_observations",
     "reconcile_service_observations",
     "reconcile_startup_statuses",
     "run_isolated_fault_injection_matrix",

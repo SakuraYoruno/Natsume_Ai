@@ -41,6 +41,7 @@ class AcceptanceEffectDispatcher:
         max_attempts: int = 5,
         retry_base_ms: int = 250,
         retry_max_ms: int = 30_000,
+        action_preview_service: Any | None = None,
     ) -> None:
         owner = str(owner_id or "").strip()
         if not owner:
@@ -67,6 +68,7 @@ class AcceptanceEffectDispatcher:
         self._max_attempts = max(1, int(max_attempts))
         self._retry_base_ms = max(0, int(retry_base_ms))
         self._retry_max_ms = max(self._retry_base_ms, int(retry_max_ms))
+        self._action_preview_service = action_preview_service
         self._dispatch_lock = asyncio.Lock()
 
     async def dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
@@ -94,7 +96,14 @@ class AcceptanceEffectDispatcher:
                 detail=f"no handler registered for {effect_type or '<empty>'}",
             )
         try:
-            outcome = handler(dict(effect.get("payload") or {}))
+            handler_payload, preview = self._require_action_preview(effect)
+            if preview is not None:
+                handler_payload["_action_preview_terminal_proof"] = {
+                    "service": self._action_preview_service,
+                    "event_id": str(preview["event_id"]),
+                    "boundary": dict(preview["_terminal_execution_boundary"]),
+                }
+            outcome = handler(handler_payload)
             if inspect.isawaitable(outcome):
                 outcome = await outcome
             receipt_ref = _receipt_ref(outcome, effect_id=str(effect["effect_id"]))
@@ -129,6 +138,89 @@ class AcceptanceEffectDispatcher:
                 receipt_ref=receipt_ref,
             )
         )
+
+    def _require_action_preview(
+        self,
+        effect: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        payload = dict(effect.get("payload") or {})
+        raw_context = payload.pop("_action_preview_context", None)
+        if raw_context is None:
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "legacy Acceptance Effect is quarantined without Runtime Context",
+            )
+        if not isinstance(raw_context, Mapping):
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "Acceptance Effect preview context is invalid",
+            )
+        service = self._action_preview_service
+        if service is None:
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "runtime-context Acceptance Effect has no ActionPreview authority",
+            )
+        context = dict(raw_context)
+        if context.get("schema_version") != "Natsume.acceptance_effect.action_preview_context.v1":
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "Acceptance Effect preview context schema drifted",
+            )
+        effect_type = str(effect.get("effect_type") or "").strip()
+        risk_level = {
+            "conversation.user_turn": 1,
+            "life.foreground_completed": 2,
+            "surface.reply_delivery": 3,
+        }.get(effect_type, 5)
+        try:
+            kwargs = {
+                "action_kind": f"acceptance-effect.{effect_type}",
+                "action_scope": str(effect.get("effect_id") or ""),
+                "risk_level": risk_level,
+                "action_args": payload,
+                "context_pack_digest": context["context_pack_digest"],
+                "scene_identity": context["scene_identity"],
+                "task_graph_id": str(effect.get("graph_id") or ""),
+                "graph_revision": int(effect.get("graph_revision") or 0),
+                "task_node_id": str(effect.get("node_id") or ""),
+                "parent_governor_grant_ref": context["parent_governor_grant_ref"],
+                "node_grant_ref": context["node_grant_ref"],
+                "node_grant": {
+                    "grant_ref": context["node_grant_ref"],
+                    "binding_digest": context["node_grant_digest"],
+                },
+                "guardian_capability_id": f"acceptance_effect_{effect_type.replace('.', '_')}",
+                "authority_context": {
+                    "schema_version": (
+                        "Natsume.action_preview."
+                        "acceptance_effect_authority_request.v1"
+                    ),
+                    "effect_id": str(effect.get("effect_id") or ""),
+                    "lease_owner_id": str(effect.get("lease_owner") or ""),
+                    "fencing_token": int(effect.get("fencing_token") or 0),
+                },
+            }
+            issued = service.issue_receipt(**kwargs)
+            execution_boundary = {
+                key: value
+                for key, value in kwargs.items()
+                if key != "guardian_capability_id"
+            }
+            service.require_execution(
+                event_id=issued["event_id"],
+                **execution_boundary,
+            )
+        except AcceptanceEffectDispatchError:
+            raise
+        except Exception as exc:
+            raise AcceptanceEffectDispatchError(
+                str(getattr(exc, "reason_code", None) or "ACTION_PREVIEW_INVALID"),
+                str(getattr(exc, "detail", None) or "Acceptance Effect preview failed"),
+            ) from exc
+        preview = dict(issued)
+        preview["_terminal_execution_boundary"] = execution_boundary
+        return payload, preview
 
     async def dispatch_graph(
         self,

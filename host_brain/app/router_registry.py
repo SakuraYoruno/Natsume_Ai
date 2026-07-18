@@ -15,7 +15,10 @@ from host_brain.app.host_obs_read_routes import (
     HostObsReadPorts,
     create_host_obs_read_router,
 )
-from host_brain.app.health_routes import router as health_router
+from host_brain.app.health_routes import (
+    DegradationStateProvider,
+    create_health_router,
+)
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.worker_dispatch import create_input_router
@@ -63,6 +66,8 @@ def register_host_routers(
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
     host_obs_read_ports: HostObsReadPorts | None = None,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    degradation_capability_port_provider: Callable[[], Any | None] | None = None,
 ) -> None:
     operator_query_gateway = OperatorQueryGateway.from_environment()
 
@@ -98,6 +103,15 @@ def register_host_routers(
             raise HTTPException(status_code=503, detail="INTERNAL_AGENT_RUNTIME_UNAVAILABLE")
         request.state.internal_agent_command_service = service
         return service
+
+    async def bind_degradation_capability_port(request: Request) -> Any:
+        port = (
+            degradation_capability_port_provider()
+            if degradation_capability_port_provider is not None
+            else None
+        )
+        request.state.degradation_capability_port = port
+        return port
 
     async def require_scheduler_authority(request: Request) -> Any:
         ingress = (
@@ -166,6 +180,7 @@ def register_host_routers(
         dependencies=[
             Depends(require_internal_agent_authority),
             Depends(bind_internal_agent_service),
+            Depends(bind_degradation_capability_port),
         ],
     )
     app.include_router(internal_security_immune_router)
@@ -189,7 +204,11 @@ def register_host_routers(
         )
     )
     app.include_router(pentest_router)
-    app.include_router(health_router)
+    app.include_router(
+        create_health_router(
+            degradation_state_provider=degradation_state_provider,
+        )
+    )
 
 
 __all__ = ["register_host_routers"]

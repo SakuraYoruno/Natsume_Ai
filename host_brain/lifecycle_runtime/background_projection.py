@@ -34,14 +34,11 @@ def _build_background_runtime_snapshot(
 
     scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
     scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}
-    core_tick_ids = [
-        "inner_world_numeric_tick",
-        "inner_world_monologue_tick",
-        "silence_tick",
-        "body_sense_tick",
-        "emotion_decay_tick",
-    ]
-    proactive_task_id = "proactive_talk_periodic"
+    # AW-04 retired the split Life timers.  One governed ``life_tick`` owns
+    # numeric/emotion/proactive policy evaluation and is therefore also the
+    # only scheduler health identity exposed by this read model.
+    core_tick_ids = ["life_tick"]
+    proactive_task_id = "life_tick"
     tasks_by_id: dict[str, dict[str, Any]] = {}
     for item in list(scheduler_snapshot.get("tasks") or []):
         if not isinstance(item, dict):
@@ -107,7 +104,7 @@ def _build_background_runtime_snapshot(
     if last_inner_world_tick_ts_ms <= 0:
         last_inner_world_tick_ts_ms = None
     numeric_tick_last_run_ts = _coerce_int(
-        core_tick_tasks.get("inner_world_numeric_tick", {}).get("last_run_ts"),
+        core_tick_tasks.get("life_tick", {}).get("last_run_ts"),
         0,
     )
     if numeric_tick_last_run_ts > 0 and (

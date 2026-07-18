@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 from .context_authority_schema import (
     RuntimeContextSchemaError,
     assert_runtime_context_authority_schema,
 )
+from .environment_state import build_environment_snapshot
 from .intent_arbiter import IntentArbiter
 from .intent_authority import IntentAuthorityPort, IntentPolicyIdentityV1
 from .runtime_guardian import RuntimeGuardian
 from .scene_resolver import SceneResolver
 from .world_resolver import WorldResolver
+from .world_observation_application import RuntimeWorldObservationApplication
 
 
 class RuntimeContextCompositionError(RuntimeError):
@@ -24,9 +27,13 @@ class RuntimeContextCompositionError(RuntimeError):
 class RuntimeContextComposition:
     """The single object graph shared by Host context consumers."""
 
+    event_store: Any
+    observation_port: Any
     world_resolver: WorldResolver
+    world_observation_application: RuntimeWorldObservationApplication
     scene_resolver: SceneResolver
     intent_arbiter: IntentArbiter
+    intent_authority_port: IntentAuthorityPort
     guardian: RuntimeGuardian
     durable: bool = True
 
@@ -37,8 +44,11 @@ def build_runtime_context_composition(
     observation_port: Any,
     runtime_scope_id: str,
     runtime_authority_provider: Any,
-    intent_authority_port: IntentAuthorityPort,
     intent_policy_identity: IntentPolicyIdentityV1,
+    intent_authority_port: IntentAuthorityPort | None = None,
+    intent_authority_port_factory: Callable[[SceneResolver], IntentAuthorityPort]
+    | None = None,
+    environment_observation_provider: Callable[..., Any] | None = None,
 ) -> RuntimeContextComposition:
     """Build the NE-03 graph; reject a process-local-only production graph."""
 
@@ -58,15 +68,32 @@ def build_runtime_context_composition(
         raise RuntimeContextCompositionError(
             "Runtime context requires the canonical Observation head authority"
         )
-    if not callable(
-        getattr(intent_authority_port, "resolve_intent_authority", None)
-    ):
+    if not callable(getattr(observation_port, "append_observation_batch", None)):
+        raise RuntimeContextCompositionError(
+            "Runtime context requires the canonical Observation write authority"
+        )
+    if not callable(getattr(observation_port, "current_expiry_authority_ref", None)):
+        raise RuntimeContextCompositionError(
+            "Runtime context requires explicit World expiry authority"
+        )
+    if intent_authority_port is not None and intent_authority_port_factory is not None:
+        raise RuntimeContextCompositionError(
+            "Runtime context accepts one Intent authority composition path"
+        )
+    if intent_authority_port is None and not callable(intent_authority_port_factory):
         raise RuntimeContextCompositionError(
             "Runtime context requires the canonical IntentAuthorityPort"
         )
     if type(intent_policy_identity) is not IntentPolicyIdentityV1:
         raise RuntimeContextCompositionError(
             "Runtime context requires a typed composition-owned Intent policy identity"
+        )
+    environment_provider = (
+        environment_observation_provider or build_environment_snapshot
+    )
+    if not callable(environment_provider):
+        raise RuntimeContextCompositionError(
+            "Runtime context requires a composition-owned environment authority"
         )
     try:
         assert_runtime_context_authority_schema(event_store)
@@ -79,18 +106,42 @@ def build_runtime_context_composition(
         runtime_scope_id=runtime_scope_id,
         runtime_authority_provider=runtime_authority_provider,
     )
+    scene_resolver = SceneResolver(
+        event_store=event_store,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+        guardian_snapshot_provider=guardian.snapshot,
+    )
+    if intent_authority_port_factory is not None:
+        try:
+            intent_authority_port = intent_authority_port_factory(scene_resolver)
+        except Exception as exc:
+            raise RuntimeContextCompositionError(
+                "Runtime context Intent authority factory failed"
+            ) from exc
+    if not callable(
+        getattr(intent_authority_port, "resolve_intent_authority", None)
+    ):
+        raise RuntimeContextCompositionError(
+            "Runtime context requires the canonical IntentAuthorityPort"
+        )
+    world_resolver = WorldResolver(observation_port=observation_port)
     return RuntimeContextComposition(
-        world_resolver=WorldResolver(observation_port=observation_port),
-        scene_resolver=SceneResolver(
+        event_store=event_store,
+        observation_port=observation_port,
+        world_resolver=world_resolver,
+        world_observation_application=RuntimeWorldObservationApplication(
             event_store=event_store,
-            runtime_scope_id=runtime_scope_id,
-            runtime_authority_provider=runtime_authority_provider,
-            guardian_snapshot_provider=guardian.snapshot,
+            observation_port=observation_port,
+            world_resolver=world_resolver,
+            environment_observation_provider=environment_provider,
         ),
+        scene_resolver=scene_resolver,
         intent_arbiter=IntentArbiter(
-            authority_port=intent_authority_port,
+            authority_port=intent_authority_port,  # type: ignore[arg-type]
             policy_identity=intent_policy_identity,
         ),
+        intent_authority_port=intent_authority_port,  # type: ignore[arg-type]
         guardian=guardian,
     )
 

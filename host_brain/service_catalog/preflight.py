@@ -33,7 +33,9 @@ from host_brain.service_catalog.probes import (
 )
 
 MODE_AUDIT = CatalogMode.AUDIT.value
+MODE_SHADOW = CatalogMode.SHADOW.value
 MODE_PREFLIGHT = CatalogMode.PREFLIGHT.value
+MODE_CANARY = CatalogMode.CANARY.value
 MODE_ENFORCE = CatalogMode.ENFORCE.value
 _MODES = frozenset(CatalogMode)
 
@@ -492,7 +494,7 @@ def _normalize_mode(mode: object) -> tuple[CatalogMode, CatalogIssue | None]:
     return CatalogMode.PREFLIGHT, _issue(
         ISSUE_MODE_INVALID,
         (),
-        "mode must be AUDIT, PREFLIGHT or ENFORCE",
+        "mode must be AUDIT, SHADOW, PREFLIGHT, CANARY or ENFORCE",
     )
 
 
@@ -676,7 +678,7 @@ def preflight_catalog(
 
     reservation: ReservationAttestation | None = None
     sorted_issues = _sort_issues(issues)
-    if normalized_mode is CatalogMode.ENFORCE and not sorted_issues and claims:
+    if normalized_mode in {CatalogMode.CANARY, CatalogMode.ENFORCE} and not sorted_issues and claims:
         ttl = int(reservation_ttl_ms)
         endpoint_ids = tuple(sorted({claim.endpoint_id for claim in claims}))
         if ttl <= 0 or ttl > 30_000:
@@ -710,12 +712,12 @@ def preflight_catalog(
                     _issue(
                         ISSUE_RESERVATION_REQUIRED,
                         endpoint_ids,
-                        "ENFORCE requires an exact, consumable short-lived reservation",
+                        f"{normalized_mode.value} requires an exact, consumable short-lived reservation",
                     )
                 )
 
     sorted_issues = _sort_issues(issues)
-    if normalized_mode is CatalogMode.AUDIT:
+    if normalized_mode in {CatalogMode.AUDIT, CatalogMode.SHADOW}:
         sorted_issues = tuple(
             CatalogIssue(
                 reason_code=issue.reason_code,
@@ -726,9 +728,17 @@ def preflight_catalog(
             )
             for issue in sorted_issues
         )
-    # AUDIT is observation only.  It never grants effect authority; consumers
-    # can inspect non-blocking issues to learn whether a stricter mode would pass.
-    start_allowed = normalized_mode is not CatalogMode.AUDIT and not sorted_issues
+    # AUDIT is observation only. SHADOW permits the legacy candidate start while
+    # retaining every issue as non-blocking evidence. The three stricter stages
+    # grant start authority only after their complete gate passes.
+    start_allowed = (
+        normalized_mode is CatalogMode.SHADOW
+        or (
+            normalized_mode
+            in {CatalogMode.PREFLIGHT, CatalogMode.CANARY, CatalogMode.ENFORCE}
+            and not sorted_issues
+        )
+    )
     return PreflightDecision(
         mode=normalized_mode,
         snapshot_digest=snapshot_digest,

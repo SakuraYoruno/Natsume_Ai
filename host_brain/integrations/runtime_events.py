@@ -468,6 +468,77 @@ def _runtime_event_matches(
     )
 
 
+def validate_runtime_event_record_envelope(
+    record: Mapping[str, Any],
+    *,
+    expected: RuntimeEvent,
+) -> dict[str, Any]:
+    """Validate the complete durable envelope against a typed expectation.
+
+    Domain replayers must not validate only their inner payload: source,
+    redaction, dedupe, evidence and timestamp fields are authority-bearing too.
+    The repository facade normally performs the same checks, but replay code
+    also accepts structural stores in tests and adapters, so it verifies the
+    boundary again before installing state.
+    """
+
+    required = {
+        "cursor",
+        "event_id",
+        "schema_version",
+        "event_type",
+        "source_kind",
+        "source_ref",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_version",
+        "payload_ref",
+        "payload",
+        "payload_digest",
+        "evidence_refs",
+        "dedupe_key",
+        "redaction_level",
+        "ts_ms",
+        "created_ts_ms",
+        "published_ts_ms",
+    }
+    item = dict(record)
+    missing = sorted(required - set(item))
+    if missing:
+        raise RuntimeEventError(
+            RUNTIME_EVENT_INVALID,
+            f"runtime event envelope fields missing: {','.join(missing)}",
+        )
+    try:
+        cursor = int(item["cursor"])
+        created = int(item["created_ts_ms"])
+        published = int(item["published_ts_ms"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeEventError(
+            RUNTIME_EVENT_INVALID,
+            "runtime event envelope integer is invalid",
+        ) from exc
+    if cursor < 1 or created < 0 or published < created:
+        raise RuntimeEventError(
+            RUNTIME_EVENT_INVALID,
+            "runtime event envelope chronology is invalid",
+        )
+    expected.validate()
+    if not _runtime_event_matches(item, expected):
+        raise RuntimeEventError(
+            RUNTIME_EVENT_INVALID,
+            "runtime event outer envelope does not match typed expectation",
+        )
+    if str(item.get("payload_digest") or "") != runtime_event_payload_digest(
+        expected.payload
+    ):
+        raise RuntimeEventError(
+            RUNTIME_EVENT_INVALID,
+            "runtime event envelope payload digest drift",
+        )
+    return item
+
+
 class RuntimeEventStore:
     """Validated Runtime Event facade over the sole SQLite repository owner."""
 
@@ -577,6 +648,27 @@ class RuntimeEventStore:
         except RuntimeEventRepositoryError as exc:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
         return [_runtime_event_record(row) for row in rows]
+
+    def get_event_by_id(self, *, event_id: str) -> dict[str, Any] | None:
+        """Read one canonical Runtime Event by its exact durable identity."""
+
+        if not isinstance(event_id, str):
+            raise RuntimeEventError(
+                RUNTIME_EVENT_INVALID,
+                "event_id must be a string",
+            )
+        raw_event_id = event_id
+        identity = _require_durable_ref(raw_event_id, field_name="event_id")
+        if raw_event_id != identity:
+            raise RuntimeEventError(
+                RUNTIME_EVENT_INVALID,
+                "event_id must use its exact canonical form",
+            )
+        try:
+            row = self._repository.get_journal_by_event_id(event_id=identity)
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return _runtime_event_record(row) if row is not None else None
 
     def list_events_for_aggregates(
         self,
@@ -1299,5 +1391,6 @@ __all__ = [
     "TASK_RUNTIME_PROJECTION",
     "build_runtime_event_dedupe_key",
     "runtime_event_payload_digest",
+    "validate_runtime_event_record_envelope",
     "sanitize_runtime_event_payload",
 ]

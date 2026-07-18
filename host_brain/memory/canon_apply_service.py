@@ -47,9 +47,9 @@ from host_brain.memory.canon_world_store import (
     _normalize_tags,
     compute_world_canon_hash,
 )
-from host_brain.observability.degradation_state import (
-    DegradationStateError,
-    require_degradation_capability,
+from host_brain.runtime.degradation_authority import (
+    DegradationCapabilityPort,
+    evaluate_degradation_capability,
 )
 from host_brain.persistence.canon_apply_repository import (
     CanonApplyRepository,
@@ -531,6 +531,7 @@ class CanonApplyService:
         recovery_lease_ms: int = 120_000,
         trusted_approval_keys: Mapping[str, Any] | None = None,
         repository: CanonApplyRepository | None = None,
+        degradation_capability_port: DegradationCapabilityPort | None = None,
     ) -> None:
         selected_db = (
             db_path
@@ -561,6 +562,7 @@ class CanonApplyService:
             trusted_approval_keys
         )
         self.repository = repository or CanonApplyRepository(self.db_path)
+        self.degradation_capability_port = degradation_capability_port
         if self.repository.db_path != self.db_path:
             raise ValueError("CANON_APPLY_REPOSITORY_DB_MISMATCH")
         self.ledger = ledger or SQLiteLedger(db_path=self.db_path, check_same_thread=False)
@@ -583,15 +585,24 @@ class CanonApplyService:
     def apply(self, command: CanonApplyCommand) -> CanonApplyResult:
         if not isinstance(command, CanonApplyCommand):
             raise TypeError("command must be CanonApplyCommand")
-        try:
-            require_degradation_capability(
-                capability_id="canon_apply",
-                static_risk_level=5,
-            )
-        except DegradationStateError as exc:
+        degradation = evaluate_degradation_capability(
+            self.degradation_capability_port,
+            capability_id="canon_apply",
+            static_risk_level=5,
+        )
+        if not bool(degradation.get("allowed")):
             # Preserve Canon's stable machine-readable boundary contract while
             # ensuring no clock, journal, token burn, or file mutation happens.
-            raise CanonApplyError(exc.reason_code, exc.detail) from exc
+            raise CanonApplyError(
+                str(
+                    degradation.get("reason_code")
+                    or "DEGRADATION_STATE_UNAVAILABLE"
+                ),
+                str(
+                    degradation.get("detail")
+                    or "degradation authority blocked Canon apply"
+                ),
+            )
         now_value = self._clock_ms()
         prepared = self._prepare(command, now_value)
         self._fault("after_prepare", command.apply_id)

@@ -109,7 +109,18 @@ class SQLiteWorldObservationJournal:
         *,
         runtime_scope_id: str,
         runtime_authority_provider: Callable[[], Mapping[str, Any]],
-        source_event_verifier: Callable[[str, str, str, str], bool],
+        source_event_verifier: Callable[
+            [
+                str,
+                str,
+                str,
+                str,
+                int,
+                Sequence[WorldFactV2],
+                Sequence[WorldFactExpiryV1],
+            ],
+            bool,
+        ],
         clock: Callable[[], int] = now_ms,
     ) -> None:
         raw = str(db_path or "").strip()
@@ -368,6 +379,9 @@ class SQLiteWorldObservationJournal:
                 subject,
                 str(source_event_ref or "").strip(),
                 str(source_event_digest or "").strip().lower(),
+                observed_at_ms,
+                tuple(upserts),
+                tuple(expiries),
             )
         except Exception as exc:
             raise WorldObservationJournalError(
@@ -653,6 +667,24 @@ class SQLiteWorldObservationJournal:
             if physical != logical or batch.runtime_scope_id != self._runtime_scope_id:
                 raise WorldObservationJournalError(
                     "WORLD_OBSERVATION_PHYSICAL_ROW_DRIFT"
+                )
+            try:
+                source_verified = self._source_event_verifier(
+                    workspace,
+                    subject,
+                    batch.source_event_ref,
+                    batch.source_event_digest,
+                    batch.observed_at_ms,
+                    batch.upserts,
+                    batch.expiries,
+                )
+            except Exception as exc:
+                raise WorldObservationJournalError(
+                    "WORLD_OBSERVATION_SOURCE_AUTHORITY_UNAVAILABLE"
+                ) from exc
+            if source_verified is not True:
+                raise WorldObservationJournalError(
+                    "WORLD_OBSERVATION_SOURCE_AUTHORITY_REJECTED"
                 )
             batches.append(batch)
         return tuple(batches)

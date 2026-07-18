@@ -408,7 +408,7 @@ def _run_personality_scheduler_skill(
     system_intent: dict[str, Any],
     logger: Any,
     get_ledger: Callable[[], Any],
-    ui_pusher: Callable[[dict[str, Any]], dict[str, Any]],
+    ui_pusher: Callable[..., dict[str, Any]],
     llm_generator_override: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     try:

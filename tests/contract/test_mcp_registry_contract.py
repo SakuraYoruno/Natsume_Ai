@@ -22,6 +22,9 @@ from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
 )
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -168,6 +171,9 @@ class TestMCPBrokerContract(unittest.TestCase):
             capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
             ledger=self.ledger,
             token_service=self.token_service,
+            degradation_capability_port=(
+                LegacyModuleGlobalDegradationAdapter()
+            ),
         )
 
     def tearDown(self) -> None:

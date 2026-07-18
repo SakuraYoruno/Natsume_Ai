@@ -2,6 +2,12 @@
 
 from ._shared import *  # noqa: F403
 from .ports import ExecutiveRuntimeApplicationPorts
+from host_brain.runtime.scene_consumer_projection import (
+    SCENE_PROJECTION_BLOCK,
+    SCENE_PROJECTION_REVIEW,
+    SceneConsumerProjectionError,
+    project_scene_decision_v2,
+)
 
 def _format_elapsed(elapsed_ms: int) -> str:
     seconds = max(0, int(elapsed_ms // 1000))
@@ -309,6 +315,7 @@ def _execute_skill(
     governed_execution_context: Mapping[str, Any] | None = None,
     execution_args_override: Mapping[str, Any] | None = None,
     verified_node_grant: Mapping[str, Any] | None = None,
+    degradation_capability_port: Any | None = None,
 ) -> _ExecutionOutcome:
     started = time.time()
     if skill_registry is None:
@@ -405,68 +412,63 @@ def _execute_skill(
 
         if not authority_error:
             from host_brain.governor.action_arbiter import arbitrate_action  # noqa: PLC0415
-            from host_brain.persona.scene_policy import build_scene_decision  # noqa: PLC0415
 
-            surface_control = dict(getattr(request_body, "surface_task_control", {}) or {})
-            scene_awareness = envelope.get("scene_awareness")
-            if not isinstance(scene_awareness, dict):
-                envelope_args = envelope.get("args")
-                scene_awareness = (
-                    dict(envelope_args.get("scene_awareness") or {})
-                    if isinstance(envelope_args, dict)
-                    else {}
-                )
-            scene_decision = build_scene_decision(
-                scene_awareness=scene_awareness,
-                task_mode=str(surface_control.get("task_mode") or envelope.get("action") or ""),
-                user_goal_ref=f"intent://{bound_intent_id}",
-                now_ms=int(time.time() * 1000),
-            )
-            action_arbiter_decision = arbitrate_action(
-                governor_decision=governor_result,
-                proposed_action={
-                    "action_kind": skill_id,
-                    "scope": str(skill_meta.scope or ""),
-                    "risk_level": int(skill_meta.risk_level),
-                    "requires_token": True,
-                    "is_proactive": False,
-                },
-                intent_envelope=envelope,
-                scene_decision=scene_decision,
-                user_intent={
-                    "explicit": True,
-                    "intent_id": bound_intent_id,
-                    "action_kind": str(envelope.get("action") or ""),
-                    "goal_ref": f"intent://{bound_intent_id}",
-                },
-                now_ms=int(time.time() * 1000),
-            )
             try:
-                from host_brain.persona.life_evolution_observer import (  # noqa: PLC0415
-                    observe_action_arbiter_decision,
-                    observe_scene_decision,
+                scene_projection = project_scene_decision_v2(
+                    envelope.get("scene_decision_v2"),
+                    expected_identity=envelope.get("scene_identity_v2"),
                 )
+            except SceneConsumerProjectionError as exc:
+                authority_error = exc.reason_code
+            else:
+                if scene_projection.disposition == SCENE_PROJECTION_BLOCK:
+                    authority_error = "SCENE_DECISION_V2_BLOCKED"
+                elif scene_projection.disposition == SCENE_PROJECTION_REVIEW:
+                    authority_error = "SCENE_DECISION_V2_REVIEW_REQUIRED"
 
-                observation_ref = f"request://{request_id}"
-                if scene_awareness:
-                    observe_scene_decision(
-                        scene_decision,
+            if not authority_error:
+                action_arbiter_decision = arbitrate_action(
+                    governor_decision=governor_result,
+                    proposed_action={
+                        "action_kind": skill_id,
+                        "scope": str(skill_meta.scope or ""),
+                        "risk_level": int(skill_meta.risk_level),
+                        "requires_token": True,
+                        "is_proactive": False,
+                    },
+                    intent_envelope=envelope,
+                    scene_decision=scene_projection.action_projection(
+                        user_goal_ref=f"intent://{bound_intent_id}"
+                    ),
+                    user_intent={
+                        "explicit": True,
+                        "intent_id": bound_intent_id,
+                        "action_kind": str(envelope.get("action") or ""),
+                        "goal_ref": f"intent://{bound_intent_id}",
+                    },
+                    now_ms=int(time.time() * 1000),
+                    degradation_capability_port=degradation_capability_port,
+                )
+                try:
+                    from host_brain.persona.life_evolution_observer import (  # noqa: PLC0415
+                        observe_action_arbiter_decision,
+                    )
+
+                    observe_action_arbiter_decision(
+                        action_arbiter_decision,
                         person_id=person_id,
                         source_kind="executive_runtime",
-                        source_ref=observation_ref,
+                        source_ref=f"request://{request_id}",
                     )
-                observe_action_arbiter_decision(
-                    action_arbiter_decision,
-                    person_id=person_id,
-                    source_kind="executive_runtime",
-                    source_ref=observation_ref,
-                )
-            except Exception:
-                pass
-            if action_arbiter_decision.get("decision") == "BLOCK":
-                authority_error = str(
-                    (action_arbiter_decision.get("reason_codes") or ["ACTION_ARBITER_BLOCKED"])[0]
-                )
+                except Exception:
+                    pass
+                if action_arbiter_decision.get("decision") == "BLOCK":
+                    authority_error = str(
+                        (
+                            action_arbiter_decision.get("reason_codes")
+                            or ["ACTION_ARBITER_BLOCKED"]
+                        )[0]
+                    )
 
         if authority_error:
             latency_ms = int((time.time() - started) * 1000)

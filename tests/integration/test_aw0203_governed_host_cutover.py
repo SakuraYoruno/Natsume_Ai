@@ -14,8 +14,17 @@ from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.app.governed_task_adapter import (
     GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE,
     GovernedHostAdapterError,
-    build_governed_host_runtime,
+    build_governed_host_runtime as _build_governed_host_runtime,
 )
+from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
+
+
+def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault(
+        "degradation_capability_port",
+        LegacyModuleGlobalDegradationAdapter(),
+    )
+    return _build_governed_host_runtime(**kwargs)
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
 from host_brain.app.production_authority import verify_durable_production_authority

@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 
 import pytest
+from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
 
 from host_brain.app.governed_skill_execution_ports import (
     GovernedSkillExecutionPorts,
@@ -25,6 +26,7 @@ def _ports() -> GovernedSkillExecutionPorts:
         resource_manager=object(),
         episodic_store=object(),
         semantic_recaller=object(),
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
 
 
@@ -38,6 +40,7 @@ def test_governed_skill_ports_are_immutable_and_authority_minimal() -> None:
         "resource_manager",
         "episodic_store",
         "semantic_recaller",
+        "degradation_capability_port",
     }
     with pytest.raises(FrozenInstanceError):
         ports.skill_registry = object()  # type: ignore[misc]
@@ -122,6 +125,7 @@ def test_governed_skill_ports_reject_invalid_authority_verifier() -> None:
         "resource_manager": object(),
         "episodic_store": object(),
         "semantic_recaller": object(),
+        "degradation_capability_port": LegacyModuleGlobalDegradationAdapter(),
     }
 
     with pytest.raises(
@@ -159,6 +163,7 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
         resource_manager=services_a[0],
         episodic_store=services_a[1],
         semantic_recaller=services_a[2],
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
     ports_b = build_governed_skill_execution_ports(
         skill_registry=object(),
@@ -168,6 +173,7 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
         resource_manager=services_b[0],
         episodic_store=services_b[1],
         semantic_recaller=services_b[2],
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
 
     assert ports_a.get_resource_manager(create_if_missing=True) is services_a[0]

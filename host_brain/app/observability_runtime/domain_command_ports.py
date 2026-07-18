@@ -33,6 +33,10 @@ from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationError,
 )
 from host_brain.observability.operator_command_gateway import operator_runtime_value
+from host_brain.runtime.degradation_authority import (
+    DegradationCapabilityPort,
+    evaluate_degradation_capability,
+)
 
 
 OBS_DOMAIN_RESULT_SCHEMA = "natsume.obs-domain-command-result.v1"
@@ -47,6 +51,17 @@ class ObsDomainCommandError(RuntimeError):
 
 
 DomainHandler = Callable[[Mapping[str, Any], str], Any]
+
+
+# These legacy Obs command adapters still invoke production writers/actuators
+# directly instead of admitting an immutable TaskGraph.  Secure Ingress proves
+# who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
+# fail-closed until NE-01 gives each command a Governed Operator route.
+_UNGOVERNED_OPERATOR_DIRECT_COMMANDS = frozenset(
+    spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS
+)
+if len(_UNGOVERNED_OPERATOR_DIRECT_COMMANDS) != 37:
+    raise RuntimeError("UNGOVERNED_OPERATOR_COMMAND_SET_MUST_MATCH_MANIFEST")
 
 
 def _required_text(payload: Mapping[str, Any], field: str) -> str:
@@ -104,6 +119,11 @@ class _DomainCommandPort:
     async def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
         if envelope.command_id != self.command_id:
             raise ObsDomainCommandError("OBS_DOMAIN_COMMAND_ID_MISMATCH")
+        if self.command_id in _UNGOVERNED_OPERATOR_DIRECT_COMMANDS:
+            raise ObsCommandPortExecutionError(
+                "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+                side_effects_may_have_run=False,
+            )
         payload = dict(envelope.payload)
         payload["_operator_authority"] = {
             "allowed": True,
@@ -801,15 +821,34 @@ def _task_review_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
     return {"accepted": True, "review": dict(record)}
 
 
-def _task_review_resume(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.observability.degradation_state import (  # noqa: PLC0415
-        require_degradation_capability,
-    )
-
-    require_degradation_capability(
+def _task_review_resume(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    degradation_capability_port_provider: (
+        Callable[[], DegradationCapabilityPort | None] | None
+    ) = None,
+) -> Any:
+    try:
+        port = (
+            degradation_capability_port_provider()
+            if degradation_capability_port_provider is not None
+            else None
+        )
+    except Exception:
+        port = None
+    degradation = evaluate_degradation_capability(
+        port,
         capability_id="remote_review_resume",
         static_risk_level=4,
     )
+    if not bool(degradation.get("allowed")):
+        raise ObsDomainCommandError(
+            str(
+                degradation.get("reason_code")
+                or "DEGRADATION_STATE_UNAVAILABLE"
+            )
+        )
     service = _task_review_service()
     review_id = _required_text(payload, "review_id")
     resume = service.resume_review(
@@ -892,6 +931,9 @@ _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
 def build_default_obs_domain_command_registry(
     *,
     route_ports: HostRoutePorts | None = None,
+    degradation_capability_port_provider: (
+        Callable[[], DegradationCapabilityPort | None] | None
+    ) = None,
 ) -> ObsCommandPortRegistry:
     """Bind every manifest command to its fail-closed domain adapter."""
 
@@ -904,6 +946,12 @@ def build_default_obs_domain_command_registry(
         command_id: partial(handler, route_ports=effective_ports)
         for command_id, handler in _ROUTE_PORT_HANDLERS.items()
     })
+    handlers["task_review.resume"] = partial(
+        _task_review_resume,
+        degradation_capability_port_provider=(
+            degradation_capability_port_provider
+        ),
+    )
     return ObsCommandPortRegistry(
         ports={
             command_id: _DomainCommandPort(command_id, handler)

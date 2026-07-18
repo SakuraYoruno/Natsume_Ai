@@ -5,6 +5,9 @@ from host_brain.core.errors import CONFIRM_REQUIRED, SKILL_TOKEN_MISSING, UNDO_R
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
 
 
 def _read_only_status(args: dict, _context: dict | None) -> dict:
@@ -57,7 +60,14 @@ class TestSkillLoaderContract(unittest.TestCase):
                 handler=_high_risk_write_no_manifest,
             )
         )
-        self.loader = SkillLoader(registry=self.registry, token_service=self.tokens, ledger=self.ledger)
+        self.loader = SkillLoader(
+            registry=self.registry,
+            token_service=self.tokens,
+            ledger=self.ledger,
+            degradation_capability_port=(
+                LegacyModuleGlobalDegradationAdapter()
+            ),
+        )
 
     def test_t_skill_01_success_has_evidence_ref_and_approval_ref(self) -> None:
         intent = {

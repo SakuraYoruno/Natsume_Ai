@@ -286,16 +286,16 @@ def _assert_minimal_profile(health: Mapping[str, Any], *, edge_port: int) -> dic
 async def _submit_and_query_receipt(
     *, base_url: str, shared_key: str, request_suffix: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Any, Any]:
-    from host_brain.channels.edge_transport import HttpEdgeTransportPort
+    from host_brain.channels.edge_transport import _HttpEdgeTransportPort
     from host_brain.channels.embodiment import (
         EdgeEmbodimentSessionConfig,
-        EdgeRpcEmbodimentCommandPort,
+        _EdgeRpcEmbodimentCommandPort,
         build_host_embodiment_command,
     )
     from natsume_contracts.edge.embodiment_v1 import build_embodiment_receipt_query
 
-    transport = HttpEdgeTransportPort(base_url=base_url, shared_key=shared_key)
-    command_port = EdgeRpcEmbodimentCommandPort(
+    transport = _HttpEdgeTransportPort(base_url=base_url, shared_key=shared_key)
+    command_port = _EdgeRpcEmbodimentCommandPort(
         post_to_edge=transport.submit,
         session_config=EdgeEmbodimentSessionConfig(
             session_id=f"d8-tcp-smoke-{request_suffix}",
@@ -472,7 +472,7 @@ def run_smoke(
             "smoke_kind": "real_loopback_tcp_hmac_host_transport_edge_sqlite_receipt",
             "endpoint": base_url,
             "edge_child_processes": 2,
-            "host_transport": "HttpEdgeTransportPort + EdgeRpcEmbodimentCommandPort",
+            "host_transport": "private Host Edge transport + claimed embodiment dispatcher",
             "minimal_profile": {
                 "bind_host": "127.0.0.1",
                 "edge_rpc_gateway_enabled": True,

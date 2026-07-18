@@ -10,9 +10,10 @@ from host_brain.core.errors import SKILL_TOKEN_MISSING, TOKEN_INVALID, UNDO_REQU
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.governor.tier_policy import AuditTier
 from host_brain.governor.tokens import TokenService
-from host_brain.observability.degradation_state import (
-    evaluate_degradation_front_door,
-    infer_degradation_capability,
+from host_brain.observability.degradation_state import infer_degradation_capability
+from host_brain.runtime.degradation_authority import (
+    DegradationCapabilityPort,
+    evaluate_degradation_capability,
 )
 from host_brain.skills.executor_registry import (
     BoundSkillExecutionAuthority,
@@ -45,11 +46,13 @@ class SkillLoader:
         token_service: TokenService,
         ledger: SQLiteLedger,
         capability_broker: Any | None = None,
+        degradation_capability_port: DegradationCapabilityPort | None = None,
     ) -> None:
         self.registry = registry
         self.token_service = token_service
         self.ledger = ledger
         self.capability_broker = capability_broker
+        self.degradation_capability_port = degradation_capability_port
 
     def execute(
         self,
@@ -137,7 +140,8 @@ class SkillLoader:
         )
         if not isinstance(capability_policy_decision, dict):
             capability_policy_decision = intent.get("capability_policy_decision")
-        degradation_decision = evaluate_degradation_front_door(
+        degradation_decision = evaluate_degradation_capability(
+            self.degradation_capability_port,
             capability_id=capability_id,
             static_risk_level=int(meta.risk_level),
             capability_policy_decision=(

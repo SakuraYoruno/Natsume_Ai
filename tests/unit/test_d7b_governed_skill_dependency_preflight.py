@@ -15,6 +15,7 @@ from host_brain.app.governed_task_adapter import (
     _build_contracts,
     _require_frozen_skill_dependencies,
 )
+from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
 
 
 def _ports(
@@ -31,6 +32,7 @@ def _ports(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
+        degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
     )
 
 

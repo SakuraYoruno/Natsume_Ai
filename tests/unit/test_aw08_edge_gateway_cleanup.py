@@ -11,7 +11,7 @@ from edge_client.gateway.delivery_runtime import (
     GatewayTransportMode,
     load_gateway_transport_mode,
 )
-from host_brain.channels.edge_transport import HttpEdgeTransportPort, build_edge_envelope
+from host_brain.channels.edge_transport import _HttpEdgeTransportPort, build_edge_envelope
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +54,7 @@ def test_input_reporter_has_no_second_queue_or_compat_entrypoint() -> None:
 
 def test_typed_edge_port_fails_closed_without_hmac_key() -> None:
     result = asyncio.run(
-        HttpEdgeTransportPort(
+        _HttpEdgeTransportPort(
             base_url="http://127.0.0.1:17800",
             shared_key="",
         ).submit(

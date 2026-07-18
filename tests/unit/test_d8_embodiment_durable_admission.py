@@ -33,7 +33,7 @@ def _reply() -> ReplyEnvelope:
     )
 
 
-def test_reply_performance_only_claims_durable_admission_before_edge_receipt() -> None:
+def test_reply_performance_without_preview_fails_before_durable_admission() -> None:
     runtime = _Runtime()
 
     result = asyncio.run(
@@ -44,16 +44,10 @@ def test_reply_performance_only_claims_durable_admission_before_edge_receipt() -
         )
     )
 
-    assert len(runtime.commands) == 1
-    command = runtime.commands[0]
-    assert command.kind == "avatar"
-    assert command.action == "set_expression"
-    assert result["status"] == "PENDING"
-    assert result["success"] is True
-    assert result["delivery_state"] == "DURABLY_QUEUED"
+    assert runtime.commands == []
+    assert result["status"] == "FAILED"
+    assert result["reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
     assert result["affected_output"] is False
-    assert result["expression_id"] is None
-    assert result["outbox_id"] == "outbox-performance-1"
 
 
 def test_reply_performance_has_no_process_global_runtime_fallback() -> None:
@@ -66,5 +60,5 @@ def test_reply_performance_has_no_process_global_runtime_fallback() -> None:
     )
 
     assert result["status"] == "FAILED"
-    assert result["reason_code"] == "PERFORMANCE_TRIGGER_EXCEPTION"
+    assert result["reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
     assert result["affected_output"] is False

@@ -132,54 +132,22 @@ class ANSAgent:
             payload.setdefault("recovery_mode", True)
         self.emit_from_thread("INNER_WORLD_TICKED", payload)
 
-        # T-148：INNER_WORLD_TICKED 后判断是否触发主动发声
-        # 触发条件：tick_result 中 proactive_voice_eligible=True，
-        # 或者 loneliness > 0.5 且关系阶段已存在
+        # Inner-world events are observations, not execution authority.  The
+        # former direct PersonaProactiveVoice call bypassed HostCommand,
+        # immutable TaskGraph and the canonical Scene.  Proactive delivery is
+        # now admitted exclusively by the governed ``life_tick`` TaskGraph;
+        # the accepted Life command may create the canonical Life Outbox.
         try:
-            _eligible = bool(payload.get("proactive_voice_eligible", False))
-            _loneliness = float(payload.get("loneliness") or 0.0)
-            _bond = str(self._bond_stage or "friend").lower()
-            _voice_active = bool(getattr(self, "_voice_active", False))
-            _should_trigger = (
-                not _voice_active  # 语音管线空闲时才触发
-                and (
-                    _eligible
-                    or _loneliness > 0.5
-                )
+            proactive_observed = bool(
+                payload.get("proactive_voice_eligible", False)
+            ) or float(payload.get("loneliness") or 0.0) > 0.5
+        except (TypeError, ValueError):
+            proactive_observed = bool(payload.get("proactive_voice_eligible", False))
+        if proactive_observed:
+            logger.debug(
+                "ANSAgent proactive observation deferred to governed Scheduler: source=%s",
+                payload.get("source"),
             )
-            if _should_trigger:
-                _voice_session_id = str(payload.get("session_id") or "default")
-                _voice_user_id = _resolve_ans_bond_user_id(
-                    payload.get("bond_user_id") or payload.get("target_user_id"),
-                    session_id=_voice_session_id,
-                )
-
-                decision = get_initiative_governor_agent().evaluate_initiative(
-                    action="proactive_voice",
-                    motive=_loneliness,
-                    session_id=_voice_session_id,
-                    user_id=_voice_user_id,
-                    context={
-                        "bond_stage": _bond,
-                        "loneliness": _loneliness,
-                        "trigger_source": "inner_world_ticked",
-                        "pending_followup_count": int(payload.get("pending_followup_count") or 0),
-                        "session_id": _voice_session_id,
-                        "active_topic_id": str(payload.get("topic_id") or "").strip() or None,
-                    },
-                )
-                if str(decision.get("decision") or "").upper() == "ALLOW":
-                    self.trigger_proactive_voice(
-                        user_id=_voice_user_id,
-                        context={
-                            "bond_stage": _bond,
-                            "loneliness": _loneliness,
-                            "trigger_source": "inner_world_ticked",
-                            "initiative_trace_id": decision.get("trace_id"),
-                        },
-                    )
-        except Exception as _pv_exc:
-            logger.debug("ANSAgent emit_inner_world_ticked proactive_voice 触发失败（降级）: %s", _pv_exc)
 
     def emit_body_sense_updated(self, *, sense_result: dict[str, Any] | None = None) -> None:
         """body_sense_skill 执行完成后调用，发布 BODY_SENSE_UPDATED 事件。
@@ -390,11 +358,10 @@ class ANSAgent:
         traits: Any = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """T-133：触发主动发声评估，将 PersonaProactiveVoice 族化到 ANSAgent。
+        """拒绝已退役的 ANS 主动发声旁路。
 
-        由 inner_world_skill / proactive_talk_skill 调用，ANSAgent 作为统一入口
-        封装 PersonaProactiveVoice.evaluate_scene()，并在触发时发布
-        PROACTIVE_VOICE_TRIGGERED 事件供 CortexAgent 感知。
+        主动表达必须由 governed Scheduler 冻结 World/Scene 后执行；ANS
+        仅发布内心世界 observation，不能把 observation 升格为执行权限。
 
         Args:
             user_id: 用户 ID；空值使用 canonical bond user id。
@@ -404,62 +371,14 @@ class ANSAgent:
         Returns:
             {"triggered": bool, "expression": dict | None, "scene_type": str | None}
         """
-        try:
-            from host_brain.persona.proactive_voice import PersonaProactiveVoice  # noqa: PLC0415
-
-            decision = get_initiative_governor_agent().evaluate_initiative(
-                action="proactive_voice",
-                motive=context.get("motive") if isinstance(context, dict) else None,
-                session_id=str((context or {}).get("session_id") or "default"),
-                user_id=_resolve_ans_bond_user_id(user_id, session_id=str((context or {}).get("session_id") or "default")),
-                context=dict(context or {}),
-            )
-            if str(decision.get("decision") or "").upper() != "ALLOW":
-                return {
-                    "triggered": False,
-                    "expression": None,
-                    "scene_type": None,
-                    "reason": f"initiative_{str(decision.get('decision') or '').lower()}",
-                    "reason_code": decision.get("reason_code"),
-                    "trace_id": decision.get("trace_id"),
-                }
-
-            voice = PersonaProactiveVoice()
-            ctx = dict(context or {})
-            voice_user_id = _resolve_ans_bond_user_id(user_id, session_id=str(ctx.get("session_id") or "default"))
-            # 注入当前 bond_stage（从 ANSAgent 内部状态）
-            ctx.setdefault("bond_stage", self._bond_stage.upper())
-            expression = voice.evaluate_scene(
-                user_id=voice_user_id,
-                traits=traits,
-                context=ctx,
-            )
-            if expression is None:
-                return {"triggered": False, "expression": None, "scene_type": None}
-
-            expr_dict = expression.as_dict() if hasattr(expression, "as_dict") else {}
-            scene_type = str(getattr(expression, "scene_type", "") or "")
-
-            # 发布 PROACTIVE_VOICE_TRIGGERED 事件，供 CortexAgent 感知
-            self.emit_from_thread(
-                "PROACTIVE_VOICE_TRIGGERED",
-                {
-                    "user_id": voice_user_id,
-                    "scene_type": scene_type,
-                    "emotion_tag": str(getattr(expression, "emotion_tag", "") or "NEUTRAL"),
-                    "content_preview": str(getattr(expression, "content", "") or "")[:80],
-                    "bond_stage": self._bond_stage,
-                    "source": "ans_agent",
-                },
-            )
-            logger.info(
-                "ANSAgent.trigger_proactive_voice: scene=%s user_id=%s bond_stage=%s",
-                scene_type, user_id, self._bond_stage,
-            )
-            return {"triggered": True, "expression": expr_dict, "scene_type": scene_type}
-        except Exception as exc:
-            logger.warning("ANSAgent.trigger_proactive_voice 失败（降级）: %s", exc)
-            return {"triggered": False, "expression": None, "scene_type": None, "error": str(exc)}
+        del user_id, traits, context
+        return {
+            "triggered": False,
+            "expression": None,
+            "scene_type": None,
+            "reason": "governed_scheduler_required",
+            "reason_code": "PROACTIVE_GOVERNED_SCHEDULER_REQUIRED",
+        }
 
     # ── T-134：meta_learning_loop 族化入口 ───────────────────────────────────
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
+
 from edge_client.app.fastapi_app import _handle_embodiment_command
 from edge_client.gateway.embodiment_runtime import (
     DurableEmbodimentRuntime,
@@ -16,7 +19,14 @@ from natsume_contracts.edge.embodiment_v1 import (
 )
 from natsume_contracts.edge.transport_v1 import bind_command_to_lease
 from host_brain.channels.embodiment import (
+    build_host_embodiment_command,
+    submit_avatar_command,
     submit_voice_command,
+)
+from tests.action_preview_test_support import (
+    build_scheduler_action_preview,
+    issue_embodiment_action_preview,
+    terminal_preview_kwargs,
 )
 
 
@@ -107,7 +117,10 @@ def test_edge_rejects_expired_command_without_device_effect(monkeypatch, tmp_pat
     assert calls == []
 
 
-def test_host_authors_metadata_and_only_submits_to_port() -> None:
+def test_host_authors_metadata_and_only_submits_to_port(
+    monkeypatch,
+    tmp_path,
+) -> None:
     captured = []
 
     class _Port:
@@ -123,14 +136,53 @@ def test_host_authors_metadata_and_only_submits_to_port() -> None:
                 received_at_ms=command.issued_at_ms,
             )
 
+    port = _Port()
+    with pytest.raises(RuntimeError, match="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"):
+        asyncio.run(
+            submit_voice_command(
+                action="speak",
+                payload={"text": "hello"},
+                request_id="req-host-port-voice",
+                grant_ref="grant://test/voice",
+                idempotency_key="voice-command-without-preview",
+                command_port=port,
+            )
+        )
+    assert captured == []
+
+    issued_at_ms = 1_800_000_000_000
+    monkeypatch.setattr(
+        "host_brain.channels.embodiment.now_ms",
+        lambda: issued_at_ms,
+    )
+    service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="aw06b-host-metadata",
+    )
+    meta = {
+        "request_id": "req-host-port",
+        "grant_ref": "governor-grant://preview-child/aw06b-host-metadata",
+        "idempotency_key": "avatar-command-1",
+        "deadline_ms": issued_at_ms + 30_000,
+    }
+    expected = build_host_embodiment_command(
+        kind="avatar",
+        action="set_expression",
+        payload={"emotion_tag": "HAPPY"},
+        **meta,
+    )
+    preview = issue_embodiment_action_preview(
+        service=service,
+        scheduler_context=scheduler_context,
+        command=expected,
+    )
     receipt = asyncio.run(
-        submit_voice_command(
-            action="speak",
-            payload={"text": "hello"},
-            request_id="req-host-port",
-            grant_ref="grant://test/voice",
-            idempotency_key="voice-command-1",
-            command_port=_Port(),
+        submit_avatar_command(
+            action="set_expression",
+            payload={"emotion_tag": "HAPPY"},
+            command_port=port,
+            **meta,
+            **terminal_preview_kwargs(service, preview),
         )
     )
 
@@ -139,6 +191,6 @@ def test_host_authors_metadata_and_only_submits_to_port() -> None:
     command = captured[0]
     assert command.command_id.startswith("emb_")
     assert command.authority_ref == "authority://host/device-command-author"
-    assert command.grant_ref == "grant://test/voice"
+    assert command.grant_ref == "governor-grant://preview-child/aw06b-host-metadata"
     assert command.deadline_ms > command.issued_at_ms
-    assert command.idempotency_key == "voice-command-1"
+    assert command.idempotency_key == "avatar-command-1"

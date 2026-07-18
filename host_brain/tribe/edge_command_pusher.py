@@ -7,6 +7,8 @@ Phase 6 T-124：实现大脑族向躯干族推送下行指令的 HTTP 客户端�
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import threading
@@ -17,6 +19,7 @@ from urllib.parse import urlparse
 import requests
 
 from host_brain.core.ids import now_ms
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 
 logger = logging.getLogger("Natsume.tribe.edge_command_pusher")
 
@@ -54,6 +57,34 @@ def _resolve_edge_command_base_url() -> str:
     return f"http://{rpc_host}:{port}"
 
 
+def build_edge_command_preview_args(
+    *,
+    command_type: str,
+    target_agent: str,
+    payload: dict[str, Any] | None = None,
+    source_agent: str = "host_brain",
+) -> dict[str, Any]:
+    """Return the exact semantic command that Preview authority must bind."""
+
+    return {
+        "command_type": str(command_type or "").strip() or "UNKNOWN",
+        "source_agent": str(source_agent or "host_brain").strip() or "host_brain",
+        "target_agent": str(target_agent or "").strip() or "edge.unknown",
+        "payload": dict(payload or {}),
+    }
+
+
+def edge_command_preview_scope(action_args: dict[str, Any]) -> str:
+    material = json.dumps(
+        dict(action_args or {}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "tribe-command://sha256/" + hashlib.sha256(material).hexdigest()
+
+
 class EdgeCommandPusher:
     """向 edge_client /internal/tribe_command 推送下行指令的 HTTP 客户端。
 
@@ -73,6 +104,7 @@ class EdgeCommandPusher:
         max_failure_cooldown_ms: int = 300000,
         enabled: bool = True,
         session: requests.Session | None = None,
+        enforce_action_preview: bool = True,
     ) -> None:
         self.edge_base_url = str(edge_base_url or "").rstrip("/")
         self.token = str(token or "").strip()
@@ -81,6 +113,11 @@ class EdgeCommandPusher:
         self.max_failure_cooldown_ms = max(self.failure_cooldown_ms, int(max_failure_cooldown_ms))
         self.enabled = bool(enabled and bool(self.edge_base_url))
         self._session = session or requests.Session()
+        # Kept as a compatibility argument only.  No constructor, factory or
+        # singleton injection is allowed to downgrade the terminal Preview
+        # gate; ``False`` therefore has no effect.
+        _ = enforce_action_preview
+        self._enforce_action_preview = True
         self._state_lock = threading.Lock()
         self._cooldown_until_ms = 0
         self._consecutive_failures = 0
@@ -126,6 +163,7 @@ class EdgeCommandPusher:
             failure_cooldown_ms=failure_cooldown_ms,
             max_failure_cooldown_ms=max_failure_cooldown_ms,
             enabled=enabled,
+            enforce_action_preview=True,
         )
 
     def _now_ms(self) -> int:
@@ -178,6 +216,7 @@ class EdgeCommandPusher:
         target_agent: str,
         payload: dict[str, Any] | None = None,
         source_agent: str = "host_brain",
+        action_preview_proof: ActionPreviewExecutionProof | None = None,
     ) -> dict[str, Any]:
         """向 edge_client 推送下行指令。
 
@@ -194,6 +233,47 @@ class EdgeCommandPusher:
             return {"ok": False, "reason": "PUSHER_DISABLED"}
         if not self.edge_base_url:
             return {"ok": False, "reason": "EDGE_BASE_URL_MISSING"}
+        action_args = build_edge_command_preview_args(
+            command_type=command_type,
+            target_agent=target_agent,
+            source_agent=source_agent,
+            payload=payload,
+        )
+        if action_preview_proof is None:
+            return {
+                "ok": False,
+                "reason": "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+                "detail": (
+                    "legacy EdgeCommandPusher has no immutable TaskGraph/node "
+                    "authority and is disabled before network I/O"
+                ),
+            }
+        expected_scope = edge_command_preview_scope(action_args)
+        if (
+            not isinstance(action_preview_proof, ActionPreviewExecutionProof)
+            or action_preview_proof.action_kind != "edge.tribe_command"
+            or action_preview_proof.action_scope != expected_scope
+            or action_preview_proof.action_args != action_args
+        ):
+            return {
+                "ok": False,
+                "reason": "ACTION_PREVIEW_DRIFT",
+                "detail": "Edge command differs from its exact Preview proof",
+            }
+        try:
+            action_preview_proof.service.require_execution(
+                event_id=action_preview_proof.event_id,
+                **action_preview_proof.boundary_dict(),
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "reason": str(
+                    getattr(exc, "reason_code", None)
+                    or "ACTION_PREVIEW_INVALID"
+                ),
+                "detail": str(getattr(exc, "detail", None) or exc)[:300],
+            }
         cooldown_remaining_ms = self._current_cooldown_remaining_ms()
         if cooldown_remaining_ms > 0:
             return {
@@ -207,10 +287,7 @@ class EdgeCommandPusher:
         if self.token:
             headers["X-Internal-Token"] = self.token
         body = {
-            "command_type": str(command_type or "").strip() or "UNKNOWN",
-            "source_agent": str(source_agent or "host_brain").strip() or "host_brain",
-            "target_agent": str(target_agent or "").strip() or "edge.unknown",
-            "payload": dict(payload or {}),
+            **action_args,
             "ts_ms": now_ms(),
             "schema_version": "tribe.command.v1",
         }
@@ -258,6 +335,7 @@ class EdgeCommandPusher:
         mood_state: str | None = None,
         session_id: str | None = None,
         source_agent: str = "limbic_agent",
+        action_preview_proof: ActionPreviewExecutionProof | None = None,
     ) -> dict[str, Any]:
         """推送情绪状态变化指令到 edge.somatic，驱动 vts_driver 表情。
 
@@ -278,6 +356,7 @@ class EdgeCommandPusher:
                 "mood_state": str(mood_state).strip().lower() if mood_state else None,
                 "session_id": str(session_id or "").strip() or None,
             },
+            action_preview_proof=action_preview_proof,
         )
 
     def push_gate_control(
@@ -287,6 +366,7 @@ class EdgeCommandPusher:
         reason: str | None = None,
         platform: str | None = None,
         source_agent: str = "cortex_agent",
+        action_preview_proof: ActionPreviewExecutionProof | None = None,
     ) -> dict[str, Any]:
         """推送门控指令到 edge.channel，控制消息路由开关。
 
@@ -302,6 +382,7 @@ class EdgeCommandPusher:
                 "reason": str(reason or "").strip() or None,
                 "platform": str(platform or "").strip() or None,
             },
+            action_preview_proof=action_preview_proof,
         )
 
 
@@ -323,6 +404,8 @@ def init_edge_command_pusher(pusher: EdgeCommandPusher | None = None) -> EdgeCom
         pusher: 可选，若不传则从环境变量自动构建。
     """
     global _PUSHER
+    if pusher is not None and type(pusher) is not EdgeCommandPusher:
+        raise TypeError("EdgeCommandPusher injection must use the canonical gated type")
     with _PUSHER_LOCK:
         if _PUSHER is None:
             _PUSHER = pusher or EdgeCommandPusher.from_env()
@@ -332,11 +415,15 @@ def init_edge_command_pusher(pusher: EdgeCommandPusher | None = None) -> EdgeCom
 def set_edge_command_pusher(pusher: EdgeCommandPusher | None) -> None:
     """强制替换全局单例（用于测试）。"""
     global _PUSHER
+    if pusher is not None and type(pusher) is not EdgeCommandPusher:
+        raise TypeError("EdgeCommandPusher injection must use the canonical gated type")
     _PUSHER = pusher
 
 
 __all__ = [
     "EdgeCommandPusher",
+    "build_edge_command_preview_args",
+    "edge_command_preview_scope",
     "get_edge_command_pusher",
     "init_edge_command_pusher",
     "set_edge_command_pusher",

@@ -518,6 +518,35 @@ class RuntimeEventRepository:
         finally:
             conn.close()
 
+    def get_journal_by_event_id(
+        self,
+        *,
+        event_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the canonical journal row for one exact Runtime Event id."""
+
+        if not isinstance(event_id, str):
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_INVALID,
+                "event_id must be a string",
+            )
+        raw_event_id = event_id
+        identity = _required_text(raw_event_id, "event_id")
+        if raw_event_id != identity:
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_INVALID,
+                "event_id must use its exact canonical form",
+            )
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM runtime_event_timeline WHERE event_id = ?",
+                (identity,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
     def list_journal_for_aggregates(
         self,
         *,

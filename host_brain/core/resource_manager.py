@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from host_brain.core.ids import now_ms
 
@@ -637,6 +637,7 @@ class SystemResourceManager:
         auto_gc_enabled: bool | None = None,
         auto_trim_enabled: bool | None = None,
         model_attempt_service: Any = None,
+        degradation_state_provider: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._interval_s = float(interval_s if interval_s is not None else _parse_float_env(
             "HOST_RESOURCE_MANAGER_INTERVAL_S",
@@ -654,6 +655,11 @@ class SystemResourceManager:
         self._auto_gc_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_GC_ENABLED", default=True) if auto_gc_enabled is None else bool(auto_gc_enabled)
         self._auto_trim_enabled = _parse_bool_env("HOST_RESOURCE_MANAGER_AUTO_TRIM_ENABLED", default=True) if auto_trim_enabled is None else bool(auto_trim_enabled)
         self._model_attempt_service = model_attempt_service
+        if degradation_state_provider is not None and not callable(
+            degradation_state_provider
+        ):
+            raise TypeError("degradation_state_provider must be callable")
+        self._degradation_state_provider = degradation_state_provider
         default_status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
         self._status_path = Path(status_path) if status_path is not None else default_status_path
         self._shutdown_event = threading.Event()
@@ -715,19 +721,7 @@ class SystemResourceManager:
         logger.info("SystemResourceManager stopped")
 
     def get_status(self) -> dict[str, Any]:
-        degradation_state: dict[str, Any] = {}
-        try:
-            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
-
-            degradation_state = get_degradation_state()
-        except Exception as exc:
-            degradation_state = {
-                "status": "UNAVAILABLE",
-                "durability_required": True,
-                "durability_status": "FAILED",
-                "state_read_failed": True,
-                "error_type": type(exc).__name__,
-            }
+        degradation_state = self._read_degradation_state()
         with self._lock:
             return {
                 "running": self._running,
@@ -749,6 +743,32 @@ class SystemResourceManager:
                 "last_actions": list(self._last_actions),
                 "degradation_state": degradation_state,
                 "status_path": str(self._status_path),
+            }
+
+    def _read_degradation_state(self) -> dict[str, Any]:
+        """Read the explicitly composed authority, or fail closed.
+
+        Production Host composition injects the app-local RuntimeGuardian
+        provider.  A caller that omits it receives an unavailable snapshot;
+        it must never fall back to the process-global legacy reducer because
+        that would reintroduce a second degradation authority.
+        """
+
+        try:
+            provider = self._degradation_state_provider
+            if provider is None:
+                raise RuntimeError("RUNTIME_GUARDIAN_PROVIDER_REQUIRED")
+            value = provider()
+            if not isinstance(value, Mapping) or not value:
+                raise RuntimeError("DEGRADATION_STATE_PROVIDER_UNAVAILABLE")
+            return dict(value)
+        except Exception as exc:
+            return {
+                "status": "UNAVAILABLE",
+                "durability_required": True,
+                "durability_status": "FAILED",
+                "state_read_failed": True,
+                "error_type": type(exc).__name__,
             }
 
     def run_once(self, *, reason: str = "manual") -> dict[str, Any]:
@@ -827,19 +847,7 @@ class SystemResourceManager:
             reasons = [str(item) for item in _as_list(pressure.get("reasons")) if str(item).strip()]
             reasons.append(f"llm_pressure_{decision_pressure.lower()}")
             pressure = {**pressure, "status": decision_pressure, "reasons": reasons}
-        degradation_state: dict[str, Any] = {}
-        try:
-            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
-
-            degradation_state = get_degradation_state()
-        except Exception as exc:
-            degradation_state = {
-                "status": "UNAVAILABLE",
-                "durability_required": True,
-                "durability_status": "FAILED",
-                "state_read_failed": True,
-                "error_type": type(exc).__name__,
-            }
+        degradation_state = self._read_degradation_state()
         decision = assess_background_task_pressure(
             task_id=task_id,
             pressure=pressure,

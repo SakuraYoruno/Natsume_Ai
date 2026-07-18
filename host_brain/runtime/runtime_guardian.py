@@ -17,9 +17,20 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.integrations.runtime_events import (
+    RuntimeEvent,
+    validate_runtime_event_record_envelope,
+)
+
 from host_brain.observability.degradation_state import (
+    DEGRADATION_CAPABILITY_DECISION_SCHEMA_VERSION,
+    DEGRADATION_STATE_UNAVAILABLE,
     DegradationStateMachine,
     DegradationTransition,
+    degradation_policy_config,
+    evaluate_degradation_front_door,
+    normalize_service_observations,
+    normalize_startup_observations,
 )
 
 
@@ -29,6 +40,11 @@ class RuntimeGuardianError(RuntimeError):
 
 class _GuardianStateReconciledError(RuntimeGuardianError):
     """A competing durable head replaced the attempted in-memory mutation."""
+
+
+GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION = (
+    "Natsume.runtime_guardian.degradation_authority.v1"
+)
 
 
 def _now_ms() -> int:
@@ -58,6 +74,13 @@ def _refs(values: Sequence[str]) -> tuple[str, ...]:
     if any("://" not in item for item in result):
         raise RuntimeGuardianError("guardian evidence must be durable references")
     return result
+
+
+def _risk_level(value: Any) -> int:
+    try:
+        return max(1, min(5, int(value)))
+    except (TypeError, ValueError):
+        return 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +253,9 @@ class RuntimeGuardian:
         self._runtime_owner_id = authority["owner_id"]
         self._runtime_lease_id = authority["lease_id"]
         self._fencing_token = authority["fencing_token"]
+        self._runtime_issued_at_ms = authority["issued_at_ms"]
+        self._runtime_expires_at_ms = authority["expires_at_ms"]
+        self._runtime_released_at_ms = authority["released_at_ms"]
         self._aggregate_id = hashlib.sha256(
             self._runtime_scope_id.encode("utf-8")
         ).hexdigest()
@@ -265,21 +291,41 @@ class RuntimeGuardian:
             ) from exc
         if not isinstance(raw, Mapping):
             raise RuntimeGuardianError("guardian runtime authority is unavailable")
-        scope = str(raw.get("runtime_scope_id") or self._runtime_scope_id).strip()
+        required = {
+            "runtime_scope_id",
+            "owner_id",
+            "lease_id",
+            "fencing_token",
+            "issued_at_ms",
+            "expires_at_ms",
+            "released_at_ms",
+        }
+        if required - set(raw):
+            raise RuntimeGuardianError(
+                "guardian runtime authority identity is incomplete"
+            )
+        scope = _text(raw.get("runtime_scope_id"), "runtime_scope_id")
         owner = _text(raw.get("owner_id"), "runtime owner_id")
         lease_id = _text(raw.get("lease_id"), "runtime lease_id")
         fence = raw.get("fencing_token")
+        issued_at_ms = raw.get("issued_at_ms")
         expires_at_ms = raw.get("expires_at_ms")
+        released_at_ms = raw.get("released_at_ms")
+        now_ms = int(self._clock())
         if scope != self._runtime_scope_id:
             raise RuntimeGuardianError("guardian runtime authority scope drift")
         if (
             isinstance(fence, bool)
             or not isinstance(fence, int)
             or fence < 1
+            or isinstance(issued_at_ms, bool)
+            or not isinstance(issued_at_ms, int)
+            or issued_at_ms < 0
             or isinstance(expires_at_ms, bool)
             or not isinstance(expires_at_ms, int)
-            or expires_at_ms <= int(self._clock())
-            or raw.get("released_at_ms") is not None
+            or expires_at_ms <= issued_at_ms
+            or expires_at_ms <= now_ms
+            or released_at_ms is not None
         ):
             raise RuntimeGuardianError("guardian runtime authority is not active")
         authority = {
@@ -287,15 +333,29 @@ class RuntimeGuardian:
             "owner_id": owner,
             "lease_id": lease_id,
             "fencing_token": fence,
+            "issued_at_ms": issued_at_ms,
             "expires_at_ms": expires_at_ms,
+            "released_at_ms": released_at_ms,
         }
         if not require_initial and (
             owner != self._runtime_owner_id
             or lease_id != self._runtime_lease_id
             or fence != self._fencing_token
+            or issued_at_ms != self._runtime_issued_at_ms
         ):
             self._write_authority_status = "WRITE_FENCED"
             raise RuntimeGuardianError("guardian runtime authority was fenced")
+        if not require_initial:
+            # Renewal may only extend the exact lease.  Keep the most recent
+            # expiry so each journal append binds the claim actually checked
+            # for that mutation.
+            if expires_at_ms < self._runtime_expires_at_ms:
+                self._write_authority_status = "WRITE_FENCED"
+                raise RuntimeGuardianError(
+                    "guardian runtime authority expiry regressed"
+                )
+            self._runtime_expires_at_ms = expires_at_ms
+            self._runtime_released_at_ms = released_at_ms
         return authority
 
     def _require_writable(self) -> dict[str, Any]:
@@ -337,6 +397,10 @@ class RuntimeGuardian:
         previous_owner: str | None = None
         previous_lease_id: str | None = None
         previous_fence = 0
+        previous_issued_at_ms = -1
+        previous_expires_at_ms = -1
+        previous_observed_at_ms = -1
+        lease_fences: dict[str, int] = {}
         for record in records:
             record_cursor = int(record.get("cursor") or 0)
             if record_cursor <= previous_cursor:
@@ -366,6 +430,30 @@ class RuntimeGuardian:
                 ),
                 event_digest=str(payload.get("event_digest") or ""),
             )
+            try:
+                details_evidence = tuple(event.payload.get("evidence_refs") or ())
+                validate_runtime_event_record_envelope(
+                    record,
+                    expected=RuntimeEvent.create(
+                        event_type=self._JOURNAL_EVENT_TYPE,
+                        source_kind="SYSTEM",
+                        source_ref=f"runtime-guardian://{self._aggregate_id}",
+                        aggregate_type=self._EVENT_AGGREGATE_TYPE,
+                        aggregate_id=self._aggregate_id,
+                        aggregate_version=version,
+                        payload_ref=f"guardian://event/{event.event_digest}",
+                        payload=payload,
+                        evidence_refs=(
+                            _refs(details_evidence) if details_evidence else ()
+                        ),
+                        event_id=event.event_id,
+                        ts_ms=event.observed_at_ms,
+                    ),
+                )
+            except Exception as exc:
+                raise RuntimeGuardianError(
+                    "guardian RuntimeEvent envelope is invalid"
+                ) from exc
             if event.event_id != str(record.get("event_id") or event.event_id):
                 raise RuntimeGuardianError("guardian journal event identity mismatch")
             details = dict(event.payload)
@@ -377,10 +465,28 @@ class RuntimeGuardian:
                 "runtime_lease_id",
             )
             durable_fence = details.get("fencing_token")
+            durable_issued_at_ms = details.get("runtime_issued_at_ms")
+            durable_expires_at_ms = details.get("runtime_expires_at_ms")
+            if "runtime_released_at_ms" not in details:
+                raise RuntimeGuardianError(
+                    "guardian runtime authority identity is incomplete"
+                )
+            durable_released_at_ms = details.get("runtime_released_at_ms")
             if (
                 isinstance(durable_fence, bool)
                 or not isinstance(durable_fence, int)
                 or durable_fence < 1
+                or isinstance(durable_issued_at_ms, bool)
+                or not isinstance(durable_issued_at_ms, int)
+                or durable_issued_at_ms < 0
+                or isinstance(durable_expires_at_ms, bool)
+                or not isinstance(durable_expires_at_ms, int)
+                or durable_expires_at_ms <= durable_issued_at_ms
+                or durable_released_at_ms is not None
+                or event.observed_at_ms <= 0
+                or event.observed_at_ms < durable_issued_at_ms
+                or event.observed_at_ms >= durable_expires_at_ms
+                or event.observed_at_ms < previous_observed_at_ms
                 or durable_fence < previous_fence
                 or (
                     durable_fence == previous_fence
@@ -388,10 +494,29 @@ class RuntimeGuardian:
                     and (
                         durable_owner != previous_owner
                         or durable_lease_id != previous_lease_id
+                        or durable_issued_at_ms != previous_issued_at_ms
+                        or durable_expires_at_ms < previous_expires_at_ms
+                    )
+                )
+                or (
+                    durable_fence > previous_fence
+                    and previous_owner is not None
+                    and (
+                        durable_lease_id == previous_lease_id
+                        or durable_issued_at_ms < previous_observed_at_ms
                     )
                 )
             ):
                 raise RuntimeGuardianError("guardian owner/fence lineage is invalid")
+            prior_lease_fence = lease_fences.get(durable_lease_id)
+            if (
+                prior_lease_fence is not None
+                and prior_lease_fence != durable_fence
+            ):
+                raise RuntimeGuardianError(
+                    "guardian lease id was reused with another fencing token"
+                )
+            lease_fences[durable_lease_id] = durable_fence
             self._validate_event_delta(event)
             self._apply_event(event)
             self._history.append(event)
@@ -399,6 +524,9 @@ class RuntimeGuardian:
             previous_owner = durable_owner
             previous_lease_id = durable_lease_id
             previous_fence = durable_fence
+            previous_issued_at_ms = durable_issued_at_ms
+            previous_expires_at_ms = durable_expires_at_ms
+            previous_observed_at_ms = event.observed_at_ms
             expected += 1
         if previous_fence > self._fencing_token or (
             previous_fence == self._fencing_token
@@ -406,10 +534,29 @@ class RuntimeGuardian:
             and (
                 previous_owner != self._runtime_owner_id
                 or previous_lease_id != self._runtime_lease_id
+                or previous_issued_at_ms != self._runtime_issued_at_ms
             )
         ):
             raise RuntimeGuardianError(
                 "guardian runtime owner does not hold the latest fencing token"
+            )
+        if (
+            previous_fence == self._fencing_token
+            and previous_expires_at_ms > self._runtime_expires_at_ms
+        ):
+            raise RuntimeGuardianError(
+                "guardian runtime authority expiry predates durable history"
+            )
+        if (
+            previous_fence > 0
+            and self._fencing_token > previous_fence
+            and (
+                self._runtime_lease_id == previous_lease_id
+                or self._runtime_issued_at_ms < previous_observed_at_ms
+            )
+        ):
+            raise RuntimeGuardianError(
+                "guardian runtime lease rotation is invalid"
             )
 
     def _reload_guardian_journal(self) -> None:
@@ -885,14 +1032,58 @@ class RuntimeGuardian:
         self._acknowledged_events = set(state.get("acknowledged_events") or ())
         self._degradation.restore_reducer_state(state["degradation_state"])
 
+    @staticmethod
+    def _state_with(
+        current: Mapping[str, Any],
+        **changes: Any,
+    ) -> dict[str, Any]:
+        next_state = {
+            "mode": str(current["mode"]),
+            "maintenance_ref": current.get("maintenance_ref"),
+            "sleep_ref": current.get("sleep_ref"),
+            "slo_breaches": set(current.get("slo_breaches") or ()),
+            "acknowledged_events": set(
+                current.get("acknowledged_events") or ()
+            ),
+            "degradation_state": json.loads(
+                json.dumps(
+                    dict(current["degradation_state"]),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            ),
+        }
+        next_state.update(changes)
+        return next_state
+
+    @staticmethod
+    def _status_for_state(state: Mapping[str, Any]) -> str:
+        mode = str(state.get("mode") or "")
+        if mode == "MAINTENANCE":
+            return "MAINTENANCE"
+        if mode == "SLEEP":
+            return "SLEEP"
+        if set(state.get("slo_breaches") or ()):
+            return "SLO_BREACH"
+        shadow = DegradationStateMachine(restore_from_store=False)
+        shadow.restore_reducer_state(state["degradation_state"])
+        degradation = shadow.snapshot()
+        if degradation.status == "DEGRADED":
+            return "DEGRADED"
+        if degradation.status == "RECOVERY_PENDING":
+            return "RECOVERY_PENDING"
+        return "READY"
+
     def _append(
         self,
         *,
         event_type: str,
         details: Mapping[str, Any],
         observed_at_ms: int,
+        next_state: Mapping[str, Any],
     ) -> GuardianEventV1:
-        self._require_writable()
+        authority = self._require_writable()
         if (
             isinstance(observed_at_ms, bool)
             or not isinstance(observed_at_ms, int)
@@ -901,29 +1092,50 @@ class RuntimeGuardian:
             raise RuntimeGuardianError(
                 "guardian observed_at_ms must be a positive integer"
             )
+        # Equal timestamps are valid for one atomic probe/recovery batch, but
+        # the durable journal must never move backwards.
+        if self._history and observed_at_ms < self._history[-1].observed_at_ms:
+            raise RuntimeGuardianError(
+                "guardian observed_at_ms must be monotonic"
+            )
+        if not (
+            int(authority["issued_at_ms"])
+            <= observed_at_ms
+            < int(authority["expires_at_ms"])
+        ):
+            raise RuntimeGuardianError(
+                "guardian observation is outside its runtime lease"
+            )
         next_revision = self._revision + 1
+        immutable_next = self._state_with(next_state)
         event = GuardianEventV1(
             event_type=event_type,
             revision=next_revision,
-            status=self._status(),
+            status=self._status_for_state(immutable_next),
             payload={
                 **dict(details),
                 "runtime_scope_id": self._runtime_scope_id,
                 "runtime_owner_id": self._runtime_owner_id,
                 "runtime_lease_id": self._runtime_lease_id,
                 "fencing_token": self._fencing_token,
-                "mode": self._mode,
-                "maintenance_ref": self._maintenance_ref,
-                "sleep_ref": self._sleep_ref,
-                "slo_breaches": sorted(self._slo_breaches),
-                "acknowledged_events": sorted(self._acknowledged_events),
-                "degradation_state": self._degradation.export_reducer_state(),
+                "runtime_issued_at_ms": int(authority["issued_at_ms"]),
+                "runtime_expires_at_ms": int(authority["expires_at_ms"]),
+                "runtime_released_at_ms": authority["released_at_ms"],
+                "mode": immutable_next["mode"],
+                "maintenance_ref": immutable_next["maintenance_ref"],
+                "sleep_ref": immutable_next["sleep_ref"],
+                "slo_breaches": sorted(immutable_next["slo_breaches"]),
+                "acknowledged_events": sorted(
+                    immutable_next["acknowledged_events"]
+                ),
+                "degradation_state": immutable_next["degradation_state"],
             },
             observed_at_ms=observed_at_ms,
         )
+        # Validate the immutable candidate against the currently installed
+        # state before any durable or in-memory mutation occurs.
+        self._validate_event_delta(event)
         if self._event_store is not None:
-            from host_brain.integrations.runtime_events import RuntimeEvent  # noqa: PLC0415
-
             evidence = _refs(tuple(details.get("evidence_refs") or ())) if details.get("evidence_refs") else ()
             runtime_event = RuntimeEvent.create(
                 # One stable outer event type/source makes RuntimeEvent's
@@ -951,6 +1163,10 @@ class RuntimeGuardian:
             for _attempt in range(2):
                 try:
                     record = self._event_store.append_event(runtime_event)
+                    validate_runtime_event_record_envelope(
+                        record,
+                        expected=runtime_event,
+                    )
                     if (
                         int(record.get("aggregate_version") or 0)
                         != event.revision
@@ -989,9 +1205,26 @@ class RuntimeGuardian:
                 raise RuntimeGuardianError(
                     "guardian event could not be durably appended"
                 ) from append_error
+        self._apply_event(event)
         self._revision = event.revision
         self._history.append(event)
         return event
+
+    def _require_monotonic_observation(self, observed_at_ms: int) -> None:
+        """Reject a backdated mutation even when its reducer would be a no-op."""
+
+        if (
+            isinstance(observed_at_ms, bool)
+            or not isinstance(observed_at_ms, int)
+            or observed_at_ms <= 0
+        ):
+            raise RuntimeGuardianError(
+                "guardian observed_at_ms must be a positive integer"
+            )
+        if self._history and observed_at_ms < self._history[-1].observed_at_ms:
+            raise RuntimeGuardianError(
+                "guardian observed_at_ms must be monotonic"
+            )
 
     def snapshot(self) -> GuardianSnapshotV1:
         with self._lock:
@@ -1032,12 +1265,226 @@ class RuntimeGuardian:
         """Expose the pure reducer read model through the Guardian owner."""
 
         with self._lock:
-            if self._write_authority_status == "RECONCILIATION_REQUIRED":
-                raise RuntimeGuardianError(
-                    "guardian state requires reconciliation before it can be read"
-                )
-            self._read_runtime_authority()
+            self._require_degradation_read_authority()
             return self._degradation.snapshot()
+
+    def _require_degradation_read_authority(self) -> dict[str, Any]:
+        if self._event_store is None:
+            raise RuntimeGuardianError(
+                "guardian degradation authority requires a durable journal"
+            )
+        if self._write_authority_status == "RECONCILIATION_REQUIRED":
+            raise RuntimeGuardianError(
+                "guardian state requires reconciliation before it can be read"
+            )
+        return self._read_runtime_authority()
+
+    def _degradation_authority_identity(
+        self,
+        *,
+        authority: Mapping[str, Any] | None,
+        authority_status: str,
+    ) -> dict[str, Any]:
+        item = dict(authority or {})
+        return {
+            "schema_version": GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION,
+            "authority": "RUNTIME_GUARDIAN",
+            "authority_status": str(authority_status or "UNAVAILABLE").upper(),
+            "aggregate_type": self._EVENT_AGGREGATE_TYPE,
+            "aggregate_id": self._aggregate_id,
+            "aggregate_ref": f"runtime-guardian://sha256/{self._aggregate_id}",
+            "runtime_scope_id": self._runtime_scope_id,
+            "runtime_owner_id": str(
+                item.get("owner_id") or self._runtime_owner_id
+            ),
+            "runtime_lease_id": str(
+                item.get("lease_id") or self._runtime_lease_id
+            ),
+            "fencing_token": int(
+                item.get("fencing_token") or self._fencing_token
+            ),
+            "lease_issued_at_ms": item.get(
+                "issued_at_ms", self._runtime_issued_at_ms
+            ),
+            "lease_expires_at_ms": item.get("expires_at_ms"),
+            "lease_released_at_ms": item.get(
+                "released_at_ms", self._runtime_released_at_ms
+            ),
+            "guardian_revision": self._revision,
+            "guardian_status": self._status(),
+            "last_event_digest": (
+                self._history[-1].event_digest if self._history else None
+            ),
+            "durable": self._event_store is not None,
+        }
+
+    def read_degradation_state(self) -> dict[str, Any]:
+        """Read the reducer only through the live, durable Guardian claim."""
+
+        with self._lock:
+            authority = self._require_degradation_read_authority()
+            config = degradation_policy_config()
+            state = self._degradation.snapshot(
+                policy_enabled=bool(config["enabled"]),
+                policy_status=str(config["status"]),
+            ).as_dict()
+            state.update(
+                {
+                    "durability_required": True,
+                    "durability_status": "READY",
+                    "durability_authority": "RUNTIME_GUARDIAN_JOURNAL",
+                    "guardian_event_count": len(self._history),
+                    "last_durable_error": None,
+                    "guardian_authority": self._degradation_authority_identity(
+                        authority=authority,
+                        authority_status="ACTIVE",
+                    ),
+                }
+            )
+            return state
+
+    def evaluate_capability(
+        self,
+        *,
+        capability_id: str,
+        static_risk_level: int,
+        capability_policy_decision: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate one capability without exposing the embedded reducer.
+
+        A stale or unavailable Host claim never returns an executable
+        high-risk decision.  Lower-risk callers may retain an explicit safe
+        fallback, but the result remains marked as unavailable and grants no
+        authority.
+        """
+
+        risk = _risk_level(static_risk_level)
+        with self._lock:
+            try:
+                authority = self._require_degradation_read_authority()
+            except RuntimeGuardianError as exc:
+                blocked = risk >= 3
+                return {
+                    "schema_version": DEGRADATION_CAPABILITY_DECISION_SCHEMA_VERSION,
+                    "capability_id": str(capability_id or "").strip().lower(),
+                    "decision": "BLOCK" if blocked else "DEGRADE",
+                    "allowed_by_degradation": not blocked,
+                    "allowed": not blocked,
+                    "authority_granted": False,
+                    "static_risk_level": risk,
+                    "effective_risk_level": risk,
+                    "reason_code": (
+                        DEGRADATION_STATE_UNAVAILABLE
+                        if blocked
+                        else "DEGRADATION_STATE_UNAVAILABLE_SAFE_FALLBACK"
+                    ),
+                    "origin_dependencies": [],
+                    "safe_fallbacks": ["deterministic_rule", "human_review"],
+                    "permission_effect": "RESTRICT_ONLY",
+                    "can_expand_scope": False,
+                    "can_reduce_risk": False,
+                    "can_bypass_review": False,
+                    "can_bypass_token": False,
+                    "durability_required": True,
+                    "durability_status": "UNAVAILABLE",
+                    "guardian_authority": self._degradation_authority_identity(
+                        authority=None,
+                        authority_status="UNAVAILABLE",
+                    ),
+                    "authority_error": type(exc).__name__,
+                }
+            decision = dict(
+                evaluate_degradation_front_door(
+                    capability_id=capability_id,
+                    static_risk_level=risk,
+                    capability_policy_decision=capability_policy_decision,
+                    machine=self._degradation,
+                )
+            )
+            decision.update(
+                {
+                    "allowed": bool(
+                        decision.get(
+                            "allowed",
+                            decision.get("allowed_by_degradation"),
+                        )
+                    ),
+                    "durability_required": True,
+                    "durability_status": "READY",
+                    "guardian_authority": self._degradation_authority_identity(
+                        authority=authority,
+                        authority_status="ACTIVE",
+                    ),
+                }
+            )
+            return decision
+
+    def _observe_normalized_batch(
+        self,
+        observations: Sequence[Mapping[str, Any]],
+    ) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            self._require_degradation_read_authority()
+        transitions: list[dict[str, Any]] = []
+        for observation in observations:
+            before_revision = self.snapshot().revision
+            snapshot = self.observe_dependency(
+                dependency_id=str(observation["dependency_id"]),
+                status=str(observation["status"]),
+                evidence_refs=tuple(observation["evidence_refs"]),
+                source_ref=str(observation["source_ref"]),
+                observed_at_ms=int(observation["observed_at_ms"]),
+                detail=str(observation["detail"]),
+            )
+            if snapshot.revision == before_revision:
+                continue
+            transitions.append(
+                {
+                    "dependency_id": str(observation["dependency_id"]),
+                    "status": str(observation["status"]),
+                    "evidence_refs": list(observation["evidence_refs"]),
+                    "source_ref": str(observation["source_ref"]),
+                    "observed_at_ms": int(observation["observed_at_ms"]),
+                    "guardian_revision": snapshot.revision,
+                    "guardian_status": snapshot.status,
+                    "guardian_snapshot_digest": snapshot.snapshot_digest,
+                }
+            )
+        return tuple(transitions)
+
+    def observe_service_batch(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        source_ref: str,
+        observed_at_ms: int | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Normalize and durably apply one service-health probe batch."""
+
+        observed = self._clock() if observed_at_ms is None else observed_at_ms
+        observations = normalize_service_observations(
+            rows,
+            source_ref=source_ref,
+            now_ms=observed,
+        )
+        return self._observe_normalized_batch(observations)
+
+    def observe_startup_batch(
+        self,
+        statuses: Mapping[str, Any],
+        *,
+        source_ref: str,
+        observed_at_ms: int | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Normalize and durably apply one startup result batch."""
+
+        observed = self._clock() if observed_at_ms is None else observed_at_ms
+        observations = normalize_startup_observations(
+            statuses,
+            source_ref=source_ref,
+            now_ms=observed,
+        )
+        return self._observe_normalized_batch(observations)
 
     def observe_dependency(
         self,
@@ -1052,34 +1499,35 @@ class RuntimeGuardian:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         refs = _refs(evidence_refs)
         with self._lock:
-            before = self._capture_mutable_state()
-            try:
-                transition = self._degradation.observe(
-                    dependency_id=dependency_id,
-                    status=status,
-                    evidence_refs=refs,
-                    source_ref=_text(source_ref, "source_ref"),
-                    now_ms=observed,
-                    detail=detail,
+            self._require_monotonic_observation(observed)
+            current = self._capture_mutable_state()
+            shadow = DegradationStateMachine(restore_from_store=False)
+            shadow.restore_reducer_state(current["degradation_state"])
+            transition = shadow.observe(
+                dependency_id=dependency_id,
+                status=status,
+                evidence_refs=refs,
+                source_ref=_text(source_ref, "source_ref"),
+                now_ms=observed,
+                detail=detail,
+            )
+            if transition is not None:
+                self._append(
+                    event_type="GUARDIAN_HEALTH_OBSERVED",
+                    details={
+                        "dependency_id": transition.dependency_id,
+                        "dependency_status": transition.dependency_status,
+                        "degradation_event_type": transition.event_type,
+                        "degradation_transition_id": transition.transition_id,
+                        "source_ref": transition.source_ref,
+                        "evidence_refs": refs,
+                    },
+                    observed_at_ms=observed,
+                    next_state=self._state_with(
+                        current,
+                        degradation_state=shadow.export_reducer_state(),
+                    ),
                 )
-                if transition is not None:
-                    self._append(
-                        event_type="GUARDIAN_HEALTH_OBSERVED",
-                        details={
-                            "dependency_id": transition.dependency_id,
-                            "dependency_status": transition.dependency_status,
-                            "degradation_event_type": transition.event_type,
-                            "degradation_transition_id": transition.transition_id,
-                            "source_ref": transition.source_ref,
-                            "evidence_refs": refs,
-                        },
-                        observed_at_ms=observed,
-                    )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
             return self.snapshot()
 
     def acknowledge_recovery(
@@ -1093,6 +1541,7 @@ class RuntimeGuardian:
     ) -> GuardianSnapshotV1:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         with self._lock:
+            self._require_monotonic_observation(observed)
             binding = self._degradation.prepare_recovery_acknowledgement(
                 dependency_id=dependency_id,
                 review_id=_text(review_id, "review_id"),
@@ -1136,6 +1585,7 @@ class RuntimeGuardian:
                     "prepared recovery operation_id",
                 )
             if prepared is None:
+                current = self._capture_mutable_state()
                 self._append(
                     event_type="GUARDIAN_RECOVERY_ACK_PREPARED",
                     details={
@@ -1144,6 +1594,7 @@ class RuntimeGuardian:
                         "evidence_refs": tuple(binding.get("evidence_refs") or ()),
                     },
                     observed_at_ms=observed,
+                    next_state=current,
                 )
             try:
                 resumed = review_store.resume_review(
@@ -1182,32 +1633,30 @@ class RuntimeGuardian:
                         "recovery review was not consumed by this operation"
                     ) from resume_exc
 
-            before = self._capture_mutable_state()
-            try:
-                transition = (
-                    self._degradation.apply_consumed_recovery_acknowledgement(
-                        binding=binding,
-                        review_record=review_record,
-                        now_ms=observed,
-                    )
-                )
-                self._append(
-                    event_type="GUARDIAN_RECOVERY_ACK_COMMITTED",
-                    details={
-                        "operation_id": operation_id,
-                        "binding": binding,
-                        "dependency_id": transition.dependency_id,
-                        "degradation_transition_id": transition.transition_id,
-                        "review_id": binding["review_id"],
-                        "evidence_refs": tuple(transition.evidence_refs),
-                    },
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            shadow = DegradationStateMachine(restore_from_store=False)
+            shadow.restore_reducer_state(current["degradation_state"])
+            transition = shadow.apply_consumed_recovery_acknowledgement(
+                binding=binding,
+                review_record=review_record,
+                now_ms=observed,
+            )
+            self._append(
+                event_type="GUARDIAN_RECOVERY_ACK_COMMITTED",
+                details={
+                    "operation_id": operation_id,
+                    "binding": binding,
+                    "dependency_id": transition.dependency_id,
+                    "degradation_transition_id": transition.transition_id,
+                    "review_id": binding["review_id"],
+                    "evidence_refs": tuple(transition.evidence_refs),
+                },
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    degradation_state=shadow.export_reducer_state(),
+                ),
+            )
             return self.snapshot()
 
     def reconcile_prepared_recoveries(
@@ -1220,6 +1669,7 @@ class RuntimeGuardian:
 
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         with self._lock:
+            self._require_monotonic_observation(observed)
             committed_ids = {
                 str(item.payload.get("operation_id") or "")
                 for item in self._history
@@ -1269,123 +1719,115 @@ class RuntimeGuardian:
                     raise RuntimeGuardianError(
                         "prepared recovery binding drifted before reconciliation"
                     )
-                before = self._capture_mutable_state()
-                try:
-                    transition = self._degradation.apply_consumed_recovery_acknowledgement(
-                        binding=binding,
-                        review_record=review_record,
-                        now_ms=observed,
-                    )
-                    self._append(
-                        event_type="GUARDIAN_RECOVERY_ACK_COMMITTED",
-                        details={
-                            "operation_id": operation_id,
-                            "binding": binding,
-                            "dependency_id": transition.dependency_id,
-                            "degradation_transition_id": transition.transition_id,
-                            "review_id": binding["review_id"],
-                            "evidence_refs": tuple(transition.evidence_refs),
-                        },
-                        observed_at_ms=observed,
-                    )
-                    committed_binding_digests.add(prepared_identity_digest)
-                except _GuardianStateReconciledError:
-                    raise
-                except Exception:
-                    self._restore_mutable_state(before)
-                    raise
+                current = self._capture_mutable_state()
+                shadow = DegradationStateMachine(restore_from_store=False)
+                shadow.restore_reducer_state(current["degradation_state"])
+                transition = shadow.apply_consumed_recovery_acknowledgement(
+                    binding=binding,
+                    review_record=review_record,
+                    now_ms=observed,
+                )
+                self._append(
+                    event_type="GUARDIAN_RECOVERY_ACK_COMMITTED",
+                    details={
+                        "operation_id": operation_id,
+                        "binding": binding,
+                        "dependency_id": transition.dependency_id,
+                        "degradation_transition_id": transition.transition_id,
+                        "review_id": binding["review_id"],
+                        "evidence_refs": tuple(transition.evidence_refs),
+                    },
+                    observed_at_ms=observed,
+                    next_state=self._state_with(
+                        current,
+                        degradation_state=shadow.export_reducer_state(),
+                    ),
+                )
+                committed_binding_digests.add(prepared_identity_digest)
             return self.snapshot()
 
     def enter_maintenance(self, *, reason_ref: str, observed_at_ms: int | None = None) -> GuardianSnapshotV1:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         reason = _text(reason_ref, "reason_ref")
         with self._lock:
+            self._require_monotonic_observation(observed)
             if self._mode == "MAINTENANCE" and self._maintenance_ref == reason:
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._mode = "MAINTENANCE"
-                self._maintenance_ref = reason
-                self._sleep_ref = None
-                self._append(
-                    event_type="GUARDIAN_MAINTENANCE_ENTERED",
-                    details={"reason_ref": reason, "evidence_refs": (reason,)},
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            self._append(
+                event_type="GUARDIAN_MAINTENANCE_ENTERED",
+                details={"reason_ref": reason, "evidence_refs": (reason,)},
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    mode="MAINTENANCE",
+                    maintenance_ref=reason,
+                    sleep_ref=None,
+                ),
+            )
             return self.snapshot()
 
     def exit_maintenance(self, *, acknowledgement_ref: str, observed_at_ms: int | None = None) -> GuardianSnapshotV1:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         ack = _text(acknowledgement_ref, "acknowledgement_ref")
         with self._lock:
+            self._require_monotonic_observation(observed)
             if self._mode != "MAINTENANCE":
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._mode = "ACTIVE"
-                self._maintenance_ref = None
-                self._sleep_ref = None
-                self._append(
-                    event_type="GUARDIAN_MAINTENANCE_EXITED",
-                    details={"acknowledgement_ref": ack, "evidence_refs": (ack,)},
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            self._append(
+                event_type="GUARDIAN_MAINTENANCE_EXITED",
+                details={"acknowledgement_ref": ack, "evidence_refs": (ack,)},
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    mode="ACTIVE",
+                    maintenance_ref=None,
+                    sleep_ref=None,
+                ),
+            )
             return self.snapshot()
 
     def enter_sleep(self, *, reason_ref: str, observed_at_ms: int | None = None) -> GuardianSnapshotV1:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         reason = _text(reason_ref, "reason_ref")
         with self._lock:
+            self._require_monotonic_observation(observed)
             if self._mode == "SLEEP" and self._sleep_ref == reason:
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._mode = "SLEEP"
-                self._sleep_ref = reason
-                self._maintenance_ref = None
-                self._append(
-                    event_type="GUARDIAN_SLEEP_ENTERED",
-                    details={"reason_ref": reason, "evidence_refs": (reason,)},
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            self._append(
+                event_type="GUARDIAN_SLEEP_ENTERED",
+                details={"reason_ref": reason, "evidence_refs": (reason,)},
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    mode="SLEEP",
+                    sleep_ref=reason,
+                    maintenance_ref=None,
+                ),
+            )
             return self.snapshot()
 
     def exit_sleep(self, *, acknowledgement_ref: str, observed_at_ms: int | None = None) -> GuardianSnapshotV1:
         observed = int(self._clock() if observed_at_ms is None else observed_at_ms)
         ack = _text(acknowledgement_ref, "acknowledgement_ref")
         with self._lock:
+            self._require_monotonic_observation(observed)
             if self._mode != "SLEEP":
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._mode = "ACTIVE"
-                self._sleep_ref = None
-                self._maintenance_ref = None
-                self._append(
-                    event_type="GUARDIAN_SLEEP_EXITED",
-                    details={"acknowledgement_ref": ack, "evidence_refs": (ack,)},
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            self._append(
+                event_type="GUARDIAN_SLEEP_EXITED",
+                details={"acknowledgement_ref": ack, "evidence_refs": (ack,)},
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    mode="ACTIVE",
+                    sleep_ref=None,
+                    maintenance_ref=None,
+                ),
+            )
             return self.snapshot()
 
     def record_slo_breach(
@@ -1404,27 +1846,27 @@ class RuntimeGuardian:
             raise RuntimeGuardianError("evidence_ref must be durable")
         breach_ref = f"slo-breach://{_digest({'slo_id': slo, 'observed': observed_value, 'threshold': threshold, 'evidence': evidence})}"
         with self._lock:
+            self._require_monotonic_observation(observed)
             if breach_ref in self._slo_breaches:
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._slo_breaches.add(breach_ref)
-                self._append(
-                    event_type="GUARDIAN_SLO_BREACH",
-                    details={
-                        "slo_id": slo,
-                        "observed_value": float(observed_value),
-                        "threshold": float(threshold),
-                        "breach_ref": breach_ref,
-                        "evidence_refs": (evidence,),
-                    },
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            next_breaches = set(current["slo_breaches"])
+            next_breaches.add(breach_ref)
+            self._append(
+                event_type="GUARDIAN_SLO_BREACH",
+                details={
+                    "slo_id": slo,
+                    "observed_value": float(observed_value),
+                    "threshold": float(threshold),
+                    "breach_ref": breach_ref,
+                    "evidence_refs": (evidence,),
+                },
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    slo_breaches=next_breaches,
+                ),
+            )
             return self.snapshot()
 
     def resolve_slo_breach(
@@ -1440,24 +1882,24 @@ class RuntimeGuardian:
         if "://" not in breach or "://" not in evidence:
             raise RuntimeGuardianError("SLO resolution requires durable references")
         with self._lock:
+            self._require_monotonic_observation(observed)
             if breach not in self._slo_breaches:
                 raise RuntimeGuardianError("cannot resolve an unknown SLO breach")
-            before = self._capture_mutable_state()
-            try:
-                self._slo_breaches.remove(breach)
-                self._append(
-                    event_type="GUARDIAN_SLO_RESOLVED",
-                    details={
-                        "breach_ref": breach,
-                        "evidence_refs": (evidence,),
-                    },
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            next_breaches = set(current["slo_breaches"])
+            next_breaches.remove(breach)
+            self._append(
+                event_type="GUARDIAN_SLO_RESOLVED",
+                details={
+                    "breach_ref": breach,
+                    "evidence_refs": (evidence,),
+                },
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    slo_breaches=next_breaches,
+                ),
+            )
             return self.snapshot()
 
     def acknowledge_event(self, *, event_id: str, acknowledgement_ref: str, observed_at_ms: int | None = None) -> GuardianSnapshotV1:
@@ -1465,28 +1907,28 @@ class RuntimeGuardian:
         target = _text(event_id, "event_id")
         ack = _text(acknowledgement_ref, "acknowledgement_ref")
         with self._lock:
+            self._require_monotonic_observation(observed)
             known = {item.event_id for item in self._history}
             if target not in known:
                 raise RuntimeGuardianError("cannot acknowledge an unknown guardian event")
             if target in self._acknowledged_events:
                 return self.snapshot()
-            before = self._capture_mutable_state()
-            try:
-                self._acknowledged_events.add(target)
-                self._append(
-                    event_type="GUARDIAN_EVENT_ACKNOWLEDGED",
-                    details={
-                        "target_event_id": target,
-                        "acknowledgement_ref": ack,
-                        "evidence_refs": (ack,),
-                    },
-                    observed_at_ms=observed,
-                )
-            except _GuardianStateReconciledError:
-                raise
-            except Exception:
-                self._restore_mutable_state(before)
-                raise
+            current = self._capture_mutable_state()
+            next_acknowledged = set(current["acknowledged_events"])
+            next_acknowledged.add(target)
+            self._append(
+                event_type="GUARDIAN_EVENT_ACKNOWLEDGED",
+                details={
+                    "target_event_id": target,
+                    "acknowledgement_ref": ack,
+                    "evidence_refs": (ack,),
+                },
+                observed_at_ms=observed,
+                next_state=self._state_with(
+                    current,
+                    acknowledged_events=next_acknowledged,
+                ),
+            )
             return self.snapshot()
 
     def event_history(self) -> tuple[dict[str, Any], ...]:
@@ -1495,6 +1937,7 @@ class RuntimeGuardian:
 
 
 __all__ = [
+    "GUARDIAN_DEGRADATION_AUTHORITY_SCHEMA_VERSION",
     "GuardianEventV1",
     "GuardianSnapshotV1",
     "RuntimeGuardian",

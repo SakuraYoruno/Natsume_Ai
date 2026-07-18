@@ -19,6 +19,7 @@ from typing import Any
 
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.governor.tokens import TokenService
+from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 from host_brain.app.observability_runtime.command_composition import (
     OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED,
     ObsCommandComposition,
@@ -295,6 +296,9 @@ def build_process_security_service_container(
     pentest_builder: PentestBuilder | None = None,
     signed_intake_builder: SignedIntakeBuilder | None = None,
     route_ports: HostRoutePorts | None = None,
+    degradation_capability_port_provider: (
+        Callable[[], DegradationCapabilityPort | None] | None
+    ) = None,
 ) -> ProcessSecurityServiceContainer:
     """Build independent service slots from explicit process dependencies.
 
@@ -348,6 +352,15 @@ def build_process_security_service_container(
             env=source,
             db_path=resolved_path,
             **({"route_ports": route_ports} if route_ports is not None else {}),
+            **(
+                {
+                    "degradation_capability_port_provider": (
+                        degradation_capability_port_provider
+                    )
+                }
+                if degradation_capability_port_provider is not None
+                else {}
+            ),
         ),
     )
     compositions[SecurityServiceName.OBS_COMMAND] = obs

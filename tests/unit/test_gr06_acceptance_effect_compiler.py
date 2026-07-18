@@ -32,6 +32,8 @@ def _contracts():
             "id": "intent-gr06-compiler",
             "route": "chat",
             "target_id": "surface_reply",
+            "action": "exec_intent",
+            "target": "host",
             "task": "reply safely",
         },
         governor_result=governor,
