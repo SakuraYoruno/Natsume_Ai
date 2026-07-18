@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 
 from host_brain.persistence import host_command_repository
+from host_brain.persistence import host_command_claim_result_validation
 from host_brain.persistence import host_command_repository_codec
 from host_brain.persistence import host_command_repository_types
 
@@ -22,6 +23,16 @@ def test_host_command_codec_owns_no_connection_or_transaction() -> None:
     assert "sqlite3.connect" not in source
     assert "BEGIN IMMEDIATE" not in source
     assert "INSERT INTO host_command_journal" not in source
+
+
+def test_claim_result_validation_reuses_repository_connection_and_uow() -> None:
+    source = inspect.getsource(host_command_claim_result_validation)
+
+    assert len(source.splitlines()) < 1_500
+    assert "sqlite3.connect" not in source
+    assert "BEGIN IMMEDIATE" not in source
+    assert "class HostCommandRepository(" not in source
+    assert "self._connect()" in source
 
 
 def test_public_error_and_constants_are_stable_reexports() -> None:

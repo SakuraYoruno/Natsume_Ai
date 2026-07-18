@@ -37,6 +37,7 @@ from host_brain.runtime.degradation_authority import (
     DegradationCapabilityPort,
     evaluate_degradation_capability,
 )
+from natsume_contracts.task import HostCommandSurface
 
 
 OBS_DOMAIN_RESULT_SCHEMA = "natsume.obs-domain-command-result.v1"
@@ -57,11 +58,19 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # directly instead of admitting an immutable TaskGraph.  Secure Ingress proves
 # who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
 # fail-closed until NE-01 gives each command a Governed Operator route.
-_UNGOVERNED_OPERATOR_DIRECT_COMMANDS = frozenset(
-    spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS
+GOVERNED_OPERATOR_COMMAND_IDS = frozenset({"scheduler.task.trigger"})
+BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
+    spec.command_id
+    for spec in DEFAULT_OBS_COMMAND_SPECS
+    if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
-if len(_UNGOVERNED_OPERATOR_DIRECT_COMMANDS) != 37:
-    raise RuntimeError("UNGOVERNED_OPERATOR_COMMAND_SET_MUST_MATCH_MANIFEST")
+if (
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 36
+    or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
+    or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
+    != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
+):
+    raise RuntimeError("OPERATOR_COMMAND_GOVERNANCE_SET_MUST_MATCH_MANIFEST")
 
 
 def _required_text(payload: Mapping[str, Any], field: str) -> str:
@@ -119,7 +128,7 @@ class _DomainCommandPort:
     async def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
         if envelope.command_id != self.command_id:
             raise ObsDomainCommandError("OBS_DOMAIN_COMMAND_ID_MISMATCH")
-        if self.command_id in _UNGOVERNED_OPERATOR_DIRECT_COMMANDS:
+        if self.command_id in BLOCKED_OPERATOR_COMMAND_IDS:
             raise ObsCommandPortExecutionError(
                 "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
                 side_effects_may_have_run=False,
@@ -136,6 +145,8 @@ class _DomainCommandPort:
             "request_id": envelope.authority.request_id,
             "action": envelope.action,
             "required_scopes": tuple(envelope.required_scopes),
+            "ingress_surface": "obs.command",
+            "operator_command_id": self.command_id,
         }
         # This value was injected by bind_server_authority.  Do not read
         # envelope.authority here: the payload is the command/domain boundary.
@@ -533,8 +544,33 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
         authority=_scheduler_authority(payload),
         payload=dict(payload.get("payload") or {}),
         received_at_ms=int(__import__("time").time() * 1000),
+        command_surface=HostCommandSurface.OPERATOR,
     )
-    return await output if inspect.isawaitable(output) else output
+    resolved = await output if inspect.isawaitable(output) else output
+    if not isinstance(resolved, Mapping):
+        raise ObsDomainCommandError("OBS_SCHEDULER_RESULT_INVALID")
+    result = dict(resolved)
+    receipt = result.get("execution_receipt")
+    receipt_payload = dict(receipt) if isinstance(receipt, Mapping) else {}
+    status = str(receipt_payload.get("status") or "").strip().upper()
+    if status not in {
+        "WAITING_APPROVAL",
+        "WAITING_ACCEPTANCE_REVIEW",
+        "ACCEPTED",
+        "FAILED",
+        "BLOCKED",
+        "CANCELLED",
+    }:
+        raise ObsDomainCommandError("OBS_SCHEDULER_RESULT_INVALID")
+    # The outer OBS outcome records admission as success.  It records an
+    # actual side effect only when the Task Runtime has durably accepted the
+    # node; a Review pause is an admitted, explicitly non-executed outcome.
+    return {
+        **result,
+        "success": status
+        in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW", "ACCEPTED"},
+        "side_effects_executed": status == "ACCEPTED",
+    }
 
 
 def _tool_execute(
@@ -965,6 +1001,8 @@ build_default_obs_domain_port_registry = build_default_obs_domain_command_regist
 
 
 __all__ = [
+    "BLOCKED_OPERATOR_COMMAND_IDS",
+    "GOVERNED_OPERATOR_COMMAND_IDS",
     "OBS_DOMAIN_RESULT_SCHEMA",
     "ObsDomainCommandError",
     "build_default_obs_domain_command_registry",

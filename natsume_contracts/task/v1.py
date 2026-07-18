@@ -23,9 +23,11 @@ EXECUTOR_ASSIGNMENT_INVALID = "RUNTIME_ASSIGNMENT_INVALID"
 class HostCommandSurface(StrEnum):
     CHAT = "chat"
     HOST_INPUT = "host_input"
+    TOOL = "tool"
     INTERNAL = "internal"
     SCHEDULER = "scheduler"
     GATEWAY = "gateway"
+    OPERATOR = "operator"
 
 
 class TaskExecutor(StrEnum):

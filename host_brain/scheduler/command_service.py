@@ -17,7 +17,7 @@ import inspect
 import re
 from typing import Any, Protocol
 
-from natsume_contracts.task import HostCommand
+from natsume_contracts.task import HostCommand, HostCommandSurface
 
 from host_brain.orchestration import governor_grant_ref
 from host_brain.scheduler.contracts import (
@@ -46,6 +46,9 @@ SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED = (
 )
 SCHEDULER_RUNTIME_DRAIN_TIMEOUT = "SCHEDULER_RUNTIME_DRAIN_TIMEOUT"
 SCHEDULER_COMMAND_REPLAY = "SCHEDULER_COMMAND_REPLAY"
+_OPERATOR_TRIGGER_COMMAND_ID = "scheduler.task.trigger"
+_OPERATOR_TRIGGER_ACTION = "obs:command:scheduler.task.trigger"
+_OPERATOR_TRIGGER_SCOPES = frozenset({"obs:write", "scheduler:write"})
 
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 
@@ -179,7 +182,12 @@ class ClaimResultStorePort(Protocol):
 
 
 class GovernedSchedulerRuntimePort(Protocol):
-    def existing_command(self, *, request_id: str) -> Mapping[str, Any] | None: ...
+    def existing_command(
+        self,
+        *,
+        request_id: str,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
+    ) -> Mapping[str, Any] | None: ...
 
     def execute_stream(
         self,
@@ -189,6 +197,7 @@ class GovernedSchedulerRuntimePort(Protocol):
         authority: Mapping[str, Any],
         governor_grant: str,
         received_at_ms: int,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
     ) -> AsyncIterator[Mapping[str, Any]]: ...
 
     def health(self) -> dict[str, Any]: ...
@@ -408,8 +417,11 @@ class SchedulerCommandService:
         authority: SecureIngressAuthority | Mapping[str, Any],
         payload: Mapping[str, Any],
         received_at_ms: int,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
     ) -> dict[str, Any]:
         auth = _require_authority(authority)
+        surface = _require_scheduler_command_surface(command_surface)
+        _bind_scheduler_command_surface(auth, surface=surface)
         if bool(auth.get("duplicate")):
             replay_raw = self._definitions.get_occurrence_by_request(
                 str(auth["request_id"]),
@@ -424,6 +436,7 @@ class SchedulerCommandService:
                 occurrence=SchedulerOccurrence.from_mapping(replay_raw),
                 authority=auth,
                 received_at_ms=received_at_ms,
+                command_surface=surface,
             )
         definition = self._current_definition(task_id)
         self.preflight_definition(definition)
@@ -440,6 +453,7 @@ class SchedulerCommandService:
             occurrence=occurrence,
             authority=auth,
             received_at_ms=received_at_ms,
+            command_surface=surface,
         )
 
     async def execute_occurrence(
@@ -448,8 +462,11 @@ class SchedulerCommandService:
         occurrence: SchedulerOccurrence | Mapping[str, Any],
         authority: SecureIngressAuthority | Mapping[str, Any],
         received_at_ms: int,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
     ) -> dict[str, Any]:
         auth = _require_authority(authority)
+        surface = _require_scheduler_command_surface(command_surface)
+        _bind_scheduler_command_surface(auth, surface=surface)
         admitted = (
             occurrence
             if isinstance(occurrence, SchedulerOccurrence)
@@ -475,13 +492,17 @@ class SchedulerCommandService:
             )
             if isinstance(durable_outcome, Mapping):
                 terminal = _terminal_outcome_response(durable, durable_outcome)
-                await self._complete_claim(
-                    auth,
-                    result_ref=str(durable_outcome["receipt_ref"]),
-                    received_at_ms=received_at_ms,
-                )
+                if surface is HostCommandSurface.SCHEDULER:
+                    await self._complete_claim(
+                        auth,
+                        result_ref=str(durable_outcome["receipt_ref"]),
+                        received_at_ms=received_at_ms,
+                    )
                 return terminal
-            existing = self._runtime.existing_command(request_id=request_id)
+            existing = self._runtime.existing_command(
+                request_id=request_id,
+                command_surface=surface,
+            )
             if existing is not None:
                 command = existing.get("command")
                 if not isinstance(command, HostCommand) or not command.governor_grant_ref:
@@ -534,11 +555,12 @@ class SchedulerCommandService:
                         },
                     )
                     terminal = _terminal_outcome_response(durable, outcome)
-                    await self._complete_claim(
-                        auth,
-                        result_ref=str(outcome["receipt_ref"]),
-                        received_at_ms=received_at_ms,
-                    )
+                    if surface is HostCommandSurface.SCHEDULER:
+                        await self._complete_claim(
+                            auth,
+                            result_ref=str(outcome["receipt_ref"]),
+                            received_at_ms=received_at_ms,
+                        )
                     return terminal
                 grant = governor_grant_ref(request_id, decision)
 
@@ -549,6 +571,7 @@ class SchedulerCommandService:
                 authority=auth,
                 governor_grant=grant,
                 received_at_ms=int(received_at_ms),
+                command_surface=surface,
             ):
                 if bool(event.get("done")):
                     terminal = dict(event)
@@ -585,11 +608,15 @@ class SchedulerCommandService:
                     SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED,
                     "terminal scheduler result has no durable receipt",
                 )
-            await self._complete_claim(
-                auth,
-                result_ref=result_ref,
-                received_at_ms=received_at_ms,
-            )
+            # Native Scheduler ingress owns and completes its claim here.
+            # OBS Operator ingress has a separate append-only outcome journal
+            # and must remain the sole result authority for that outer claim.
+            if surface is HostCommandSurface.SCHEDULER:
+                await self._complete_claim(
+                    auth,
+                    result_ref=result_ref,
+                    received_at_ms=received_at_ms,
+                )
             return terminal
 
     @asynccontextmanager
@@ -773,6 +800,59 @@ def _require_authority(
         )
     data["body_sha256"] = body_sha.removeprefix("sha256:")
     return data
+
+
+def _require_scheduler_command_surface(
+    value: HostCommandSurface | str,
+) -> HostCommandSurface:
+    try:
+        surface = (
+            value
+            if isinstance(value, HostCommandSurface)
+            else HostCommandSurface(str(value))
+        )
+    except (TypeError, ValueError) as exc:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "scheduler command surface is invalid",
+        ) from exc
+    if surface not in {
+        HostCommandSurface.SCHEDULER,
+        HostCommandSurface.OPERATOR,
+    }:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "scheduler command surface is not admitted",
+        )
+    return surface
+
+
+def _bind_scheduler_command_surface(
+    authority: dict[str, Any],
+    *,
+    surface: HostCommandSurface,
+) -> None:
+    authority["command_surface"] = surface.value
+    if surface is HostCommandSurface.SCHEDULER:
+        return
+    raw_scopes = authority.get("required_scopes")
+    scopes = (
+        frozenset(str(item).strip() for item in raw_scopes if str(item).strip())
+        if isinstance(raw_scopes, (tuple, list, set, frozenset))
+        else frozenset()
+    )
+    if (
+        str(authority.get("ingress_surface") or "").strip() != "obs.command"
+        or str(authority.get("operator_command_id") or "").strip()
+        != _OPERATOR_TRIGGER_COMMAND_ID
+        or str(authority.get("action") or "").strip()
+        != _OPERATOR_TRIGGER_ACTION
+        or scopes != _OPERATOR_TRIGGER_SCOPES
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "Operator scheduler trigger lacks its exact OBS authority binding",
+        )
 
 
 def _assert_occurrence_authority(

@@ -776,7 +776,7 @@ class SQLiteSecureIngressStore:
                     claim is None
                     or str(claim["claim_status"]) != "COMMITTED"
                     or command is None
-                    or str(command["surface"]) not in {"internal", "scheduler"}
+                    or str(command["surface"]) not in {"internal", "scheduler", "tool"}
                     or str(command["graph_id"]) != normalized_graph_id
                     or int(command["graph_revision"]) != revision
                     or review is None

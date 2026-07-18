@@ -8,12 +8,13 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from host_brain.app.agents.tool_registry import (
+    REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED,
+    REACT_SKILL_GOVERNED_ADMISSION_REQUIRED,
     ToolSpec,
     execute_tool,
     get_tools_for_agent,
@@ -441,8 +442,8 @@ class TestIntentAgentExecutionTools:
         assert "dispatch_sub_agent" not in readonly_tools
 
         assert "list_skills" in full_tools
-        assert "run_skill" in full_tools
-        assert "dispatch_sub_agent" in full_tools
+        assert "run_skill" not in full_tools
+        assert "dispatch_sub_agent" not in full_tools
 
     def test_list_skills_tool_returns_skill_catalog(self):
         result = execute_tool("list_skills", {"limit": 5})
@@ -450,16 +451,8 @@ class TestIntentAgentExecutionTools:
         assert isinstance(result.get("skills"), list)
         assert int(result.get("count") or 0) >= 1
 
-    def test_run_skill_tool_executes_runtime_entrypoint(self):
-        fake_outcome = SimpleNamespace(
-            success=True,
-            result_text="stored",
-            error_text="",
-            skill_family="memory",
-            route_type="skill",
-            latency_ms=12,
-        )
-        with patch("host_brain.executive_runtime.skill_execution._execute_skill", return_value=fake_outcome):
+    def test_run_skill_tool_fails_closed_before_legacy_runtime(self):
+        with patch("host_brain.executive_runtime.skill_execution._execute_skill") as execute_skill:
             result = execute_tool(
                 "run_skill",
                 {
@@ -468,22 +461,28 @@ class TestIntentAgentExecutionTools:
                     "_react_context": {"request_id": "req_tool_run_skill_001"},
                 },
             )
-        assert result.get("success") is True
-        assert result.get("status") == "SUCCESS"
+        execute_skill.assert_not_called()
+        assert result.get("success") is False
+        assert result.get("status") == "BLOCKED"
+        assert result.get("error") == REACT_SKILL_GOVERNED_ADMISSION_REQUIRED
+        assert result.get("reason_code") == REACT_SKILL_GOVERNED_ADMISSION_REQUIRED
         assert result.get("skill_name") == "memory_store"
+        assert result.get("side_effects_executed") is False
+        assert result.get("required_authority") == [
+            "host_command",
+            "immutable_task_graph",
+            "node_bound_grant",
+            "budget_reservation",
+            "review_continuation",
+            "verification",
+            "acceptance",
+            "effect_receipt",
+        ]
 
-    def test_dispatch_sub_agent_tool_executes_dispatcher(self):
-        class _FakeDispatcher:
-            async def dispatch(self, req):  # noqa: ANN001
-                return SimpleNamespace(
-                    success=True,
-                    result=f"handled:{req.agent_id}",
-                    error=None,
-                    latency_ms=23,
-                    audit_refs={"trace": "ok"},
-                )
-
-        with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher", return_value=_FakeDispatcher()):
+    def test_dispatch_sub_agent_fails_closed_before_legacy_dispatcher(self):
+        with patch(
+            "host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher"
+        ) as get_dispatcher:
             result = execute_tool(
                 "dispatch_sub_agent",
                 {
@@ -495,82 +494,14 @@ class TestIntentAgentExecutionTools:
                     },
                 },
             )
-        assert result.get("success") is True
-        assert result.get("status") == "SUCCESS"
-        assert result.get("agent_id") == "translate_agent"
-        assert "handled:translate_agent" in str(result.get("result") or "")
-
-    def test_dispatch_sub_agent_hydrates_conversation_window_and_memory_packet(self):
-        captured: dict[str, object] = {}
-
-        class _FakeDispatcher:
-            async def dispatch(self, req):  # noqa: ANN001
-                captured["req"] = req
-                return SimpleNamespace(
-                    success=True,
-                    result="handled",
-                    error=None,
-                    latency_ms=23,
-                    audit_refs={"trace": "ok"},
-                )
-
-        class _FakeHistory:
-            def fetch_window_for_messages(self, **kwargs):  # noqa: ANN001
-                captured["history_kwargs"] = dict(kwargs)
-                return SimpleNamespace(
-                    recent_turns=[
-                        SimpleNamespace(role="user", content="刚才那本书是哪本", turn_index=1),
-                        SimpleNamespace(role="assistant", content="我刚才推荐了三本轻小说", turn_index=2),
-                    ],
-                    older_summary="更早些时候在测试子 agent 上下文。",
-                    older_turn_count=12,
-                    fetched_count=2,
-                )
-
-        with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher", return_value=_FakeDispatcher()), patch(
-            "host_brain.composition.process_services.get_conversation_history",
-            return_value=_FakeHistory(),
-        ):
-            result = execute_tool(
-                "dispatch_sub_agent",
-                {
-                    "agent_id": "translate_agent",
-                    "task": "翻译刚才那段",
-                    "_react_context": {
-                        "agent_id": "intent_agent",
-                        "request_id": "req_tool_sub_agent_hydrate",
-                        "session_id": "sess_tool_sub_agent_hydrate",
-                        "retrieval_summary": {
-                            "surface_memory_recall_packet": {
-                                "facts": ["长期事实：翻译保留术语表。"],
-                                "evidence_refs": ["semantic://sem-translate"],
-                            }
-                        },
-                    },
-                },
-            )
-
-        assert result.get("success") is True
-        req = captured["req"]
-        ctx = dict(req.context)
-        assert ctx["parent_agent_id"] == "intent_agent"
-        assert ctx["tool_budget"]["timeout_ms"] >= 1000
-        assert "retrieval_summary" in ctx
-        assert ctx["surface_memory_recall_packet"]["facts"] == ["长期事实：翻译保留术语表。"]
-        assert ctx["conversation_window"]["older_summary"] == "更早些时候在测试子 agent 上下文。"
-        assert len(ctx["conversation_window"]["recent_turns"]) == 2
-        assert captured["history_kwargs"]["max_turns"] == 4
-        assert captured["history_kwargs"]["exclude_request_id"] == "req_tool_sub_agent_hydrate"
-
-    def test_dispatch_sub_agent_blocks_self_recursion(self):
-        result = execute_tool(
-            "dispatch_sub_agent",
-            {
-                "agent_id": "intent_agent",
-                "task": "do something",
-            },
+        get_dispatcher.assert_not_called()
+        assert result.get("success") is False
+        assert result.get("status") == "BLOCKED"
+        assert result.get("reason_code") == (
+            REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED
         )
-        assert result.get("error") == "SUB_AGENT_SELF_CALL_BLOCKED"
+        assert result.get("agent_id") == "translate_agent"
+        assert result.get("side_effects_executed") is False
 
     def test_intent_agent_auto_discovers_new_side_effect_tool(self):
         auto_tool = ToolSpec(

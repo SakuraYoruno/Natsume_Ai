@@ -4,7 +4,7 @@ DevSpec §24：ToolBroker REST API。
 端点：
   GET  /tools/meta-pack                — 获取当前 Top-K 工具元数据包（含 tool_visibility_hash）
   GET  /tools/{tool_id}                — 查询单个工具元数据
-  POST /tools/execute                  — 执行工具（经 ToolBroker 单入口 + WRITE token gating）
+  POST /tools/execute                  — Secure Ingress → Governed Task Runtime
   GET  /tools/health                   — ToolBroker 健康状态
 """
 
@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from host_brain.app.host_route_ports import (
@@ -25,24 +25,11 @@ from host_brain.core.errors import (
     TOOL_VISIBILITY_POLICY_VIOLATION,
 )
 from host_brain.core.ids import new_request_id
-from host_brain.tools.broker import (
-    RESULT_REJECTED,
-    RESULT_SUCCESS,
-    TOOL_NOT_FOUND,
-    ToolBroker,
-    ToolExecutionResult,
-)
+from host_brain.app.governed_tool_runtime import GovernedToolExecutionError
+from host_brain.tools.broker import TOOL_NOT_FOUND
 from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
 _logger = logging.getLogger("Natsume.tool_routes")
-
-def _get_broker(route_ports: HostRoutePorts) -> ToolBroker:
-    provider = route_ports.tool_broker_provider
-    broker = provider() if provider is not None else None
-    if broker is None:
-        raise RuntimeError("ToolBroker provider not configured")
-    return broker
-
 
 def _get_catalog(route_ports: HostRoutePorts) -> ToolCatalog:
     provider = route_ports.tool_catalog_provider
@@ -52,13 +39,32 @@ def _get_catalog(route_ports: HostRoutePorts) -> ToolCatalog:
     return catalog
 
 
-def _require_tool_runtime_seeded(route_ports: HostRoutePorts) -> int:
-    """Require the composition-owned catalog; HTTP routes never build services."""
+def _get_broker(route_ports: HostRoutePorts) -> Any:
+    provider = route_ports.tool_broker_provider
+    broker = provider() if provider is not None else None
+    if broker is None or not callable(getattr(broker, "readiness_snapshot", None)):
+        raise RuntimeError("ToolBroker provider not configured")
+    return broker
 
-    tools = _get_catalog(route_ports).list_all()
-    if not tools:
-        raise RuntimeError("TOOL_RUNTIME_NOT_COMPOSED")
-    return len(tools)
+
+def _tool_runtime_readiness(route_ports: HostRoutePorts) -> dict[str, Any]:
+    """Reopen exact Catalog↔Broker readiness; metadata alone is insufficient."""
+
+    catalog = _get_catalog(route_ports)
+    broker = _get_broker(route_ports)
+    readiness = dict(broker.readiness_snapshot())
+    catalog_ids = tuple(tool.id for tool in catalog.list_all())
+    if tuple(readiness.get("catalog_ids") or ()) != catalog_ids:
+        raise RuntimeError("TOOL_RUNTIME_READINESS_DRIFT")
+    return readiness
+
+
+def _require_tool_runtime_seeded(route_ports: HostRoutePorts) -> int:
+    readiness = _tool_runtime_readiness(route_ports)
+    status = str(readiness.get("status") or "")
+    if status not in {"READY", "FAIL_CLOSED_NO_GOVERNED_EXECUTOR"}:
+        raise RuntimeError(str(readiness.get("status") or "TOOL_RUNTIME_NOT_COMPOSED"))
+    return len(tuple(readiness.get("catalog_ids") or ()))
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +128,9 @@ class ToolHealthResponse(BaseModel):
     catalog_size: int = Field(..., description="已注册工具数量")
     write_tools: int = Field(..., description="WRITE 工具数量")
     read_tools: int = Field(..., description="READ 工具数量")
+    registered_tools: int = Field(..., description="具有 Broker 注册记录的工具数量")
+    governed_executable_tools: int = Field(..., description="已接真实 governed executor 的工具数量")
+    readiness: str = Field(..., description="Catalog 与 Broker 的精确就绪状态")
     request_id: str = Field(..., description="请求 ID")
     timestamp: int = Field(..., description="响应时间戳（毫秒）")
 
@@ -140,16 +149,22 @@ async def tool_health(
 
     try:
         catalog = _get_catalog(_route_ports)
-        _require_tool_runtime_seeded(_route_ports)
         all_tools = catalog.list_all()
+        readiness = _tool_runtime_readiness(_route_ports)
         write_count = sum(1 for t in all_tools if t.side_effect_level == "WRITE")
         read_count = len(all_tools) - write_count
+        readiness_status = str(readiness.get("status") or "UNSEEDED")
 
         return ToolHealthResponse(
-            status="OK",
+            status="OK" if readiness_status == "READY" else "DEGRADED",
             catalog_size=len(all_tools),
             write_tools=write_count,
             read_tools=read_count,
+            registered_tools=len(tuple(readiness.get("registered_ids") or ())),
+            governed_executable_tools=len(
+                tuple(readiness.get("governed_executable_ids") or ())
+            ),
+            readiness=readiness_status,
             request_id=request_id,
             timestamp=ts_ms,
         )
@@ -160,6 +175,9 @@ async def tool_health(
             catalog_size=0,
             write_tools=0,
             read_tools=0,
+            registered_tools=0,
+            governed_executable_tools=0,
+            readiness=str(exc),
             request_id=request_id,
             timestamp=ts_ms,
         )
@@ -297,95 +315,56 @@ async def get_tool_meta(
 
 
 # ---------------------------------------------------------------------------
-# POST /tools/execute — 执行工具（经 ToolBroker 单入口）
+# POST /tools/execute — Secure Ingress → HostCommand → TaskGraph
 # ---------------------------------------------------------------------------
 
 async def execute_tool(
     body: ToolExecuteRequest,
+    request: Request,
     *,
     _route_ports: HostRoutePorts,
 ) -> ToolExecuteResponse:
-    """执行工具（经 ToolBroker 单入口 + WRITE token gating）。
+    """Authenticate and submit a frozen Tool node to the governed runtime.
 
-    - READ 工具：无需 approval_token_ref，直接执行
-    - WRITE 工具：必须提供 approval_token_ref，否则返回 403
-    - 所有执行均写入审计链（skill_exec_log）
+    The legacy token fields remain in the wire schema for compatibility, but
+    are never accepted as execution authority.  WRITE authority must be
+    derived by Governor/Review as a node-bound child grant.
     """
-    request_id = new_request_id()
-    ts_ms = int(time.time() * 1000)
-
     try:
         _require_tool_runtime_seeded(_route_ports)
-        broker = _get_broker(_route_ports)
+        provider = _route_ports.governed_tool_application_provider
+        application = provider() if provider is not None else None
+        if application is None or not callable(getattr(application, "execute", None)):
+            raise GovernedToolExecutionError(
+                503,
+                "GOVERNED_TOOL_RUNTIME_UNAVAILABLE",
+                "governed Tool application is not composed",
+            )
+        result = await application.execute(
+            body=body,
+            request=request,
+            raw_body=await request.body(),
+        )
+        return ToolExecuteResponse(**result)
+    except GovernedToolExecutionError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            headers={"X-Reason-Code": exc.reason_code},
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-    try:
-        result: ToolExecutionResult = broker.execute(
-            request_id=request_id,
-            intent_id=body.intent_id,
-            session_id=body.session_id,
-            seq=body.seq,
-            tool_id=body.tool_id,
-            args=body.args,
-            context=body.context,
-            approval_token_ref=body.approval_token_ref,
-            confirm_token_ref=body.confirm_token_ref,
-            thread_id=body.thread_id,
-            turn_id=body.turn_id,
-            ts_ms=ts_ms,
-        )
-
-        # WRITE 工具无 token → 403
-        if result.status == RESULT_REJECTED and result.result_code in (
-            "TOOL_TOKEN_MISSING",
-            "TOKEN_INVALID",
-            "CONFIRM_REQUIRED",
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=result.detail.get("result_digest", "write token required"),
-                headers={"X-Reason-Code": result.result_code},
-            )
-
-        # 工具不存在 → 404
-        if result.status == RESULT_REJECTED and result.result_code == TOOL_NOT_FOUND:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"tool not found: {body.tool_id}",
-                headers={"X-Reason-Code": TOOL_NOT_FOUND},
-            )
-
-        # 其他拒绝 → 422
-        if result.status == RESULT_REJECTED:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=result.detail.get("result_digest", "tool execution rejected"),
-                headers={"X-Reason-Code": result.result_code},
-            )
-
-        return ToolExecuteResponse(
-            status=result.status,
-            result_code=result.result_code,
-            tool_id=result.tool_id,
-            intent_id=result.intent_id,
-            evidence_ref=result.evidence_ref,
-            output=result.output,
-            reason_code=None,
-            detail=None,
-            request_id=request_id,
-            timestamp=ts_ms,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive boundary
         _logger.error(
-            "execute_tool failed: %s",
-            exc,
-            extra={"request_id": request_id, "tool_id": body.tool_id},
+            "execute_tool governed boundary failed: %s",
+            type(exc).__name__,
+            extra={"tool_id": body.tool_id},
         )
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail="governed Tool execution failed",
+            headers={"X-Reason-Code": "GOVERNED_TOOL_RESULT_INVALID"},
+        ) from exc
 
 
 def create_tool_router(route_ports: HostRoutePorts) -> APIRouter:

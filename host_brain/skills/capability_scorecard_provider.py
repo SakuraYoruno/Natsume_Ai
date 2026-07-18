@@ -72,6 +72,7 @@ class FederatedCapabilityScorecardProvider:
         self,
         *,
         skill_registry: Any,
+        tool_catalog: Any | None = None,
         mcp_registry: Any | None = None,
         pentest_get: Callable[[str], Any | None] | None = None,
         pentest_all: Callable[[], Iterable[Any]] | None = None,
@@ -82,6 +83,7 @@ class FederatedCapabilityScorecardProvider:
         if not callable(clock):
             raise ValueError("federated scorecard provider clock must be callable")
         self._skill_registry = skill_registry
+        self._tool_catalog = tool_catalog
         self._mcp_registry = mcp_registry
         self._pentest_get = pentest_get
         self._pentest_all = pentest_all
@@ -116,7 +118,17 @@ class FederatedCapabilityScorecardProvider:
             )
 
         skill = self._skill_registry.get(key)
-        return self._project_skill(skill) if skill is not None else None
+        if skill is not None:
+            return self._project_skill(skill)
+        catalog_get = getattr(self._tool_catalog, "get", None)
+        if callable(catalog_get):
+            try:
+                local_tool = catalog_get(key)
+            except KeyError:
+                local_tool = None
+            if local_tool is not None:
+                return self._project_local_tool(local_tool, capability_id=key)
+        return None
 
     def project_agent_runtime(
         self,
@@ -158,6 +170,17 @@ class FederatedCapabilityScorecardProvider:
             for skill in all_skills():
                 card = self.get(_text(getattr(skill, "skill_name", "")))
                 if card is not None:
+                    projected[card.capability_id] = card
+
+        list_tools = getattr(self._tool_catalog, "list_all", None)
+        if callable(list_tools):
+            for tool in list_tools():
+                capability_id = _text(getattr(tool, "id", ""))
+                if capability_id:
+                    card = self._project_local_tool(
+                        tool,
+                        capability_id=capability_id,
+                    )
                     projected[card.capability_id] = card
 
         list_mcp = getattr(self._mcp_registry, "list_all", None)
@@ -210,6 +233,42 @@ class FederatedCapabilityScorecardProvider:
         )
         card = scorecard_from_tool_meta(meta, maturity_level=level, generated_at_ms=generated)
         return replace(card, evidence=(_baseline_evidence(card, observed_at_ms=generated),))
+
+    def _project_local_tool(
+        self,
+        meta: Any,
+        *,
+        capability_id: str,
+    ) -> CapabilityScorecard:
+        """Project composition-owned ToolCatalog entries without MCP identity.
+
+        A local registration location is not maturity evidence.  ToolCatalog
+        entries therefore use the same new/provider-capability L2/L1 ceiling
+        as other ToolMeta sources; promotion still requires Lab evidence and
+        Review through the versioned maturity authority.
+        """
+
+        generated = int(self._clock())
+        provisional = scorecard_from_tool_meta(
+            meta,
+            capability_id=capability_id,
+            maturity_level=0,
+            generated_at_ms=generated,
+        )
+        level = _baseline_level(
+            canonical_risk=provisional.canonical_risk,
+            source_kind=SOURCE_TOOL_META,
+        )
+        card = scorecard_from_tool_meta(
+            meta,
+            capability_id=capability_id,
+            maturity_level=level,
+            generated_at_ms=generated,
+        )
+        return replace(
+            card,
+            evidence=(_baseline_evidence(card, observed_at_ms=generated),),
+        )
 
     def _project_pentest(self, descriptor: Any) -> CapabilityScorecard:
         generated = int(self._clock())

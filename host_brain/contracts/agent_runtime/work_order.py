@@ -57,6 +57,7 @@ ALLOWED_AGENT_DOMAINS = {
     "translation",
     "creative",
     "skill",
+    "tool",
     "immune",
     "evolution",
     "organ_ops",

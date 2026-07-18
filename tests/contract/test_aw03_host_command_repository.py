@@ -31,6 +31,10 @@ from host_brain.persistence.host_command_repository import (
     HostCommandRepository,
     HostCommandRepositoryError,
 )
+from host_brain.persistence.worker_projection_repository import (
+    WORKER_PROJECTION_SCHEMA_VERSION,
+    WorkerProjectionStore,
+)
 import host_brain.persistence.host_command_repository as repository_module
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
@@ -202,6 +206,198 @@ def _insert_committed_claim(
                 claim_ref,
                 NOW,
             ),
+        )
+
+
+def _tool_admission(
+    *,
+    claim_ref: str,
+    audit_ref: str,
+) -> tuple[HostCommand, WorkOrderV3, ExecutorAssignment, TaskGraph]:
+    work_order = WorkOrderV3(
+        work_order_id="work-order-aw03-tool",
+        domain="tool",
+        run_mode="inspect",
+        objective="execute the admitted governed Tool command",
+        input_pack={
+            "input_ref": "tool-input://request-aw03-tool",
+            "intent_draft": {"route": "tool", "target_id": "read_status"},
+        },
+        allowed_actions=("tool:read_status",),
+        forbidden_actions=(),
+        acceptance_criteria=("tool result verified",),
+        root_work_order_id="work-order-aw03-tool",
+        task_graph_id="graph-aw03-tool",
+        task_node_id="node-aw03-tool",
+        graph_revision=1,
+        budget_policy=BudgetPolicy(
+            scope="work-order:work-order-aw03-tool",
+            limits=BudgetAmount(
+                token_count=0,
+                tool_call_count=1,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=1,
+                model_cost_micros=0,
+            ),
+        ),
+        business_idempotency_scope="host-tool:read_status",
+        operation_fingerprint=_sha256("aw03-tool-operation"),
+    )
+    node = TaskNode(
+        node_id="node-aw03-tool",
+        dependencies=(),
+        route="tool",
+        input_refs=("tool-input://request-aw03-tool",),
+        output_contract={"type": "tool_result"},
+        retry_policy={"max_attempts": 1},
+        risk_level=1,
+        acceptance_criteria=("tool result verified",),
+        status=TaskNodeStatus.READY,
+        status_version=0,
+    )
+    graph = TaskGraph(
+        graph_id="graph-aw03-tool",
+        root_work_order_id=work_order.work_order_id,
+        revision=1,
+        planner_ref="planner://host-command/aw03/tool",
+        status=TaskGraphStatus.CREATED,
+        created_at=NOW,
+        nodes=(node,),
+    )
+    assignment = ExecutorAssignment(
+        work_order_id=work_order.work_order_id,
+        executor=TaskExecutor.CANONICAL,
+        assignment_id="runtime-assignment://work-order-aw03-tool/canonical",
+        assigned_at_ms=NOW,
+        is_new_task=True,
+        reason_code="RUNTIME_NEW_TASK_CANONICAL",
+    )
+    command = build_host_command(
+        surface=HostCommandSurface.TOOL,
+        request_id="request-aw03-tool",
+        session_id="session-aw03-tool",
+        principal_id="principal-aw03-tool",
+        ingress_claim_ref=claim_ref,
+        ingress_audit_ref=audit_ref,
+        governor_grant_ref="governor-grant://aw03/tool",
+        input_ref="tool-input://request-aw03-tool",
+        input_sha256=_sha256("aw03-tool-input"),
+        root_work_order_id=work_order.work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        route_type="tool",
+        target_id="read_status",
+        business_scope="host-tool:read_status",
+        operation_fingerprint=_sha256("aw03-tool-operation"),
+        created_at_ms=NOW,
+    )
+    return command, work_order, assignment, graph
+
+
+def _insert_tool_claim(
+    db_path: Path,
+    *,
+    claim_ref: str,
+    audit_ref: str,
+    result_ref: str | None = None,
+) -> None:
+    input_digest = _sha256("aw03-tool-input").removeprefix("sha256:")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO secure_ingress_idempotency_claim(
+                principal_id, surface, idempotency_digest, action,
+                required_scopes_json, request_id, body_sha256, claim_ref,
+                result_ref, claim_status, provisional_expires_at_ms,
+                claimed_at_ms, updated_at_ms, expires_at_ms
+            ) VALUES (?, 'host.tool', ?, 'host:tool', '["host:write"]', ?, ?, ?, ?,
+                      'COMMITTED', NULL, ?, ?, ?)
+            """,
+            (
+                "principal-aw03-tool",
+                _sha256("wire-tool-idempotency"),
+                "request-aw03-tool",
+                input_digest,
+                claim_ref,
+                result_ref,
+                NOW,
+                NOW,
+                NOW + 60_000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO secure_ingress_audit(
+                audit_ref, request_id, correlation_id, surface, action, method,
+                normalized_path, principal_id, tenant_id, key_id,
+                credential_kind, credential_ref_digest, requested_scopes_json,
+                required_scopes_json, body_sha256, idempotency_digest,
+                nonce_digest, transport_key_digest, decision, reason_code,
+                stage, claim_ref, rate_snapshot_json, side_effects_executed, ts_ms
+            ) VALUES (?, 'request-aw03-tool', NULL, 'host.tool', 'host:tool', 'POST',
+                      '/tools/execute', 'principal-aw03-tool', 'tenant-aw03',
+                      'key-aw03-tool', 'HMAC_SHA256', ?, '["host:write"]',
+                      '["host:write"]', ?, ?, ?, ?, 'ALLOW',
+                      'SECURE_INGRESS_ALLOWED', 'COMPLETE', ?, '{}', 0, ?)
+            """,
+            (
+                audit_ref,
+                _sha256("credential-tool-ref"),
+                input_digest,
+                _sha256("wire-tool-idempotency"),
+                _sha256("tool-nonce"),
+                _sha256("tool-transport"),
+                claim_ref,
+                NOW,
+            ),
+        )
+
+
+def _set_tool_terminal(
+    db_path: Path,
+    *,
+    graph_status: str = "FAILED",
+    node_status: str = "FAILED",
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        graph_row = conn.execute(
+            """
+            SELECT graph_json FROM task_runtime_graph
+            WHERE graph_id = 'graph-aw03-tool' AND revision = 1
+            """
+        ).fetchone()
+        node_row = conn.execute(
+            """
+            SELECT node_json FROM task_runtime_node
+            WHERE graph_id = 'graph-aw03-tool' AND graph_revision = 1
+              AND node_id = 'node-aw03-tool'
+            """
+        ).fetchone()
+        assert graph_row is not None and node_row is not None
+        graph_payload = json.loads(graph_row[0])
+        node_payload = json.loads(node_row[0])
+        graph_payload["status"] = graph_status
+        graph_payload["status_version"] = 1
+        node_payload["status"] = node_status
+        node_payload["status_version"] = 1
+        graph_payload["nodes"] = [node_payload]
+        conn.execute(
+            """
+            UPDATE task_runtime_node
+            SET status = ?, status_version = 1, node_json = ?, updated_ts_ms = ?
+            WHERE graph_id = 'graph-aw03-tool' AND graph_revision = 1
+              AND node_id = 'node-aw03-tool'
+            """,
+            (node_status, json.dumps(node_payload, sort_keys=True), NOW + 1),
+        )
+        conn.execute(
+            """
+            UPDATE task_runtime_graph
+            SET status = ?, status_version = 1, graph_json = ?, updated_ts_ms = ?
+            WHERE graph_id = 'graph-aw03-tool' AND revision = 1
+            """,
+            (graph_status, json.dumps(graph_payload, sort_keys=True), NOW + 1),
         )
 
 
@@ -493,3 +689,140 @@ def test_aw03_tampered_typed_json_fails_closed_on_read(tmp_path: Path) -> None:
         repository.get(command.command_id)
 
     assert error.value.reason_code == HOST_COMMAND_DURABLE_DATA_INVALID
+
+
+def test_tool_command_id_duplicate_requires_exact_nonworker_terminal_lineage(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    claim_ref = "secure-ingress-claim://aw03/tool/nonworker"
+    audit_ref = "secure-ingress-audit://aw03/tool/nonworker"
+    _insert_tool_claim(db_path, claim_ref=claim_ref, audit_ref=audit_ref)
+    command, work_order, assignment, graph = _tool_admission(
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    repository.admit(command, work_order, assignment, graph)
+    _set_tool_terminal(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_idempotency_claim
+            SET result_ref = ?, updated_at_ms = ?
+            WHERE claim_ref = ?
+            """,
+            (command.command_id, NOW + 2, claim_ref),
+        )
+
+    first = repository.validate_ingress_claim_result(command.command_id)
+    duplicate = HostCommandRepository(
+        db_path,
+        clock=lambda: NOW + 3,
+    ).validate_ingress_claim_result(command.command_id)
+
+    assert first["command"].command_id == command.command_id
+    assert duplicate["command"].command_id == command.command_id
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_worker_projection
+            WHERE command_id = ?
+            """,
+            (command.command_id,),
+        ).fetchone()[0] == 0
+
+
+def test_tool_verifier_failure_replays_approve_projection_with_terminal_lineage(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    claim_ref = "secure-ingress-claim://aw03/tool/verifier-failed"
+    audit_ref = "secure-ingress-audit://aw03/tool/verifier-failed"
+    _insert_tool_claim(db_path, claim_ref=claim_ref, audit_ref=audit_ref)
+    command, work_order, assignment, graph = _tool_admission(
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    repository.admit(command, work_order, assignment, graph)
+    attempt_id = "attempt://aw03/tool/verifier-failed"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms, error_ref
+            ) VALUES (?, 'graph-aw03-tool', 1, 'node-aw03-tool', 1,
+                      'FAILED', 3, 'worker-aw03-tool', 'host-tool:read_status',
+                      ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                _sha256("aw03-tool-operation"),
+                NOW,
+                NOW,
+                NOW,
+                NOW + 1,
+                NOW + 1,
+                "verification://aw03/tool/failed",
+            ),
+        )
+    projection_ref = "worker-projection://aw03/tool/verifier-failed"
+    projection_body = {
+        "phase": "COMMIT",
+        "done": True,
+        # Worker execution succeeded; the independent verifier failed later.
+        "decision": "APPROVE",
+        "reason_code": None,
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "narrative": "worker completed before verifier rejection",
+        "route_type": "tool",
+        "target_id": "read_status",
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": "node-aw03-tool",
+        "attempt_id": attempt_id,
+        "node_grant_ref": "governor-decision://aw03/tool/child",
+        "audit_refs": {"verification_ref": "verification://aw03/tool/failed"},
+    }
+    projection = {
+        **projection_body,
+        "projection_id": projection_ref,
+        "payload_digest": _sha256(
+            json.dumps(
+                projection_body,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        ),
+        "schema_version": WORKER_PROJECTION_SCHEMA_VERSION,
+    }
+    WorkerProjectionStore(db_path, clock=lambda: NOW + 1).stage(
+        projection_id=projection_ref,
+        projection=projection,
+    )
+    _set_tool_terminal(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_idempotency_claim
+            SET result_ref = ?, updated_at_ms = ?
+            WHERE claim_ref = ?
+            """,
+            (projection_ref, NOW + 2, claim_ref),
+        )
+
+    first = repository.validate_ingress_claim_result(command.command_id)
+    duplicate = HostCommandRepository(
+        db_path,
+        clock=lambda: NOW + 3,
+    ).validate_ingress_claim_result(command.command_id)
+
+    assert first["command"].command_id == command.command_id
+    assert duplicate["command"].command_id == command.command_id
+    assert WorkerProjectionStore(db_path).get(projection_ref)["decision"] == "APPROVE"

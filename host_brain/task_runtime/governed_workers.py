@@ -167,8 +167,8 @@ class GovernedFrozenNodeWorker:
         action_preview_service: Any | None = None,
     ) -> None:
         kind = str(route_kind or "").strip().lower()
-        if kind not in {"chat", "delegate"}:
-            raise ValueError("route_kind must be chat or delegate")
+        if kind not in {"chat", "delegate", "tool"}:
+            raise ValueError("route_kind must be chat, delegate or tool")
         if not callable(getattr(executor, "execute_stream", None)):
             raise ValueError("executor.execute_stream is required")
         if not callable(getattr(node_grants, "verify", None)):
@@ -212,7 +212,7 @@ class GovernedFrozenNodeWorker:
             fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
-        preview = self._preview_delegate(
+        preview = self._preview_action(
             command=command,
             work_order=work_order,
             frozen=frozen,
@@ -321,7 +321,7 @@ class GovernedFrozenNodeWorker:
             },
         }
 
-    def _preview_delegate(
+    def _preview_action(
         self,
         *,
         command: HostCommand,
@@ -329,7 +329,9 @@ class GovernedFrozenNodeWorker:
         frozen: FrozenNodeInput,
         verified_grant: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        if self._route_kind != "delegate":
+        if self._route_kind not in {"delegate", "tool"}:
+            return None
+        if self._route_kind == "tool" and frozen.node_risk_level < 3:
             return None
         pack = dict(work_order.input_pack or {})
         if pack.get("runtime_context_schema") != "natsume.runtime-context.request.v1":
@@ -346,17 +348,51 @@ class GovernedFrozenNodeWorker:
                 "governed Delegate has no app-local ActionPreview authority",
             )
         try:
+            action_args = {
+                "objective_digest": "sha256:"
+                + hashlib.sha256(frozen.objective.encode("utf-8")).hexdigest(),
+                "input_refs": list(frozen.input_refs),
+            }
+            if self._route_kind == "tool":
+                intent = pack.get("intent_draft")
+                if not isinstance(intent, Mapping):
+                    raise GovernedNodeWorkerError(
+                        GOVERNED_NODE_GRANT_INVALID,
+                        "governed Tool Preview requires its frozen intent projection",
+                    )
+                if (
+                    str(intent.get("route") or "").strip().lower() != "tool"
+                    or str(intent.get("target_id") or "").strip()
+                    != frozen.target_id
+                    or not isinstance(intent.get("tool_binding"), Mapping)
+                    or not intent.get("tool_binding")
+                ):
+                    raise GovernedNodeWorkerError(
+                        GOVERNED_NODE_GRANT_INVALID,
+                        "governed Tool Preview route/target differs from the TaskNode",
+                    )
+                # Bind the actual immutable execution payload, not merely the
+                # objective.  The WorkOrder freezer already rejected
+                # authority-bearing/sensitive fields before this point.
+                action_args = {
+                    "tool_id": frozen.target_id,
+                    "args": _json_copy(dict(intent.get("args") or {})),
+                    "context": _json_copy(dict(intent.get("context") or {})),
+                    "tool_binding": _json_copy(
+                        dict(intent.get("tool_binding") or {})
+                    ),
+                }
             kwargs = {
-                "action_kind": "delegate.dispatch",
+                "action_kind": (
+                    "delegate.dispatch"
+                    if self._route_kind == "delegate"
+                    else "tool.execute"
+                ),
                 "action_scope": frozen.target_id,
                 # The initial pentest adapter is read-only, but the domain is
                 # security-sensitive and therefore keeps the high-risk gate.
                 "risk_level": frozen.node_risk_level,
-                "action_args": {
-                    "objective_digest": "sha256:"
-                    + hashlib.sha256(frozen.objective.encode("utf-8")).hexdigest(),
-                    "input_refs": list(frozen.input_refs),
-                },
+                "action_args": action_args,
                 "context_pack_digest": context_pack_digest_from_work_order(work_order),
                 "scene_identity": action_preview_scene_identity(
                     dict(pack.get("scene_identity_v2") or {})
@@ -367,7 +403,11 @@ class GovernedFrozenNodeWorker:
                 "parent_governor_grant_ref": frozen.parent_grant_ref,
                 "node_grant_ref": frozen.node_grant_ref,
                 "node_grant": dict(verified_grant),
-                "guardian_capability_id": f"delegate_{frozen.target_id}".lower(),
+                "guardian_capability_id": (
+                    f"delegate_{frozen.target_id}"
+                    if self._route_kind == "delegate"
+                    else frozen.target_id
+                ).lower(),
                 "authority_context": build_node_authority_context(
                     command=command,
                     execution_context={
@@ -376,7 +416,11 @@ class GovernedFrozenNodeWorker:
                         "lease_owner_id": frozen.lease_owner_id,
                         "fencing_token": frozen.fencing_token,
                     },
-                    purpose="delegate.dispatch",
+                    purpose=(
+                        "delegate.dispatch"
+                        if self._route_kind == "delegate"
+                        else "tool.execute"
+                    ),
                 ),
             }
             issued = service.issue_receipt(**kwargs)

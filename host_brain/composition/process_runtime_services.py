@@ -373,10 +373,15 @@ def get_capability_scorecard_provider(
     current_skill_registry = getattr(
         _container().capability_scorecard_provider, "_skill_registry", None
     )
+    current_tool_catalog = getattr(
+        _container().capability_scorecard_provider, "_tool_catalog", None
+    )
     current_mcp_registry = getattr(_container().capability_scorecard_provider, "_mcp_registry", None)
+    tool_catalog = get_tool_catalog()
     if (
         _container().capability_scorecard_provider is None
         or current_skill_registry is not registry
+        or current_tool_catalog is not tool_catalog
         or current_mcp_registry is not mcp_registry
     ):
         def _get_pentest_tool(tool_id: str):
@@ -391,6 +396,7 @@ def get_capability_scorecard_provider(
 
         _container().capability_scorecard_provider = FederatedCapabilityScorecardProvider(
             skill_registry=registry,
+            tool_catalog=tool_catalog,
             mcp_registry=mcp_registry,
             pentest_get=_get_pentest_tool,
             pentest_all=_all_pentest_tools,

@@ -719,6 +719,7 @@ def build_process_task_runtime_container(
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
     reconciliation_public_keys: Mapping[str, bytes] | None = None,
     terminal_reconciliation_auto_enabled: bool = False,
+    authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
 ) -> ProcessTaskRuntimeContainer:
     """Migrate and construct one fail-closed durable infrastructure graph."""
 
@@ -792,7 +793,14 @@ def build_process_task_runtime_container(
         constructed.append(("review_continuation_store", review_continuation_store))
         worker_projection_store = worker_projection_store_builder(canonical)
         constructed.append(("worker_projection_store", worker_projection_store))
-        command_repository = command_repository_builder(canonical)
+        command_repository = (
+            command_repository_builder(
+                canonical,
+                authenticated_outcome_lookup=authenticated_outcome_lookup,
+            )
+            if authenticated_outcome_lookup is not None
+            else command_repository_builder(canonical)
+        )
         constructed.append(("command_repository", command_repository))
         agent_result_repository = agent_result_repository_builder(canonical)
         constructed.append(("agent_result_repository", agent_result_repository))

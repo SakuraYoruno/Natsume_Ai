@@ -15,12 +15,21 @@ from natsume_contracts.task import HostCommand, HostCommandSurface
 _SURFACE_RUNTIME = {
     HostCommandSurface.CHAT.value: "host",
     HostCommandSurface.HOST_INPUT.value: "host",
+    HostCommandSurface.TOOL.value: "host",
     HostCommandSurface.GATEWAY.value: "host",
     HostCommandSurface.INTERNAL.value: "internal_agent",
     HostCommandSurface.SCHEDULER.value: "scheduler",
+    # Governed Operator commands reuse the owning domain runtime.  The first
+    # production slice is scheduler.task.trigger, whose frozen node is still
+    # executed by the canonical Scheduler worker/coordinator.
+    HostCommandSurface.OPERATOR.value: "scheduler",
 }
 _CLAIM_COMPLETION_SURFACES = frozenset(
-    {HostCommandSurface.INTERNAL.value, HostCommandSurface.SCHEDULER.value}
+    {
+        HostCommandSurface.INTERNAL.value,
+        HostCommandSurface.SCHEDULER.value,
+        HostCommandSurface.TOOL.value,
+    }
 )
 _WAITING_REVIEW_STATUSES = frozenset(
     {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"}

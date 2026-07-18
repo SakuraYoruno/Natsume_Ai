@@ -23,12 +23,6 @@ TRIBE_EVENTS_KIND = "tribe_events"
 TRIBE_EVENTS_INDEX_KEY = "index"
 SESSION_KIND = "session"
 SESSION_INDEX_KEY = "index"
-def get_query_projection_worker() -> QueryProjectionWorker:
-    from host_brain.composition.process_services import get_query_projection_store
-
-    return QueryProjectionWorker(get_query_projection_store())
-
-
 def projection_meta(
     kind: str,
     key: str,
@@ -304,7 +298,6 @@ __all__ = [
     "TRACE_FEED_INDEX_KEY",
     "TRIBE_EVENTS_KIND",
     "TRIBE_EVENTS_INDEX_KEY",
-    "get_query_projection_worker",
     "trace_source",
     "projection_meta",
     "refresh_task_projections",

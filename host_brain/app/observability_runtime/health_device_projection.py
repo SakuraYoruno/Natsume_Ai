@@ -289,26 +289,6 @@ def load_health_projection_sources(
     return service_payload, node_payload, cursor
 
 
-def refresh_health_query_projections() -> dict[str, int]:
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
-
-    service_payload, node_payload, cursor = load_health_projection_sources(get_ledger())
-    store = get_query_projection_store()
-    for kind, key, payload in (
-        (SERVICE_HEALTH_KIND, SERVICE_HEALTH_KEY, service_payload),
-        (LLM_NODE_HEALTH_KIND, LLM_NODE_HEALTH_KEY, node_payload),
-    ):
-        store.upsert(
-            kind,
-            key,
-            payload,
-            source_cursor=cursor,
-            source_digest=digest_json(payload),
-            source_ref="health-passive-background-worker",
-        )
-    return {"service_count": len(service_payload["services"]), "node_count": len(node_payload["nodes"])}
-
-
 _PUBLIC_EVENT_FIELDS = frozenset(
     {
         "action", "available", "behavior_id", "component", "connected",
@@ -410,23 +390,6 @@ def load_device_status_projection_sources(
             if current is None or cursor >= current[1]:
                 sources[key] = (dict(payload), cursor)
     return sources
-
-
-def refresh_device_status_query_projections() -> dict[str, int]:
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
-
-    sources = load_device_status_projection_sources(get_ledger())
-    store = get_query_projection_store()
-    for key, (payload, cursor) in sources.items():
-        store.upsert(
-            DEVICE_STATUS_KIND,
-            key,
-            payload,
-            source_cursor=cursor,
-            source_digest=digest_json(payload),
-            source_ref="embodiment-receipt-background-worker",
-        )
-    return {"device_count": len(sources)}
 
 
 def _state_metrics(snapshot: Mapping[str, Any], *, agent_id: str) -> dict[str, Any]:
@@ -627,35 +590,6 @@ def load_organ_tribe_projection_source(
     )
 
 
-def refresh_organ_tribe_query_projection() -> dict[str, int]:
-    from host_brain.composition.process_services import get_query_projection_store
-    from host_brain.app.obs_host_proxy import fetch_host_json
-
-    payload, cursor = load_organ_tribe_projection_source(
-        host_state_loader=lambda: fetch_host_json("/internal/tribe_state/all", timeout_s=1.5),
-        scheduler_loader=lambda: fetch_host_json("/scheduler/health", timeout_s=1.5),
-    )
-    get_query_projection_store().upsert(
-        ORGAN_TRIBE_KIND,
-        ORGAN_TRIBE_KEY,
-        payload,
-        source_cursor=cursor,
-        source_digest=digest_json(payload),
-        source_ref="organ-tribe-process-background-worker",
-        degraded_state=(
-            ProjectionDegradedState.HEALTHY
-            if int(payload.get("active_agents") or 0) > 0
-            else ProjectionDegradedState.SOURCE_UNAVAILABLE
-        ),
-        degraded_detail=(
-            None
-            if int(payload.get("active_agents") or 0) > 0
-            else "no Host Organ-Tribe process state was observable"
-        ),
-    )
-    return {"agent_count": len(payload["agents"])}
-
-
 def read_projection_payload(
     store: QueryProjectionStore,
     *,
@@ -676,6 +610,5 @@ __all__ = [
     "SERVICE_HEALTH_KEY", "SERVICE_HEALTH_KIND", "load_device_status_projection_sources",
     "build_organ_tribe_public_snapshot", "load_health_projection_sources",
     "load_organ_tribe_projection_source",
-    "read_projection_payload", "refresh_device_status_query_projections",
-    "refresh_health_query_projections", "refresh_organ_tribe_query_projection",
+    "read_projection_payload",
 ]

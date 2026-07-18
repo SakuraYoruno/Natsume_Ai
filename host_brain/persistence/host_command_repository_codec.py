@@ -395,9 +395,11 @@ def digest(serialized: str) -> str:
 def secure_ingress_surface(command_surface: str) -> str:
     return {
         "host_input": "host.input",
+        "tool": "host.tool",
         "gateway": "gateway.webhook",
         "internal": "internal.agent",
         "scheduler": "scheduler.admin",
+        "operator": "obs.command",
     }.get(str(command_surface), str(command_surface))
 
 

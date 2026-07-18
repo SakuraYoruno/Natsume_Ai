@@ -46,6 +46,10 @@ from host_brain.app.governed_route_executors import (
     FrozenChatRouteExecutor,
     FrozenDelegateRouteExecutor,
 )
+from host_brain.app.governed_tool_runtime import (
+    FrozenToolRouteExecutor,
+    ToolHostRequest,
+)
 from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateDispatchError,
 )
@@ -248,6 +252,103 @@ class GovernedHostRuntime:
             ).strip()
         )
 
+    async def replay_tool_stream(
+        self,
+        *,
+        request_id: str,
+        target_id: str,
+        session_id: str,
+        principal_id: str,
+        command_authority: Mapping[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Replay one exact Secure-Ingress Tool admission without re-governing.
+
+        Secure Ingress has already established that the duplicate body is
+        byte-identical.  This method reopens only the canonical HostCommand;
+        it never invokes Governor, ToolCatalog selection or ToolBroker itself.
+        """
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting Tool replays",
+                )
+            self._in_flight += 1
+        try:
+            request_ref = str(request_id or "").strip()
+            target = str(target_id or "").strip()
+            session = str(session_id or "").strip()
+            principal = str(principal_id or "").strip()
+            authority = dict(command_authority or {})
+            record = self._command_repository.get_by_request(
+                surface=HostCommandSurface.TOOL.value,
+                request_id=request_ref,
+            )
+            if not isinstance(record, Mapping):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "duplicate Tool ingress has no durable HostCommand",
+                )
+            command = record.get("command")
+            validate_claim = getattr(
+                self._command_repository,
+                "validate_ingress_claim_result",
+                None,
+            )
+            if isinstance(command, HostCommand) and callable(validate_claim):
+                record = validate_claim(command.command_id)
+                command = record.get("command")
+            work_order = record.get("work_order")
+            assignment = record.get("assignment")
+            graph = record.get("graph")
+            body_digest = str(authority.get("body_sha256") or "").strip().lower()
+            if body_digest and not body_digest.startswith("sha256:"):
+                body_digest = "sha256:" + body_digest
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.TOOL
+                or command.request_id != request_ref
+                or command.route_type != "tool"
+                or command.target_id != target
+                or command.session_id != session
+                or command.principal_id != principal
+                or command.ingress_claim_ref
+                != str(authority.get("ingress_claim_ref") or "").strip()
+                or command.ingress_audit_ref
+                != str(authority.get("ingress_audit_ref") or "").strip()
+                or command.input_sha256 != body_digest
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "duplicate Tool ingress differs from its canonical command",
+                )
+            intent = work_order.input_pack.get("intent_draft")
+            if (
+                not isinstance(intent, Mapping)
+                or str(intent.get("route") or "").strip().lower() != "tool"
+                or str(intent.get("target_id") or "").strip() != target
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "durable Tool WorkOrder route binding is invalid",
+                )
+            async for event in self._application.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            ):
+                yield await self._dispatch_accepted_effects(event)
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+
     async def request_graph_cancellation(
         self,
         record: Mapping[str, Any],
@@ -274,6 +375,7 @@ class GovernedHostRuntime:
                 not in {
                     HostCommandSurface.CHAT,
                     HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
                 }
             ):
@@ -336,6 +438,23 @@ class GovernedHostRuntime:
                     "an approved official Governor decision is required",
                 )
             route = str(intent_draft.get("route") or "").strip().lower()
+            if route == "tool":
+                authority = dict(command_authority or {})
+                ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
+                surface = _resolve_host_command_surface(
+                    request_body=request_body,
+                    authority=authority,
+                )
+                if (
+                    not isinstance(request_body, ToolHostRequest)
+                    or surface is not HostCommandSurface.TOOL
+                    or not ingress_claim_ref
+                    or not ingress_audit_ref
+                ):
+                    raise GovernedHostAdapterError(
+                        GOVERNED_HOST_AUTHORITY_INVALID,
+                        "Tool route requires the server-owned TOOL surface and exact Secure Ingress claim/audit",
+                    )
             frozen_context = _build_frozen_context(
                 request_body=request_body,
                 surface_user_message=sanitized_message,
@@ -574,6 +693,7 @@ class GovernedHostRuntime:
                 not in {
                     HostCommandSurface.CHAT,
                     HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
                 }
                 or not isinstance(work_order, WorkOrderV3)
@@ -761,6 +881,8 @@ def build_governed_host_runtime(
     resource_manager: Any | None,
     episodic_store: Any | None,
     semantic_recaller: Any | None,
+    tool_broker: Any | None = None,
+    tool_catalog: Any | None = None,
     cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
@@ -819,6 +941,12 @@ def build_governed_host_runtime(
     )
     chat_worker = None
     delegate_worker = None
+    tool_worker = None
+    if (tool_broker is None) != (tool_catalog is None):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "ToolBroker and ToolCatalog must be composed together",
+        )
     if projection_store is not None:
         route_execution_ports = build_governed_route_execution_ports(
             governed_delegate_dispatcher=delegate_dispatcher,
@@ -842,10 +970,23 @@ def build_governed_host_runtime(
             projections=projection_store,
             action_preview_service=action_preview_service,
         )
+        if tool_broker is not None and tool_catalog is not None:
+            tool_worker = GovernedFrozenNodeWorker(
+                route_kind="tool",
+                executor=FrozenToolRouteExecutor(
+                    broker=tool_broker,
+                    catalog=tool_catalog,
+                    ledger=ledger,
+                ),
+                node_grants=node_grant_verifier,
+                projections=projection_store,
+                action_preview_service=action_preview_service,
+            )
     worker_registry = GovernedWorkerRegistry(
         chat=chat_worker,
         skill=canonical,
         delegate=delegate_worker,
+        tool=tool_worker,
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
@@ -912,6 +1053,7 @@ def build_governed_host_runtime(
         supported_routes=frozenset(
             {"skill"}
             | ({"chat", "delegate"} if projection_store is not None else set())
+            | ({"tool"} if tool_worker is not None else set())
         ),
         planning_enabled=projection_store is not None,
         acceptance_effect_dispatcher=effect_dispatcher,

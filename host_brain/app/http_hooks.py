@@ -53,6 +53,30 @@ def _startup_status_is_degraded(value: Any) -> bool:
     return startup_status_is_degraded(value)
 
 
+def _tool_runtime_startup_status(
+    *,
+    seeded_count: int,
+    readiness: Mapping[str, Any],
+) -> str:
+    """Project executable Tool readiness, not Catalog presence alone."""
+
+    status_value = str(readiness.get("status") or "UNSEEDED").strip().upper()
+    catalog_ids = tuple(readiness.get("catalog_ids") or ())
+    registered_ids = tuple(readiness.get("registered_ids") or ())
+    executable_ids = tuple(readiness.get("governed_executable_ids") or ())
+    exact_seed = int(seeded_count) == len(catalog_ids) == len(registered_ids)
+    if status_value == "READY" and exact_seed and executable_ids:
+        return (
+            f"OK ({len(catalog_ids)} tools registered, "
+            f"{len(executable_ids)} governed executors)"
+        )
+    return (
+        f"DEGRADED: {status_value} "
+        f"(seeded={int(seeded_count)}, catalog={len(catalog_ids)}, "
+        f"registered={len(registered_ids)}, governed_executors={len(executable_ids)})"
+    )
+
+
 def _build_world_canon_reader(*, ledger: Any) -> Any:
     """Bind the startup Canon reader to the process canonical ledger."""
 
@@ -342,14 +366,16 @@ def runtime_lifespan(
                     seed_production_tool_runtime,
                 )
 
+                tool_broker = get_tool_broker()
                 tool_seed = seed_production_tool_runtime(
                     catalog=get_tool_catalog(),
-                    broker=get_tool_broker(),
+                    broker=tool_broker,
                     skill_registry=get_skill_registry(),
                     lifecycle_ports=lifecycle_ports,
                 )
-                new_module_statuses["tool_runtime_catalog"] = (
-                    f"OK ({tool_seed.count} tools registered by composition)"
+                new_module_statuses["tool_runtime_catalog"] = _tool_runtime_startup_status(
+                    seeded_count=tool_seed.count,
+                    readiness=tool_broker.readiness_snapshot(),
                 )
             except Exception as tool_seed_exc:
                 new_module_statuses["tool_runtime_catalog"] = (

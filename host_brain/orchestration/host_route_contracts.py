@@ -1,4 +1,4 @@
-"""Canonical one-node Host contracts for direct chat and delegate routes.
+"""Canonical one-node Host contracts for direct chat, delegate and tool routes.
 
 Complex plans are intentionally absent: they must enter through
 ``PlanningSearchService`` and ``PlanningGraphCompiler``.  This module only
@@ -29,7 +29,14 @@ from host_brain.contracts.agent_runtime.task_graph import (
     validate_task_graph_admission_state,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from host_brain.orchestration.governor_grant import governor_grant_ref
+from host_brain.orchestration.governor_grant import (
+    durable_governor_binding,
+    governor_grant_ref,
+)
+from host_brain.governor.route_token import (
+    RouteTokenDisposition,
+    validate_governor_route_token,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
 
@@ -37,7 +44,7 @@ HOST_ROUTE_CONTRACT_INVALID = "HOST_ROUTE_CONTRACT_INVALID"
 HOST_ROUTE_AUTHORITY_INVALID = "HOST_ROUTE_AUTHORITY_INVALID"
 HOST_ROUTE_UNSUPPORTED = "HOST_ROUTE_UNSUPPORTED"
 
-_SUPPORTED = frozenset({"chat", "delegate"})
+_SUPPORTED = frozenset({"chat", "delegate", "tool"})
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
 _SENSITIVE_KEY = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|cookie|credential|password|"
@@ -61,6 +68,14 @@ _BUDGETS = {
         concurrency=1,
         retry_count=1,
         model_cost_micros=1_000_000,
+    ),
+    "tool": BudgetAmount(
+        token_count=0,
+        tool_call_count=1,
+        time_ms=120_000,
+        concurrency=1,
+        retry_count=1,
+        model_cost_micros=0,
     ),
 }
 
@@ -135,7 +150,16 @@ def build_direct_host_route_contracts(
     if route not in _SUPPORTED:
         raise HostRouteContractError(
             HOST_ROUTE_UNSUPPORTED,
-            "direct contract builder accepts only chat or delegate",
+            "direct contract builder accepts only chat, delegate or tool",
+        )
+    if route == "tool" and (
+        surface is not HostCommandSurface.TOOL
+        or not _text(ingress_claim_ref)
+        or not _text(ingress_audit_ref)
+    ):
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "Tool contracts require the TOOL surface and exact Secure Ingress claim/audit",
         )
     target_id = (
         "surface_reply"
@@ -182,9 +206,52 @@ def build_direct_host_route_contracts(
             "route": route,
             "target_id": target,
             "safe_args": _safe_json(dict(intent_draft.get("args") or {}), path="intent.args"),
+            "safe_context": (
+                _safe_json(
+                    dict(intent_draft.get("context") or {}),
+                    path="intent.context",
+                )
+                if route == "tool"
+                else {}
+            ),
+            "tool_binding": (
+                _safe_json(
+                    dict(intent_draft.get("tool_binding") or {}),
+                    path="intent.tool_binding",
+                )
+                if route == "tool"
+                else {}
+            ),
         }
     )
-    review_ref = f"review-waiver://governor-grant/{suffix}"
+    durable_review_required = False
+    if route == "tool":
+        route_authority = validate_governor_route_token(governor)
+        if route_authority.disposition not in {
+            RouteTokenDisposition.ALLOW,
+            RouteTokenDisposition.PAUSE,
+        }:
+            raise HostRouteContractError(
+                HOST_ROUTE_AUTHORITY_INVALID,
+                "Tool Governor route token is not executable",
+            )
+        durable_review_required = (
+            route_authority.disposition is RouteTokenDisposition.PAUSE
+        )
+        caller_review_flag = intent_draft.get("durable_review_required")
+        if (
+            caller_review_flag is not None
+            and caller_review_flag is not durable_review_required
+        ):
+            raise HostRouteContractError(
+                HOST_ROUTE_AUTHORITY_INVALID,
+                "Tool durable Review flag differs from Governor route authority",
+            )
+    review_ref = (
+        f"review-required://tool/{suffix}"
+        if durable_review_required
+        else f"review-waiver://governor-grant/{suffix}"
+    )
     objective = _text(intent_draft.get("task") or message)[:_MAX_TEXT]
     node_binding = {
         "candidate_id": f"direct-{route}-{suffix}",
@@ -222,6 +289,15 @@ def build_direct_host_route_contracts(
         ).lower(),
         "args": _safe_json(dict(intent_draft.get("args") or {}), path="intent.args"),
     }
+    if route == "tool":
+        intent_projection["context"] = _safe_json(
+            dict(intent_draft.get("context") or {}),
+            path="intent.context",
+        )
+        intent_projection["tool_binding"] = _safe_json(
+            dict(intent_draft.get("tool_binding") or {}),
+            path="intent.tool_binding",
+        )
     frozen = _safe_json(dict(frozen_context or {}), path="frozen_context")
     if not isinstance(frozen, Mapping):
         raise HostRouteContractError(
@@ -246,7 +322,13 @@ def build_direct_host_route_contracts(
         )
     work_order = WorkOrderV3(
         work_order_id=root_id,
-        domain="chat" if route == "chat" else _delegate_domain(intent_draft, target),
+        domain=(
+            "chat"
+            if route == "chat"
+            else "tool"
+            if route == "tool"
+            else _delegate_domain(intent_draft, target)
+        ),
         run_mode="worker",
         objective=objective,
         input_pack={
@@ -260,7 +342,13 @@ def build_direct_host_route_contracts(
             "emotion_context": _safe_json(dict(emotion_context or {}), path="emotion_context"),
             "render_target_lang": _text(render_target_lang or "zh")[:16],
         },
-        allowed_actions=(("render_reply",) if route == "chat" else (f"delegate:{target}",)),
+        allowed_actions=(
+            ("render_reply",)
+            if route == "chat"
+            else (f"tool:{target}",)
+            if route == "tool"
+            else (f"delegate:{target}",)
+        ),
         forbidden_actions=("reroute", "replan", "cross_executor_resume"),
         acceptance_criteria=("frozen worker returned a durable accepted projection",),
         verification_plan={"required": True, "policy": "durable_worker_projection"},
@@ -269,14 +357,25 @@ def build_direct_host_route_contracts(
             "governor_grant_ref": grant_ref,
             "on_missing": "BLOCK",
         },
-        review_policy={
-            "review_required": False,
-            "durable_review_required": False,
-            "mode": "governor_grant_review_waiver",
-            "reason": "explicit_low_risk_direct_route_waiver",
-            "waiver_authority": "governor_grant",
-            "waiver_ref": review_ref,
-        },
+        review_policy=(
+            {
+                "review_required": True,
+                "durable_review_required": True,
+                "mode": "pre_execution_durable_review",
+                "reason": "governor_airlock_tool_requires_operator_review",
+                "review_ref": review_ref,
+                "frozen_tool_binding": intent_projection.get("tool_binding"),
+            }
+            if durable_review_required
+            else {
+                "review_required": False,
+                "durable_review_required": False,
+                "mode": "governor_grant_review_waiver",
+                "reason": "explicit_low_risk_direct_route_waiver",
+                "waiver_authority": "governor_grant",
+                "waiver_ref": review_ref,
+            }
+        ),
         metadata={
             "surface": surface.value,
             "direct_route": True,
@@ -295,7 +394,7 @@ def build_direct_host_route_contracts(
         task_node_id=node_id,
         graph_revision=1,
         capability_requirements=(("surface_reply",) if route == "chat" else (target,)),
-        risk_level=max(1, min(5, int(governor.get("risk_level") or 1))),
+        risk_level=_governor_risk(governor),
         input_refs=(input_ref, grant_ref),
         output_contract=output_contract,
         budget_policy=budget,
@@ -372,6 +471,17 @@ def _delegate_domain(intent: Mapping[str, Any], target: str) -> str:
     if "research" in target_lower or "intent" in target_lower:
         return "research"
     return "research"
+
+
+def _governor_risk(governor: Mapping[str, Any]) -> int:
+    binding = durable_governor_binding(governor)
+    raw = binding.get("risk_level") if binding else governor.get("risk_level")
+    if isinstance(raw, bool):
+        return 5
+    try:
+        return max(1, min(5, int(raw)))
+    except (TypeError, ValueError):
+        return 5
 
 
 def _safe_json(value: Any, *, path: str) -> Any:

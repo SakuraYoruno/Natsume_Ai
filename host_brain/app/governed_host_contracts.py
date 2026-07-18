@@ -144,6 +144,8 @@ def _resolve_host_command_surface(
     else:
         raw_source = getattr(request_body, "input_source", None)
     source = str(raw_source or "").strip().upper()
+    if source == "TOOL":
+        return HostCommandSurface.TOOL
     return (
         HostCommandSurface.GATEWAY
         if source == "GATEWAY"

@@ -21,6 +21,15 @@ from host_brain.tools.contracts import ToolSpec
 logger = logging.getLogger(__name__)
 
 
+REACT_SKILL_GOVERNED_ADMISSION_REQUIRED = (
+    "REACT_SKILL_GOVERNED_ADMISSION_REQUIRED"
+)
+REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED = (
+    "REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED"
+)
+_REACT_NON_EXECUTABLE_TOOL_IDS = frozenset({"run_skill", "dispatch_sub_agent"})
+
+
 # ---------------------------------------------------------------------------
 # ToolSpec：工具规格定义
 # ---------------------------------------------------------------------------
@@ -638,8 +647,22 @@ def _tool_list_skills(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_run_skill(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute a registered skill through the governed runtime path."""
-    payload, ctx = _split_runtime_context(args)
+    """Reject the retired ReAct Skill executor before any effect is attempted.
+
+    A ReAct action is an untrusted proposal produced *inside* an Agent worker.
+    It does not own HostCommand admission and therefore cannot prove an
+    immutable TaskGraph revision, a node-bound grant, a Budget reservation, a
+    Review continuation, Verification, Acceptance, or an Effect Receipt.  The
+    outer application must turn the requested action into a new governed Host
+    command; executing it here would restore the legacy nested-execution
+    authority that NE-01 removes.
+
+    The compatibility executor remains registered only so stale callers get a
+    stable, explicit fail-closed result instead of silently falling through to
+    the old private Skill executor.
+    """
+
+    payload, _ctx = _split_runtime_context(args)
     skill_name = str(
         payload.get("skill_name")
         or payload.get("skill_id")
@@ -650,82 +673,32 @@ def _tool_run_skill(args: dict[str, Any]) -> dict[str, Any]:
     ).strip()
     if not skill_name:
         return {"error": "MISSING_SKILL_NAME", "result": None}
-
-    task_text = str(
-        payload.get("task_text")
-        or payload.get("task")
-        or payload.get("query")
-        or payload.get("text")
-        or ""
-    ).strip()
-    user_message = str(payload.get("user_message") or task_text or "").strip()
-    skill_args = payload.get("args")
-    if not isinstance(skill_args, dict):
-        skill_args = {}
-    if not skill_args:
-        skill_args = {
-            "query": task_text or user_message,
-            "text": task_text or user_message,
-            "user_message": user_message,
-        }
-
-    request_id = str(payload.get("request_id") or ctx.get("request_id") or f"react_req_{int(time.time() * 1000)}").strip()
-    session_id = str(payload.get("session_id") or ctx.get("session_id") or "").strip()
-    person_id = str(payload.get("person_id") or ctx.get("person_id") or "default").strip() or "default"
-    intent_id = str(payload.get("intent_id") or "").strip() or None
-    governor_result = ctx.get("governor_result")
-    if not isinstance(governor_result, dict):
-        governor_result = {"decision": "APPROVE", "tokens": {}}
-    else:
-        governor_result = dict(governor_result)
-        governor_result.setdefault("decision", "APPROVE")
-
-    try:
-        from host_brain.app.runtime_port_wiring import (  # noqa: PLC0415
-            build_executive_runtime_application_ports,
-        )
-        from host_brain.executive_runtime.skill_execution import _execute_skill  # noqa: PLC0415
-
-        outcome = _execute_skill(
-            ports=build_executive_runtime_application_ports(),
-            request_body={"args": skill_args},
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            intent_id=intent_id,
-            skill_id=skill_name,
-            task_text=task_text or user_message,
-            user_message=user_message,
-            governor_result=governor_result,
-            intent_draft=dict(ctx.get("intent_draft") or {}),
-            emotion_context=dict(ctx.get("emotion_context") or {}),
-            render_target_lang=str(
-                payload.get("render_target_lang")
-                or ctx.get("render_target_lang")
-                or "zh-CN"
-            ),
-        )
-        return {
-            "result": outcome.result_text or outcome.error_text or "",
-            "status": "SUCCESS" if outcome.success else "FAILED",
-            "success": bool(outcome.success),
-            "skill_name": skill_name,
-            "skill_family": outcome.skill_family,
-            "route_type": outcome.route_type,
-            "latency_ms": int(outcome.latency_ms or 0),
-            "error": outcome.error_text or None,
-        }
-    except Exception as exc:
-        logger.warning("_tool_run_skill failed: %s", exc)
-        return {
-            "error": f"RUN_SKILL_ERROR:{type(exc).__name__}:{exc}",
-            "result": None,
-        }
+    return {
+        "error": REACT_SKILL_GOVERNED_ADMISSION_REQUIRED,
+        "reason_code": REACT_SKILL_GOVERNED_ADMISSION_REQUIRED,
+        "status": "BLOCKED",
+        "success": False,
+        "result": None,
+        "skill_name": skill_name,
+        "execution_surface": "HostCommand -> immutable TaskGraph",
+        "side_effects_executed": False,
+        "required_authority": [
+            "host_command",
+            "immutable_task_graph",
+            "node_bound_grant",
+            "budget_reservation",
+            "review_continuation",
+            "verification",
+            "acceptance",
+            "effect_receipt",
+        ],
+    }
 
 
 def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
-    """Dispatch task to another sub-agent and return its execution result."""
-    payload, ctx = _split_runtime_context(args)
+    """Reject nested Delegate execution outside canonical Host admission."""
+
+    payload, _ctx = _split_runtime_context(args)
     agent_id = str(
         payload.get("agent_id")
         or payload.get("target_id")
@@ -743,70 +716,26 @@ def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "MISSING_AGENT_ID", "result": None}
     if not task_text:
         return {"error": "MISSING_TASK", "result": None}
-    if agent_id == "intent_agent":
-        return {"error": "SUB_AGENT_SELF_CALL_BLOCKED", "result": None}
-
-    timeout_ms = int(payload.get("timeout_ms") or os.environ.get("HOST_SUBAGENT_DISPATCH_TIMEOUT_MS") or 90_000)
-    timeout_ms = max(1_000, min(timeout_ms, 300_000))
-    request_id = str(payload.get("request_id") or ctx.get("request_id") or f"react_req_{int(time.time() * 1000)}").strip()
-    session_id = str(payload.get("session_id") or ctx.get("session_id") or "").strip()
-    user_message = str(payload.get("user_message") or task_text).strip()
-
-    sub_ctx = dict(ctx)
-    if isinstance(payload.get("context"), dict):
-        sub_ctx.update(dict(payload.get("context") or {}))
-    sub_ctx.setdefault("source", "intent_agent_tool_dispatch")
-    try:
-        from host_brain.app.sub_agent_context import hydrate_sub_agent_context  # noqa: PLC0415
-
-        sub_ctx = hydrate_sub_agent_context(
-            sub_ctx,
-            request_id=request_id,
-            session_id=session_id,
-            task=task_text,
-            user_message=user_message,
-            agent_id=agent_id,
-            parent_agent_id=str(ctx.get("agent_id") or "intent_agent"),
-            timeout_ms=timeout_ms,
-        )
-    except Exception:
-        pass
-
-    try:
-        from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
-            SubAgentRequest,
-            get_sub_agent_dispatcher,
-        )
-
-        dispatcher = get_sub_agent_dispatcher()
-        response = _run_async(
-            dispatcher.dispatch(
-                SubAgentRequest(
-                    agent_id=agent_id,
-                    task=task_text,
-                    user_message=user_message,
-                    request_id=request_id,
-                    session_id=session_id,
-                    context=sub_ctx,
-                    timeout_ms=timeout_ms,
-                )
-            )
-        )
-        return {
-            "result": str(response.result or response.error or "").strip(),
-            "status": "SUCCESS" if response.success else "FAILED",
-            "success": bool(response.success),
-            "agent_id": agent_id,
-            "latency_ms": int(response.latency_ms or 0),
-            "error": str(response.error or "").strip() or None,
-            "audit_refs": dict(response.audit_refs or {}),
-        }
-    except Exception as exc:
-        logger.warning("_tool_dispatch_sub_agent failed: %s", exc)
-        return {
-            "error": f"DISPATCH_SUB_AGENT_ERROR:{type(exc).__name__}:{exc}",
-            "result": None,
-        }
+    return {
+        "error": REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED,
+        "reason_code": REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED,
+        "status": "BLOCKED",
+        "success": False,
+        "result": None,
+        "agent_id": agent_id,
+        "execution_surface": "HostCommand -> immutable TaskGraph",
+        "side_effects_executed": False,
+        "required_authority": [
+            "host_command",
+            "immutable_task_graph",
+            "node_bound_grant",
+            "budget_reservation",
+            "review_continuation",
+            "verification",
+            "acceptance",
+            "effect_receipt",
+        ],
+    }
 
 
 def _tool_emotion_history_search(args: dict[str, Any]) -> dict[str, Any]:
@@ -994,8 +923,11 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
     ),
     "run_skill": ToolSpec(
         tool_id="run_skill",
-        display_name="Run Skill",
-        description="Execute a registered skill and return audited execution result.",
+        display_name="Request governed Skill execution",
+        description=(
+            "Legacy compatibility boundary. ReAct cannot execute Skills; the outer "
+            "application must admit a new immutable TaskGraph."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -1012,8 +944,11 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
     ),
     "dispatch_sub_agent": ToolSpec(
         tool_id="dispatch_sub_agent",
-        display_name="Dispatch Sub Agent",
-        description="Delegate execution to another sub-agent and return sub-agent result.",
+        display_name="Request governed Delegate execution",
+        description=(
+            "Legacy compatibility boundary. ReAct cannot dispatch another Agent; "
+            "the outer application must admit a new immutable TaskGraph."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -1129,8 +1064,6 @@ _AGENT_TOOLS: dict[str, list[str]] = {
         "get_context",
         "list_skills",
         "analyze_code",
-        "run_skill",
-        "dispatch_sub_agent",
     ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
     "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
@@ -1169,7 +1102,11 @@ def _resolve_intent_dynamic_tool_ids(*, allow_side_effects: bool) -> list[str]:
 
     include_readonly = _parse_bool_env("INTENT_AUTO_INCLUDE_READONLY_TOOLS", default=False)
     for tool_id in sorted(_TOOL_REGISTRY):
-        if tool_id in denylist or tool_id in tool_ids:
+        if (
+            tool_id in denylist
+            or tool_id in tool_ids
+            or tool_id in _REACT_NON_EXECUTABLE_TOOL_IDS
+        ):
             continue
         spec = _TOOL_REGISTRY.get(tool_id)
         if spec is None or spec.executor is None:

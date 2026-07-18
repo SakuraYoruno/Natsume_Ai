@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.app.agents.tool_registry import (
+    REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED,
+    REACT_SKILL_GOVERNED_ADMISSION_REQUIRED,
     ToolSpec,
     execute_tool,
     is_tool_allowed,
@@ -576,7 +578,18 @@ def _tool_specs_to_lc_tools(
         def _make_func(s: ToolSpec, c: dict, aid: str, ase: bool) -> Any:
             def _fn(**kwargs: Any) -> Any:
                 if not is_tool_allowed(s.tool_id, aid, allow_side_effects=ase):
-                    return {"error": f"TOOL_NOT_ALLOWED:{s.tool_id}", "result": None}
+                    reason = {
+                        "run_skill": REACT_SKILL_GOVERNED_ADMISSION_REQUIRED,
+                        "dispatch_sub_agent": (
+                            REACT_DELEGATE_GOVERNED_ADMISSION_REQUIRED
+                        ),
+                    }.get(s.tool_id, f"TOOL_NOT_ALLOWED:{s.tool_id}")
+                    return {
+                        "error": reason,
+                        "reason_code": reason,
+                        "result": None,
+                        "side_effects_executed": False,
+                    }
                 runtime_args = dict(kwargs)
                 if c:
                     runtime_args["_react_context"] = dict(c)

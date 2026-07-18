@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from threading import RLock
 from typing import Any
 
 
@@ -70,21 +71,25 @@ class ToolCatalog:
     """In-memory metadata registry used by context/tool selector contracts."""
 
     def __init__(self, tools: list[ToolMeta] | None = None) -> None:
+        self._lock = RLock()
         self._tools: dict[str, ToolMeta] = {}
         for tool in tools or []:
             self.register(tool)
 
     def register(self, tool: ToolMeta | dict[str, Any]) -> None:
         meta = tool if isinstance(tool, ToolMeta) else ToolMeta.from_dict(tool)
-        self._tools[meta.id] = meta
+        with self._lock:
+            self._tools[meta.id] = meta
 
     def get(self, tool_id: str) -> ToolMeta:
-        if tool_id not in self._tools:
-            raise KeyError(f"tool not found: {tool_id}")
-        return self._tools[tool_id]
+        with self._lock:
+            if tool_id not in self._tools:
+                raise KeyError(f"tool not found: {tool_id}")
+            return self._tools[tool_id]
 
     def list_all(self) -> list[ToolMeta]:
-        return [self._tools[tool_id] for tool_id in sorted(self._tools.keys())]
+        with self._lock:
+            return [self._tools[tool_id] for tool_id in sorted(self._tools.keys())]
 
     def export_meta(self, *, include_write: bool = True) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

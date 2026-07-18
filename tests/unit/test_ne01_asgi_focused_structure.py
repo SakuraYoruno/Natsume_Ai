@@ -6,6 +6,7 @@ from host_brain.app import asgi
 from host_brain.app import host_life_scheduler_wiring
 from host_brain.app import host_runtime_context_wiring
 from host_brain.app import host_runtime_startup_guards
+from host_brain.app import tool_runtime_composition
 
 
 def test_asgi_composition_root_and_focused_helpers_stay_below_large_file_gate() -> None:
@@ -13,6 +14,11 @@ def test_asgi_composition_root_and_focused_helpers_stay_below_large_file_gate() 
     assert len(inspect.getsource(host_life_scheduler_wiring).splitlines()) < 1_500
     assert len(inspect.getsource(host_runtime_context_wiring).splitlines()) < 1_500
     assert len(inspect.getsource(host_runtime_startup_guards).splitlines()) < 1_500
+    assert len(inspect.getsource(tool_runtime_composition).splitlines()) < 1_500
+    assert (
+        "host_brain.composition.process_services"
+        not in inspect.getsource(tool_runtime_composition)
+    )
 
 
 def test_asgi_keeps_lifespan_state_and_reverse_close_order_in_one_scope() -> None:
@@ -42,6 +48,7 @@ def test_focused_helpers_do_not_own_asgi_lifecycle() -> None:
         host_life_scheduler_wiring,
         host_runtime_context_wiring,
         host_runtime_startup_guards,
+        tool_runtime_composition,
     ):
         source = inspect.getsource(module)
         assert "def create_app" not in source

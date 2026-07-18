@@ -84,12 +84,10 @@ from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
-from host_brain.app.governed_task_adapter import (
-    GovernedHostRuntime,
-    build_governed_host_runtime,
+from host_brain.app.tool_runtime_composition import (
+    GovernedHostToolRuntimeComposition,
+    GovernedHostToolRuntimeDependencies,
 )
-from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
-from host_brain.app.production_authority import verify_durable_production_authority
 from host_brain.app.internal_agent_ingress import InternalAgentIngress
 from host_brain.app.internal_task_runtime import (
     GovernedInternalRuntime,
@@ -145,7 +143,6 @@ from host_brain.composition.tribe_runtime import require_process_tribe_runtime
 from host_brain.runtime.context_application import (
     RuntimeContextApplicationService,
 )
-from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
 from host_brain.runtime.production_composition import (
     RuntimeContextComposition,
 )
@@ -269,7 +266,17 @@ def create_app() -> FastAPI:
     memory_container: ProcessMemoryContainer | None = None
     task_runtime_container: ProcessTaskRuntimeContainer | None = None
     agent_workspace_container: workspace.ProcessAgentWorkspaceContainer | None = None
-    governed_host_runtime: GovernedHostRuntime | None = None
+    tool_composition = GovernedHostToolRuntimeComposition(
+        GovernedHostToolRuntimeDependencies(
+            skill_registry=get_skill_registry,
+            token_service=get_token_service,
+            capability_broker=get_capability_broker,
+            resource_manager=get_resource_manager,
+            tool_broker=get_tool_broker,
+            tool_catalog=get_tool_catalog,
+            intent_engine=get_intent_engine,
+        )
+    )
     governed_internal_runtime: GovernedInternalRuntime | None = None
     internal_agent_command_service: InternalAgentCommandService | None = None
     task_review_command_service: TaskReviewCommandService | None = None
@@ -307,9 +314,6 @@ def create_app() -> FastAPI:
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
-
-    def governed_command_application_provider() -> GovernedHostRuntime | None:
-        return governed_host_runtime
 
     def degradation_capability_port_provider() -> Any | None:
         current = runtime_context_composition
@@ -350,6 +354,7 @@ def create_app() -> FastAPI:
         canon_service_provider=canon_service_provider,
         tool_broker_provider=get_tool_broker,
         tool_catalog_provider=get_tool_catalog,
+        governed_tool_application_provider=tool_composition.provide_tool_application,
         bond_engine_provider=resolve_bond_engine,
         bond_writer_provider=get_bond_dynamics_writer,
         mode_transition_service_provider=mode_transition_service_provider,
@@ -401,7 +406,7 @@ def create_app() -> FastAPI:
             request_body,
             request,
             metrics,
-            governed_command_application=governed_command_application_provider(),
+            governed_command_application=tool_composition.provide_runtime(),
         )
 
     async def chat_endpoint_with_runtime(
@@ -460,7 +465,7 @@ def create_app() -> FastAPI:
     async def app_lifespan(application: FastAPI):
         nonlocal security_container, command_ingress_container
         nonlocal memory_container
-        nonlocal task_runtime_container, governed_host_runtime
+        nonlocal task_runtime_container
         nonlocal agent_workspace_container
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal task_review_command_service
@@ -569,6 +574,17 @@ def create_app() -> FastAPI:
                     "domain_mode": "domain",
                 }
                 runtime_settings = get_core_settings()
+                authenticated_outcome_lookup = None
+                if security is not None:
+                    obs_composition = security.obs_command_composition
+                    outcome_journal = (
+                        obs_composition.outcome_journal
+                        if obs_composition is not None
+                        else None
+                    )
+                    lookup = getattr(outcome_journal, "lookup", None)
+                    if callable(lookup):
+                        authenticated_outcome_lookup = lookup
                 task_runtime = build_process_task_runtime_container(
                     ledger=ledger,
                     canonical_db_path=str(
@@ -584,6 +600,7 @@ def create_app() -> FastAPI:
                             False,
                         )
                     ),
+                    authenticated_outcome_lookup=authenticated_outcome_lookup,
                 )
                 # Digital Life repositories are migration-gated.  The task
                 # runtime owns canonical migration application, so Life must
@@ -900,40 +917,17 @@ def create_app() -> FastAPI:
                 agent_workspace_container = workspace.compose_agent_workspace_application_scope(
                     application, task_runtime, runtime_settings, canonical_owner
                 )
-                governed_skill_resource_manager = get_resource_manager(
-                    create_if_missing=False,
-                )
-                governed_skill_episodic_store = episodic_projection_store
-                governed_skill_semantic_recaller = host_obs_semantic_recaller
-                governed_runtime = build_governed_host_runtime(
-                    task_runtime_container=task_runtime,
+                governed_runtime = tool_composition.activate(
+                    task_runtime=task_runtime,
                     ledger=ledger,
-                    skill_registry=get_skill_registry(),
-                    token_service=get_token_service(),
-                    capability_broker=get_capability_broker(),
-                    model_attempt_service=ApplicationModelAttemptServicePort(),
-                    production_authority_verifier=verify_durable_production_authority,
-                    resource_manager=governed_skill_resource_manager,
-                    episodic_store=governed_skill_episodic_store,
-                    semantic_recaller=governed_skill_semantic_recaller,
-                    cancellation_authority_verifier=cancellation_authority_verifier,
-                    runtime_router=CanonicalRuntimeRouter(),
+                    command_ingress=command_ingress,
                     owner_id=canonical_owner,
-                    bounded_fanout_enabled=runtime_settings.task_runtime_bounded_fanout_enabled,
-                    atomic_graph_success_enabled=runtime_settings.task_runtime_atomic_graph_success_enabled,
+                    runtime_settings=runtime_settings,
                     runtime_context_application=runtime_context_application,
-                    intent_admission_verifier=DurableIntentAdmissionVerifier(
-                        authority_port=(
-                            runtime_context_composition.intent_authority_port
-                        ),
-                        intent_arbiter=runtime_context_composition.intent_arbiter,
-                        event_store=runtime_context_composition.event_store,
-                        review_store=task_runtime.review_store,
-                    ),
-                    degradation_capability_port=(
-                        runtime_context_composition.guardian
-                    ),
+                    cancellation_authority_verifier=cancellation_authority_verifier,
                     action_preview_service=action_preview_service,
+                    episodic_store=episodic_projection_store,
+                    semantic_recaller=host_obs_semantic_recaller,
                 )
                 canonical_agent_executor_kwargs: dict[str, Any] = {
                     "model_attempt_service": get_model_attempt_service(),
@@ -1238,7 +1232,6 @@ def create_app() -> FastAPI:
                 await task_runtime.activate_runtime()
                 await scheduler.activate_clock()
                 task_runtime_container = task_runtime
-                governed_host_runtime = governed_runtime
                 governed_internal_runtime = internal_runtime
                 internal_agent_command_service = InternalAgentCommandService(
                     runtime=internal_runtime,
@@ -1296,7 +1289,7 @@ def create_app() -> FastAPI:
                 internal_agent_command_service = None
                 task_review_command_service = None
                 governed_internal_runtime = None
-                governed_host_runtime = None
+                tool_composition.clear()
                 task_runtime_container = None
                 memory_container = None
                 command_ingress_container = None
@@ -1433,9 +1426,7 @@ def create_app() -> FastAPI:
         signed_skill_provider_intake_provider=(
             signed_skill_provider_intake_provider
         ),
-        governed_command_application_provider=(
-            governed_command_application_provider
-        ),
+        governed_command_application_provider=tool_composition.provide_runtime,
         internal_agent_ingress_provider=internal_agent_ingress_provider,
         internal_agent_command_service_provider=(
             internal_agent_command_service_provider
