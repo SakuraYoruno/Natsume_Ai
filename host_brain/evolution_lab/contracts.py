@@ -116,6 +116,20 @@ class ExperimentRunReceiptV1:
             raise EvolutionLabContractError("Evolution Lab runs cannot produce production side effects")
         object.__setattr__(self, "production_side_effects", False)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.evolution-lab.experiment-run-receipt.v1",
+            "run_id": self.run_id,
+            "spec_digest": self.spec_digest,
+            "variant": self.variant,
+            "status": self.status,
+            "evidence_digest": self.evidence_digest,
+            "outcome": _json_copy(self.outcome),
+            "cost": _json_copy(self.cost),
+            "risk": _json_copy(self.risk),
+            "production_side_effects": False,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class CounterfactualPairV1:
@@ -138,6 +152,17 @@ class CounterfactualPairV1:
             normalized = {str(key): float(item) for key, item in value.items()}
             object.__setattr__(self, name, normalized)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.evolution-lab.counterfactual-pair.v1",
+            "baseline_run_id": self.baseline_run_id,
+            "alternative_run_id": self.alternative_run_id,
+            "outcome_delta": _json_copy(self.outcome_delta),
+            "evidence_delta": _json_copy(self.evidence_delta),
+            "cost_delta": _json_copy(self.cost_delta),
+            "risk_delta": _json_copy(self.risk_delta),
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class ExperimentReportV1:
@@ -157,11 +182,21 @@ class ExperimentReportV1:
             raise EvolutionLabContractError("report run spec digest drift")
         if not all(isinstance(item, CounterfactualPairV1) for item in self.comparisons):
             raise EvolutionLabContractError("report comparisons are invalid")
-        computed = _json_digest({"report_id": self.report_id, "spec": self.spec.to_dict(), "runs": [item.run_id for item in self.runs], "comparisons": [item.__dict__ if hasattr(item, "__dict__") else {"baseline_run_id": item.baseline_run_id, "alternative_run_id": item.alternative_run_id} for item in self.comparisons]})
+        computed = _json_digest({"report_id": self.report_id, "spec": self.spec.to_dict(), "runs": [item.to_dict() for item in self.runs], "comparisons": [item.to_dict() for item in self.comparisons]})
         supplied = str(self.report_digest or "").strip().lower()
         if supplied and supplied != computed:
             raise EvolutionLabContractError("report_digest drift")
         object.__setattr__(self, "report_digest", computed)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.evolution-lab.experiment-report.v1",
+            "report_id": self.report_id,
+            "spec": self.spec.to_dict(),
+            "runs": [item.to_dict() for item in self.runs],
+            "comparisons": [item.to_dict() for item in self.comparisons],
+            "report_digest": self.report_digest,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +219,18 @@ class EvolutionProposalV1:
             raise EvolutionLabContractError("Evolution proposals require Review and cannot mutate production")
         object.__setattr__(self, "review_required", True)
         object.__setattr__(self, "production_influence_enabled", False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.evolution-lab.proposal.v1",
+            "proposal_id": self.proposal_id,
+            "report_digest": self.report_digest,
+            "target_kind": self.target_kind,
+            "target_version": self.target_version,
+            "rationale": self.rationale,
+            "review_required": True,
+            "production_influence_enabled": False,
+        }
 
 
 __all__ = [
