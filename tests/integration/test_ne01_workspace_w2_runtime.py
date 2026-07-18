@@ -12,6 +12,9 @@ import pytest
 
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.workspace_allocator import (
     ManagedGitSource,
@@ -21,7 +24,6 @@ from host_brain.agent_runtime.workspace_allocator import (
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.agent_runtime.workspace_runtime import (
     WORKSPACE_CLEANUP_UNAVAILABLE,
-    WORKSPACE_HEARTBEAT_LOST,
     WORKSPACE_RUNTIME_BINDING_INVALID,
     DurableWorkspaceRuntime,
     DurableWorkspaceRuntimeError,
@@ -266,7 +268,7 @@ def test_internal_admission_replaces_caller_workspace_with_server_graph_id() -> 
     assert "caller" not in str(canonical.workspace).lower()
 
 
-def test_production_executor_uses_server_authority_and_isolated_git_worktree(
+def test_production_executor_blocks_write_before_legacy_agent_worktree(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -291,6 +293,8 @@ def test_production_executor_uses_server_authority_and_isolated_git_worktree(
         runtime_owner=runtime_owner,
     )
 
+    executor_calls = 0
+
     class FakeAgentExecutor:
         def __init__(self, **_: object) -> None:
             pass
@@ -302,16 +306,9 @@ def test_production_executor_uses_server_authority_and_isolated_git_worktree(
             workspace: Path,
             cancelled=None,
         ) -> AgentResult:
-            assert candidate is order
-            assert callable(cancelled)
-            assert cancelled() is False
-            (workspace / "generated.txt").write_text("isolated\n", encoding="utf-8")
-            return AgentResult(
-                status="EXECUTED",
-                work_order_id=candidate.work_order_id,
-                summary="isolated write complete",
-                result_text="done",
-            )
+            nonlocal executor_calls
+            executor_calls += 1
+            raise AssertionError("proposal-only write reached AgentExecutor")
 
     monkeypatch.setattr("host_brain.agent_runtime.executor.AgentExecutor", FakeAgentExecutor)
     result = AgentRuntimeExecutor(
@@ -321,35 +318,27 @@ def test_production_executor_uses_server_authority_and_isolated_git_worktree(
         prompt_registry=object(),
     ).execute(order, workspace_execution_authority=dict(authority))
 
-    workspace = Path(result["metadata"]["workspace"])
-    assert result["status"] == "EXECUTED"
-    assert workspace.parent == managed.resolve()
-    assert (workspace / "generated.txt").read_text(encoding="utf-8") == "isolated\n"
+    assert result["status"] == "BLOCKED"
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result["acceptance"]["decision"] == "NOT_RUN"
+    assert result["verification"]["status"] == "NOT_RUN"
+    assert executor_calls == 0
+    assert "workspace" not in result["metadata"]
+    assert list(managed.rglob("generated.txt")) == []
     assert not (source / "generated.txt").exists()
     assert (source / "baseline.txt").read_text(encoding="utf-8") == "main baseline\n"
     assert _git(source, "branch", "--show-current") == "main"
-    assert _git(workspace, "branch", "--show-current").startswith("natsume-agent/workspace-")
-    durable_workspace = runtime.repository.get(
-        str(result["metadata"]["workspace_id"])
-    )
-    assert _git(workspace, "rev-parse", "HEAD") == durable_workspace.source_ref.rsplit(
-        "/", 1
-    )[-1]
-    # Successful write workspaces remain ACTIVE for review/promotion.  Only an
-    # explicit cleanup transition may remove them; startup resumes PENDING only.
-    assert durable_workspace.status == "ACTIVE"
     serialized_order = (tmp_path / "runs" / root_order / "work_order.json").read_text(encoding="utf-8")
     assert "workspace-lease-" not in serialized_order
     assert "lease_token" not in serialized_order
     with sqlite3.connect(db_path) as conn:
-        token_digest = conn.execute(
-            "SELECT lease_token_digest FROM agent_workspace_authority"
+        workspace_rows = conn.execute(
+            "SELECT COUNT(*) FROM agent_workspace_authority"
         ).fetchone()[0]
-    assert str(token_digest).startswith("sha256:")
-    assert "workspace-lease-" not in str(token_digest)
+    assert workspace_rows == 0
 
 
-def test_known_heartbeat_loss_blocks_post_summary_and_verification(
+def test_proposal_only_write_does_not_start_heartbeat_or_verification(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -372,7 +361,11 @@ def test_known_heartbeat_loss_blocks_post_summary_and_verification(
     )
     runtime.heartbeat_interval_s = 0.001
 
+    heartbeat_calls = 0
+
     def lose_heartbeat(*_args, **_kwargs):  # noqa: ANN202
+        nonlocal heartbeat_calls
+        heartbeat_calls += 1
         raise WorkspaceRepositoryError(
             WORKSPACE_STALE_FENCE,
             "simulated heartbeat authority loss",
@@ -446,9 +439,10 @@ def test_known_heartbeat_loss_blocks_post_summary_and_verification(
         ),
     )
 
-    assert result["status"] == "FAILED"
-    assert result["reason_code"] == WORKSPACE_HEARTBEAT_LOST
-    assert summary_calls == 1
+    assert result["status"] == "BLOCKED"
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert heartbeat_calls == 0
+    assert summary_calls == 0
     assert verification.calls == 0
 
 
@@ -1769,7 +1763,7 @@ def test_asgi_workspace_composition_missing_secret_keeps_writes_fail_closed(
         prompt_registry=object(),
     ).execute(_order(graph_id=graph_id, root_work_order_id=root_order))
     assert result["status"] == "BLOCKED"
-    assert result["reason_code"] == "WORKSPACE_WRITE_GRANT_REQUIRED"
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
     assert not (source / "generated.txt").exists()
 
 

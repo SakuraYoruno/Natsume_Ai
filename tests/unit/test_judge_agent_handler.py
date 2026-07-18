@@ -1,8 +1,7 @@
-"""Deterministic judge boundary and artifact-tool unit tests."""
+"""Deterministic judge boundary and proposal metadata tests."""
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -11,79 +10,15 @@ import pytest
 from host_brain.agent_runtime.agent_registry import AGENT_ID_JUDGE
 from host_brain.app.agents.tool_registry import (
     ToolSpec,
-    execute_tool,
     get_tools_for_agent,
     is_tool_allowed,
     _TOOL_REGISTRY,
     _AGENT_TOOLS,
-    _tool_evaluate_artifact,
-    _tool_compare_artifacts,
 )
 from host_brain.app.handlers.judge_agent_handler import (
     judge_agent_handler,
     _parse_judge_final_answer,
 )
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-def _make_gateway(final_answer: str = "selected_agent=agent_worker, confidence=0.85, reason=最高置信度") -> MagicMock:
-    """构造直接给出 final_answer 的 mock gateway。"""
-    gateway = MagicMock()
-    gateway.complete.return_value = {
-        "content": json.dumps(
-            {
-                "thought": "分析工件后选择最优",
-                "action_type": "final_answer",
-                "final_answer": final_answer,
-            },
-            ensure_ascii=False,
-        )
-    }
-    return gateway
-
-
-def _make_gateway_tool_then_answer(tool_name: str = "compare_artifacts") -> MagicMock:
-    """构造先调用工具再给出 final_answer 的 mock gateway（两步）。"""
-    gateway = MagicMock()
-    call_count = [0]
-
-    def _complete(messages):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return {
-                "content": json.dumps(
-                    {
-                        "thought": "先比较工件",
-                        "action_type": "tool_call",
-                        "action": {
-                            "tool": tool_name,
-                            "args": {
-                                "artifacts": {
-                                    "agent_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
-                                    "translate_agent": {"confidence": 0.60, "summary": "翻译结果", "risk_flags": []},
-                                }
-                            },
-                        },
-                    },
-                    ensure_ascii=False,
-                )
-            }
-        return {
-            "content": json.dumps(
-                {
-                    "thought": "比较完毕，agent_worker 最优",
-                    "action_type": "final_answer",
-                    "final_answer": "selected_agent=agent_worker, confidence=0.85, reason=最高置信度",
-                },
-                ensure_ascii=False,
-            )
-        }
-
-    gateway.complete.side_effect = _complete
-    return gateway
 
 
 def _make_payload(
@@ -170,175 +105,6 @@ class TestArtifactPolicyBoundary:
 
 
 # ---------------------------------------------------------------------------
-# 3.2 evaluate_artifact 工具
-# ---------------------------------------------------------------------------
-
-class TestEvaluateArtifactTool:
-    """验收 3.2：evaluate_artifact 工具有真实实现。"""
-
-    def test_basic_evaluation(self):
-        """正常工件返回 quality 和 score。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {
-                "confidence": 0.85,
-                "summary": "代码草案已生成",
-                "risk_flags": [],
-                "artifact_ref": "artifact://req/code_1",
-            },
-            "agent_id": "agent_worker",
-        })
-        assert "quality" in result
-        assert result["quality"] in {"HIGH", "MEDIUM", "LOW"}
-        assert "score" in result
-        assert 0.0 <= result["score"] <= 1.0
-
-    def test_high_confidence_high_quality(self):
-        """高置信度工件质量为 HIGH。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {"confidence": 0.9, "summary": "优质输出", "risk_flags": []},
-        })
-        assert result["quality"] == "HIGH"
-
-    def test_low_confidence_low_quality(self):
-        """低置信度工件质量为 LOW。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {"confidence": 0.1, "summary": "低质量", "risk_flags": []},
-        })
-        assert result["quality"] == "LOW"
-
-    def test_high_risk_score_zero(self):
-        """含 SAFETY_RISK:HIGH 标记时 score == 0.0。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {
-                "confidence": 0.9,
-                "summary": "危险输出",
-                "risk_flags": ["SAFETY_RISK:HIGH"],
-            },
-        })
-        assert result["score"] == 0.0
-
-    def test_error_artifact_score_zero(self):
-        """含 error 字段的工件 score == 0.0。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {
-                "confidence": 0.8,
-                "summary": "出错了",
-                "risk_flags": [],
-                "error": "HANDLER_ERROR",
-            },
-        })
-        assert result["score"] == 0.0
-        assert result["has_error"] is True
-
-    def test_missing_artifact_returns_error(self):
-        """缺少 artifact 参数时返回 error。"""
-        result = _tool_evaluate_artifact({})
-        assert "error" in result
-        assert result["error"] == "MISSING_ARTIFACT"
-
-    def test_result_text_nonempty(self):
-        """result 字段非空。"""
-        result = _tool_evaluate_artifact({
-            "artifact": {"confidence": 0.7, "summary": "测试", "risk_flags": []},
-        })
-        assert result.get("result")
-
-    def test_execute_tool_evaluate_artifact(self):
-        """通过 execute_tool 调用 evaluate_artifact 可正常执行。"""
-        result = execute_tool("evaluate_artifact", {
-            "artifact": {"confidence": 0.75, "summary": "测试工件", "risk_flags": []},
-        })
-        assert "quality" in result or "error" in result
-
-
-# ---------------------------------------------------------------------------
-# 3.2 compare_artifacts 工具
-# ---------------------------------------------------------------------------
-
-class TestCompareArtifactsTool:
-    """验收 3.2：compare_artifacts 工具有真实实现。"""
-
-    def test_basic_comparison(self):
-        """正常比较返回 recommended 和 scores。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "agent_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
-                "translate_agent": {"confidence": 0.60, "summary": "翻译结果", "risk_flags": []},
-            }
-        })
-        assert "recommended" in result
-        assert result["recommended"] == "agent_worker"
-        assert "scores" in result
-
-    def test_recommends_highest_confidence(self):
-        """推荐置信度最高的工件。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "agent_a": {"confidence": 0.3, "summary": "低", "risk_flags": []},
-                "agent_b": {"confidence": 0.9, "summary": "高", "risk_flags": []},
-                "agent_c": {"confidence": 0.6, "summary": "中", "risk_flags": []},
-            }
-        })
-        assert result["recommended"] == "agent_b"
-
-    def test_high_risk_excluded(self):
-        """高风险工件被排除（score=0），不被推荐。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "safe_agent": {"confidence": 0.5, "summary": "安全", "risk_flags": []},
-                "risky_agent": {"confidence": 0.95, "summary": "危险", "risk_flags": ["SAFETY_RISK:HIGH"]},
-            }
-        })
-        assert result["recommended"] == "safe_agent"
-
-    def test_all_failed_returns_none(self):
-        """所有工件均有错误时 recommended 为 None。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "agent_a": {"confidence": 0.8, "error": "HANDLER_ERROR", "risk_flags": []},
-                "agent_b": {"confidence": 0.7, "error": "TIMEOUT", "risk_flags": []},
-            }
-        })
-        assert result["recommended"] is None
-        assert result["reason"] == "ALL_FAILED"
-
-    def test_missing_artifacts_returns_error(self):
-        """缺少 artifacts 参数时返回 error。"""
-        result = _tool_compare_artifacts({})
-        assert "error" in result
-        assert result["error"] == "MISSING_ARTIFACTS"
-
-    def test_valid_count_field(self):
-        """valid_count 字段正确。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "agent_a": {"confidence": 0.8, "summary": "ok", "risk_flags": []},
-                "agent_b": {"confidence": 0.5, "error": "FAIL", "risk_flags": []},
-            }
-        })
-        assert result["valid_count"] == 1
-        assert result["total_count"] == 2
-
-    def test_result_text_nonempty(self):
-        """result 字段非空。"""
-        result = _tool_compare_artifacts({
-            "artifacts": {
-                "agent_a": {"confidence": 0.8, "summary": "ok", "risk_flags": []},
-            }
-        })
-        assert result.get("result")
-
-    def test_execute_tool_compare_artifacts(self):
-        """通过 execute_tool 调用 compare_artifacts 可正常执行。"""
-        result = execute_tool("compare_artifacts", {
-            "artifacts": {
-                "agent_worker": {"confidence": 0.8, "summary": "ok", "risk_flags": []},
-            }
-        })
-        assert "recommended" in result or "error" in result
-
-
-# ---------------------------------------------------------------------------
 # 3.3 tool_registry 契约：judge_agent 工具 allowlist 更新
 # ---------------------------------------------------------------------------
 
@@ -388,15 +154,13 @@ class TestJudgeAgentToolRegistry:
         """is_tool_allowed('compare_artifacts', 'judge_agent') 返回 True。"""
         assert is_tool_allowed("compare_artifacts", AGENT_ID_JUDGE) is True
 
-    def test_evaluate_artifact_has_executor(self):
-        """evaluate_artifact 有 executor。"""
+    def test_evaluate_artifact_is_proposal_only(self):
         spec = _TOOL_REGISTRY["evaluate_artifact"]
-        assert spec.executor is not None
+        assert spec.executor is None
 
-    def test_compare_artifacts_has_executor(self):
-        """compare_artifacts 有 executor。"""
+    def test_compare_artifacts_is_proposal_only(self):
         spec = _TOOL_REGISTRY["compare_artifacts"]
-        assert spec.executor is not None
+        assert spec.executor is None
 
 
 # ---------------------------------------------------------------------------
@@ -461,4 +225,3 @@ class TestParseJudgeFinalAnswer:
         )
         # 回退到 agent_worker
         assert agent == "agent_worker"
-

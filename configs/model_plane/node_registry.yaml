@@ -121,13 +121,12 @@ nodes:
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_DISPATCH_AGENT_MODEL_ID / HOST_DISPATCH_AGENT_TIMEOUT_MS
 
-  # SubAgent（code/translate/intent/vision）—— 准确，多轮工具调用
+  # SubAgent（code/translate/intent/vision）—— 仅推理与工具提案
   sub_agent_node:
-    description: "SubAgent ReAct 循环节点（Phase XV）"
+    description: "SubAgent proposal-only ReAct 节点；工具需新 TaskGraph revision"
     provider: gemini
     model_id: gemini-2.5-pro
     temperature: 0.30
     max_output_tokens: 4000
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_SUBAGENT_MODEL_ID / HOST_SUBAGENT_TIMEOUT_MS
-

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.agents import tool_registry
 from host_brain.app.recall import semantic_recall
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 
@@ -54,30 +53,3 @@ async def test_semantic_recaller_skips_markdown_kb_for_metadata_filtered_recall(
 
     assert result.filtered_count == 0
     assert called is False
-
-
-def test_search_knowledge_tool_reaches_markdown_kb(monkeypatch) -> None:
-    def _fake_query_markdown_kbs(query: str, *, top_k: int = 5):
-        assert query == "GraphRAG"
-        return [
-            SimpleNamespace(
-                doc_id="agent_guide:00173",
-                content="GraphRAG 不是把所有文本都塞进 Neo4j。",
-                score=1.0,
-                metadata={"kb_id": "agent_guide", "heading_path": "第 9 章"},
-                source="markdown_kb",
-            )
-        ][:top_k]
-
-    monkeypatch.setattr(semantic_recall, "query_markdown_kbs", _fake_query_markdown_kbs)
-    monkeypatch.setattr(
-        tool_registry,
-        "_get_semantic_recaller",
-        lambda: SemanticRecaller(use_mock=True, markdown_kb_enabled=True),
-    )
-
-    result = tool_registry.execute_tool("search_knowledge", {"query": "GraphRAG"})
-
-    assert result["items"][0]["source"] == "markdown_kb"
-    assert result["items"][0]["metadata"]["kb_id"] == "agent_guide"
-    assert "GraphRAG" in result["result"]

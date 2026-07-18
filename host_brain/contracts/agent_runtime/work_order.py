@@ -78,6 +78,7 @@ ALLOWED_AGENT_RUN_MODES = {
 }
 
 WRITE_RUN_MODES = {"worker", "self_heal", "self_evolve"}
+WRITE_AGENT_ACTIONS = {"write_files", "agent_write_file"}
 
 
 def _list_of_text(value: Any) -> list[str]:
@@ -147,7 +148,8 @@ class AgentWorkOrder:
 
     @property
     def requires_write(self) -> bool:
-        return self.run_mode in WRITE_RUN_MODES or "write_files" in set(self.allowed_actions)
+        actions = {str(action).strip().lower() for action in self.allowed_actions}
+        return self.run_mode in WRITE_RUN_MODES or bool(actions & WRITE_AGENT_ACTIONS)
 
     @property
     def review_required(self) -> bool:
@@ -376,7 +378,8 @@ class WorkOrderV3:
 
     @property
     def requires_write(self) -> bool:
-        return self.run_mode in WRITE_RUN_MODES or "write_files" in set(self.allowed_actions)
+        actions = {str(action).strip().lower() for action in self.allowed_actions}
+        return self.run_mode in WRITE_RUN_MODES or bool(actions & WRITE_AGENT_ACTIONS)
 
     @property
     def review_required(self) -> bool:

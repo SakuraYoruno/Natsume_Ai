@@ -66,5 +66,5 @@ def test_dead_zero_argument_projection_refreshers_are_removed() -> None:
 
 def test_process_locator_inventory_only_moves_down() -> None:
     modules, imports = _process_locator_inventory()
-    assert modules <= 47
+    assert modules <= 45
     assert imports <= 147

@@ -3,120 +3,69 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from host_brain.agent_runtime.agent_tools import execute_agent_tool
+import host_brain.agent_runtime.agent_tools as agent_tools
+
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+    execute_agent_tool,
+)
 
 
-def test_agent_file_tools_share_workspace_path_boundary(tmp_path: Path) -> None:
+def _assert_retired(result: dict[str, Any], *, tool_id: str) -> None:
+    assert result == {
+        "error": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+        "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+        "proposed_tool_id": tool_id,
+        "result": None,
+        "side_effects_executed": False,
+        "required_execution_surface": "new immutable TaskGraph revision",
+    }
+
+
+def test_raw_agent_file_dispatcher_cannot_read_write_or_list(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
 
-    written = execute_agent_tool(
-        tool_id="agent_write_file",
-        args={"path": "nested/example.py", "content": "answer = 42\n"},
-        workspace=workspace,
-    )
-    read = execute_agent_tool(
-        tool_id="agent_read_file",
-        args={"path": "nested/example.py"},
-        workspace=workspace,
-    )
-    listed = execute_agent_tool(
-        tool_id="agent_list_files",
-        args={"path": "nested"},
-        workspace=workspace,
-    )
+    for tool_id, args in (
+        ("agent_write_file", {"path": "nested/example.py", "content": "answer = 42\n"}),
+        ("agent_read_file", {"path": "nested/example.py"}),
+        ("agent_list_files", {"path": "nested"}),
+    ):
+        _assert_retired(
+            execute_agent_tool(tool_id=tool_id, args=args, workspace=workspace),
+            tool_id=tool_id,
+        )
 
-    assert "error" not in written
-    assert read["content"] == "answer = 42\n"
-    assert listed["entries"] == [
-        {
-            "name": "example.py",
-            "type": "file",
-            "size_bytes": (workspace / "nested/example.py").stat().st_size,
-        },
-    ]
+    assert not (workspace / "nested").exists()
 
 
-def test_agent_file_tools_reject_same_prefix_sibling_escape(tmp_path: Path) -> None:
+def test_raw_agent_dispatcher_cannot_escape_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     sibling = tmp_path / "work-escape"
     workspace.mkdir()
     sibling.mkdir()
-    (sibling / "secret.py").write_text("secret = True\n", encoding="utf-8")
-    escape = f"../{sibling.name}/secret.py"
+    secret = sibling / "secret.py"
+    secret.write_text("secret = True\n", encoding="utf-8")
 
-    read = execute_agent_tool(
-        tool_id="agent_read_file",
-        args={"path": escape},
-        workspace=workspace,
-    )
-    write = execute_agent_tool(
+    result = execute_agent_tool(
         tool_id="agent_write_file",
-        args={"path": escape, "content": "overwritten\n"},
-        workspace=workspace,
-    )
-    listed = execute_agent_tool(
-        tool_id="agent_list_files",
-        args={"path": f"../{sibling.name}"},
+        args={"path": f"../{sibling.name}/secret.py", "content": "overwritten\n"},
         workspace=workspace,
     )
 
-    assert "error" in read
-    assert "error" in write
-    assert "error" in listed
-    assert (sibling / "secret.py").read_text(encoding="utf-8") == "secret = True\n"
+    _assert_retired(result, tool_id="agent_write_file")
+    assert secret.read_text(encoding="utf-8") == "secret = True\n"
 
 
-def test_browser_screenshot_rejects_unsafe_save_path_before_executor(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "work"
-    workspace.mkdir()
-    calls: list[dict[str, Any]] = []
+def test_raw_browser_dispatcher_has_no_provider_handler(tmp_path: Path) -> None:
+    for tool_id in ("browser_screenshot", "browser_click", "browser_execute_script"):
+        result = execute_agent_tool(
+            tool_id=tool_id,
+            args={"save_path": "artifacts/page.png"},
+            workspace=tmp_path,
+        )
+        _assert_retired(result, tool_id=tool_id)
 
-    def fake_execute(payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append(payload)
-        return {"status": "ok"}
-
-    monkeypatch.setattr(
-        "host_brain.agent_runtime.agent_tools.execute_browser_skill",
-        fake_execute,
-    )
-
-    result = execute_agent_tool(
-        tool_id="browser_screenshot",
-        args={"save_path": str(tmp_path / "outside.png")},
-        workspace=workspace,
-    )
-
-    assert "error" in result
-    assert calls == []
-
-
-def test_browser_screenshot_workspace_persistence_requires_durable_grant(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "work"
-    workspace.mkdir()
-    calls: list[dict[str, Any]] = []
-
-    def fake_execute(payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append(payload)
-        return {"status": "ok"}
-
-    monkeypatch.setattr(
-        "host_brain.agent_runtime.agent_tools.execute_browser_skill",
-        fake_execute,
-    )
-
-    result = execute_agent_tool(
-        tool_id="browser_screenshot",
-        args={"save_path": "artifacts/page.png"},
-        workspace=workspace,
-    )
-
-    assert "requires durable WorkspaceGrant" in str(result.get("error"))
-    assert calls == []
-    assert not (workspace / "artifacts").exists()
+    assert not hasattr(agent_tools, "execute_browser_skill")
+    assert not any(name.startswith("_tool_") for name in vars(agent_tools))
+    assert not (tmp_path / "artifacts").exists()

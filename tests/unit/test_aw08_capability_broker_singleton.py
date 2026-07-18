@@ -12,7 +12,10 @@ from host_brain.capability_plane.production_composition import (
     build_production_capability_runtime,
 )
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
-from host_brain.integrations.graph_governed_tool_node import GovernedToolNode
+from host_brain.integrations.graph_governed_tool_node import (
+    GovernedToolNode,
+    REACT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.skills.executor_registry import dispatch_executor_payload
@@ -34,7 +37,7 @@ def test_dependencies_owns_one_capability_runtime_composition(monkeypatch) -> No
         dependencies.reset_capability_runtime_composition()
 
 
-def test_graph_and_skill_use_broker_while_mcp_compatibility_facade_is_inert() -> None:
+def test_graph_and_mcp_facades_are_inert_while_skill_uses_composed_broker() -> None:
     composition = build_production_capability_runtime(
         execution_journal=InMemoryCapabilityExecutionJournal(),
     )
@@ -75,10 +78,13 @@ def test_graph_and_skill_use_broker_while_mcp_compatibility_facade_is_inert() ->
         args={"value": 1},
     )
 
-    assert graph._broker is broker  # noqa: SLF001
+    assert not hasattr(graph, "_broker")
     assert not hasattr(mcp, "_broker")
-    assert graph_result["tool_results"][0]["result"] == "ok"
-    assert calls == ["graph"]
+    assert graph_result["committed_route_token"] == (
+        REACT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    )
+    assert graph_result["tool_results"][0]["result"]["side_effects_executed"] is False
+    assert calls == []
     assert skill_result["reason_code"] == "SKILL_AUTHORITY_MISSING"
     assert mcp_result.reason_code == MCP_TASK_AUTHORITY_REQUIRED
     assert mcp_result.output is None

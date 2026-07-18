@@ -11,7 +11,10 @@ from host_brain.capability_plane.broker import (
 )
 from host_brain.capability_plane.contracts import CapabilityKind, CapabilityRequest, ReceiptStatus
 from host_brain.capability_plane.policies import DescriptorCapabilityPolicy, PredicateCapabilityPolicy
-from host_brain.integrations.graph_governed_tool_node import GovernedToolNode
+from host_brain.integrations.graph_governed_tool_node import (
+    GovernedToolNode,
+    REACT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 
 
 def _request(*, key: str = "key-1", args: dict | None = None, deadline: int | None = None) -> CapabilityRequest:
@@ -83,7 +86,7 @@ def test_broker_fails_closed_when_policy_returns_no_grant() -> None:
     assert receipt.reason_code == "CAPABILITY_GRANT_MISSING"
 
 
-def test_graph_tool_node_fails_closed_without_governor_or_on_governor_error() -> None:
+def test_retired_graph_tool_node_rejects_every_governor_without_handler() -> None:
     calls: list[str] = []
     tool = SimpleNamespace(name="demo", func=lambda **_kwargs: calls.append("called"))
     missing = GovernedToolNode(tools=[tool], capability_broker=_composed_broker())({
@@ -103,9 +106,22 @@ def test_graph_tool_node_fails_closed_without_governor_or_on_governor_error() ->
         "request_id": "req-broken-governor",
         "tool_calls": [{"tool": "demo", "args": {}}],
     })
+    approving = GovernedToolNode(
+        tools=[tool],
+        governor=SimpleNamespace(
+            evaluate_tool_call=lambda **_kwargs: SimpleNamespace(token="GOV_APPROVE")
+        ),
+        capability_broker=_composed_broker(),
+    )({
+        "request_id": "req-approving-governor",
+        "tool_calls": [{"tool": "demo", "args": {}}],
+    })
     assert calls == []
-    assert missing["committed_route_token"] == "GOVERNOR_MISSING"
-    assert broken["committed_route_token"].startswith("GOVERNOR_UNAVAILABLE")
+    assert {
+        missing["committed_route_token"],
+        broken["committed_route_token"],
+        approving["committed_route_token"],
+    } == {REACT_TOOL_GOVERNED_ADMISSION_REQUIRED}
 
 
 def test_concurrent_same_idempotency_key_is_single_flight() -> None:

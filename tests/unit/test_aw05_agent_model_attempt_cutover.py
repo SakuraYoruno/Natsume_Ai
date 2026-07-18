@@ -5,6 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from host_brain.agent_runtime.agent_executor import AgentExecutor
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.agent_runtime.agent_prompt import (
     AGENT_MODEL_PROMPT_VERSION,
     AGENT_REACT_PROMPT_ID,
@@ -113,7 +116,7 @@ def test_agent_executor_uses_one_request_with_service_owned_semantic_retry(
     assert result.metadata["model_id"] == "test-agent-model"
 
 
-def test_agent_executor_rechecks_cancellation_before_tool_side_effect(
+def test_agent_executor_blocks_write_order_before_model_attempt(
     tmp_path: Path,
 ) -> None:
     registry = build_live_production_prompt_registry()
@@ -121,9 +124,10 @@ def test_agent_executor_rechecks_cancellation_before_tool_side_effect(
         [
             json.dumps(
                 {
-                    "thought": "write after the model call",
-                    "tool_id": "agent_write_file",
-                    "tool_args": {"path": "must-not-exist.txt", "content": "unsafe"},
+                    "thought": "claim completion without doing the write",
+                    "tool_id": "agent_finish",
+                    "tool_args": {},
+                    "final_answer": "pretend the write completed",
                 }
             )
         ]
@@ -140,22 +144,60 @@ def test_agent_executor_rechecks_cancellation_before_tool_side_effect(
             "metadata": {"request_id": "req-aw05-agent-cancel"},
         }
     )
-    probes = iter((False, True))
-
     result = AgentExecutor(
         model_attempt_service=service,
         prompt_registry=registry,
-    ).execute(
-        order,
-        workspace=tmp_path,
-        cancelled=lambda: next(probes, True),
+    ).execute(order, workspace=tmp_path)
+
+    assert result.status == "BLOCKED"
+    assert result.reason_code == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result.acceptance["decision"] == "NOT_RUN"
+    assert result.verification["status"] == "NOT_RUN"
+    assert result.metadata["model_attempts"] == []
+    assert adapter.requests == []
+    assert not (tmp_path / "must-not-exist.txt").exists()
+
+
+def test_agent_executor_records_read_tool_proposal_without_nested_execution(
+    tmp_path: Path,
+) -> None:
+    registry = build_live_production_prompt_registry()
+    adapter = _ScriptedAdapter(
+        [
+            json.dumps(
+                {
+                    "thought": "read inside the running node",
+                    "tool_id": "agent_read_file",
+                    "tool_args": {
+                        "path": "must-not-be-read.txt",
+                    },
+                }
+            )
+        ]
     )
+    service = _service(registry, adapter)
+    order = AgentWorkOrder.from_mapping(
+        {
+            "work_order_id": "wo-aw05-agent-tool-proposal",
+            "domain": "code",
+            "run_mode": "inspect",
+            "objective": "propose a read",
+            "allowed_actions": ["read_files"],
+            "forbidden_actions": ["modify_secret_files"],
+            "metadata": {"request_id": "req-aw05-agent-tool-proposal"},
+        }
+    )
+    result = AgentExecutor(
+        model_attempt_service=service,
+        prompt_registry=registry,
+    ).execute(order, workspace=tmp_path)
 
     assert result.status == "DEGRADED"
-    assert result.reason_code == "AGENT_CANCELLED"
-    assert result.metadata["stopped_reason"] == "CANCELLED"
-    assert result.risk_flags == ["agent_cancelled"]
-    assert not (tmp_path / "must-not-exist.txt").exists()
+    assert result.reason_code == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result.metadata["stopped_reason"] == "TOOL_GOVERNED_ADMISSION_REQUIRED"
+    assert result.risk_flags == [AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED]
+    assert len(adapter.requests) == 1
+    assert not (tmp_path / "must-not-be-read.txt").exists()
 
 
 def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypatch) -> None:
