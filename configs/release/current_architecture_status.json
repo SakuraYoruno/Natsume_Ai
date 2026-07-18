@@ -83,7 +83,7 @@
       "not_completed": [
         "agent_worker write execution still has no task-bound durable WorkspaceRuntime/WorkspaceGrant injection and remains fail-closed before model work",
         "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
-        "Code now has a pure dynamic catalog plus trusted-in-process private-bare paired-worktree mechanics only; controlled model/tool execution, durable receipt/comparison ledger, OS/container/network isolation and production influence remain unimplemented",
+        "Code has a pure dynamic catalog, D17 trusted-in-process private-bare paired worktrees, D18 0106 cleanup-gated durable experiment evidence, and D19 allowlisted pytest child receipts; controlled model/tool execution, general budget authority, OS/container/network isolation, cross-domain comparison and production influence remain unimplemented",
         "generic chat/delegate/runtime cutover remains incomplete"
       ],
       "evidence_refs": [
@@ -573,8 +573,8 @@
       ]
     },
     "planning_search_kernel": {
-      "status": "PARTIAL_D18_CLEANUP_GATED_CODE_LEDGER",
-      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-in-process private-bare paired-worktree experiment adapter, and a preregistered cleanup-gated durable experiment ledger only; no production domain cutover, hard execution authority, isolation claim or benefit claim.",
+      "status": "PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT",
+      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-process private-bare paired-worktree experiment adapter, a preregistered cleanup-gated durable experiment ledger, and an opt-in frozen-argv pytest subprocess verifier only; no production domain cutover, general hard execution authority, isolation claim or benefit claim.",
       "evidence_refs": [
         "host_brain/planning_search/",
         "host_brain/planning_search/code_domain.py",
@@ -582,6 +582,9 @@
         "host_brain/planning_search/code_benchmark_models.py",
         "host_brain/planning_search/code_benchmark_sandbox.py",
         "host_brain/planning_search/code_benchmark_ledger.py",
+        "host_brain/planning_search/code_benchmark_verification_contracts.py",
+        "host_brain/planning_search/code_benchmark_verifier.py",
+        "host_brain/planning_search/code_benchmark_experiment.py",
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "host_brain/orchestration/goal_planning.py",
@@ -594,17 +597,19 @@
         "tests/unit/test_d16_planning_execution_context.py",
         "tests/unit/test_d17_code_benchmark_sandbox.py",
         "tests/unit/test_d18_code_benchmark_ledger.py",
-        "tests/integration/test_d18_code_benchmark_ledger_sqlite.py"
+        "tests/integration/test_d18_code_benchmark_ledger_sqlite.py",
+        "tests/unit/test_d19_code_benchmark_verifier.py",
+        "tests/integration/test_d19_code_benchmark_controlled_experiment.py"
       ]
     },
     "planning_search_goal_foundation": {
-      "status": "PARTIAL_D18_CLEANUP_GATED_CODE_LEDGER",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: exact workload registration, frozen paired RunSpec, two arm evidence/outcome rows, verified-clean receipt and terminal experiment receipt are all identity-bound, replayable and schema-verified before a completed pair becomes queryable.",
-      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records only cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. Declared execution budgets freeze a future experiment contract only; they are not ModelAttempt/Tool/Test runtime authority. It is not a historical cohort result, controlled model/tool execution, hidden-oracle security, test-command sandbox, network isolation or a benefit result.",
+      "status": "PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT",
+      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. A controlled receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
+      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. It is not a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
       "not_completed": [
         "Host chat or plan production cutover to GoalPlanningService",
         "Research dynamic successor adapter and real read-only source/verifier shadow",
-        "actual historical cohort selection/statistical comparison, hidden-oracle verifier, controlled model/tool/test execution budget and WorkspaceGrant-bound write path",
+        "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
         "Pentest capability/fact-driven successor catalog",
         "receipt-bound baseline-versus-search comparison and promotion gate",
         "any production influence from MCTS"
@@ -624,18 +629,56 @@
       ]
     },
     "code_historical_benchmark_sandbox": {
-      "status": "PARTIAL_D18_CLEANUP_GATED_LEDGER",
-      "implemented": "The experiment-only runner requires a registered clean protected source that owns an unshared non-link .git directory, creates a disposable private bare clone with no remote, sets a private empty hooks path, and creates two detached worktrees at the same frozen commit. Its workload isolation manifest has exactly six fixed fields (mode/source ref/source commit/policy digest/executor trust/network non-enforcement); its lower-case portable repository-relative allow/deny API rejects padded/case-alias/.git/traversal/symlink paths and its governed references reject file and host-path-shaped values. Private roots/artifacts reject links and Windows reparse points; cleanup unlinks/removes only the direct private link itself and never enumerates or recursively deletes its target. A successful runner now emits path-free VERIFIED_CLEAN evidence only after private bare/worktrees/run-root are removed and the protected source fingerprint is unchanged. D18 0106 then persists a preregistered workload, exact paired spec, arm evidence/outcome, cleanup receipt and terminal receipt atomically; all records are append-only, canonical-JSON/digest-bound and schema-semantic verified. Git child processes discard inherited Git variables, system/global config and interactive prompts, force core.fsmonitor off, allow only file transport and skip standard LFS smudge. Generic DomainBenchmarkReport remains SHADOW_ONLY and production influence stays false.",
-      "boundary": "This is `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY`: a local mechanical worktree guard plus durable experiment evidence, not OS/container/tenant/filesystem/network isolation. The source repository, including its local Git configuration and checked-out content, is trusted input. Executor and verifier run in the current Python process, so only repository-owned trusted adapters are permitted; a narrow API does not confine model, skill, plugin or hidden-oracle code. `network_isolation=NOT_ENFORCED` replaces the false `network_enabled=false` claim. Git hardening reduces inherited configuration, fsmonitor, credentials and hooks but is not an OS security boundary. The adapter and ledger are not composed into Host, TaskGraph, AgentExecutor, WorkspaceGrant or production routes; declared budget is not hard model/tool/test enforcement, and there is still no hidden-oracle process, retry/lease cleanup worker, historical cohort/statistical comparison or uplift conclusion.",
+      "status": "PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT",
+      "implemented": "The experiment-only runner requires a registered clean protected source that owns an unshared non-link .git directory, creates a disposable private bare clone with no remote, sets a private empty hooks path, and creates two detached worktrees at the same frozen commit. Its workload isolation manifest has exactly six fixed fields (mode/source ref/source commit/policy digest/executor trust/network non-enforcement); its lower-case portable repository-relative allow/deny API rejects padded/case-alias/.git/traversal/symlink paths and its governed references reject file and host-path-shaped values. Private roots/artifacts reject links and Windows reparse points; cleanup unlinks/removes only the direct private link itself and never enumerates or recursively deletes its target. A successful runner emits path-free VERIFIED_CLEAN evidence only after private bare/worktrees/run-root are removed and the protected source fingerprint is unchanged. D18 0106 stores preregistration and RunSpec in independent append-only transactions; only the later terminal-evidence transaction atomically writes both arm evidence/outcomes, cleanup receipt and terminal receipt. Records are canonical-JSON/digest-bound and schema-semantic verified. D19 optionally binds a frozen `python -m pytest -q <repo-relative-test>` plan into registration, rejects a paired run that exceeds its declared test-command/wall limit, invokes each arm in a shell-free child process, and stores only command identity, exit/status, bounded-output digests and duration inside the verifier evidence. Git child processes discard inherited Git variables, system/global config and interactive prompts, force core.fsmonitor off, allow only file transport and skip standard LFS smudge. Generic DomainBenchmarkReport remains SHADOW_ONLY and production influence stays false.",
+      "boundary": "D17/D18 remain `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY`: a local mechanical worktree guard plus durable experiment evidence, not OS/container/tenant/filesystem/network isolation. D19's `CONTROLLED_COMMAND_TRUSTED_WORKSPACE_ONLY` child is separate only from the trusted adapter process; it uses a fixed allowlisted pytest argv, workspace-root cwd, shell-free invocation, no inherited PYTHONPATH and disabled pytest plugin autoload, but it is not a hidden oracle or independent trust domain. APPDATA/user-site is intentionally retained as trusted host input because PYTHONNOUSERSITE is not set. It has no process-tree kill, CPU/memory, container, filesystem ACL, tenant or network boundary; local test code and source remain trusted. `network_isolation=NOT_ENFORCED` remains fixed. The adapter, ledger and D19 service are not composed into Host, TaskGraph, AgentExecutor, WorkspaceGrant or production routes. Only max_test_commands/max_wall_time_ms are enforced by the opt-in verifier; model/provider/tool/token/cost and durable general Budget authority remain absent. Cleanup failure blocks a terminal receipt, but there is no durable benchmark lease, crash recovery or cleanup retry worker, historical cohort/statistical comparison or uplift conclusion.",
       "evidence_refs": [
         "host_brain/planning_search/code_benchmark_models.py",
         "host_brain/planning_search/code_benchmark_sandbox.py",
         "host_brain/planning_search/code_benchmark_ledger.py",
+        "host_brain/planning_search/code_benchmark_verification_contracts.py",
+        "host_brain/planning_search/code_benchmark_verifier.py",
+        "host_brain/planning_search/code_benchmark_experiment.py",
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "tests/unit/test_d17_code_benchmark_sandbox.py",
         "tests/unit/test_d18_code_benchmark_ledger.py",
-        "tests/integration/test_d18_code_benchmark_ledger_sqlite.py"
+        "tests/integration/test_d18_code_benchmark_ledger_sqlite.py",
+        "tests/unit/test_d19_code_benchmark_verifier.py",
+        "tests/integration/test_d19_code_benchmark_controlled_experiment.py"
+      ]
+    },
+    "code_benchmark_controlled_verification": {
+      "status": "PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT",
+      "scope": "Only an explicitly preregistered Code benchmark plan may run its fixed `python -m pytest -q <repo-relative-test>` argv in each disposable detached worktree. PASS is bound to exit code zero; each receipt is bound to its run/arm/plan/budget, a started arm reserves its frozen commands even on timeout/error, and the terminal reader requires two successful controlled arms within the paired aggregate test/wall limit. The experiment service requires VERIFIED_CLEAN before it records a terminal receipt.",
+      "enforced": [
+        "paired max_test_commands",
+        "paired max_wall_time_ms",
+        "started-command reservation and no same-arm retry within one pair",
+        "fixed pytest argv",
+        "workspace-root cwd",
+        "shell-free child process",
+        "no inherited PYTHONPATH",
+        "disabled pytest plugin autoload",
+        "path-free command/status/output-digest/duration evidence",
+        "run/arm/plan/budget receipt binding and restart-replay validation"
+      ],
+      "not_enforced": [
+        "ModelAttempt/provider/model token/model cost budget",
+        "tool budget or tool precharge",
+        "container/OS/filesystem/tenant/network isolation",
+        "hermetic Python dependency environment (APPDATA/user-site remains trusted)",
+        "process-tree kill or CPU/memory limits",
+        "hidden-oracle or independent trust-domain verification",
+        "durable benchmark lease, crash recovery or cleanup retry"
+      ],
+      "production_influence_enabled": false,
+      "evidence_refs": [
+        "host_brain/planning_search/code_benchmark_verification_contracts.py",
+        "host_brain/planning_search/code_benchmark_verifier.py",
+        "host_brain/planning_search/code_benchmark_experiment.py",
+        "tests/unit/test_d19_code_benchmark_verifier.py",
+        "tests/integration/test_d19_code_benchmark_controlled_experiment.py"
       ]
     },
     "host_candidate_plan_generation": {
@@ -660,7 +703,7 @@
     },
     "code_production_planning_benefit": {
       "status": "UNPROVEN",
-      "existing_evidence_level": "PRIVATE_BARE_CLEANUP_GATED_DURABLE_EXPERIMENT_LEDGER_NO_BENEFIT"
+      "existing_evidence_level": "PRIVATE_BARE_CLEANUP_GATED_DURABLE_CONTROLLED_PYTEST_EXPERIMENT_NO_BENEFIT"
     },
     "budget_enforcement": {
       "status": "PARTIAL",

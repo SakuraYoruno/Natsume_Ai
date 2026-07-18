@@ -26,6 +26,10 @@ from host_brain.planning_search.code_benchmark_models import (
     CodeBenchmarkArmEvidence,
     CodeHistoricalBenchmarkRun,
 )
+from host_brain.planning_search.code_benchmark_verification_contracts import (
+    CodeBenchmarkControlledVerificationBudget,
+    CodeBenchmarkVerificationPlan,
+)
 
 
 CODE_BENCHMARK_LEDGER_SCHEMA = "natsume.code-historical-benchmark-ledger.v1"
@@ -60,9 +64,10 @@ class CodeBenchmarkExecutionBudget:
 
     D18 stores this boundary with the workload so a later executor cannot
     silently change the experiment contract.  It is deliberately *not* a
-    model/tool/test runtime gate: D17 only has trusted in-process adapters and
-    self-reported counters.  Non-zero fields therefore never imply that those
-    actions are authorized or canonically charged in this release.
+    model/provider/tool/token/cost runtime gate.  D19 may consume only
+    ``max_test_commands`` and ``max_wall_time_ms`` when a matching controlled
+    pytest plan is explicitly preregistered; all other fields remain declared
+    evidence, not authority.
     """
 
     max_model_calls: int = 0
@@ -112,6 +117,7 @@ class CodeBenchmarkWorkloadRegistration:
 
     workload: DomainBenchmarkWorkload
     execution_budget: CodeBenchmarkExecutionBudget = CodeBenchmarkExecutionBudget()
+    controlled_verification_plan: CodeBenchmarkVerificationPlan | None = None
     registration_id: str = ""
     mode: str = CODE_HISTORICAL_BENCHMARK_MODE
     production_influence_enabled: bool = False
@@ -125,6 +131,23 @@ class CodeBenchmarkWorkloadRegistration:
             raise CodeBenchmarkLedgerContractError(
                 "execution_budget must be CodeBenchmarkExecutionBudget"
             )
+        plan = self.controlled_verification_plan
+        if plan is not None:
+            if not isinstance(plan, CodeBenchmarkVerificationPlan):
+                raise CodeBenchmarkLedgerContractError(
+                    "controlled_verification_plan must be CodeBenchmarkVerificationPlan"
+                )
+            if plan.plan_ref not in self.workload.verifier_refs:
+                raise CodeBenchmarkLedgerContractError(
+                    "controlled verification plan must be listed in workload verifier_refs"
+                )
+            requirements = plan.paired_budget_requirements()
+            for field_name, required in requirements.items():
+                configured = getattr(self.execution_budget, field_name)
+                if configured < required:
+                    raise CodeBenchmarkLedgerContractError(
+                        f"{field_name} cannot cover the preregistered paired verification plan"
+                    )
         isolation = _validated_code_isolation(self.workload)
         if str(self.mode or "").strip().upper() != CODE_HISTORICAL_BENCHMARK_MODE:
             raise CodeBenchmarkLedgerContractError(
@@ -134,14 +157,7 @@ class CodeBenchmarkWorkloadRegistration:
             raise CodeBenchmarkLedgerContractError(
                 "benchmark registration cannot enable production influence"
             )
-        identity = {
-            "schema": CODE_BENCHMARK_LEDGER_SCHEMA,
-            "workload": self.workload.to_dict(),
-            "execution_budget": self.execution_budget.to_dict(),
-            "isolation": isolation,
-            "mode": CODE_HISTORICAL_BENCHMARK_MODE,
-            "production_influence_enabled": False,
-        }
+        identity = self._identity(isolation=isolation)
         digest = _digest(identity)
         expected_id = f"codebenchwork_{digest[:32]}"
         supplied_id = str(self.registration_id or "").strip().lower()
@@ -155,16 +171,7 @@ class CodeBenchmarkWorkloadRegistration:
 
     @property
     def registration_digest(self) -> str:
-        return _digest(
-            {
-                "schema": CODE_BENCHMARK_LEDGER_SCHEMA,
-                "workload": self.workload.to_dict(),
-                "execution_budget": self.execution_budget.to_dict(),
-                "isolation": self.isolation,
-                "mode": CODE_HISTORICAL_BENCHMARK_MODE,
-                "production_influence_enabled": False,
-            }
-        )
+        return _digest(self._identity(isolation=self.isolation))
 
     @property
     def isolation(self) -> dict[str, str]:
@@ -183,7 +190,7 @@ class CodeBenchmarkWorkloadRegistration:
         return self.isolation["path_policy_digest"]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema": CODE_BENCHMARK_LEDGER_SCHEMA,
             "registration_id": self.registration_id,
             "registration_digest": self.registration_digest,
@@ -193,6 +200,28 @@ class CodeBenchmarkWorkloadRegistration:
             "mode": CODE_HISTORICAL_BENCHMARK_MODE,
             "production_influence_enabled": False,
         }
+        # Omitting this D19-only optional field preserves D18 registration
+        # digest/replay identity for existing ledger records.
+        if self.controlled_verification_plan is not None:
+            payload["controlled_verification_plan"] = (
+                self.controlled_verification_plan.to_dict()
+            )
+        return payload
+
+    def _identity(self, *, isolation: Mapping[str, str]) -> dict[str, Any]:
+        identity: dict[str, Any] = {
+            "schema": CODE_BENCHMARK_LEDGER_SCHEMA,
+            "workload": self.workload.to_dict(),
+            "execution_budget": self.execution_budget.to_dict(),
+            "isolation": dict(isolation),
+            "mode": CODE_HISTORICAL_BENCHMARK_MODE,
+            "production_influence_enabled": False,
+        }
+        if self.controlled_verification_plan is not None:
+            identity["controlled_verification_plan"] = (
+                self.controlled_verification_plan.to_dict()
+            )
+        return identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,21 +404,29 @@ def _validate_run_against_spec(
     if run.cleanup_receipt.run_id != run.run_id:
         raise CodeBenchmarkLedgerContractError("cleanup receipt does not bind completed run")
     _validate_arm_execution(
+        run_id=run.run_id,
         arm=report.baseline,
         outcome=report.baseline_outcome,
         evidence=run.baseline_evidence,
         registration=spec.registration,
     )
     _validate_arm_execution(
+        run_id=run.run_id,
         arm=report.selected,
         outcome=report.selected_outcome,
         evidence=run.selected_evidence,
+        registration=spec.registration,
+    )
+    _validate_controlled_pair_budget(
+        baseline_evidence=run.baseline_evidence,
+        selected_evidence=run.selected_evidence,
         registration=spec.registration,
     )
 
 
 def _validate_arm_execution(
     *,
+    run_id: str,
     arm: BenchmarkArm,
     outcome: BenchmarkArmOutcome,
     evidence: CodeBenchmarkArmEvidence,
@@ -412,6 +449,86 @@ def _validate_arm_execution(
     ):
         raise CodeBenchmarkLedgerContractError(
             "arm evidence differs from registered source or path policy"
+        )
+    _validate_controlled_arm(
+        run_id=run_id,
+        arm=arm,
+        outcome=outcome,
+        evidence=evidence,
+        registration=registration,
+    )
+
+
+def _validate_controlled_arm(
+    *,
+    run_id: str,
+    arm: BenchmarkArm,
+    outcome: BenchmarkArmOutcome,
+    evidence: CodeBenchmarkArmEvidence,
+    registration: CodeBenchmarkWorkloadRegistration,
+) -> None:
+    """Bind an opt-in D19 receipt to this immutable run/spec/arm exactly."""
+
+    plan = registration.controlled_verification_plan
+    controlled = evidence.verifier.controlled_receipt
+    if plan is None:
+        if controlled is not None:
+            raise CodeBenchmarkLedgerContractError(
+                "unregistered controlled verification receipt is not durable evidence"
+            )
+        return
+    if controlled is None:
+        raise CodeBenchmarkLedgerContractError(
+            "controlled verification plan requires an arm-bound controlled receipt"
+        )
+    expected_budget = CodeBenchmarkControlledVerificationBudget(
+        max_test_commands=registration.execution_budget.max_test_commands,
+        max_wall_time_ms=registration.execution_budget.max_wall_time_ms,
+    )
+    if (
+        controlled.run_id != run_id
+        or controlled.arm_id != arm.arm_id
+        or controlled.plan.to_dict() != plan.to_dict()
+        or controlled.budget.to_dict() != expected_budget.to_dict()
+    ):
+        raise CodeBenchmarkLedgerContractError(
+            "controlled verification receipt does not bind preregistered run, arm, plan or budget"
+        )
+    if not (outcome.success and evidence.verifier.success and controlled.success):
+        raise CodeBenchmarkLedgerContractError(
+            "controlled verification plan requires a successful controlled arm outcome"
+        )
+
+
+def _validate_controlled_pair_budget(
+    *,
+    baseline_evidence: CodeBenchmarkArmEvidence,
+    selected_evidence: CodeBenchmarkArmEvidence,
+    registration: CodeBenchmarkWorkloadRegistration,
+) -> None:
+    """Recheck D19's only two paired budget dimensions during durable replay."""
+
+    if registration.controlled_verification_plan is None:
+        return
+    controlled = (
+        baseline_evidence.verifier.controlled_receipt,
+        selected_evidence.verifier.controlled_receipt,
+    )
+    if any(item is None for item in controlled):
+        # Per-arm validation reports the more specific binding error first.
+        raise CodeBenchmarkLedgerContractError(
+            "controlled verification pair lacks an arm-bound receipt"
+        )
+    total_test_commands = sum(item.cost["test_command_count"] for item in controlled)
+    total_wall_time_ms = sum(
+        item.cost["verification_wall_time_ms"] for item in controlled
+    )
+    if (
+        total_test_commands > registration.execution_budget.max_test_commands
+        or total_wall_time_ms > registration.execution_budget.max_wall_time_ms
+    ):
+        raise CodeBenchmarkLedgerContractError(
+            "controlled verification pair exceeds its preregistered paired budget"
         )
 
 

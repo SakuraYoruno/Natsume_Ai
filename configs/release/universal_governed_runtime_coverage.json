@@ -119,13 +119,18 @@
   "architecture_controls": {
     "generic_three_layer_planning_search": {
       "status": "PARTIAL",
-      "host_boundary": "The domain-neutral kernel exists; D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests, and D17 adds an experiment-only PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY adapter with a lower-case repository-relative file API. D17 accepts only repository-owned trusted in-process executors/verifiers and does not enforce network or filesystem isolation. Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
+      "host_boundary": "The domain-neutral kernel exists; D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests, D17 adds an experiment-only PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY adapter with a lower-case repository-relative file API, D18 adds cleanup-gated 0106 preregistration and terminal experiment evidence, and D19 adds an opt-in frozen pytest child receipt. D19 binds each receipt to run/arm/plan/budget and rechecks paired test/wall limits on durable replay, but it still does not enforce OS/container/filesystem/network isolation or a hermetic Python dependency environment (APPDATA/user-site remains trusted). Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
       "evidence_refs": [
         "host_brain/planning_search/service.py",
         "host_brain/planning_search/code_domain.py",
         "host_brain/planning_search/code_domain_models.py",
         "host_brain/planning_search/code_benchmark_models.py",
         "host_brain/planning_search/code_benchmark_sandbox.py",
+        "host_brain/planning_search/code_benchmark_ledger.py",
+        "host_brain/planning_search/code_benchmark_verification_contracts.py",
+        "host_brain/planning_search/code_benchmark_verifier.py",
+        "host_brain/planning_search/code_benchmark_experiment.py",
+        "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
         "host_brain/pentest/agent/virtual_planning_world.py",
@@ -133,6 +138,10 @@
         "tests/unit/test_d16_code_planning_domain.py",
         "tests/unit/test_d16_planning_execution_context.py",
         "tests/unit/test_d17_code_benchmark_sandbox.py",
+        "tests/unit/test_d18_code_benchmark_ledger.py",
+        "tests/integration/test_d18_code_benchmark_ledger_sqlite.py",
+        "tests/unit/test_d19_code_benchmark_verifier.py",
+        "tests/integration/test_d19_code_benchmark_controlled_experiment.py",
         "docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json"
       ]
     },

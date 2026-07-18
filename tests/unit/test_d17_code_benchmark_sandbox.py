@@ -116,6 +116,23 @@ class _Verifier:
         )
 
 
+class _VerifierWithUnboundD19Counters(_Verifier):
+    """A legacy verifier must not self-report D19-only subprocess counters."""
+
+    def verify(self, *, workspace, arm):  # noqa: ANN001, ANN201
+        result = super().verify(workspace=workspace, arm=arm)
+        return CodeVerifierResult(
+            success=result.success,
+            receipt_ref=result.receipt_ref,
+            cost={
+                "tool_call_count": 1,
+                "test_command_count": 1,
+                "verification_wall_time_ms": 1,
+            },
+            evidence_digest=result.evidence_digest,
+        )
+
+
 class _EscapingWriter:
     def execute(self, *, workspace, arm):  # noqa: ANN001, ANN201
         del arm
@@ -261,6 +278,26 @@ def test_path_escape_fails_closed_and_still_cleans_private_artifacts(tmp_path: P
 
     assert (source / "src" / "app.py").read_text(encoding="utf-8") == "value = 'base'\n"
     assert _git(source, "status", "--porcelain=v1", "--untracked-files=no") == ""
+    assert list(private_root.iterdir()) == []
+    assert list(worktree_root.iterdir()) == []
+
+
+def test_legacy_verifier_cannot_claim_d19_only_cost_dimensions(tmp_path: Path) -> None:
+    sandbox, source_ref, commit, policy, source, private_root, worktree_root = _sandbox(tmp_path)
+
+    with pytest.raises(CodeBenchmarkSandboxError, match="exact subset"):
+        sandbox.run_paired(
+            run_id="run-d17-unbound-d19-counters",
+            workload=_workload(source_ref=source_ref, commit=commit, policy=policy),
+            baseline=_arm("baseline"),
+            selected=_arm("selected"),
+            path_policy=policy,
+            baseline_executor=_Writer(),
+            selected_executor=_Writer(),
+            verifier=_VerifierWithUnboundD19Counters(),
+        )
+
+    assert (source / "src" / "app.py").read_text(encoding="utf-8") == "value = 'base'\n"
     assert list(private_root.iterdir()) == []
     assert list(worktree_root.iterdir()) == []
 

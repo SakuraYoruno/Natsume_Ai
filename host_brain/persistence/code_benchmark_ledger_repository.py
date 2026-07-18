@@ -37,6 +37,10 @@ from host_brain.planning_search.code_benchmark_models import (
     CodeHistoricalBenchmarkRun,
     CodeVerifierResult,
 )
+from host_brain.planning_search.code_benchmark_verification_contracts import (
+    CodeBenchmarkControlledVerificationReceipt,
+    CodeBenchmarkVerificationPlan,
+)
 from host_brain.planning_search.contracts import SearchBudget
 
 
@@ -916,9 +920,16 @@ def _registration_from_payload(payload: Mapping[str, Any]) -> CodeBenchmarkWorkl
         raise CodeBenchmarkLedgerContractError("registration payload must be an object")
     workload = _workload_from_payload(payload["workload"])
     budget = CodeBenchmarkExecutionBudget(**payload["execution_budget"])
+    controlled_plan_payload = payload.get("controlled_verification_plan")
+    controlled_plan = (
+        None
+        if controlled_plan_payload is None
+        else CodeBenchmarkVerificationPlan.from_dict(controlled_plan_payload)
+    )
     return CodeBenchmarkWorkloadRegistration(
         workload=workload,
         execution_budget=budget,
+        controlled_verification_plan=controlled_plan,
         registration_id=payload.get("registration_id", ""),
         mode=payload.get("mode"),
         production_influence_enabled=payload.get("production_influence_enabled"),
@@ -1043,6 +1054,13 @@ def _evidence_from_payload(payload: Mapping[str, Any]) -> CodeBenchmarkArmEviden
         receipt_ref=verifier_payload["receipt_ref"],
         cost=verifier_payload["cost"],
         evidence_digest=verifier_payload["evidence_digest"],
+        controlled_receipt=(
+            None
+            if verifier_payload.get("controlled_receipt") is None
+            else CodeBenchmarkControlledVerificationReceipt.from_dict(
+                verifier_payload["controlled_receipt"]
+            )
+        ),
     )
     return CodeBenchmarkArmEvidence(
         arm_id=payload["arm_id"],

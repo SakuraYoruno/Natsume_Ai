@@ -244,7 +244,7 @@ flowchart LR
 
 当前 Host Plan 不会新增步骤、发明工具组合或比较多套方案。搜索内核存在，但这里主要用于选择完整合法的拓扑顺序。
 
-Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。D17/D18 也没有接入该实线：它仅在实验 adapter 内从 clean protected source 创建 private bare clone 和 baseline/search detached worktree；仓库自有 trusted in-process arm 才能使用 lower-case repository-relative ACL API，cleanup 后复核 source fingerprint。D18 将 preregistration、双臂 evidence/outcome、`VERIFIED_CLEAN` 和 terminal receipt 写入 0106 durable ledger；该 ledger 不选择 winner 或赋予生产 authority。API/账本都无法约束恶意同进程 executor/verifier，`network_isolation=NOT_ENFORCED`；它不是 OS/container/filesystem/network sandbox、没有真实模型 hard budget 或收益，故同样不能画成 Host 已具备目标规划。
+Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。D17/D18 也没有接入该实线：它仅在实验 adapter 内从 clean protected source 创建 private bare clone 和 baseline/search detached worktree；仓库自有 trusted arm 才能使用 lower-case repository-relative ACL API，cleanup 后复核 source fingerprint。D18 将 preregistration、双臂 evidence/outcome、`VERIFIED_CLEAN` 和 terminal receipt 写入 0106 durable ledger。D19 只在预注册时让固定 `python -m pytest -q <repo-relative-test>` 在每条 worktree 的 shell-free child 中运行，拒 paired test/wall budget 超限并写 path-free verifier receipt；该 service 不选择 winner 或赋予生产 authority。API/账本都无法形成独立信任域，也没有 OS/container/filesystem/network sandbox、模型/工具/token/cost budget 或收益，故同样不能画成 Host 已具备目标规划。
 
 ## 当前例外与缺口
 

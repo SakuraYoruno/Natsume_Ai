@@ -255,7 +255,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.7 D17/D18 Code historical trusted-process experiment and durable evidence flow
+### 4.7 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 
 ```text
 registered clean protected source (unshared non-link .git; local Git config is trusted)
@@ -264,20 +264,27 @@ registered clean protected source (unshared non-link .git; local Git config is t
      no system/global config, file transport only, standard LFS smudge skipped,
      private empty hooks path; remote removed)
   → baseline detached worktree ─┐
-                                ├→ lower-case repository-relative API → trusted in-process verifier → redacted arm evidence
+                                ├→ lower-case repository-relative API → trusted executor
   → selected detached worktree ─┘
+  → D19 preregistered frozen `python -m pytest -q <repo-relative-test>`
+     (worktree root, shell-free child, no PYTHONPATH, plugin autoload off)
+  → path-free command/exit/output-digest/duration verifier receipt per arm
   → tracked diff + untracked-file content digest; ignored artifacts fail closed
   → compare private bare refs unchanged
   → remove both worktrees + private bare
   → recheck protected source HEAD / refs / status / worktree / Git-control fingerprint
   → path-free VERIFIED_CLEAN receipt (private bare/worktrees/run root removed
      and protected source fingerprint unchanged)
-  → D18 0106 durable ledger: preregistered workload + exact RunSpec
-     + BASELINE/SELECTED evidence/outcome + cleanup + terminal receipt
+  → 0106 preregistration transaction A: workload + optional exact verifier plan
+  → 0106 preregistration transaction B: exact RunSpec
+  → D19 terminal-evidence transaction only after both arms + VERIFIED_CLEAN:
+     BASELINE/SELECTED evidence/outcome + cleanup + terminal receipt
+  → terminal reader requires two successful run/arm/plan/budget-bound controlled arms;
+     a started arm has already reserved its frozen command budget even on timeout/error
   → EXPERIMENT_EVIDENCE_ONLY (no production influence, winner or promotion)
 ```
 
-该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；但 executor/verifier 是当前 Python process 的受信仓库代码，能够绕开 API 的不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D18 只在 runner 成功返回后写入 0106；SQL 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：Git hardening 和账本不是 container/tenant/OS/filesystem/network 隔离；declared execution budget 不是模型/工具/测试 hard gate，也没有隐藏 oracle process、cleanup retry worker、cohort/statistical comparison 或收益/promotion 结论。
+该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D19 的 verifier 把同主机 child 仅用作受控仓库测试命令：它实际强制冻结 argv、paired `max_test_commands` / `max_wall_time_ms`、worktree cwd、`shell=False`、无 `PYTHONPATH` 与关闭自动插件加载，并只持久化无路径摘要；实际解释器路径先被同次 child 核验，持久化的是无主机路径的冻结 portable argv digest。`PASS` 必须对应 exit code `0`，receipt 还会绑定 exact run/arm/plan/budget，并在 terminal replay 重验两个 arm 的 aggregate test/wall limit及两个成功 outcome；没有受控 receipt 的 D17 verifier 仍必须与 executor cost 完全相等。arm 在 child 可能启动前就预留冻结 command count，所以 timeout/policy error 也不能同一 pair 内重试规避预算。它不能强杀子进程树，也没有 CPU/内存、container、tenant、文件系统或网络隔离。本地 source、pytest 测试及 user-site 依赖仍是受信输入；为 Windows user-site discovery 会保留 `APPDATA`，且未设 `PYTHONNOUSERSITE`。0106 先独立 append-only preregister workload/plan，再独立 preregister RunSpec；只有正常 runner cleanup 成功后的 terminal-evidence transaction 才写两 arm evidence/outcome、cleanup 和 terminal receipt。SQL/Python 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：模型/provider/tool/token/cost 不受 D19 预算治理，也没有隐藏 oracle、durable cleanup lease/retry、cohort/statistical comparison 或收益/promotion 结论。
 
 ## 5. TaskGraph 状态流与回执
 

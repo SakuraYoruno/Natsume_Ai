@@ -18,7 +18,7 @@
 | 1 | [运行拓扑](01_runtime_topology.md) | Host、Obs、Gateway、Edge、UI 和外部服务如何连接？ |
 | 2 | [Governed 请求主链](02_main_chain_flow.md) | `chat/skill/delegate/plan` 如何从请求进入 TaskGraph 并提交副作用？ |
 | 3 | [记忆、Canon 与召回](03_dataflow_recall.md) | 长期材料如何写入、索引、召回并进入表达上下文？ |
-| 4 | [Planning、Task Runtime 与退役 Executive 边界](04_executive_layers.md) | 搜索、编译、执行、只读投影和退役边界各自在哪里？Code D16 是 pure-shadow catalog，D17/D18 是 trusted-process 私有 bare-worktree 加 cleanup-gated durable experiment ledger，均不是生产执行实线 |
+| 4 | [Planning、Task Runtime 与退役 Executive 边界](04_executive_layers.md) | 搜索、编译、执行、只读投影和退役边界各自在哪里？Code D16 是 pure-shadow catalog，D17/D18 是 trusted-process 私有 bare-worktree 加 cleanup-gated durable ledger，D19 仅增加预注册 pytest 子进程回执；均不是生产执行实线 |
 | 5 | [数字生命状态与表达](05_tribe_topology.md) | Life、Memory、Bond、Scene、Persona 和 Surface 如何分工？ |
 | 6 | [Gateway 与 Edge 输入输出](06_input_output_routes.md) | 外部平台消息和设备动作如何进入/离开 Host？ |
 | 7 | [Observability 与 Operator](07_observability_topology.md) | 运行状态如何投影，Operator 如何安全操作？ |

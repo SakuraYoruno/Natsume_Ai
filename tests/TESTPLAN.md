@@ -167,6 +167,7 @@
 - T-PERSONA-FENCE-01：NE-01 safety fence 后，Bond stage/milestone、interaction cycle、emergent weekly 和后续新增入口在 `PersonaEngine.apply_growth_delta()` 中央 authority 边界全部 fail closed，trait mutation 为 0；静态扫描证明不存在绕开中央门禁的新 writer，运行时负测覆盖全部已知入口。
 - T-PERSONA-PROPOSAL-01：NE-06 replacement 后，旧 Persona growth caller 只生成 `FeedbackProposal`，并完成 proposal → Lab/shadow → Review → versioned activation → rollback；普通后台任务无直接 trait mutation authority。
 - T-PLAN-PROD-01：Research/Code 使用真实 workload、真实 source/repository、真实 model/verifier、隔离 workspace、实际成本和延迟比较 baseline 与 PlanningSearch；synthetic fixture 不能计入，未执行候选不得复用 baseline outcome。
+- T-PLAN-CODE-D19-01：Code 实验的预注册 pytest argv 只能在 disposable detached worktree 中以 shell-free child 执行；必须拒绝 argv/path/budget drift，核验实际解释器后持久化 portable argv digest，强制 `PASS ↔ exit_code=0`，并把 command/exit/受限输出 digest/耗时与 exact run/arm/plan/budget、两 arm aggregate test/wall limit 和 `VERIFIED_CLEAN` 绑定。child 可能启动前必须预留其冻结 command budget，timeout/error 后同一 arm 不能重试；带 D19 plan 的通用 terminal ledger 也必须拒绝任何 FAIL arm。restart replay 必须拒绝损坏 receipt。该 Gate 不等于独立安全域、hermetic Python、模型/工具预算、crash cleanup recovery 或 `T-PLAN-PROD-01` 的收益验收。
 - T-PLAN-CAL-01：Pentest/通用 L3 必须按虚拟状态动态生成后继，prediction/baseline/candidate/actual outcome/cost 跨 run durable；达到预注册样本、误差、安全与 uplift 门槛前 production influence 为 0。
 - T-NE-FINAL-01：NE-07 聚合所有 Target Architecture Gate；任一 Target Gate 未满足时只能 `FAIL` 或精确的 `ACCEPTANCE_PENDING_EXTERNAL`，历史 receipt、shadow 完成或早期 wave 状态不能产生 `PASS`。
 
