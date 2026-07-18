@@ -228,13 +228,34 @@ flowchart LR
 
 该链已经在 repository/service/contract 层可回放；外部 provider 的真实 sandbox canary、Review production route 和 bundle import 仍标记为未验收，不能把 stage 或测试 fixture 写成生产激活。
 
-### 4.3 Delegate
+### 4.4 Feedback、Knowledge 与 Identity 演化（NE-06）
+
+NE-06 把长期变化限定为 proposal 流：旧增长入口只生成 FeedbackProposal，Knowledge 先以 namespace-scoped proposal 保存，Identity 先注册 migration plan。0110 ledger 以 append-only event 记录 `PROPOSED/STAGED → Lab + Review → ACTIVE/APPLIED → ROLLED_BACK/DEPRECATED`，任何读取只看已激活 projection。
+
+```mermaid
+flowchart LR
+    Outcome[任务结果 / 用户反馈] --> Feedback[FeedbackProposal]
+    Fact[Life 或 Project 事实] --> Knowledge[KnowledgeEntry proposal]
+    Snapshot[Identity snapshot + diff] --> Identity[MigrationPlan]
+    Feedback --> Ledger[0110 Evolution Governance Ledger]
+    Knowledge --> Ledger
+    Identity --> Ledger
+    Lab[Lab evidence] --> Gate{Review + evidence gate}
+    Ledger --> Gate
+    Gate -->|拒绝 / 保持 proposal| Pending[只读 proposal]
+    Gate -->|通过| Active[版本化 active projection]
+    Active --> Rollback[durable rollback / deprecation event]
+```
+
+反馈、知识和人格都没有直接生产 writer；当前 repository/composition 已能回放 apply/rollback，旧 Memory、IdentitySnapshot owner 和所有增长 caller 的完整切流仍待完成。
+
+### 4.5 Delegate
 
 Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_dispatch.py](../../../host_brain/app/governed_delegate_dispatch.py) 只注册 `pentest_agent`，将 command/request/session/principal、root WorkOrder、graph/revision/node、attempt、lease/owner/fence、parent/node grant、objective 与 input reference 冻结为一次 invocation；调用前重新校验 node grant，并只投影无副作用的 Domain Pack/SecureRun handoff。它不经过旧 `SubAgentDispatcher`、全局 Agent gateway 或独立 `skill_exec_log`。
 
 `intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 以及未注册 target 会在 direct/Plan admission 前失败关闭。故该实现保证已启用目标执行的是上游冻结决定，而不是 worker 内重新选择 agent；它不代表 child agent 的全部工作已迁入同一 TaskGraph，也不代表一般 Delegate 平台已经完成。
 
-### 4.4 Plan
+### 4.6 Plan
 
 [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
 
@@ -247,7 +268,7 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 
 显式 failure-replan metadata 可以构造 graph revision + 1，但这只是合同能力，不是完整的自动重规划闭环。
 
-### 4.5 PlanningSearch shadow calibration
+### 4.7 PlanningSearch shadow calibration
 
 Pentest 的公共 L3 只在纯虚拟状态中计算。0105 提供通用、append-only 的 calibration repository，但它不是执行 authority：只有调用方显式把 repository 注入 Pentest kernel context 时，adapter 才会写 prediction；候选 target 会在计算 candidate fingerprint 前收口到授权 scope，真实动作始终来自 L1/L2 baseline。
 
@@ -263,7 +284,7 @@ L1/L2 baseline selection ──────────────────�
 
 prediction 固定 virtual state digest、baseline/executed/shadow path、trace、budget 与纯虚拟 counters；outcome 固定实际执行的 baseline candidate、规范化结果摘要和 verifier label。两表禁止 update/delete，重复只允许 exact replay，身份、candidate 或 outcome drift 一律拒绝；repository 会验证 table/index/FK/trigger 物理语义，防止 catalog-only replay 掩盖半残 schema。当前 runtime record 没有 durable Task/Run receipt，因此该 outcome 不能证明未执行的 L3 路径收益，也不能喂给 promotion；repository 未注入时仅保留兼容内存 ledger，注入库不可用时只记录 unavailable 事件而不阻断 baseline。
 
-### 4.6 Code 动态 pure-shadow flow
+### 4.8 Code 动态 pure-shadow flow
 
 ```text
 frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
@@ -277,7 +298,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.6.1 D20a Research 冻结语料 pure-shadow 流
+### 4.9 D20a Research 冻结语料 pure-shadow 流
 
 ```text
 ResearchTaskSnapshot
@@ -300,7 +321,7 @@ trusted experiment root + FrozenResearchCorpusManifest
 
 `FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes；但 D20a 尚未把 planner snapshot 与 manifest/document 的 corpus/source id/ref/digest/tier 精确绑定，也不是 hostile concurrent replacement 的原子 TOCTOU 防线或来源独立性证明。D20a 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。
 
-### 4.7 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
+### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 
 ```text
 registered clean protected source (unshared non-link .git; local Git config is trusted)

@@ -1217,8 +1217,15 @@
       "boundary": "Markdown/API/script/accepted-trace metadata compiles to a deterministic SkillDraftV1 with contracts, verifier, test vectors, budget and rollback metadata. The compiler never imports or activates source; SBOM/signature request and lifecycle activation are separate guarded stages."
     },
     "experience_feedback_pipeline": {
-      "status": "PARTIAL_BROKEN_PATH",
-      "reason": "Prefrontal calls PersonaGrowthTracker.on_interaction_cycle with arguments that do not match its signature; the TypeError is swallowed."
+      "status": "PARTIAL_NE06_DURABLE_PROPOSAL_LEDGER",
+      "evidence_refs": [
+        "host_brain/tribe/prefrontal_agent.py",
+        "host_brain/evolution/contracts.py",
+        "host_brain/persistence/evolution_governance_ledger.py",
+        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
+        "tests/integration/test_ne06_evolution_governance_ledger.py"
+      ],
+      "reason": "Prefrontal now passes bounded interaction_stats instead of raw conversation fields, removing the old on_interaction_cycle signature drift while keeping Persona growth proposal-only. FeedbackProposal is durably staged, Lab/Review applied and rollback receipts are append-only; legacy stage/milestone/emergent callers still need proposal adapters and version activation."
     },
     "persona_growth_authority": {
       "status": "CENTRAL_FENCE_WIRED",
@@ -1238,9 +1245,28 @@
       ],
       "required_action": "REPLACE_BLOCKED_CANDIDATES_WITH_GOVERNED_PROPOSAL_PIPELINE_IN_NE_06"
     },
-    "knowledge_os": {"status": "MISSING"},
+    "knowledge_os": {
+      "status": "PARTIAL_NE06_NAMESPACE_PROPOSAL_LEDGER",
+      "evidence_refs": [
+        "host_brain/evolution/contracts.py",
+        "host_brain/persistence/evolution_governance_ledger.py",
+        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
+        "tests/integration/test_ne06_evolution_governance_ledger.py"
+      ],
+      "boundary": "Life-memory and project-knowledge namespaces are validated, competing entries remain separate, and active retrieval is read-only over activated evidence. Promotion/deprecation requires Lab/Review events. Existing Memory, Markdown KB, Canon and Pentest stores are not yet shadow-compared or cut over to this owner."
+    },
     "identity_snapshot": {"status": "PARTIAL", "release_gate_default": "DISABLED"},
-    "identity_migration": {"status": "MISSING"}
+    "identity_migration": {
+      "status": "PARTIAL_NE06_DURABLE_ACTIVATION_ROLLBACK",
+      "evidence_refs": [
+        "host_brain/evolution/contracts.py",
+        "host_brain/evolution/production_composition.py",
+        "host_brain/persistence/evolution_governance_ledger.py",
+        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
+        "tests/integration/test_ne06_evolution_governance_ledger.py"
+      ],
+      "boundary": "Identity migration plans now persist immutable snapshot/diff/regression/review/rollback bindings and separate ACTIVE/ROLLED_BACK events; no-change plans require an explicit flag. Existing IdentitySnapshot/Review runtime is not yet composed into this ledger and no production persona activation is claimed."
+    }
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"

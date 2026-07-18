@@ -422,6 +422,8 @@ flowchart LR
 
 ## 11. 当前过渡边界
 
+NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedback、Knowledge 和 Identity 只能先写 proposal/plan，再由独立 Lab/Review evidence 产生 append-only apply/activation/rollback event。active Knowledge 通过 workspace-scoped read projection 提供，任何旧 Memory、Persona 或 Identity writer 都不能绕过该 ledger；当前仍处于 partial/canary 前阶段。
+
 系统仍处于迁移期，但 Executive 执行兼容层和内存任务真相已经退役：
 
 | 新主干 | 待退役/修复 |

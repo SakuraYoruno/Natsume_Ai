@@ -810,9 +810,12 @@ class PrefrontalAgent:
         if feedbacks:
             growth_result = tracker.on_interaction_cycle(
                 user_id=user_id,
+                # PersonaGrowthTracker consumes a bounded interaction
+                # spectrum, not raw conversation bodies.  Keeping only the
+                # count preserves proposal-only authority and fixes the old
+                # user_message/assistant_reply signature drift.
+                interaction_stats={"response_feedback": len(feedbacks)},
                 feedback_collector=collector,
-                user_message=str(user_message or ""),
-                assistant_reply=str(assistant_reply or ""),
             )
         return {
             "user_id": user_id,
