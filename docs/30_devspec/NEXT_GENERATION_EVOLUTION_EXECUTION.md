@@ -374,7 +374,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0107_research_shadow_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0108_evolution_lab_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 

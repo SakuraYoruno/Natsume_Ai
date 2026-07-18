@@ -591,6 +591,7 @@
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "host_brain/audit/migrations/0107_research_shadow_ledger.sql",
+        "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
         "host_brain/orchestration/goal_planning.py",
         "host_brain/orchestration/planning_graph_compiler.py",
         "host_brain/orchestration/planning_execution.py",
@@ -660,6 +661,7 @@
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "host_brain/audit/migrations/0107_research_shadow_ledger.sql",
+        "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
         "tests/unit/test_d17_code_benchmark_sandbox.py",
         "tests/unit/test_d18_code_benchmark_ledger.py",
         "tests/integration/test_d18_code_benchmark_ledger_sqlite.py",
@@ -1161,8 +1163,26 @@
       ],
       "reason": "Canonical path resolution and the W0 fuse remain active. Migration 0101 plus the W2 runtime bind one server-derived logical workspace to the exact graph epoch, root WorkOrder, owner, configured root, frozen Git source commit and canonical allow-list. The authenticated Internal Agent write path can explicitly opt in with a stable HMAC secret; it then uses a namespace worktree, runtime-instance/PID lease, exclusive local execution scope, heartbeat, monotonic handoff/takeover, trusted git cleanup receipt and CLEANUP_PENDING continuation. Startup synchronously continues at most one pending cleanup; the app-scoped worker owns the remaining durable backlog. Only provisioning/allocator/cleanup adapter Filesystem/Git callbacks run outside SQLite transactions under workspace/source cross-process locks and one lease-bounded deadline; exact authority is revalidated before and after, heartbeat can advance status_version, and a changed fence/status/expiry never releases the callback result even though physical reconciliation may still be required. Agent tools probe cooperative cancellation between actions; Verification checks live authority only before the whole run starts. Neither has a per-operation repository fence or preemption. Missing secret keeps Host online but write admission fail closed, and no real canary has run. Heartbeat loss cannot terminate an already-running model/tool/Verification. ACTIVE promotion/abandon, accepted-checkpoint HEAD authority, Domain Pack/codex_runtime injection, cleanup health, OS/container/tenant isolation and handle-level TOCTOU protection remain missing, so this is PARTIAL W2 rather than completed Workspace Isolation."
     },
-    "evolution_lab": {"status": "PLACEHOLDER"},
-    "counterfactual_analysis": {"status": "MISSING"},
+    "evolution_lab": {
+      "status": "PARTIAL_NE04_DURABLE_PROPOSAL_LEDGER",
+      "evidence_refs": [
+        "host_brain/evolution_lab/contracts.py",
+        "host_brain/evolution_lab/policy.py",
+        "host_brain/persistence/evolution_lab_ledger_repository.py",
+        "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
+        "tests/integration/test_ne04_evolution_lab_ledger.py"
+      ],
+      "boundary": "ExperimentSpec, run, report and proposal are append-only and digest-bound; proposals require Review and cannot influence production. Isolated runner, independent verifier, redaction receipts, exact replay worker and activation/rollback remain missing."
+    },
+    "counterfactual_analysis": {
+      "status": "PARTIAL_NE04_CONTRACT_AND_DURABLE_REPORT",
+      "evidence_refs": [
+        "host_brain/evolution_lab/contracts.py",
+        "host_brain/persistence/evolution_lab_ledger_repository.py",
+        "tests/integration/test_ne04_evolution_lab_ledger.py"
+      ],
+      "boundary": "CounterfactualPair is persisted only inside an immutable ExperimentReport; it has no production writer or promotion authority."
+    },
     "capability_maturity": {"status": "PARTIAL", "production_policy_default": "DISABLED"},
     "skill_compiler": {"status": "MISSING"},
     "experience_feedback_pipeline": {
