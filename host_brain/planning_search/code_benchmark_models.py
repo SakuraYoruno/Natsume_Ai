@@ -22,6 +22,9 @@ from host_brain.planning_search.benchmarking import (
     DomainBenchmarkReport,
     DomainBenchmarkWorkload,
 )
+from host_brain.planning_search.code_benchmark_verification_contracts import (
+    CodeBenchmarkControlledVerificationReceipt,
+)
 
 
 CODE_HISTORICAL_BENCHMARK_SCHEMA = "natsume.code-historical-benchmark.v1"
@@ -134,6 +137,7 @@ class CodeVerifierResult:
     receipt_ref: str
     cost: Mapping[str, int]
     evidence_digest: str
+    controlled_receipt: CodeBenchmarkControlledVerificationReceipt | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.success, bool):
@@ -149,14 +153,36 @@ class CodeVerifierResult:
             "evidence_digest",
             _digest_text(self.evidence_digest, field_name="evidence_digest"),
         )
+        controlled_receipt = self.controlled_receipt
+        if controlled_receipt is not None:
+            if not isinstance(
+                controlled_receipt, CodeBenchmarkControlledVerificationReceipt
+            ):
+                raise CodeBenchmarkContractError(
+                    "controlled_receipt must be CodeBenchmarkControlledVerificationReceipt"
+                )
+            if (
+                controlled_receipt.success != self.success
+                or controlled_receipt.receipt_ref != self.receipt_ref
+                or controlled_receipt.evidence_digest != self.evidence_digest
+                or dict(controlled_receipt.cost) != dict(self.cost)
+            ):
+                raise CodeBenchmarkContractError(
+                    "controlled receipt must bind verifier success, evidence and cost"
+                )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "success": self.success,
             "receipt_ref": self.receipt_ref,
             "cost": _thaw_json(self.cost),
             "evidence_digest": self.evidence_digest,
         }
+        # Omitting the optional D19 receipt preserves byte-for-byte D17/D18
+        # identity on historical durable evidence that predates this adapter.
+        if self.controlled_receipt is not None:
+            payload["controlled_receipt"] = self.controlled_receipt.to_dict()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

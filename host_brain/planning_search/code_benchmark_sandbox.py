@@ -216,6 +216,18 @@ class CodeBenchmarkWorkspace:
     def _close(self) -> None:
         self._closed = True
 
+    def _trusted_verification_root(self) -> Path:
+        """Return the worktree only to a repository-owned verifier adapter.
+
+        This private bridge is intentionally unavailable after the arm closes
+        and must never be copied into benchmark evidence or a durable receipt.
+        It does not broaden the public file capability or create a sandbox.
+        """
+
+        if self._closed:
+            raise CodeBenchmarkSandboxError("benchmark arm workspace is closed")
+        return self._root
+
 
 class CodeHistoricalBenchmarkSandbox:
     """Run two Code arms from one frozen commit in private detached worktrees."""
@@ -267,7 +279,16 @@ class CodeHistoricalBenchmarkSandbox:
         primary_failure: BaseException | None = None
         completed_run: CodeHistoricalBenchmarkRun | None = None
         cleanup_receipt: CodeBenchmarkCleanupReceipt | None = None
+        verifier_prepared = False
         try:
+            self._prepare_verifier(
+                verifier=verifier,
+                run_id=normalized_run_id,
+                workload=workload,
+                baseline=baseline,
+                selected=selected,
+            )
+            verifier_prepared = True
             self._create_private_bare(private_bare)
             _assert_private_directory(
                 private_bare,
@@ -322,21 +343,27 @@ class CodeHistoricalBenchmarkSandbox:
             primary_failure = exc
             raise
         finally:
-            cleanup_result = self._cleanup(
-                private_bare=private_bare,
-                run_root=run_root,
-                opened_targets=opened_targets,
-                source_before=source_before,
-                run_id=normalized_run_id,
-                return_receipt=True,
-            )
-            assert isinstance(cleanup_result, tuple)
-            cleanup_receipt, cleanup_error = cleanup_result
-            if cleanup_error is not None:
-                if primary_failure is not None:
-                    primary_failure.add_note(f"benchmark cleanup also failed: {cleanup_error}")
-                else:
-                    raise cleanup_error
+            try:
+                cleanup_result = self._cleanup(
+                    private_bare=private_bare,
+                    run_root=run_root,
+                    opened_targets=opened_targets,
+                    source_before=source_before,
+                    run_id=normalized_run_id,
+                    return_receipt=True,
+                )
+                assert isinstance(cleanup_result, tuple)
+                cleanup_receipt, cleanup_error = cleanup_result
+                if cleanup_error is not None:
+                    if primary_failure is not None:
+                        primary_failure.add_note(
+                            f"benchmark cleanup also failed: {cleanup_error}"
+                        )
+                    else:
+                        raise cleanup_error
+            finally:
+                if verifier_prepared:
+                    self._finish_verifier(verifier=verifier, run_id=normalized_run_id)
         if completed_run is None or cleanup_receipt is None:
             raise CodeBenchmarkSandboxError(
                 "benchmark did not produce a cleanup-verified paired receipt"
@@ -445,9 +472,12 @@ class CodeHistoricalBenchmarkSandbox:
         if not isinstance(verifier_result, CodeVerifierResult):
             raise CodeBenchmarkSandboxError("verifier must return CodeVerifierResult")
         _assert_counter_mapping(cost, field_name="executor cost")
-        if dict(cost) != dict(verifier_result.cost):
+        if not _executor_cost_is_bound_by_verifier(
+            executor_cost=cost,
+            verifier=verifier_result,
+        ):
             raise CodeBenchmarkSandboxError(
-                "executor and verifier cost must be the same canonical measurement"
+                "executor cost must be an exact subset of canonical verifier cost"
             )
         changed_paths = self._changed_paths(target=target, path_policy=path_policy)
         diff_digest = self._workspace_diff_digest(
@@ -474,6 +504,46 @@ class CodeHistoricalBenchmarkSandbox:
                 workspace_diff_digest=diff_digest,
             ),
         )
+
+    @staticmethod
+    def _prepare_verifier(
+        *,
+        verifier: CodeBenchmarkVerifier,
+        run_id: str,
+        workload: DomainBenchmarkWorkload,
+        baseline: BenchmarkArm,
+        selected: BenchmarkArm,
+    ) -> None:
+        prepare = getattr(verifier, "prepare_run", None)
+        if prepare is None:
+            return
+        if not callable(prepare):
+            raise CodeBenchmarkSandboxError("verifier prepare_run must be callable")
+        try:
+            prepare(
+                run_id=run_id,
+                workload=workload,
+                baseline=baseline,
+                selected=selected,
+            )
+        except CodeBenchmarkSandboxError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - fail closed on verifier setup
+            raise CodeBenchmarkSandboxError("controlled verifier preflight failed") from exc
+
+    @staticmethod
+    def _finish_verifier(*, verifier: CodeBenchmarkVerifier, run_id: str) -> None:
+        finish = getattr(verifier, "finish_run", None)
+        if finish is None:
+            return
+        if not callable(finish):
+            raise CodeBenchmarkSandboxError("verifier finish_run must be callable")
+        try:
+            finish(run_id=run_id)
+        except CodeBenchmarkSandboxError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - state reset must fail closed
+            raise CodeBenchmarkSandboxError("controlled verifier finalization failed") from exc
 
     def _changed_paths(
         self,
@@ -1165,6 +1235,35 @@ def _assert_counter_mapping(value: Any, *, field_name: str) -> None:
             raise CodeBenchmarkSandboxError(
                 f"{field_name} must contain non-negative integer counters"
             )
+
+
+def _executor_cost_is_bound_by_verifier(
+    *,
+    executor_cost: Mapping[str, int],
+    verifier: CodeVerifierResult,
+) -> bool:
+    """Preserve D17 equality unless a D19 receipt owns the two extra counters.
+
+    A legacy trusted verifier still has the D17 exact-match contract.  Only a
+    self-consistent ``CodeBenchmarkControlledVerificationReceipt`` may add
+    D19's server-observed test-command and wall-time dimensions; an arbitrary
+    in-process verifier cannot self-report those dimensions into canonical
+    durable evidence.
+    """
+
+    verifier_cost = verifier.cost
+    _assert_counter_mapping(verifier_cost, field_name="verifier cost")
+    expected = dict(executor_cost)
+    observed = dict(verifier_cost)
+    controlled = verifier.controlled_receipt
+    if controlled is None:
+        return observed == expected
+    if dict(controlled.cost) != observed:
+        return False
+    if any(observed.get(name) != amount for name, amount in expected.items()):
+        return False
+    additional = set(observed) - set(expected)
+    return additional <= {"test_command_count", "verification_wall_time_ms"}
 
 
 def _digest_json(value: Any) -> str:
