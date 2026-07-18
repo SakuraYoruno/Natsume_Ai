@@ -67,7 +67,7 @@ flowchart LR
 |---|---|---|
 | Host Plan | Governor 已批准的 `planned_steps/steps` | 只做合法拓扑选择，未生成竞争方案 |
 | Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only；0105 durable calibration 仅显式注入时写入，target 在 fingerprint 前收口，库故障只记 unavailable 事件，outcome 仍是未验证运行记录投影 |
-| Research | 冻结模拟 fixture | 没有真实来源、模型和 verifier 对照 |
+| Research | D20a `ResearchTaskSnapshot` 的公开 task/corpus/source metadata（`source_id/ref/digest` 与有限 authority/relevance/cost hints）；`FrozenResearchCorpusLoader` 仅从可信实验根+manifest 读取 repository-relative 普通文件 | 按虚拟状态动态给出 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict`、`stop` 的 pure-shadow L1/L2；L3 仅冻结 `virtual_transition_ready=true` 时有虚拟 ports。公开 snapshot 没有 dedicated 本机 locator/source-body/answer-key/verifier-decision 字段，constraints 拒绝命名 key，任务文字不是内容级 DLP；公开 receipt 不含路径或正文。loader 在稳定输入中前后核对状态/大小并在读完后核对摘要，拒绝绝对/遍历/ADS colon/case alias/link/reparse/未列来源；未有 snapshot-manifest-document exact handshake，亦非 hostile TOCTOU 防线或独立来源证明。它不是生产 route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立 verifier、paired cohort、收益证明或 OS/tenant/sandbox；Research benefit `UNPROVEN` |
 | Code | D16 frozen opaque ref/digest + registered patch catalog；D17 trusted-process private bare 双 detached worktree；D18 cleanup-gated 0106 ledger；D19 pre-registered fixed pytest subprocess receipt | D16 动态 pure-shadow `inspect→patch→unit/rollback` 已有单测；D17/D18 证明受信 adapter 的本地 private-bare clone、portable ACL file API、双 arm cleanup 后 source fingerprint 无漂移，且 preregistration/evidence/clean receipt 可跨重启审计；D19 实际拒 paired test-command/wall limit 并保留无路径 command receipt。它不是恶意执行防护、独立 verifier 或 OS/container sandbox，`network_isolation=NOT_ENFORCED`；仍没有真实模型/工具/token/cost budget 或成本收益对照 |
 
 ## Scheduler/Internal 分界
@@ -113,6 +113,7 @@ stateDiagram-v2
 
 - 公共搜索：`host_brain/planning_search/`
 - Code pure-shadow frozen models / catalog：`host_brain/planning_search/code_domain_models.py`、`host_brain/planning_search/code_domain.py`
+- Research pure-shadow metadata catalog / frozen-corpus loader：`host_brain/planning_search/research_domain_models.py`、`host_brain/planning_search/research_domain.py`、`host_brain/planning_search/research_benchmark_corpus.py`
 - Code private-bare experiment adapter / durable ledger：`host_brain/planning_search/code_benchmark_models.py`、`host_brain/planning_search/code_benchmark_sandbox.py`、`host_brain/planning_search/code_benchmark_ledger.py`、`host_brain/persistence/code_benchmark_ledger_repository.py`
 - Host Plan adapter：`host_brain/orchestration/plan_intent_search.py`
 - Graph compiler：`host_brain/orchestration/planning_graph_compiler.py`

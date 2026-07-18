@@ -554,6 +554,8 @@ Deterministic seed / trace context
 
 当前公共合同位于 [PlanningSearch contracts](../../host_brain/planning_search/contracts.py)，算法位于 [PlanningSearch algorithms](../../host_brain/planning_search/algorithms.py)。Code 的 D19 `code_benchmark_verifier.py` 不是搜索理论的一部分，而是实验侧的受控 pytest 命令证据：它只能验证固定 worktree 测试，不会让搜索结果直接获得执行、预算或生产影响 authority。
 
+D20a 的 Research adapter 同样只实现搜索侧：`ResearchTaskSnapshot` 公开任务、corpus 与来源的受治理 ref/digest 及有限排序 hints；它没有专用本机 locator、正文、answer-key 或 verifier-decision 字段，constraints 拒绝这些命名 key，但任务文字不是内容级 DLP。它能从冻结元数据按虚拟状态动态形成 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict` 与 `stop` 后继；L2 只比较公开 authority/relevance/cost hints，只有快照冻结 `virtual_transition_ready=true` 才有 L3 virtual transition/reward。该 catalog 不读取来源、不生成答案，也不持有 Host、TaskGraph、BrowserWorker、网络或模型端口。
+
 ### 10.2 三层搜索的理论关系
 
 1. **L1 Candidate Expansion**：根据当前虚拟状态生成合法后继，而不是只重排固定列表。
@@ -577,7 +579,7 @@ Transition 必须：
 - 对相同 state/candidate/seed 可重放；
 - 明确哪些效果是预测，哪些前置条件已由事实支持。
 
-对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。
+对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。D20a 的 `FrozenResearchCorpusLoader` 把“可见元数据”和“实验私有输入”再分开：只有可信实验根目录和 manifest 共同指定的 repository-relative 普通文件可被读取，读前/读后都会核对文件状态、大小和内容 digest；在稳定受信输入中，绝对路径、遍历、ADS colon component、case alias、link/reparse point 与未列来源会拒绝。公开 receipt 只输出 source id/ref/digest、大小和 authority tier，不输出路径或正文；这不是 hostile concurrent replacement 的原子 TOCTOU 防线，也尚未把 planner snapshot 与 manifest 精确绑定或证明独立来源，更不是浏览器抓取器、生产 source resolver 或 OS/tenant/sandbox。
 
 ### 10.4 规划收益必须以真实 shadow 证明
 
@@ -593,7 +595,7 @@ Transition 必须：
   → promotion proposal
 ```
 
-未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。
+未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。D20a 的纯 catalog 与 manifest 安全读取只建立后续实验的输入边界；没有真实模型、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research benefit 仍为 `UNPROVEN`。
 
 ### 10.5 编译是规划与执行之间的防火墙
 

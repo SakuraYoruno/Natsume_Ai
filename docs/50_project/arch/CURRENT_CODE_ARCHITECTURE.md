@@ -291,6 +291,14 @@ D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时�
 
 它依然未接 Host、TaskGraph、AgentExecutor、WorkspaceGrant 或生产 route；D19 的 child 只是同一主机受信 workspace 的 subprocess，不是 hidden-oracle 或独立信任域。没有 process-tree kill、CPU/内存、container、OS 文件系统、tenant 或网络隔离；本地 source、pytest 测试及用户 site 依赖仍是受信输入，且为了 Windows user-site discovery 保留 `APPDATA`，没有设置 `PYTHONNOUSERSITE`，因此更不能误称 hermetic Python 环境。`max_model_calls`、provider/tool/token/model-cost 和通用 Durable Budget Ledger 没有接入，且没有 durable benchmark lease、crash cleanup recovery/retry worker、真实历史 cohort、统计比较或收益结论，因此仍不能宣称已跑真实模型修复或完成 Code production shadow。
 
+### 5.1.4 D20a Research frozen-corpus pure-shadow boundary
+
+`host_brain/planning_search/research_domain_models.py` 的 `ResearchTaskSnapshot` 只冻结规划可见的任务/corpus governed refs、`source_id`、source ref、content digest 与 authority/relevance/estimated-read-cost hints；它没有 dedicated 本机 locator、source-body、answer-key、verifier-decision、模型客户端或 executor 字段，constraints 会拒绝这些命名 key，但任务文字不是内容级 DLP。`research_domain.py` 根据这份不可变元数据动态生成 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict`、`stop` 的合法虚拟 successor；L2 只按公开 authority/relevance/cost hints 排序。只有快照冻结 `virtual_transition_ready=true` 时，adapter 才给公共内核提供 virtual transition/reward 与 Conditional MCTS 条件；否则没有 L3 rollout ports。选中路径不会读来源、产出回答或进入编译/admission。
+
+`research_benchmark_corpus.py` 把实验输入读取留在另一个受信边界：`FrozenResearchCorpusLoader` 只从一个可信实验根目录下、`FrozenResearchCorpusManifest` 列出的 canonical repository-relative 普通文件读取。它对 root、每个目录 component、目标文件及打开后的 descriptor 做 link/symlink/reparse/type/identity 检查，读前/读后比对大小、文件状态，并在读完后核对 SHA-256 digest；在稳定的受信输入状态中，绝对路径、`..` 遍历、ADS colon component、case alias、root escape、未列 source、link/reparse 或任何元数据/正文漂移都会失败关闭。其 `public_manifest_receipt()` 和 document receipt 只保留 source id/ref/digest、字节数与 authority tier，绝不输出根目录、relative path 或正文。
+
+这不是生产 Research route、TaskGraph、Host、BrowserWorker 或网页抓取接线；没有真实模型、独立 verifier、paired cohort、成本/延迟对照、收益统计、winner/promotion authority，也没有 OS/tenant/sandbox。loader 的根目录和 manifest 都是受信实验输入，其 before/open/after 检查不是 hostile concurrent replacement 的原子 TOCTOU 防线；D20a 也未把 snapshot 与 manifest 的 corpus/source id/ref/digest/tier 精确绑定，不能据此推导来源独立性。该 handshake 属于 D20b。因此 Research benefit 仍为 `UNPROVEN`。
+
 ### 5.2 Host Plan
 
 `host_brain/orchestration/plan_intent_search.py` 从 Governor 已批准的 `planned_steps/steps` 构造候选。搜索只能选择完整、合法的拓扑顺序，不能新增节点、改变工具组合或比较不同方案。
@@ -320,7 +328,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 
 ### 5.4 Code / Research
 
-`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract；D16 补了 Code 动态 catalog 和编译单测；D17 用临时测试仓库实际执行 private-bare clone、baseline/selected 独立 detached worktree、受信文件 API、verifier ref 与 cleanup，并在 cleanup 后复核受保护源的 Git control metadata fingerprint，漂移即失败。D18 将成功的 clean pair 以 0106 workload/spec/arm/cleanup/terminal receipt 分段不可变保存，重启可精确重放。D19 让预注册的固定 pytest 子进程实际在两个 worktree 中运行并 durable round-trip 其 path-free 回执；它没有把同主机 child 或两项测试预算伪装成模型/工具预算或隔离 sandbox。仍缺真实模型/工具、隔离的 hidden oracle、历史 cohort/statistical comparison 或收益结论；Research 仍没有真实来源。
+`tests/fixtures/planning_search_shadow/` 与 `docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json` 明确声明 `SIMULATION_SHADOW`、`production_benefit_claimed=false`。D14 新增的是配对 workload/arm/outcome 的 shadow contract；D16 补了 Code 动态 catalog 和编译单测；D17 用临时测试仓库实际执行 private-bare clone、baseline/selected 独立 detached worktree、受信文件 API、verifier ref 与 cleanup，并在 cleanup 后复核受保护源的 Git control metadata fingerprint，漂移即失败。D18 将成功的 clean pair 以 0106 workload/spec/arm/cleanup/terminal receipt 分段不可变保存，重启可精确重放。D19 让预注册的固定 pytest 子进程实际在两个 worktree 中运行并 durable round-trip 其 path-free 回执；它没有把同主机 child 或两项测试预算伪装成模型/工具预算或隔离 sandbox。D20a 只补 Research 的公开 metadata catalog 与可信实验根/manifest 的安全普通文件读取，不产生真实来源获取、模型研究结果或 verifier 对照。仍缺真实模型/工具、隔离的 hidden oracle、历史 cohort/statistical comparison 或收益结论；Research benefit 仍为 `UNPROVEN`。
 
 ### 5.4.1 D15 governed Agent 模型端口桥
 
